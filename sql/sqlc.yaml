@@ -1,0 +1,31 @@
+version: "2"
+sql:
+  - engine: "mysql"
+    queries: "queries/"
+    schema: "tables/"
+    gen:
+      go:
+        package: "generated"
+        out: "../apps/api/internal/db/generated"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        json_tags_case_style: "camel"
+        overrides:
+          - column: "events.recurrence_rule"
+            go_type:
+              type: "RawMessage"
+              import: "encoding/json"
+              pointer: true
+        rename:
+          public_id: "PublicID"
+          calendar_id: "CalendarID"
+          user_id: "UserID"
+          event_id: "EventID"
+          uploaded_by: "UploadedBy"
+          storage_key: "StorageKey"
+          byte_size: "ByteSize"
+          content_type: "ContentType"
+          notification_offset: "NotificationOffset"
+          sort_order: "SortOrder"
+          created_by: "CreatedBy"
+          user_public_id: "UserPublicID"

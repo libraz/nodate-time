@@ -1,0 +1,714 @@
+@import "tailwindcss";
+
+@theme {
+  /* Event label colors (data-driven, not theme-dependent) */
+  --color-label-blue: #3b82f6;
+  --color-label-pink: #ec4899;
+  --color-label-purple: #a855f7;
+  --color-label-gray: #9ca3af;
+  --color-label-dark: #6b7280;
+  --color-label-black: #374151;
+  --color-label-yellow: #f59e0b;
+  --color-label-red: #ef4444;
+  --color-label-green: #22c55e;
+  --color-label-orange: #f97316;
+  --color-label-cyan: #06b6d4;
+  --color-label-teal: #14b8a6;
+
+  /* Day-of-week colors */
+  --color-tt-sunday: #ef4444;
+  --color-tt-saturday: #3b82f6;
+
+  /* Font stack */
+  --font-sans: "Inter", -apple-system, "system-ui", "Helvetica Neue", Helvetica, Arial,
+    "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+/* ============================================
+   SEMANTIC TOKENS — Glass Light (default)
+   iOS-inspired: System Blue, SF-style hierarchy,
+   frosted materials, grouped backgrounds
+   ============================================ */
+:root {
+  /* Surfaces — translucent frosted glass */
+  --color-surface: rgba(255, 255, 255, 0.6);
+  --color-surface-secondary: rgba(255, 255, 255, 0.4);
+  --color-surface-elevated: rgba(255, 255, 255, 0.72);
+  --color-surface-inset: rgba(0, 0, 0, 0.03);
+  --color-surface-app: transparent;
+
+  /* Text — iOS label hierarchy */
+  --color-text-primary: #000000;
+  --color-text-secondary: rgba(60, 60, 67, 0.6);
+  --color-text-tertiary: rgba(60, 60, 67, 0.3);
+  --color-text-on-accent: #ffffff;
+
+  /* Borders — subtle hairlines on glass */
+  --color-border: rgba(255, 255, 255, 0.5);
+  --color-border-strong: rgba(60, 60, 67, 0.15);
+  --color-separator: rgba(60, 60, 67, 0.08);
+
+  /* Accent — iOS System Blue */
+  --color-accent: #007aff;
+  --color-accent-hover: #0066d6;
+  --color-accent-bg: rgba(0, 122, 255, 0.1);
+  --color-accent-subtle: rgba(0, 122, 255, 0.14);
+
+  /* Semantic */
+  --color-danger: #ff3b30;
+  --color-danger-bg: rgba(255, 59, 48, 0.1);
+  --color-success: #34c759;
+
+  /* Interaction */
+  --color-hover: rgba(255, 255, 255, 0.35);
+  --color-active: rgba(255, 255, 255, 0.5);
+  --color-overlay: rgba(0, 0, 0, 0.25);
+
+  /* Frosted glass materials */
+  --surface-glass: rgba(255, 255, 255, 0.55);
+  --surface-glass-heavy: rgba(255, 255, 255, 0.78);
+  --backdrop-blur: blur(40px) saturate(180%);
+  --backdrop-blur-heavy: blur(60px) saturate(200%);
+
+  /* Shadows — soft glow on glass */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.5);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(255, 255, 255, 0.4);
+
+  /* Radii — large, soft */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* Day colors */
+  --color-sunday: #ff3b30;
+  --color-saturday: #007aff;
+
+  /* Background — vivid gradient mesh visible through glass */
+  --app-bg: linear-gradient(160deg, #c3dafe 0%, #e0d4f7 25%, #fce7f3 50%, #dbeafe 75%, #c7f9e6 100%);
+  --glass-blob-1: radial-gradient(
+    ellipse 700px 500px at 10% 15%,
+    rgba(99, 102, 241, 0.18),
+    transparent
+  );
+  --glass-blob-2: radial-gradient(
+    ellipse 600px 500px at 85% 25%,
+    rgba(236, 72, 153, 0.12),
+    transparent
+  );
+  --glass-blob-3: radial-gradient(
+    ellipse 500px 400px at 50% 85%,
+    rgba(34, 197, 94, 0.1),
+    transparent
+  );
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Glass Dark — iOS dark mode materials
+   ============================================ */
+:root[data-mode="dark"] {
+  /* Surfaces — translucent dark glass */
+  --color-surface: rgba(30, 30, 32, 0.65);
+  --color-surface-secondary: rgba(44, 44, 48, 0.5);
+  --color-surface-elevated: rgba(50, 50, 54, 0.7);
+  --color-surface-inset: rgba(255, 255, 255, 0.04);
+  --color-surface-app: transparent;
+
+  /* Text — high contrast on dark glass */
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: rgba(235, 235, 245, 0.6);
+  --color-text-tertiary: rgba(235, 235, 245, 0.35);
+
+  /* Borders — light edges on dark glass */
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-separator: rgba(255, 255, 255, 0.06);
+
+  /* Accent — brighter blue for dark */
+  --color-accent: #0a84ff;
+  --color-accent-hover: #409cff;
+  --color-accent-bg: rgba(10, 132, 255, 0.18);
+  --color-accent-subtle: rgba(10, 132, 255, 0.22);
+
+  --color-danger: #ff453a;
+  --color-danger-bg: rgba(255, 69, 58, 0.18);
+  --color-success: #30d158;
+
+  /* Interaction */
+  --color-hover: rgba(255, 255, 255, 0.06);
+  --color-active: rgba(255, 255, 255, 0.1);
+  --color-overlay: rgba(0, 0, 0, 0.55);
+
+  /* Frosted dark glass */
+  --surface-glass: rgba(30, 30, 34, 0.6);
+  --surface-glass-heavy: rgba(30, 30, 34, 0.8);
+
+  /* Shadows — subtle glow edges */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+
+  --color-sunday: #ff453a;
+  --color-saturday: #64b5f6;
+
+  /* Background — deep gradient visible through dark glass */
+  --app-bg: linear-gradient(160deg, #0a0a1a 0%, #1a0a2e 30%, #0a1628 60%, #0a1a14 100%);
+  --glass-blob-1: radial-gradient(
+    ellipse 700px 500px at 15% 15%,
+    rgba(99, 102, 241, 0.15),
+    transparent
+  );
+  --glass-blob-2: radial-gradient(
+    ellipse 600px 500px at 80% 30%,
+    rgba(168, 85, 247, 0.1),
+    transparent
+  );
+  --glass-blob-3: radial-gradient(
+    ellipse 500px 400px at 40% 85%,
+    rgba(6, 182, 212, 0.08),
+    transparent
+  );
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Classic Light — TimeTree-compatible design
+   ============================================ */
+:root[data-theme="classic"] {
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f5f5f5;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #f5f5f5;
+  --color-surface-app: #ffffff;
+
+  --color-text-primary: #212121;
+  --color-text-secondary: #8f8f8f;
+  --color-text-tertiary: #b0b0b0;
+
+  --color-border: #ededed;
+  --color-border-strong: #e0e0e0;
+  --color-separator: #ededed;
+
+  --color-accent: #2ecc87;
+  --color-accent-hover: #27b375;
+  --color-accent-bg: rgba(46, 204, 135, 0.08);
+  --color-accent-subtle: rgba(46, 204, 135, 0.1);
+
+  --color-danger: #e73b3b;
+  --color-danger-bg: rgba(231, 59, 59, 0.1);
+  --color-success: #2ecc87;
+
+  --color-hover: #f5f5f5;
+  --color-active: #eeeeee;
+  --color-overlay: rgba(0, 0, 0, 0.1);
+
+  /* Classic: solid surfaces, no blur */
+  --surface-glass: #ffffff;
+  --surface-glass-heavy: #ffffff;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --color-sunday: #ed3131;
+  --color-saturday: #1e5df1;
+
+  /* No gradient background */
+  --app-bg: #ffffff;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Classic Dark — TimeTree-compatible dark
+   ============================================ */
+:root[data-theme="classic"][data-mode="dark"] {
+  --color-surface: #1a1a1a;
+  --color-surface-secondary: #242424;
+  --color-surface-elevated: #2a2a2a;
+  --color-surface-inset: #1a1a1a;
+  --color-surface-app: #1a1a1a;
+
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #8f8f8f;
+  --color-text-tertiary: #666666;
+
+  --color-border: #333333;
+  --color-border-strong: #444444;
+  --color-separator: #333333;
+
+  --color-accent: #2ecc87;
+  --color-accent-hover: #34d88f;
+  --color-accent-bg: rgba(46, 204, 135, 0.12);
+  --color-accent-subtle: rgba(46, 204, 135, 0.15);
+
+  --color-danger: #e73b3b;
+  --color-danger-bg: rgba(231, 59, 59, 0.15);
+  --color-success: #2ecc87;
+
+  --color-hover: #2a2a2a;
+  --color-active: #333333;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+
+  --surface-glass: #2a2a2a;
+  --surface-glass-heavy: #2a2a2a;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --color-sunday: #ff6961;
+  --color-saturday: #5b8def;
+
+  --app-bg: #1a1a1a;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Nothing Light — Industrial monochrome + red
+   ============================================ */
+:root[data-theme="nothing"] {
+  --color-surface: #fafafa;
+  --color-surface-secondary: #f0f0f0;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #e8e8e8;
+  --color-surface-app: #f0f0f0;
+
+  --color-text-primary: #000000;
+  --color-text-secondary: #555555;
+  --color-text-tertiary: #999999;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #d8d8d8;
+  --color-border-strong: #c0c0c0;
+  --color-separator: #e0e0e0;
+
+  --color-accent: #d71921;
+  --color-accent-hover: #b51419;
+  --color-accent-bg: rgba(215, 25, 33, 0.06);
+  --color-accent-subtle: rgba(215, 25, 33, 0.1);
+
+  --color-danger: #d71921;
+  --color-danger-bg: rgba(215, 25, 33, 0.08);
+  --color-success: #00aa55;
+
+  --color-hover: #e8e8e8;
+  --color-active: #e0e0e0;
+  --color-overlay: rgba(0, 0, 0, 0.3);
+
+  --surface-glass: #fafafa;
+  --surface-glass-heavy: #fafafa;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-elevated: none;
+
+  /* Nothing: squared-off, industrial */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+
+  --color-sunday: #d71921;
+  --color-saturday: #000000;
+
+  --app-bg: #f0f0f0;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Nothing Dark — True black OLED, Glyph UI
+   ============================================ */
+:root[data-theme="nothing"][data-mode="dark"] {
+  --color-surface: #000000;
+  --color-surface-secondary: #0d0d0d;
+  --color-surface-elevated: #141414;
+  --color-surface-inset: #080808;
+  --color-surface-app: #000000;
+
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #707070;
+  --color-text-tertiary: #404040;
+
+  --color-border: #1e1e1e;
+  --color-border-strong: #2a2a2a;
+  --color-separator: #141414;
+
+  --color-accent: #d71921;
+  --color-accent-hover: #ff2d35;
+  --color-accent-bg: rgba(215, 25, 33, 0.12);
+  --color-accent-subtle: rgba(215, 25, 33, 0.15);
+
+  --color-danger: #d71921;
+  --color-danger-bg: rgba(215, 25, 33, 0.15);
+  --color-success: #00cc66;
+
+  --color-hover: #0d0d0d;
+  --color-active: #141414;
+  --color-overlay: rgba(0, 0, 0, 0.7);
+
+  --surface-glass: #0d0d0d;
+  --surface-glass-heavy: #0d0d0d;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-elevated: none;
+
+  --color-sunday: #ff3b3b;
+  --color-saturday: #e8e8e8;
+
+  --app-bg: #000000;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Nothing — Glyph-inspired global overrides
+   ============================================ */
+
+/* Dot matrix grid background — finer, more visible */
+:root[data-theme="nothing"] .app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, #00000006 0.8px, transparent 0.8px),
+    linear-gradient(to right, #00000003 1px, transparent 1px),
+    linear-gradient(to bottom, #00000003 1px, transparent 1px);
+  background-size: 16px 16px, 48px 48px, 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .app-bg::after {
+  background-image: radial-gradient(circle, #ffffff08 0.8px, transparent 0.8px),
+    linear-gradient(to right, #ffffff04 1px, transparent 1px),
+    linear-gradient(to bottom, #ffffff04 1px, transparent 1px);
+  background-size: 16px 16px, 48px 48px, 48px 48px;
+}
+
+/* All text → monospace */
+:root[data-theme="nothing"] {
+  --font-sans: "Roboto Mono", "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+/* Buttons: industrial, squared, uppercase, tracked */
+:root[data-theme="nothing"] .btn-primary {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+:root[data-theme="nothing"] .btn-secondary {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+  font-weight: 500;
+  border-width: 1px;
+}
+
+/* Inputs: squared, thin border */
+:root[data-theme="nothing"] .input-modern {
+  border-radius: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-inset);
+  font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+/* Segmented control: squared, minimal */
+:root[data-theme="nothing"] .segmented-control {
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  padding: 2px;
+  gap: 0;
+}
+
+:root[data-theme="nothing"] .segmented-control button {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
+}
+
+:root[data-theme="nothing"] .segmented-control button[data-active="true"] {
+  background: var(--color-text-primary);
+  color: var(--color-surface);
+  box-shadow: none;
+}
+
+/* Red glow on accent elements (dark mode) */
+:root[data-theme="nothing"][data-mode="dark"] .btn-primary {
+  box-shadow: 0 0 20px rgba(215, 25, 33, 0.25), 0 0 4px rgba(215, 25, 33, 0.4);
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .btn-primary:hover {
+  box-shadow: 0 0 30px rgba(215, 25, 33, 0.35), 0 0 6px rgba(215, 25, 33, 0.5);
+}
+
+/* Glass surface in Nothing: no blur, just solid dark surface with border */
+:root[data-theme="nothing"] .glass-surface,
+:root[data-theme="nothing"] .glass-surface-heavy {
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+}
+
+/* Scrollbar: thin red accent line (webkit) */
+:root[data-theme="nothing"] ::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+
+:root[data-theme="nothing"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-theme="nothing"] ::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+}
+
+/* ============================================
+   Glass surface utility
+   ============================================ */
+.glass-surface {
+  background: var(--surface-glass);
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  box-shadow: var(--shadow-lg);
+}
+
+.glass-surface-heavy {
+  background: var(--surface-glass-heavy);
+  backdrop-filter: var(--backdrop-blur-heavy);
+  -webkit-backdrop-filter: var(--backdrop-blur-heavy);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* ============================================
+   Theme transition (smooth switching)
+   ============================================ */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.3s ease, color 0.2s ease, border-color 0.3s ease,
+    box-shadow 0.3s ease, fill 0.2s ease, stroke 0.2s ease !important;
+}
+
+/* ============================================
+   Global styles
+   ============================================ */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  /* iOS-style font feature: proportional figures */
+  font-feature-settings: "cv11";
+}
+
+/* Dark mode segmented control */
+:root[data-mode="dark"] .segmented-control {
+  background: rgba(118, 118, 128, 0.24);
+}
+
+:root[data-mode="dark"] .segmented-control button[data-active="true"] {
+  background: rgba(99, 99, 102, 0.56);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-mode="dark"] .btn-secondary {
+  background: rgba(118, 118, 128, 0.24);
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
+.calendar-transition {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   App background with gradient mesh (glass only)
+   ============================================ */
+.app-bg {
+  background: var(--app-bg);
+}
+
+.app-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: var(--glass-blob-1), var(--glass-blob-2), var(--glass-blob-3);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============================================
+   Segmented control — iOS UISegmentedControl
+   ============================================ */
+.segmented-control {
+  display: inline-flex;
+  border-radius: 8px;
+  background: rgba(118, 118, 128, 0.12);
+  padding: 2px;
+  gap: 0;
+}
+
+.segmented-control button {
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  color: var(--color-text-primary);
+}
+
+.segmented-control button[data-active="true"] {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0.5px 0 rgba(0, 0, 0, 0.04);
+}
+
+/* ============================================
+   Modern input style — iOS text field
+   ============================================ */
+.input-modern {
+  height: 44px;
+  width: 100%;
+  border-radius: 10px;
+  border: none;
+  padding: 0 16px;
+  font-size: 17px;
+  color: var(--color-text-primary);
+  background: var(--color-surface-inset);
+  outline: none;
+  transition: box-shadow 0.2s ease;
+}
+
+.input-modern:focus {
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+.input-modern::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* ============================================
+   Button styles — iOS-style
+   ============================================ */
+.btn-primary {
+  height: 50px;
+  border-radius: 12px;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 17px;
+  font-weight: 600;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.btn-primary:hover {
+  opacity: 0.88;
+}
+
+.btn-primary:active {
+  opacity: 0.7;
+  transform: scale(0.98);
+}
+
+.btn-primary:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.btn-secondary {
+  height: 50px;
+  border-radius: 12px;
+  background: rgba(118, 118, 128, 0.12);
+  color: var(--color-accent);
+  font-size: 17px;
+  font-weight: 600;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.btn-secondary:hover {
+  opacity: 0.88;
+}
+
+.btn-secondary:active {
+  opacity: 0.7;
+  transform: scale(0.98);
+}

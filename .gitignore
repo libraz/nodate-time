@@ -1,0 +1,61 @@
+# ---- Secrets / Env ----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# ---- Node / TypeScript ----
+node_modules/
+dist/
+build/
+out/
+.vite/
+.vitest/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+.pnpm-store/
+.yarn/
+.bun/
+bun.lock
+
+# ---- Go ----
+bin/
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/apps/api/api
+go.sum.bak
+
+# ---- Test artifacts ----
+coverage/
+playwright-report/
+test-results/
+
+# ---- Tooling cache ----
+.turbo/
+.cache/
+*.log
+.tanstack/
+
+# ---- Editor / OS ----
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+.DS_Store
+
+# ---- AI assistants ----
+.claude/
+CLAUDE.md

@@ -1,0 +1,47 @@
+# Local development compose stack for nodate-time.
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: ${TC_DB_NAME:-timetree_clone}
+      MYSQL_USER: ${TC_DB_USER:-ttuser}
+      MYSQL_PASSWORD: ${TC_DB_PASSWORD:-ttpw}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=256
+    ports:
+      - "${TC_DB_PORT:-33306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${TC_DB_ROOT_PASSWORD:-rootpw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${TC_S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${TC_S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "${TC_MINIO_API_PORT:-9000}:9000"
+      - "${TC_MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+  minio_data:

@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS calendars (
+  id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  public_id  BINARY(16)   NOT NULL,
+  name       VARCHAR(200) NOT NULL,
+  color      VARCHAR(7)   NOT NULL DEFAULT '#4CAF50',
+  cover_url  VARCHAR(500) NOT NULL DEFAULT '',
+  created_by INT UNSIGNED NOT NULL,
+  created_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_calendars_public_id (public_id),
+  CONSTRAINT fk_calendars_created_by FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
