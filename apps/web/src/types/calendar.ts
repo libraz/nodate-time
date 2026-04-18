@@ -1,0 +1,127 @@
+export interface Calendar {
+  id: string;
+  name: string;
+  color: string;
+  coverUrl: string;
+  createdAt: string;
+}
+
+export interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  color: string;
+  icon: string;
+}
+
+export interface RecurrenceRule {
+  freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  interval: number;
+  byDay?: string[] | undefined;
+  byMonthDay?: number | undefined;
+  bySetPos?: number | undefined;
+  until?: string | undefined;
+  count?: number | undefined;
+}
+
+export type RecurrencePreset =
+  | 'none'
+  | 'daily'
+  | 'weekly'
+  | 'weekdays'
+  | 'monthly_nth'
+  | 'monthly_date'
+  | 'yearly'
+  | 'custom';
+
+export interface ChecklistItem {
+  id: string;
+  title: string;
+  done: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface EventAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  createdAt: string;
+}
+
+export const NOTIFICATION_OFFSETS = [
+  { label: 'none', value: null },
+  { label: 'atTime', value: 0 },
+  { label: '5min', value: 5 },
+  { label: '10min', value: 10 },
+  { label: '15min', value: 15 },
+  { label: '30min', value: 30 },
+  { label: '1hour', value: 60 },
+  { label: '2hours', value: 120 },
+  { label: '1day', value: 1440 },
+  { label: '2days', value: 2880 },
+] as const;
+
+export interface CalendarEvent {
+  id: string;
+  calendarId: string;
+  title: string;
+  allDay: boolean;
+  startAt: string;
+  endAt: string;
+  color: string;
+  assignedTo: string | null;
+  location: string;
+  memo: string;
+  url: string;
+  notificationOffset: number | null;
+  participants: string[];
+  recurrenceRule: RecurrenceRule | null;
+  isRecurrence: boolean;
+  recurrenceDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Memo {
+  id: string;
+  calendarId: string;
+  title: string;
+  done: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CalendarView = 'month' | 'week';
+
+/** TimeTree actual event label colors (extracted via DevTools) */
+export const LABEL_COLORS = [
+  { name: 'Blue', value: '#47B2F7' },
+  { name: 'Pink', value: '#F35F8C' },
+  { name: 'Purple', value: '#B38BDC' },
+  { name: 'Yellow', value: '#FDC02D' },
+  { name: 'Red', value: '#E73B3B' },
+  { name: 'Green', value: '#2ECC87' },
+  { name: 'Orange', value: '#F5A623' },
+  { name: 'Cyan', value: '#26C6DA' },
+  { name: 'Gray', value: '#8F8F8F' },
+  { name: 'Dark', value: '#757575' },
+  { name: 'Black', value: '#212121' },
+  { name: 'Teal', value: '#26A69A' },
+] as const;
+
+export const MEMBER_COLORS = [
+  '#47B2F7',
+  '#F35F8C',
+  '#B38BDC',
+  '#FDC02D',
+  '#E73B3B',
+  '#2ECC87',
+  '#F5A623',
+  '#26C6DA',
+  '#8F8F8F',
+  '#26A69A',
+] as const;
