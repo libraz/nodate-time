@@ -9,13 +9,37 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root';
+import { Route as SettingsRouteImport } from './routes/settings';
+import { Route as ResetPasswordRouteImport } from './routes/reset-password';
+import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
 import { Route as LoginRouteImport } from './routes/login';
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as ShareTokenRouteImport } from './routes/share/$token';
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const OauthCompleteRoute = OauthCompleteRouteImport.update({
+  id: '/oauth-complete',
+  path: '/oauth-complete',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any);
 const IndexRoute = IndexRouteImport.update({
@@ -31,41 +55,107 @@ const ShareTokenRoute = ShareTokenRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
+  '/oauth-complete': typeof OauthCompleteRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/settings': typeof SettingsRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
+  '/oauth-complete': typeof OauthCompleteRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/settings': typeof SettingsRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
+  '/forgot-password': typeof ForgotPasswordRoute;
   '/login': typeof LoginRoute;
+  '/oauth-complete': typeof OauthCompleteRoute;
+  '/reset-password': typeof ResetPasswordRoute;
+  '/settings': typeof SettingsRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: '/' | '/login' | '/share/$token';
+  fullPaths:
+    | '/'
+    | '/forgot-password'
+    | '/login'
+    | '/oauth-complete'
+    | '/reset-password'
+    | '/settings'
+    | '/share/$token';
   fileRoutesByTo: FileRoutesByTo;
-  to: '/' | '/login' | '/share/$token';
-  id: '__root__' | '/' | '/login' | '/share/$token';
+  to:
+    | '/'
+    | '/forgot-password'
+    | '/login'
+    | '/oauth-complete'
+    | '/reset-password'
+    | '/settings'
+    | '/share/$token';
+  id:
+    | '__root__'
+    | '/'
+    | '/forgot-password'
+    | '/login'
+    | '/oauth-complete'
+    | '/reset-password'
+    | '/settings'
+    | '/share/$token';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  ForgotPasswordRoute: typeof ForgotPasswordRoute;
   LoginRoute: typeof LoginRoute;
+  OauthCompleteRoute: typeof OauthCompleteRoute;
+  ResetPasswordRoute: typeof ResetPasswordRoute;
+  SettingsRoute: typeof SettingsRoute;
   ShareTokenRoute: typeof ShareTokenRoute;
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings';
+      path: '/settings';
+      fullPath: '/settings';
+      preLoaderRoute: typeof SettingsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/reset-password': {
+      id: '/reset-password';
+      path: '/reset-password';
+      fullPath: '/reset-password';
+      preLoaderRoute: typeof ResetPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/oauth-complete': {
+      id: '/oauth-complete';
+      path: '/oauth-complete';
+      fullPath: '/oauth-complete';
+      preLoaderRoute: typeof OauthCompleteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/login': {
       id: '/login';
       path: '/login';
       fullPath: '/login';
       preLoaderRoute: typeof LoginRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/forgot-password': {
+      id: '/forgot-password';
+      path: '/forgot-password';
+      fullPath: '/forgot-password';
+      preLoaderRoute: typeof ForgotPasswordRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/': {
@@ -87,7 +177,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  OauthCompleteRoute: OauthCompleteRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  SettingsRoute: SettingsRoute,
   ShareTokenRoute: ShareTokenRoute,
 };
 export const routeTree = rootRouteImport

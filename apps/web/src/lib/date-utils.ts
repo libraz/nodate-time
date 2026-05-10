@@ -19,7 +19,9 @@ export function getMonthDays(year: number, month: number): DateTime[] {
     days.push(DateTime.local(year, month + 1, d));
   }
 
-  const remaining = 42 - days.length;
+  // Use 5 weeks (35 cells) when possible, 6 weeks (42) only when needed
+  const totalCells = startDay + last.day > 35 ? 42 : 35;
+  const remaining = totalCells - days.length;
   for (let d = 1; d <= remaining; d++) {
     days.push(last.plus({ days: d }));
   }
@@ -47,6 +49,17 @@ export function isToday(date: DateTime): boolean {
 
 export function formatTime(iso: string): string {
   return DateTime.fromISO(iso).toFormat('HH:mm');
+}
+
+/**
+ * Parse an ISO timestamp into the user's selected timezone.
+ * Falls back to local time if `zone` is empty.
+ */
+export function fromISOInZone(iso: string, zone?: string): DateTime {
+  if (zone && zone.length > 0) {
+    return DateTime.fromISO(iso, { zone });
+  }
+  return DateTime.fromISO(iso);
 }
 
 export function formatDateKey(date: DateTime): string {

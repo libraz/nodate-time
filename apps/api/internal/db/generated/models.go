@@ -98,6 +98,90 @@ func (ns NullCalendarMembersRole) Value() (driver.Value, error) {
 	return string(ns.CalendarMembersRole), nil
 }
 
+type OauthAccountsProvider string
+
+const (
+	OauthAccountsProviderGoogle OauthAccountsProvider = "google"
+	OauthAccountsProviderLine   OauthAccountsProvider = "line"
+)
+
+func (e *OauthAccountsProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OauthAccountsProvider(s)
+	case string:
+		*e = OauthAccountsProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OauthAccountsProvider: %T", src)
+	}
+	return nil
+}
+
+type NullOauthAccountsProvider struct {
+	OauthAccountsProvider OauthAccountsProvider `json:"oauthAccountsProvider"`
+	Valid                 bool                  `json:"valid"` // Valid is true if OauthAccountsProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOauthAccountsProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.OauthAccountsProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OauthAccountsProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOauthAccountsProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OauthAccountsProvider), nil
+}
+
+type OauthStatesProvider string
+
+const (
+	OauthStatesProviderGoogle OauthStatesProvider = "google"
+	OauthStatesProviderLine   OauthStatesProvider = "line"
+)
+
+func (e *OauthStatesProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OauthStatesProvider(s)
+	case string:
+		*e = OauthStatesProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OauthStatesProvider: %T", src)
+	}
+	return nil
+}
+
+type NullOauthStatesProvider struct {
+	OauthStatesProvider OauthStatesProvider `json:"oauthStatesProvider"`
+	Valid               bool                `json:"valid"` // Valid is true if OauthStatesProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOauthStatesProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.OauthStatesProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OauthStatesProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOauthStatesProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OauthStatesProvider), nil
+}
+
 type Calendar struct {
 	ID        uint32    `json:"id"`
 	PublicID  []byte    `json:"publicId"`
@@ -141,9 +225,11 @@ type Event struct {
 	AllDay     bool      `json:"allDay"`
 	StartAt    time.Time `json:"startAt"`
 	EndAt      time.Time `json:"endAt"`
-	Color      string    `json:"color"`
-	Location   string    `json:"location"`
-	Memo       string    `json:"memo"`
+	// IANA timezone name (e.g. Asia/Tokyo)
+	Timezone string `json:"timezone"`
+	Color    string `json:"color"`
+	Location string `json:"location"`
+	Memo     string `json:"memo"`
 	// optional URL or meeting link
 	Url       string `json:"url"`
 	CreatedBy uint32 `json:"createdBy"`
@@ -213,6 +299,43 @@ type Memo struct {
 	CreatedBy  uint32    `json:"createdBy"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type OauthAccount struct {
+	ID       uint32                `json:"id"`
+	UserID   uint32                `json:"userId"`
+	Provider OauthAccountsProvider `json:"provider"`
+	// sub claim or LINE userId
+	ProviderSubject string    `json:"providerSubject"`
+	Email           string    `json:"email"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type OauthProviderConfig struct {
+	Provider        string        `json:"provider"`
+	ClientID        string        `json:"clientId"`
+	ClientSecretEnc []byte        `json:"clientSecretEnc"`
+	Enabled         bool          `json:"enabled"`
+	UpdatedAt       time.Time     `json:"updatedAt"`
+	UpdatedBy       sql.NullInt32 `json:"updatedBy"`
+}
+
+type OauthState struct {
+	ID        uint32              `json:"id"`
+	StateHash string              `json:"stateHash"`
+	Provider  OauthStatesProvider `json:"provider"`
+	Redirect  string              `json:"redirect"`
+	ExpiresAt time.Time           `json:"expiresAt"`
+	CreatedAt time.Time           `json:"createdAt"`
+}
+
+type PasswordReset struct {
+	ID        uint32       `json:"id"`
+	UserID    uint32       `json:"userId"`
+	TokenHash string       `json:"tokenHash"`
+	ExpiresAt time.Time    `json:"expiresAt"`
+	UsedAt    sql.NullTime `json:"usedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
 }
 
 type User struct {

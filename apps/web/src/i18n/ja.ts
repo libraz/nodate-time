@@ -201,6 +201,102 @@ export const ja = {
   'search.searchEvents': '予定を検索',
   'search.placeholder': '予定を検索...',
   'search.noResults': '見つかりませんでした',
+
+  // Password reset
+  'auth.forgotPassword': 'パスワードをお忘れですか？',
+  'auth.forgotPasswordTitle': 'パスワードをリセット',
+  'auth.forgotPasswordDescription': '登録済みのメールアドレスにリセット用リンクを送信します',
+  'auth.sendResetEmail': 'リセットメールを送信',
+  'auth.resetEmailSent': 'メールを送信しました。メールの指示に従ってください',
+  'auth.backToLogin': 'ログインに戻る',
+  'auth.resetTitle': '新しいパスワードを設定',
+  'auth.resetSubmit': 'パスワードを変更',
+  'auth.resetSuccess': 'パスワードを変更しました。ログインしてください',
+  'auth.resetInvalid': 'リンクが無効か期限切れです',
+
+  // OAuth
+  'auth.oauthGoogle': 'Googleでログイン',
+  'auth.oauthLine': 'LINEでログイン',
+  'auth.oauthOr': 'または',
+  'auth.signingIn': 'サインイン中...',
+  'auth.oauthFailed': 'OAuth ログインに失敗しました。もう一度お試しください',
+  'auth.emailPlaceholder': 'you@example.com',
+
+  // Timezone / event extras
+  'event.timezone': 'タイムゾーン',
+  'event.multiDay': '{count}日間',
+
+  // Calendar views
+  'calendar.list': 'リスト',
+  'calendar.year': '年表示',
+  'calendar.viewMode': '表示',
+  'calendar.holidayLabel': '祝日',
+
+  // Settings extras
+  'settings.title': '設定',
+  'settings.profile': 'プロフィール',
+  'settings.account': 'アカウント',
+  'settings.security': 'セキュリティ',
+  'settings.holidays': '祝日表示',
+  'settings.holidaysCountry': '国/地域',
+  'settings.timezone': 'タイムゾーン',
+  'settings.calendars': 'カレンダー管理',
+  'settings.members': 'メンバー',
+  'settings.invites': '招待リンク',
+  'settings.exportImport': 'エクスポート / インポート',
+  'settings.exportIcal': 'iCal でエクスポート',
+  'settings.exportCsv': 'CSV でエクスポート',
+  'settings.importIcal': 'iCal をインポート',
+  'settings.importPasted': '貼り付けてインポート',
+  'settings.importPlaceholder': 'ここに .ics の内容を貼り付け...',
+  'settings.imported': '{count}件のイベントを取り込みました',
+  'settings.dangerZone': '危険操作',
+
+  // Admin (platform) settings
+  'settings.admin': '管理者',
+  'settings.adminOAuth': 'OAuth プロバイダー',
+  'settings.adminOAuthDescription': 'Google / LINE などの OAuth ログインを構成します',
+  'settings.adminOAuthHelp':
+    'クライアント ID とシークレットを設定すると、ログイン画面のソーシャルログインが利用可能になります。シークレットは暗号化して DB に保存されます。',
+  'settings.adminProviderClientId': 'クライアント ID',
+  'settings.adminProviderClientSecret': 'クライアント シークレット',
+  'settings.adminProviderSecretStored': '保存済み',
+  'settings.adminProviderReplaceSecret': 'シークレットを変更',
+  'settings.adminProviderClear': '設定を削除',
+  'settings.adminProviderEnabled': '有効',
+  'settings.adminProviderDisabled': '無効',
+  'settings.adminProviderEnable': '有効化',
+  'settings.adminProviderUnconfigured': '未設定',
+  'settings.adminProviderRemoveConfirm': '{provider} の設定を削除しますか?',
+
+  // Members admin
+  'members.role': '権限',
+  'members.roleAdmin': '管理者',
+  'members.roleMember': 'メンバー',
+  'members.roleViewer': '閲覧者',
+  'members.removeConfirm': 'このメンバーを削除しますか?',
+  'members.lastAdmin': '最後の管理者は削除できません',
+
+  // Invites
+  // Labels (color palette)
+  'label.1': 'スカイ',
+  'label.2': 'ピンク',
+  'label.3': 'ラベンダー',
+  'label.4': 'イエロー',
+  'label.5': 'レッド',
+  'label.6': 'グリーン',
+  'label.7': 'オレンジ',
+  'label.8': 'グレー',
+  'label.9': 'ブルー',
+  'label.10': 'コーラル',
+
+  'invites.create': '招待リンクを作成',
+  'invites.expiresAt': '有効期限',
+  'invites.maxUses': '最大利用回数',
+  'invites.unlimited': '無制限',
+  'invites.copy': 'リンクをコピー',
+  'invites.revoke': '取り消す',
+  'invites.empty': '招待リンクがありません',
 } as const;
 
 export type TranslationKey = keyof typeof ja;

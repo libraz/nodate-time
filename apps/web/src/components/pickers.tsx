@@ -5,30 +5,68 @@ import { createPortal } from 'react-dom';
 
 /* ============================================
    useFloating — positions a floating element
-   relative to an anchor, rendered via portal
-   so it escapes overflow:hidden containers.
+   relative to an anchor, rendered via portal.
+   Clamps to viewport edges and supports
+   above/below flip when space is tight.
    ============================================ */
 
-function useFloating(open: boolean) {
+function useFloating(open: boolean, floatingWidth = 280) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const floatingRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0, direction: 'below' as 'below' | 'above' });
+  const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  useLayoutEffect(() => {
+  // Recompute position when open changes or after floating renders
+  const reposition = useCallback(() => {
     if (!open || !anchorRef.current) return;
     const rect = anchorRef.current.getBoundingClientRect();
+    const floatingHeight = floatingRef.current?.offsetHeight ?? 340;
     const spaceBelow = window.innerHeight - rect.bottom;
-    const floatingHeight = floatingRef.current?.offsetHeight ?? 300;
     const goAbove = spaceBelow < floatingHeight + 8 && rect.top > spaceBelow;
 
     setPos({
-      top: goAbove ? rect.top : rect.bottom + 4,
-      left: rect.left,
-      direction: goAbove ? 'above' : 'below',
+      top: goAbove ? Math.max(8, rect.top - floatingHeight - 4) : rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - floatingWidth - 8)),
     });
-  }, [open]);
+  }, [open, floatingWidth]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reposition is a stable callback
+  useLayoutEffect(reposition, [reposition]);
+
+  // Re-measure after floating element mounts (first render has no ref)
+  useEffect(() => {
+    if (open && floatingRef.current) reposition();
+  }, [open, reposition]);
 
   return { anchorRef, floatingRef, pos };
+}
+
+/* ============================================
+   Shared: outside-click + Escape handler
+   ============================================ */
+
+function useOutsideClose(
+  refs: React.RefObject<HTMLElement | null>[],
+  onClose: () => void,
+  active: boolean,
+) {
+  useEffect(() => {
+    if (!active) return;
+    const handlePointer = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (refs.every((r) => r.current && !r.current.contains(target))) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('touchstart', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('touchstart', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [refs, onClose, active]);
 }
 
 /* ============================================
@@ -58,13 +96,7 @@ function DatePickerDropdown({
   const locale = useUiStore((s) => s.locale);
   const [viewMonth, setViewMonth] = useState(value.startOf('month'));
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (floatingRef.current && !floatingRef.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose, floatingRef]);
+  useOutsideClose([floatingRef], onClose, true);
 
   const weekdays = locale === 'ja' ? WEEKDAYS_JA : WEEKDAYS_EN;
 
@@ -89,7 +121,7 @@ function DatePickerDropdown({
   return createPortal(
     <div
       ref={floatingRef}
-      className="fixed z-[9999] w-[280px] rounded-2xl bg-[var(--color-surface-elevated)] p-3 ring-1 ring-[var(--color-border)]"
+      className="dropdown-panel fixed z-[9999] w-[280px] bg-[var(--color-surface-elevated)] p-3 ring-1 ring-[var(--color-border)]"
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
       {/* Month navigation */}
@@ -97,7 +129,9 @@ function DatePickerDropdown({
         <button
           type="button"
           onClick={() => setViewMonth((m) => m.minus({ months: 1 }))}
-          className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[var(--color-hover)]"
+          className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
+          aria-label="Previous month"
         >
           <svg
             width="16"
@@ -116,7 +150,9 @@ function DatePickerDropdown({
         <button
           type="button"
           onClick={() => setViewMonth((m) => m.plus({ months: 1 }))}
-          className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[var(--color-hover)]"
+          className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
+          aria-label="Next month"
         >
           <svg
             width="16"
@@ -165,6 +201,7 @@ function DatePickerDropdown({
               type="button"
               onClick={() => handleSelect(day)}
               disabled={isDisabled}
+              aria-label={day.toFormat('yyyy-MM-dd')}
               className="flex h-9 w-full items-center justify-center rounded-full text-[13px] transition-colors"
               style={{
                 backgroundColor: isSelected ? 'var(--color-accent)' : 'transparent',
@@ -224,13 +261,7 @@ function TimePickerDropdown({
 }: TimePickerDropdownProps) {
   const selectedRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (floatingRef.current && !floatingRef.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose, floatingRef]);
+  useOutsideClose([floatingRef], onClose, true);
 
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: 'center' });
@@ -239,8 +270,8 @@ function TimePickerDropdown({
   const nearestSlot = useMemo(() => {
     const [h, m] = value.split(':').map(Number);
     const totalMin = (h ?? 0) * 60 + (m ?? 0);
-    const rounded = Math.round(totalMin / 15) * 15;
-    const rh = Math.floor(rounded / 60) % 24;
+    const rounded = Math.min(Math.round(totalMin / 15) * 15, 23 * 60 + 45);
+    const rh = Math.floor(rounded / 60);
     const rm = rounded % 60;
     return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
   }, [value]);
@@ -248,7 +279,7 @@ function TimePickerDropdown({
   return createPortal(
     <div
       ref={floatingRef}
-      className="fixed z-[9999] max-h-[240px] w-[100px] overflow-y-auto rounded-xl bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
+      className="dropdown-panel fixed z-[9999] max-h-[240px] w-[100px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
       {TIME_SLOTS.map((slot) => {
@@ -296,26 +327,17 @@ interface CustomSelectProps {
 
 export function CustomSelect({ value, options, onChange, className }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
-  const { anchorRef, floatingRef, pos } = useFloating(open);
+  const { anchorRef, floatingRef, pos } = useFloating(open, 160);
   const selectedRef = useRef<HTMLButtonElement>(null);
+  const handleClose = useCallback(() => setOpen(false), []);
+
+  useOutsideClose([floatingRef, anchorRef], handleClose, open);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        floatingRef.current &&
-        !floatingRef.current.contains(e.target as Node) &&
-        anchorRef.current &&
-        !anchorRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
     if (open) {
-      document.addEventListener('mousedown', handler);
       setTimeout(() => selectedRef.current?.scrollIntoView({ block: 'center' }), 0);
     }
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open, floatingRef, anchorRef]);
+  }, [open]);
 
   const selected = options.find((o) => o.value === value);
 
@@ -325,7 +347,8 @@ export function CustomSelect({ value, options, onChange, className }: CustomSele
         ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-[14px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]"
+        className="flex w-full items-center justify-between gap-2 bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-[14px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]"
+        style={{ borderRadius: 'var(--radius-sm)' }}
       >
         <span className="truncate">{selected?.label ?? value}</span>
         <svg
@@ -348,7 +371,7 @@ export function CustomSelect({ value, options, onChange, className }: CustomSele
         createPortal(
           <div
             ref={floatingRef}
-            className="fixed z-[9999] max-h-[240px] min-w-[160px] overflow-y-auto rounded-xl bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
+            className="dropdown-panel fixed z-[9999] max-h-[240px] min-w-[160px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
             style={{
               top: pos.top,
               left: pos.left,
@@ -424,8 +447,8 @@ export function DateTimeField({
   const locale = useUiStore((s) => s.locale);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const dateFloating = useFloating(showDatePicker);
-  const timeFloating = useFloating(showTimePicker);
+  const dateFloating = useFloating(showDatePicker, 280);
+  const timeFloating = useFloating(showTimePicker, 100);
 
   const dateLabel = useMemo(() => {
     if (locale === 'en') return dateValue.toFormat('EEE, MMM d, yyyy');
@@ -447,7 +470,7 @@ export function DateTimeField({
             setShowDatePicker((v) => !v);
             setShowTimePicker(false);
           }}
-          className="rounded-lg bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-subtle)]"
+          className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
         >
           {dateLabel}
         </button>
@@ -470,7 +493,7 @@ export function DateTimeField({
                 setShowTimePicker((v) => !v);
                 setShowDatePicker(false);
               }}
-              className="rounded-lg bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-subtle)]"
+              className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
             >
               {timeValue}
             </button>

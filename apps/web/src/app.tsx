@@ -2,15 +2,18 @@ import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
 import { DayDetail } from '@/components/day-detail';
 import { EventModal } from '@/components/event-modal';
+import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
+import { ListView } from '@/components/list-view';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { SearchPanel } from '@/components/search-panel';
 import { WeeklyTimeline } from '@/components/weekly-timeline';
+import { YearView } from '@/components/year-view';
 import { useT } from '@/i18n';
+import { fromISOInZone } from '@/lib/date-utils';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
-import { DateTime } from 'luxon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 function MobileSearchView() {
@@ -38,8 +41,9 @@ function MobileSearchView() {
     );
   }, [q, events]);
 
+  const timezone = useUiStore((s) => s.timezone);
   const handleSelect = (startAt: string) => {
-    const dt = DateTime.fromISO(startAt);
+    const dt = fromISOInZone(startAt, timezone);
     setCurrentMonth(dt.startOf('month'));
     setSelectedDate(dt);
     setMobileTab('calendar');
@@ -96,8 +100,8 @@ function MobileSearchView() {
         ) : (
           <div className="py-1">
             {filtered.map((evt) => {
-              const dt = DateTime.fromISO(evt.startAt);
-              const endDt = DateTime.fromISO(evt.endAt);
+              const dt = fromISOInZone(evt.startAt, timezone);
+              const endDt = fromISOInZone(evt.endAt, timezone);
               const dateLabel = evt.allDay
                 ? dt.toFormat('yyyy/MM/dd (EEE)', { locale })
                 : `${dt.toFormat('yyyy/MM/dd (EEE) HH:mm', { locale })} - ${endDt.toFormat('HH:mm')}`;
@@ -311,13 +315,14 @@ export function App() {
 
   const calendarContent = (
     <div className="relative flex-1 overflow-hidden">
-      {calendarView === 'month' ? (
+      {calendarView === 'month' && (
         <div className="h-full">
           <CalendarGrid />
         </div>
-      ) : (
-        <WeeklyTimeline />
       )}
+      {calendarView === 'week' && <WeeklyTimeline />}
+      {calendarView === 'list' && <ListView />}
+      {calendarView === 'year' && <YearView />}
       <EventModal />
     </div>
   );
@@ -362,6 +367,9 @@ export function App() {
           </button>
         ))}
       </div>
+
+      {/* Mobile FAB for creating events */}
+      <FabButton />
 
       {/* Settings modal (PC) */}
       <SettingsModal />

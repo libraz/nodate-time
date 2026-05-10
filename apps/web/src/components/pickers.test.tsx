@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -159,7 +159,7 @@ describe('DateTimeField', () => {
     await user.click(screen.getByText('25'));
 
     expect(onDateChange).toHaveBeenCalledTimes(1);
-    const picked = onDateChange.mock.calls[0][0] as DateTime;
+    const picked = onDateChange.mock.calls[0]?.[0] as DateTime;
     expect(picked.day).toBe(25);
     expect(picked.month).toBe(4);
     expect(picked.year).toBe(2026);

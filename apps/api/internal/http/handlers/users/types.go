@@ -3,12 +3,13 @@ package users
 import "time"
 
 type UserResponse struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Email       string    `json:"email"`
-	Icon        string    `json:"icon"`
-	Color       string    `json:"color"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Icon      string    `json:"icon"`
+	Color     string    `json:"color"`
+	IsAdmin   bool      `json:"isAdmin"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type RegisterInput struct {
@@ -65,3 +66,53 @@ type ChangePasswordInput struct {
 }
 
 type ChangePasswordOutput struct{}
+
+type RequestResetInput struct {
+	Body struct {
+		Email string `json:"email" format:"email"`
+	}
+}
+
+type RequestResetOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
+type ConfirmResetInput struct {
+	Body struct {
+		Token       string `json:"token" minLength:"16" maxLength:"128"`
+		NewPassword string `json:"newPassword" minLength:"8" maxLength:"128"`
+	}
+}
+
+type ConfirmResetOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
+type OAuthStartInput struct {
+	Provider string `path:"provider" enum:"google,line"`
+	Redirect string `query:"redirect"`
+}
+
+type OAuthStartOutput struct {
+	Status int
+	URL    string `header:"Location"`
+	Body   struct {
+		AuthorizeURL string `json:"authorizeUrl"`
+		State        string `json:"state"`
+	}
+}
+
+type OAuthCallbackInput struct {
+	Provider string `path:"provider" enum:"google,line"`
+	Code     string `query:"code"`
+	State    string `query:"state"`
+}
+
+type OAuthCallbackOutput struct {
+	Status int
+	URL    string `header:"Location"`
+}

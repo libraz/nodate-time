@@ -7,13 +7,17 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/calendars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/invites"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/memos"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/mailer"
+	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -22,6 +26,11 @@ type Deps struct {
 	Queries   *generated.Queries
 	JWTSecret string
 	Storage   *storage.Client
+	Mailer    mailer.Mailer
+	WebURL    string
+	OAuth     users.OAuthConfig
+	Admins    auth.AdminAllowlist
+	Cipher    *secrets.Cipher
 }
 
 func Build(deps Deps) http.Handler {
@@ -37,7 +46,7 @@ func Build(deps Deps) http.Handler {
 	r.Group(func(pub chi.Router) {
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "register",
@@ -54,6 +63,49 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Login with email and password",
 			Tags:        []string{"Auth"},
 		}, users.Login(userDeps))
+
+		resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL}
+
+		huma.Register(api, huma.Operation{
+			OperationID: "request-password-reset",
+			Method:      http.MethodPost,
+			Path:        "/auth/password-reset/request",
+			Summary:     "Request a password reset email",
+			Tags:        []string{"Auth"},
+		}, users.RequestPasswordReset(resetDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "confirm-password-reset",
+			Method:      http.MethodPost,
+			Path:        "/auth/password-reset/confirm",
+			Summary:     "Confirm password reset with token",
+			Tags:        []string{"Auth"},
+		}, users.ConfirmPasswordReset(resetDeps))
+
+		oauthDeps := users.OAuthDeps{
+			DB:        deps.DB,
+			Queries:   deps.Queries,
+			JWTSecret: deps.JWTSecret,
+			WebURL:    deps.WebURL,
+			Config:    deps.OAuth,
+			Cipher:    deps.Cipher,
+		}
+
+		huma.Register(api, huma.Operation{
+			OperationID: "oauth-start",
+			Method:      http.MethodGet,
+			Path:        "/auth/oauth/{provider}/start",
+			Summary:     "Begin OAuth login flow",
+			Tags:        []string{"Auth"},
+		}, users.OAuthStart(oauthDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "oauth-callback",
+			Method:      http.MethodGet,
+			Path:        "/auth/oauth/{provider}/callback",
+			Summary:     "OAuth callback handler",
+			Tags:        []string{"Auth"},
+		}, users.OAuthCallback(oauthDeps))
 
 		// Public share (no auth)
 		invPubDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
@@ -80,7 +132,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}
@@ -162,6 +214,23 @@ func Build(deps Deps) http.Handler {
 			Tags:        []string{"Member"},
 		}, calendars.ListMembers(calDeps))
 
+		huma.Register(api, huma.Operation{
+			OperationID: "update-member-role",
+			Method:      http.MethodPut,
+			Path:        "/calendars/{calendarId}/members/{userId}/role",
+			Summary:     "Update a member's role",
+			Tags:        []string{"Member"},
+		}, calendars.UpdateMemberRole(calDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "remove-member",
+			Method:        http.MethodDelete,
+			Path:          "/calendars/{calendarId}/members/{userId}",
+			Summary:       "Remove a member from a calendar",
+			Tags:          []string{"Member"},
+			DefaultStatus: http.StatusNoContent,
+		}, calendars.RemoveMember(calDeps))
+
 		// Calendar labels
 		huma.Register(api, huma.Operation{
 			OperationID: "list-labels",
@@ -170,6 +239,23 @@ func Build(deps Deps) http.Handler {
 			Summary:     "List calendar labels (colors)",
 			Tags:        []string{"Label"},
 		}, calendars.ListLabels(calDeps))
+
+		// Export / Import
+		huma.Register(api, huma.Operation{
+			OperationID: "export-events",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/export",
+			Summary:     "Export calendar events as iCal/CSV",
+			Tags:        []string{"Calendar"},
+		}, calendars.ExportEvents(calDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "import-events",
+			Method:      http.MethodPost,
+			Path:        "/calendars/{calendarId}/import",
+			Summary:     "Import events from iCal text",
+			Tags:        []string{"Calendar"},
+		}, calendars.ImportEvents(calDeps))
 
 		// Events
 		huma.Register(api, huma.Operation{
@@ -379,6 +465,49 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Accept a calendar invite",
 			Tags:        []string{"Invite"},
 		}, invites.AcceptInvite(invDeps))
+	})
+
+	// --- Admin routes (require auth + admin allowlist) ---
+	r.Group(func(adm chi.Router) {
+		adm.Use(middleware.RequireAuth(deps.JWTSecret))
+		adm.Use(middleware.RequireAdmin(deps.Queries, deps.Admins))
+		api := humachi.New(adm, huma.DefaultConfig("Nodate Time", "1.0.0"))
+
+		envHas := func(p string) bool {
+			switch p {
+			case "google":
+				return deps.OAuth.Google.ClientID != ""
+			case "line":
+				return deps.OAuth.LINE.ClientID != ""
+			}
+			return false
+		}
+		adminDeps := admin.Deps{Queries: deps.Queries, Cipher: deps.Cipher, EnvFallback: envHas}
+
+		huma.Register(api, huma.Operation{
+			OperationID: "list-oauth-providers",
+			Method:      http.MethodGet,
+			Path:        "/admin/oauth-providers",
+			Summary:     "List configured OAuth providers (admin only)",
+			Tags:        []string{"Admin"},
+		}, admin.ListOAuthProviders(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "update-oauth-provider",
+			Method:      http.MethodPut,
+			Path:        "/admin/oauth-providers/{provider}",
+			Summary:     "Update OAuth provider credentials (admin only)",
+			Tags:        []string{"Admin"},
+		}, admin.UpdateOAuthProvider(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "delete-oauth-provider",
+			Method:        http.MethodDelete,
+			Path:          "/admin/oauth-providers/{provider}",
+			Summary:       "Delete OAuth provider configuration (admin only)",
+			Tags:          []string{"Admin"},
+			DefaultStatus: 204,
+		}, admin.DeleteOAuthProvider(adminDeps))
 	})
 
 	return r

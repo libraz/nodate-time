@@ -1,4 +1,5 @@
 import { ThemeInitializer } from '@/components/theme-initializer';
+import { Toaster } from '@/components/toaster';
 import { useAuthStore } from '@/stores/auth-store';
 import { Navigate, Outlet, createRootRoute, useLocation } from '@tanstack/react-router';
 import { useEffect } from 'react';
@@ -7,7 +8,13 @@ export const Route = createRootRoute({
   component: RootLayout,
 });
 
-const PUBLIC_PATHS = ['/login', '/share/'];
+const PUBLIC_PATHS = [
+  '/login',
+  '/share/',
+  '/forgot-password',
+  '/reset-password',
+  '/oauth-complete',
+];
 
 function RootLayout() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -37,6 +44,7 @@ function RootLayout() {
     <>
       <ThemeInitializer />
       <Outlet />
+      <Toaster />
     </>
   );
 }

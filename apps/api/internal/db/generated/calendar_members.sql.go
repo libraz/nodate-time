@@ -67,7 +67,7 @@ func (q *Queries) GetCalendarMember(ctx context.Context, arg GetCalendarMemberPa
 }
 
 const listCalendarMembers = `-- name: ListCalendarMembers :many
-SELECT cm.id, cm.calendar_id, cm.user_id, cm.role, cm.color, cm.joined_at, u.name AS user_name, u.email AS user_email, u.icon AS user_icon
+SELECT cm.id, cm.calendar_id, cm.user_id, cm.role, cm.color, cm.joined_at, u.public_id AS user_public_id, u.name AS user_name, u.email AS user_email, u.icon AS user_icon
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ?
@@ -75,15 +75,16 @@ ORDER BY cm.joined_at
 `
 
 type ListCalendarMembersRow struct {
-	ID         uint32              `json:"id"`
-	CalendarID uint32              `json:"calendarId"`
-	UserID     uint32              `json:"userId"`
-	Role       CalendarMembersRole `json:"role"`
-	Color      string              `json:"color"`
-	JoinedAt   time.Time           `json:"joinedAt"`
-	UserName   string              `json:"userName"`
-	UserEmail  string              `json:"userEmail"`
-	UserIcon   string              `json:"userIcon"`
+	ID           uint32              `json:"id"`
+	CalendarID   uint32              `json:"calendarId"`
+	UserID       uint32              `json:"userId"`
+	Role         CalendarMembersRole `json:"role"`
+	Color        string              `json:"color"`
+	JoinedAt     time.Time           `json:"joinedAt"`
+	UserPublicID []byte              `json:"userPublicId"`
+	UserName     string              `json:"userName"`
+	UserEmail    string              `json:"userEmail"`
+	UserIcon     string              `json:"userIcon"`
 }
 
 func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([]ListCalendarMembersRow, error) {
@@ -102,6 +103,7 @@ func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([
 			&i.Role,
 			&i.Color,
 			&i.JoinedAt,
+			&i.UserPublicID,
 			&i.UserName,
 			&i.UserEmail,
 			&i.UserIcon,

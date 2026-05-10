@@ -712,3 +712,164 @@ select {
   opacity: 0.7;
   transform: scale(0.98);
 }
+
+/* ============================================
+   Dialog / Modal / Picker theme utilities
+   ============================================ */
+
+/* Modal container — desktop centered dialog */
+.modal-panel {
+  border-radius: var(--radius-xl);
+}
+
+/* Bottom sheet — mobile slide-up */
+.bottom-sheet {
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+}
+
+/* Dropdown/picker floating panel */
+.dropdown-panel {
+  border-radius: var(--radius-md);
+}
+
+/* Card section within a modal/form */
+.card-section {
+  border-radius: var(--radius-md);
+}
+
+/* Toggle switch track */
+.toggle-track {
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+
+.toggle-knob {
+  border-radius: 999px;
+  background: var(--color-surface-elevated);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Pill button (date/time display in pickers) */
+.pill-button {
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+
+/* Color selector dot */
+.color-dot {
+  border-radius: 999px;
+  transition: box-shadow 0.15s ease;
+}
+
+/* ============================================
+   Nothing theme — Dialog overrides
+   ============================================ */
+
+/* Nothing: sharp modal with accent top border */
+:root[data-theme="nothing"] .bottom-sheet {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 2px solid var(--color-accent);
+}
+
+/* Nothing: squared toggle */
+:root[data-theme="nothing"] .toggle-track {
+  border-radius: 2px;
+}
+
+:root[data-theme="nothing"] .toggle-knob {
+  border-radius: 1px;
+  box-shadow: none;
+  border: 1px solid var(--color-border-strong);
+}
+
+/* Nothing: squared color dots */
+:root[data-theme="nothing"] .color-dot {
+  border-radius: 2px;
+}
+
+/* Nothing: squared pill buttons */
+:root[data-theme="nothing"] .pill-button {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
+}
+
+/* Nothing: dropdown with top accent line */
+:root[data-theme="nothing"] .dropdown-panel {
+  border: 1px solid var(--color-border-strong);
+  border-top: 2px solid var(--color-accent);
+}
+
+/* Nothing dark: glow effects on modals */
+:root[data-theme="nothing"][data-mode="dark"] .modal-panel {
+  box-shadow: 0 0 40px rgba(215, 25, 33, 0.06), inset 0 0 0 1px rgba(215, 25, 33, 0.08);
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .bottom-sheet {
+  box-shadow: 0 -20px 60px rgba(215, 25, 33, 0.06);
+  border-top: 2px solid var(--color-accent);
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .dropdown-panel {
+  box-shadow: 0 0 20px rgba(215, 25, 33, 0.05);
+}
+
+/* Nothing: drag handle → thin line instead of rounded pill */
+:root[data-theme="nothing"] .drag-handle {
+  border-radius: 0;
+  height: 2px;
+  width: 40px;
+  background: var(--color-border-strong);
+}
+
+/* ============================================
+   Glass theme — Enhanced dialog effects
+   ============================================ */
+
+/* Glass: elevated panels get extra frost & glow */
+.glass-surface-heavy.modal-panel,
+.glass-surface-heavy.bottom-sheet {
+  border: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+:root[data-mode="dark"] .glass-surface-heavy.modal-panel,
+:root[data-mode="dark"] .glass-surface-heavy.bottom-sheet {
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Glass: dropdown panels get subtle frost */
+:root:not([data-theme="classic"]):not([data-theme="nothing"]) .dropdown-panel {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ============================================
+   FAB — Floating Action Button
+   ============================================ */
+
+/* Nothing dark: red glow FAB */
+:root[data-theme="nothing"][data-mode="dark"] .fab-button {
+  box-shadow: 0 0 24px rgba(215, 25, 33, 0.35), 0 0 6px rgba(215, 25, 33, 0.5);
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .fab-button:hover {
+  box-shadow: 0 0 32px rgba(215, 25, 33, 0.45), 0 0 8px rgba(215, 25, 33, 0.6);
+}
+
+/* ============================================
+   Toaster
+   ============================================ */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -4,6 +4,7 @@ import { formatMonthYear } from '@/lib/date-utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { MEMBER_COLORS } from '@/types/calendar';
+import { useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -18,7 +19,7 @@ export function CalendarHeader() {
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
-  const toggleSettings = useUiStore((s) => s.toggleSettings);
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const updateProfile = useAuthStore((s) => s.updateProfile);
@@ -174,23 +175,6 @@ export function CalendarHeader() {
     >
       <circle cx="11" cy="11" r="7" />
       <line x1="16.65" y1="16.65" x2="21" y2="21" />
-    </svg>
-  );
-
-  const PlusIcon = ({ className }: { className?: string }) => (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--color-text-primary)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className ?? 'sm:h-6 sm:w-6'}
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 
@@ -442,7 +426,7 @@ export function CalendarHeader() {
             type="button"
             onClick={() => {
               setShowProfileMenu(false);
-              toggleSettings();
+              navigate({ to: '/settings' });
             }}
             className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           >
@@ -533,10 +517,26 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => openEventModal()}
-            className="flex h-8 w-8 items-center justify-center rounded-xl hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            className="flex h-8 w-8 items-center justify-center hover:opacity-80 active:scale-95 transition-all"
+            style={{
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-accent)',
+            }}
             aria-label={t('event.createEvent')}
           >
-            <PlusIcon className="h-5 w-5" />
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
           </button>
 
           <div className="relative" ref={profileMenuRef}>
@@ -601,6 +601,20 @@ export function CalendarHeader() {
             >
               {t('calendar.weekly')}
             </button>
+            <button
+              data-active={calendarView === 'list'}
+              type="button"
+              onClick={() => setCalendarView('list')}
+            >
+              {t('calendar.list')}
+            </button>
+            <button
+              data-active={calendarView === 'year'}
+              type="button"
+              onClick={() => setCalendarView('year')}
+            >
+              {t('calendar.year')}
+            </button>
           </div>
 
           <button
@@ -615,10 +629,28 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => openEventModal()}
-            className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            className="flex h-9 items-center gap-1.5 px-3 font-medium text-[14px] hover:opacity-85 active:scale-[0.97] transition-all"
+            style={{
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--color-accent)',
+              color: 'var(--color-text-on-accent, #fff)',
+            }}
             aria-label={t('event.createEvent')}
           >
-            <PlusIcon />
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <span className="hidden lg:inline">{t('event.createEvent')}</span>
           </button>
 
           <div className="relative" ref={profileMenuRef}>

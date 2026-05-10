@@ -71,6 +71,7 @@ export interface CalendarEvent {
   allDay: boolean;
   startAt: string;
   endAt: string;
+  timezone?: string;
   color: string;
   assignedTo: string | null;
   location: string;
@@ -95,7 +96,7 @@ export interface Memo {
   updatedAt: string;
 }
 
-export type CalendarView = 'month' | 'week';
+export type CalendarView = 'month' | 'week' | 'list' | 'year';
 
 /** TimeTree actual event label colors (extracted via DevTools) */
 export const LABEL_COLORS = [

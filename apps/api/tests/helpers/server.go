@@ -11,23 +11,30 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 )
 
-const TestJWTSecret = "test-jwt-secret-for-e2e"
+const (
+	TestJWTSecret = "test-jwt-secret-for-e2e"
+	TestWebURL    = "http://web.test.local"
+)
 
 type TestServer struct {
 	BaseURL string
 	Server  *httptest.Server
 	DB      *sql.DB
+	Mailer  *CapturingMailer
 }
 
 // NewTestServer boots an httptest.Server with the full router against a real DB.
 func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	t.Helper()
 	queries := generated.New(db)
+	mc := &CapturingMailer{}
 
 	handler := router.Build(router.Deps{
 		DB:        db,
 		Queries:   queries,
 		JWTSecret: TestJWTSecret,
+		Mailer:    mc,
+		WebURL:    TestWebURL,
 	})
 
 	srv := httptest.NewServer(handler)
@@ -37,6 +44,7 @@ func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 		BaseURL: srv.URL,
 		Server:  srv,
 		DB:      db,
+		Mailer:  mc,
 	}
 }
 
@@ -71,11 +79,14 @@ func OpenTestDB(t *testing.T) *sql.DB {
 // NewTestServerForMain is like NewTestServer but for use in TestMain (no *testing.T).
 func NewTestServerForMain(db *sql.DB) *TestServer {
 	queries := generated.New(db)
+	mc := &CapturingMailer{}
 	handler := router.Build(router.Deps{
 		DB:        db,
 		Queries:   queries,
 		JWTSecret: TestJWTSecret,
+		Mailer:    mc,
+		WebURL:    TestWebURL,
 	})
 	srv := httptest.NewServer(handler)
-	return &TestServer{BaseURL: srv.URL, Server: srv, DB: db}
+	return &TestServer{BaseURL: srv.URL, Server: srv, DB: db, Mailer: mc}
 }

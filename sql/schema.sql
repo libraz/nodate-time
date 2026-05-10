@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS events (
   all_day     TINYINT(1)   NOT NULL DEFAULT 0,
   start_at    DATETIME(3)  NOT NULL,
   end_at      DATETIME(3)  NOT NULL,
+  timezone    VARCHAR(64)  NOT NULL DEFAULT 'UTC' COMMENT 'IANA timezone name (e.g. Asia/Tokyo)',
   color       VARCHAR(7)   NOT NULL DEFAULT '#42A5F5',
   location    VARCHAR(500) NOT NULL DEFAULT '',
   memo        TEXT         NOT NULL,
@@ -181,5 +182,58 @@ CREATE TABLE IF NOT EXISTS event_attachments (
   KEY idx_att_event (event_id, enabled),
   CONSTRAINT fk_att_event FOREIGN KEY (event_id)    REFERENCES events (id) ON DELETE CASCADE,
   CONSTRAINT fk_att_user  FOREIGN KEY (uploaded_by)  REFERENCES users  (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/011_password_resets.sql =====
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id     INT UNSIGNED NOT NULL,
+  token_hash  VARCHAR(64)  NOT NULL,
+  expires_at  DATETIME(3)  NOT NULL,
+  used_at     DATETIME(3)  NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pwr_token_hash (token_hash),
+  KEY idx_pwr_user (user_id),
+  CONSTRAINT fk_pwr_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/012_oauth_accounts.sql =====
+CREATE TABLE IF NOT EXISTS oauth_accounts (
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id     INT UNSIGNED NOT NULL,
+  provider    ENUM('google', 'line') NOT NULL,
+  provider_subject VARCHAR(255) NOT NULL COMMENT 'sub claim or LINE userId',
+  email       VARCHAR(255) NOT NULL DEFAULT '',
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_oa_provider_subject (provider, provider_subject),
+  KEY idx_oa_user (user_id),
+  CONSTRAINT fk_oa_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/013_oauth_states.sql =====
+CREATE TABLE IF NOT EXISTS oauth_states (
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  state_hash  VARCHAR(64)  NOT NULL,
+  provider    ENUM('google', 'line') NOT NULL,
+  redirect    VARCHAR(512) NOT NULL DEFAULT '',
+  expires_at  DATETIME(3)  NOT NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_os_state_hash (state_hash),
+  KEY idx_os_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/014_oauth_provider_configs.sql =====
+CREATE TABLE IF NOT EXISTS oauth_provider_configs (
+  provider               VARCHAR(32)    NOT NULL,
+  client_id              VARCHAR(255)   NOT NULL DEFAULT '',
+  client_secret_enc      VARBINARY(512) NOT NULL,
+  enabled                BOOLEAN        NOT NULL DEFAULT TRUE,
+  updated_at             DATETIME(3)    NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  updated_by             INT UNSIGNED   NULL,
+  PRIMARY KEY (provider),
+  CONSTRAINT fk_opc_user FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -11,6 +11,7 @@ import (
 var (
 	testServerURL string
 	testDB        *sql.DB
+	testMailer    *helpers.CapturingMailer
 )
 
 func TestMain(m *testing.M) {
@@ -27,6 +28,7 @@ func TestMain(m *testing.M) {
 
 	srv := helpers.NewTestServerForMain(db)
 	testServerURL = srv.BaseURL
+	testMailer = srv.Mailer
 
 	code := m.Run()
 	srv.Server.Close()

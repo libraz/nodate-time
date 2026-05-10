@@ -211,7 +211,7 @@ function CommentsSection({
   };
 
   return (
-    <div className="mx-6 mt-3 rounded-xl bg-[var(--color-surface-secondary)] p-4">
+    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <svg
           width="18"
@@ -244,7 +244,10 @@ function CommentsSection({
         <div className="mb-3 max-h-[240px] space-y-3 overflow-y-auto">
           {comments.map((c) => (
             <div key={c.id} className="group flex gap-2">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-inset)] text-[14px]">
+              <span
+                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-surface-inset)] text-[14px]"
+                style={{ borderRadius: 'var(--radius-sm)' }}
+              >
                 {c.userIcon || '\uD83D\uDC64'}
               </span>
               <div className="min-w-0 flex-1">
@@ -315,7 +318,8 @@ function CommentsSection({
                             fetchComments();
                           });
                       }}
-                      className="rounded-lg bg-[var(--color-accent)] px-2 py-1 text-[11px] text-white"
+                      className="bg-[var(--color-accent)] px-2 py-1 text-[11px] text-white"
+                      style={{ borderRadius: 'var(--radius-sm)' }}
                     >
                       {t('event.saveComment')}
                     </button>
@@ -344,13 +348,15 @@ function CommentsSection({
             }
           }}
           placeholder={t('event.commentPlaceholder')}
-          className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
         />
         <button
           type="button"
           onClick={handleSend}
           disabled={!newComment.trim() || isSending}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)] disabled:opacity-40"
+          className="flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-accent)] disabled:opacity-40"
+          style={{ borderRadius: 'var(--radius-sm)' }}
           aria-label={t('event.send')}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
@@ -424,7 +430,7 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
   };
 
   return (
-    <div className="mx-6 mt-3 rounded-xl bg-[var(--color-surface-secondary)] p-4">
+    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <svg
           width="18"
@@ -516,7 +522,8 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
             }
           }}
           placeholder={t('event.checklistPlaceholder')}
-          className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
         />
       </div>
     </div>
@@ -594,7 +601,7 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
   };
 
   return (
-    <div className="mx-6 mt-3 rounded-xl bg-[var(--color-surface-secondary)] p-4">
+    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <svg
           width="18"
@@ -616,7 +623,8 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
           {attachments.map((att) => (
             <div
               key={att.id}
-              className="group flex items-center gap-2 rounded-lg bg-[var(--color-surface-inset)] px-3 py-2"
+              className="group flex items-center gap-2 bg-[var(--color-surface-inset)] px-3 py-2"
+              style={{ borderRadius: 'var(--radius-sm)' }}
             >
               <svg
                 width="16"
@@ -671,7 +679,8 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-border)] py-2.5 text-[13px] text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-[13px] text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
+        style={{ borderRadius: 'var(--radius-md)' }}
       >
         <svg
           width="16"
@@ -798,8 +807,16 @@ export function EventModal() {
       const startDay = DateTime.fromISO(form.startAt).startOf('day');
       const endDay = DateTime.fromISO(form.endAt).startOf('day');
       startIso = startDay.toISO() ?? startIso;
-      // End is exclusive: add 1 day to the selected end date
-      endIso = (endDay >= startDay ? endDay : startDay).plus({ days: 1 }).toISO() ?? endIso;
+      // End is exclusive: add 1 day. Clamp end >= start.
+      const effectiveEnd = endDay >= startDay ? endDay : startDay;
+      endIso = effectiveEnd.plus({ days: 1 }).toISO() ?? endIso;
+    } else {
+      // For timed events, ensure end > start
+      const startDt = DateTime.fromISO(startIso);
+      const endDt = DateTime.fromISO(endIso);
+      if (endDt <= startDt) {
+        endIso = startDt.plus({ hours: 1 }).toISO() ?? endIso;
+      }
     }
     const data = {
       title: form.title.trim(),
@@ -839,7 +856,8 @@ export function EventModal() {
         <button
           type="button"
           onClick={closeEventModal}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+          className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
         >
           <svg
             width="18"
@@ -871,7 +889,7 @@ export function EventModal() {
 
       {/* Date & Time card */}
       <div className="px-6">
-        <div className="rounded-xl bg-[var(--color-surface-secondary)] p-4">
+        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           <DateTimeField
             label={t('event.start')}
             dateValue={DateTime.fromISO(form.startAt)}
@@ -881,20 +899,29 @@ export function EventModal() {
               const time = form.startAt.split('T')[1] ?? '09:00';
               const newStart = `${date.toFormat('yyyy-MM-dd')}T${time}`;
               setForm((f) => {
-                // If end date is before new start, push end forward
-                const endDt = DateTime.fromISO(f.endAt);
+                const oldStartDt = DateTime.fromISO(f.startAt);
+                const oldEndDt = DateTime.fromISO(f.endAt);
+                const newStartDt = DateTime.fromISO(newStart);
+                // Preserve the original duration between start and end
+                const durationMs = oldEndDt.diff(oldStartDt).milliseconds;
+                const newEndDt = newStartDt.plus({ milliseconds: Math.max(durationMs, 0) });
+                const newEnd = newEndDt.toFormat("yyyy-MM-dd'T'HH:mm");
+                return { ...f, startAt: newStart, endAt: newEnd };
+              });
+            }}
+            onTimeChange={(time) => {
+              const datePart = form.startAt.split('T')[0] ?? '';
+              setForm((f) => {
+                const newStart = `${datePart}T${time}`;
+                // If end is now before start on same day, push end forward by 1 hour
                 const startDt = DateTime.fromISO(newStart);
+                const endDt = DateTime.fromISO(f.endAt);
                 if (endDt <= startDt) {
-                  const endTime = f.endAt.split('T')[1] ?? '10:00';
-                  const newEnd = `${date.plus({ days: f.allDay ? 0 : 0 }).toFormat('yyyy-MM-dd')}T${endTime}`;
+                  const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
                   return { ...f, startAt: newStart, endAt: newEnd };
                 }
                 return { ...f, startAt: newStart };
               });
-            }}
-            onTimeChange={(time) => {
-              const date = form.startAt.split('T')[0] ?? '';
-              setForm((f) => ({ ...f, startAt: `${date}T${time}` }));
             }}
           />
           <DateTimeField
@@ -904,11 +931,28 @@ export function EventModal() {
             showTime={!form.allDay}
             onDateChange={(date) => {
               const time = form.endAt.split('T')[1] ?? '10:00';
-              setForm((f) => ({ ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${time}` }));
+              setForm((f) => {
+                const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
+                // If end is before start, clamp to start date
+                const startDt = DateTime.fromISO(f.startAt);
+                const endDt = DateTime.fromISO(newEnd);
+                if (endDt < startDt) {
+                  const startTime = f.startAt.split('T')[1] ?? '09:00';
+                  return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
+                }
+                return { ...f, endAt: newEnd };
+              });
             }}
             onTimeChange={(time) => {
-              const date = form.endAt.split('T')[0] ?? '';
-              setForm((f) => ({ ...f, endAt: `${date}T${time}` }));
+              const datePart = form.endAt.split('T')[0] ?? '';
+              setForm((f) => {
+                const newEnd = `${datePart}T${time}`;
+                // If end is before start, don't allow it — keep old value
+                const startDt = DateTime.fromISO(f.startAt);
+                const endDt = DateTime.fromISO(newEnd);
+                if (endDt <= startDt) return f;
+                return { ...f, endAt: newEnd };
+              });
             }}
             minDate={DateTime.fromISO(form.startAt)}
           />
@@ -923,13 +967,13 @@ export function EventModal() {
             <button
               type="button"
               onClick={() => setForm((f) => ({ ...f, allDay: !f.allDay }))}
-              className="relative h-7 w-12 rounded-full transition-colors"
+              className="toggle-track relative h-7 w-12"
               style={{
                 backgroundColor: form.allDay ? 'var(--color-accent)' : 'var(--color-surface-inset)',
               }}
             >
               <span
-                className="absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform"
+                className="toggle-knob absolute top-0.5 h-6 w-6"
                 style={{ left: form.allDay ? '22px' : '2px' }}
               />
             </button>
@@ -987,7 +1031,7 @@ export function EventModal() {
 
           {/* Custom recurrence dialog */}
           {showCustomRecurrence && form.recurrenceRule && (
-            <div className="mt-2 space-y-3 rounded-xl bg-[var(--color-surface-inset)] p-4">
+            <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
               <div className="flex items-center gap-2">
                 <span className="text-[13px] text-[var(--color-text-secondary)]">
                   {t('event.recurrenceInterval')}:
@@ -1149,7 +1193,7 @@ export function EventModal() {
 
       {/* Details card (location + memo) - always visible */}
       <div className="mt-3 px-6">
-        <div className="rounded-xl bg-[var(--color-surface-secondary)] p-4">
+        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           <div className="flex items-center gap-3 py-1">
             <svg
               width="18"
@@ -1220,7 +1264,7 @@ export function EventModal() {
 
       {/* Participants & Notification card */}
       <div className="mt-3 px-6">
-        <div className="rounded-xl bg-[var(--color-surface-secondary)] p-4">
+        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           {/* Participants */}
           <div className="flex items-center gap-3 py-1.5">
             <svg
@@ -1327,7 +1371,7 @@ export function EventModal() {
                 key={c.value}
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, color: c.value }))}
-                className="h-7 w-7 rounded-full transition-shadow"
+                className="color-dot h-7 w-7"
                 style={{
                   backgroundColor: c.value,
                   boxShadow:
@@ -1363,7 +1407,8 @@ export function EventModal() {
           <button
             type="button"
             onClick={handleDelete}
-            className="w-full rounded-xl bg-[var(--color-danger-bg)] py-3 text-center text-[14px] font-medium text-[var(--color-danger)]"
+            className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-[14px] font-medium text-[var(--color-danger)]"
+            style={{ borderRadius: 'var(--radius-md)' }}
           >
             {editingEvent?.recurrenceRule ? t('event.deleteRecurring') : t('event.deleteEvent')}
           </button>
@@ -1388,22 +1433,22 @@ export function EventModal() {
           role="button"
           tabIndex={-1}
         />
-        <div className="glass-surface-heavy fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden rounded-t-3xl">
-          <div className="mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+        <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
+          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
           <div className="flex-1 overflow-y-auto">{formContent}</div>
           {/* Sticky action bar */}
           <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
             <button
               type="button"
               onClick={closeEventModal}
-              className="btn-secondary flex-1 rounded-xl py-3 text-[14px] font-medium"
+              className="btn-secondary flex-1 py-3 text-[14px] font-medium"
             >
               {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="btn-primary flex-1 rounded-xl py-3 text-[14px] font-medium"
+              className="btn-primary flex-1 py-3 text-[14px] font-medium"
               style={{ opacity: form.title.trim() ? 1 : 0.5 }}
             >
               {t('common.save')}
@@ -1424,21 +1469,21 @@ export function EventModal() {
           tabIndex={-1}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div className="glass-surface-heavy pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden rounded-2xl ring-1 ring-[var(--color-border)]">
+          <div className="glass-surface-heavy modal-panel pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
             <div className="flex-1 overflow-y-auto">{formContent}</div>
             {/* Action bar */}
             <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
               <button
                 type="button"
                 onClick={closeEventModal}
-                className="btn-secondary flex-1 rounded-xl py-3 text-[14px] font-medium"
+                className="btn-secondary flex-1 py-3 text-[14px] font-medium"
               >
                 {t('common.cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleSave}
-                className="btn-primary flex-1 rounded-xl py-3 text-[14px] font-medium"
+                className="btn-primary flex-1 py-3 text-[14px] font-medium"
                 style={{ opacity: form.title.trim() ? 1 : 0.5 }}
               >
                 {t('common.save')}

@@ -22,6 +22,7 @@ type EventResponse struct {
 	AllDay             bool                    `json:"allDay"`
 	StartAt            time.Time               `json:"startAt"`
 	EndAt              time.Time               `json:"endAt"`
+	Timezone           string                  `json:"timezone"`
 	Color              string                  `json:"color"`
 	Location           string                  `json:"location"`
 	Memo               string                  `json:"memo"`
@@ -72,6 +73,7 @@ type CreateEventInput struct {
 		AllDay             bool             `json:"allDay"`
 		StartAt            string           `json:"startAt" doc:"ISO 8601 datetime"`
 		EndAt              string           `json:"endAt" doc:"ISO 8601 datetime"`
+		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to UTC)"`
 		Color              string           `json:"color,omitempty" maxLength:"7" required:"false"`
 		Location           string           `json:"location,omitempty" maxLength:"500" required:"false"`
 		Memo               string           `json:"memo,omitempty" required:"false"`
@@ -93,6 +95,7 @@ type UpdateEventInput struct {
 		AllDay             bool             `json:"allDay"`
 		StartAt            string           `json:"startAt"`
 		EndAt              string           `json:"endAt"`
+		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to UTC)"`
 		Color              string           `json:"color,omitempty" maxLength:"7" required:"false"`
 		Location           string           `json:"location,omitempty" maxLength:"500" required:"false"`
 		Memo               string           `json:"memo,omitempty" required:"false"`

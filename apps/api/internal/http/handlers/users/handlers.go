@@ -17,6 +17,7 @@ import (
 type Deps struct {
 	Queries   *generated.Queries
 	JWTSecret string
+	Admins    auth.AdminAllowlist
 }
 
 func pubIDToHex(b []byte) string {
@@ -27,13 +28,14 @@ func pubIDToHex(b []byte) string {
 	return u.String()
 }
 
-func mapUser(u generated.User) UserResponse {
+func mapUser(u generated.User, admins auth.AdminAllowlist) UserResponse {
 	return UserResponse{
 		ID:        pubIDToHex(u.PublicID),
 		Name:      u.Name,
 		Email:     u.Email,
 		Icon:      u.Icon,
 		Color:     u.Color,
+		IsAdmin:   admins.Contains(u.Email),
 		CreatedAt: u.CreatedAt,
 	}
 }
@@ -81,6 +83,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			Email:     in.Body.Email,
 			Icon:      "👤",
 			Color:     "#42A5F5",
+			IsAdmin:   deps.Admins.Contains(in.Body.Email),
 			CreatedAt: time.Now(),
 		}
 		return out, nil
@@ -108,7 +111,7 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 
 		out := &LoginOutput{}
 		out.Body.Token = token
-		out.Body.User = mapUser(user)
+		out.Body.User = mapUser(user, deps.Admins)
 		return out, nil
 	}
 }
@@ -123,7 +126,7 @@ func GetMe(deps Deps) func(context.Context, *GetMeInput) (*GetMeOutput, error) {
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &GetMeOutput{Body: mapUser(user)}, nil
+		return &GetMeOutput{Body: mapUser(user, deps.Admins)}, nil
 	}
 }
 
@@ -179,6 +182,6 @@ func UpdateMe(deps Deps) func(context.Context, *UpdateMeInput) (*UpdateMeOutput,
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &UpdateMeOutput{Body: mapUser(user)}, nil
+		return &UpdateMeOutput{Body: mapUser(user, deps.Admins)}, nil
 	}
 }

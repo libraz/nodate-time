@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tanstack/react-router": "1.168.10",
+    "date-holidays": "^3.28.0",
     "luxon": "3.5.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",

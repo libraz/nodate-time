@@ -91,10 +91,11 @@ export function SearchPanel() {
                 key={evt.id}
                 type="button"
                 onClick={() => handleSelect(evt.startAt)}
-                className="mx-2 flex w-[calc(100%-16px)] items-start gap-3 rounded-xl px-5 py-3.5 text-left hover:bg-[var(--color-hover)]"
+                className="mx-2 flex w-[calc(100%-16px)] items-start gap-3 px-5 py-3.5 text-left hover:bg-[var(--color-hover)]"
+                style={{ borderRadius: 'var(--radius-sm)' }}
               >
                 <span
-                  className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-md"
+                  className="color-dot mt-1.5 h-2.5 w-2.5 shrink-0"
                   style={{ backgroundColor: evt.color }}
                 />
                 <div className="min-w-0 flex-1">
@@ -118,7 +119,10 @@ export function SearchPanel() {
 
   const searchInput = (
     <div className="px-5 py-4">
-      <div className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-inset)] px-4 py-2.5">
+      <div
+        className="flex items-center gap-3 bg-[var(--color-surface-inset)] px-4 py-2.5"
+        style={{ borderRadius: 'var(--radius-sm)' }}
+      >
         <svg
           width="18"
           height="18"
@@ -143,7 +147,8 @@ export function SearchPanel() {
         <button
           type="button"
           onClick={toggleSearch}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+          className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+          style={{ borderRadius: 'var(--radius-sm)' }}
           aria-label={t('common.close')}
         >
           <svg
@@ -177,7 +182,7 @@ export function SearchPanel() {
         {/* backdrop */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss */}
         <div className="fixed inset-0 z-40" onClick={toggleSearch} />
-        <div className="glass-surface-heavy absolute right-16 top-[60px] z-50 flex max-h-[520px] w-[420px] flex-col overflow-hidden rounded-2xl ring-1 ring-[var(--color-border)]">
+        <div className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 flex max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
           {searchInput}
           {resultsList}
         </div>

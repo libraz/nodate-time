@@ -103,6 +103,7 @@ func mapEvent(e generated.Event, calPubID []byte) EventResponse {
 		AllDay:             e.AllDay,
 		StartAt:            e.StartAt,
 		EndAt:              e.EndAt,
+		Timezone:           e.Timezone,
 		Color:              e.Color,
 		Location:           e.Location,
 		Memo:               e.Memo,
@@ -332,6 +333,11 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt)
 
+		tz := in.Body.Timezone
+		if tz == "" {
+			tz = "UTC"
+		}
+
 		result, err := deps.Queries.CreateEvent(ctx, generated.CreateEventParams{
 			PublicID:           pubID[:],
 			CalendarID:         cal.ID,
@@ -339,6 +345,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			AllDay:             in.Body.AllDay,
 			StartAt:            startAt,
 			EndAt:              endAt,
+			Timezone:           tz,
 			Color:              color,
 			Location:           in.Body.Location,
 			Memo:               in.Body.Memo,
@@ -381,6 +388,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			AllDay:             in.Body.AllDay,
 			StartAt:            startAt,
 			EndAt:              endAt,
+			Timezone:           tz,
 			Color:              color,
 			Location:           in.Body.Location,
 			Memo:               in.Body.Memo,
@@ -426,11 +434,20 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 
 		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt)
 
+		tz := in.Body.Timezone
+		if tz == "" {
+			tz = evt.Timezone
+			if tz == "" {
+				tz = "UTC"
+			}
+		}
+
 		err = deps.Queries.UpdateEvent(ctx, generated.UpdateEventParams{
 			Title:              in.Body.Title,
 			AllDay:             in.Body.AllDay,
 			StartAt:            startAt,
 			EndAt:              endAt,
+			Timezone:           tz,
 			Color:              in.Body.Color,
 			Location:           in.Body.Location,
 			Memo:               in.Body.Memo,

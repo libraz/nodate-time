@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -223,7 +224,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 		out := &ListMembersOutput{Body: make([]MemberResponse, 0, len(rows))}
 		for _, m := range rows {
 			out.Body = append(out.Body, MemberResponse{
-				ID:    pubIDToHex(nil), // User public_id not in join — use user_id as string for now
+				ID:    pubIDToHex(m.UserPublicID),
 				Name:  m.UserName,
 				Email: m.UserEmail,
 				Icon:  m.UserIcon,
@@ -235,19 +236,120 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 	}
 }
 
+func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
+	return func(ctx context.Context, in *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
+		actorID, _ := middleware.ActorFromContext(ctx)
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, actorID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		actor, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: actorID})
+		if err != nil || actor.Role != "admin" {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+		}
+
+		targetPub, err := parseUUID(in.UserID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+
+		if current.Role == "admin" && in.Body.Role != "admin" {
+			adminCount, _ := deps.Queries.CountCalendarAdmins(ctx, cal.ID)
+			if adminCount <= 1 {
+				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
+			}
+		}
+
+		if err := deps.Queries.UpdateCalendarMemberRole(ctx, generated.UpdateCalendarMemberRoleParams{
+			Role:       generated.CalendarMembersRole(in.Body.Role),
+			CalendarID: cal.ID,
+			UserID:     target.ID,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		return &UpdateMemberRoleOutput{Body: MemberResponse{
+			ID:    pubIDToHex(target.PublicID),
+			Name:  target.Name,
+			Email: target.Email,
+			Icon:  target.Icon,
+			Role:  in.Body.Role,
+			Color: current.Color,
+		}}, nil
+	}
+}
+
+func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveMemberOutput, error) {
+	return func(ctx context.Context, in *RemoveMemberInput) (*RemoveMemberOutput, error) {
+		actorID, _ := middleware.ActorFromContext(ctx)
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, actorID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		targetPub, err := parseUUID(in.UserID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+
+		// Self-removal allowed; otherwise admin only
+		if target.ID != actorID {
+			actor, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: actorID})
+			if err != nil || actor.Role != "admin" {
+				return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+			}
+		}
+
+		if current.Role == "admin" {
+			adminCount, _ := deps.Queries.CountCalendarAdmins(ctx, cal.ID)
+			if adminCount <= 1 {
+				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
+			}
+		}
+
+		if err := deps.Queries.RemoveCalendarMember(ctx, generated.RemoveCalendarMemberParams{
+			CalendarID: cal.ID,
+			UserID:     target.ID,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		return &RemoveMemberOutput{}, nil
+	}
+}
+
+// ListLabels returns the predefined color palette. Names are returned as i18n
+// keys (label.1 .. label.10) so the frontend can localize them.
 func ListLabels(_ Deps) func(context.Context, *ListLabelsInput) (*ListLabelsOutput, error) {
-	// TimeTree labels are predefined colors
-	labels := []LabelResponse{
-		{ID: "1", Name: "ラベル1", Color: "#47B2F7"},
-		{ID: "2", Name: "ラベル2", Color: "#F35F8C"},
-		{ID: "3", Name: "ラベル3", Color: "#B38BDC"},
-		{ID: "4", Name: "ラベル4", Color: "#FDC02D"},
-		{ID: "5", Name: "ラベル5", Color: "#E73B3B"},
-		{ID: "6", Name: "ラベル6", Color: "#2ECC87"},
-		{ID: "7", Name: "ラベル7", Color: "#F5A623"},
-		{ID: "8", Name: "ラベル8", Color: "#8F8F8F"},
-		{ID: "9", Name: "ラベル9", Color: "#42A5F5"},
-		{ID: "10", Name: "ラベル10", Color: "#FF7043"},
+	colors := []string{
+		"#47B2F7", "#F35F8C", "#B38BDC", "#FDC02D", "#E73B3B",
+		"#2ECC87", "#F5A623", "#8F8F8F", "#42A5F5", "#FF7043",
+	}
+	labels := make([]LabelResponse, len(colors))
+	for i, c := range colors {
+		id := strconv.Itoa(i + 1)
+		labels[i] = LabelResponse{ID: id, NameKey: "label." + id, Color: c}
 	}
 	return func(_ context.Context, _ *ListLabelsInput) (*ListLabelsOutput, error) {
 		return &ListLabelsOutput{Body: labels}, nil

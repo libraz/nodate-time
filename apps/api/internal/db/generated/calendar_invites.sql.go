@@ -135,7 +135,7 @@ func (q *Queries) IncrementInviteUseCount(ctx context.Context, id uint32) error 
 }
 
 const listEventsByInviteCalendar = `-- name: ListEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at
@@ -164,6 +164,7 @@ func (q *Queries) ListEventsByInviteCalendar(ctx context.Context, arg ListEvents
 			&i.AllDay,
 			&i.StartAt,
 			&i.EndAt,
+			&i.Timezone,
 			&i.Color,
 			&i.Location,
 			&i.Memo,
@@ -229,7 +230,7 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 }
 
 const listRecurringEventsByInviteCalendar = `-- name: ListRecurringEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL
   AND e.start_at < ? AND e.recurrence_end > ?
@@ -259,6 +260,7 @@ func (q *Queries) ListRecurringEventsByInviteCalendar(ctx context.Context, arg L
 			&i.AllDay,
 			&i.StartAt,
 			&i.EndAt,
+			&i.Timezone,
 			&i.Color,
 			&i.Location,
 			&i.Memo,
