@@ -15,10 +15,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
+	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
+	"github.com/libraz/nodate-time/apps/api/internal/mailer"
+	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -50,6 +55,11 @@ func main() {
 
 	queries := generated.New(db)
 
+	// Background cleanup of expired tokens
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	defer cancelCleanup()
+	cleanup.Run(cleanupCtx, queries, 15*time.Minute)
+
 	// Storage (MinIO)
 	var storageClient *storage.Client
 	if cfg.S3Endpoint != "" {
@@ -67,11 +77,51 @@ func main() {
 	}
 
 	// Build app router
+	mailerClient := mailer.New()
+	oauthCfg := users.OAuthConfig{
+		RedirectBase: cfg.APIPublic,
+		Google: users.OAuthProviderConfig{
+			ClientID:     cfg.GoogleClientID,
+			ClientSecret: cfg.GoogleClientSecret,
+			AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
+			TokenURL:     "https://oauth2.googleapis.com/token",
+			UserinfoURL:  "https://openidconnect.googleapis.com/v1/userinfo",
+			Scopes:       "openid email profile",
+		},
+		LINE: users.OAuthProviderConfig{
+			ClientID:     cfg.LINEClientID,
+			ClientSecret: cfg.LINEClientSecret,
+			AuthURL:      "https://access.line.me/oauth2/v2.1/authorize",
+			TokenURL:     "https://api.line.me/oauth2/v2.1/token",
+			UserinfoURL:  "https://api.line.me/oauth2/v2.1/userinfo",
+			Scopes:       "openid profile email",
+		},
+	}
+
+	admins := auth.NewAdminAllowlist(cfg.AdminEmails)
+	if admins.Empty() {
+		slog.Warn("TC_ADMIN_EMAILS is empty; /admin/* endpoints will reject all requests")
+	}
+
+	cipher, err := secrets.New(cfg.SecretsKey)
+	if err != nil {
+		slog.Error("invalid TC_SECRETS_KEY", "error", err)
+		os.Exit(1)
+	}
+	if cipher == nil {
+		slog.Warn("TC_SECRETS_KEY is empty; admin OAuth provider edits will be rejected")
+	}
+
 	appRouter := router.Build(router.Deps{
 		DB:        db,
 		Queries:   queries,
 		JWTSecret: cfg.JWTSecret,
 		Storage:   storageClient,
+		Mailer:    mailerClient,
+		WebURL:    cfg.WebURL,
+		OAuth:     oauthCfg,
+		Admins:    admins,
+		Cipher:    cipher,
 	})
 
 	// Outer router with global middleware

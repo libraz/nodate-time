@@ -2,7 +2,7 @@
 SELECT * FROM calendar_members WHERE calendar_id = ? AND user_id = ?;
 
 -- name: ListCalendarMembers :many
-SELECT cm.*, u.name AS user_name, u.email AS user_email, u.icon AS user_icon
+SELECT cm.*, u.public_id AS user_public_id, u.name AS user_name, u.email AS user_email, u.icon AS user_icon
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ?

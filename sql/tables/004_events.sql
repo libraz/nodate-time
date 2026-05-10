@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS events (
   all_day     TINYINT(1)   NOT NULL DEFAULT 0,
   start_at    DATETIME(3)  NOT NULL,
   end_at      DATETIME(3)  NOT NULL,
+  timezone    VARCHAR(64)  NOT NULL DEFAULT 'UTC' COMMENT 'IANA timezone name (e.g. Asia/Tokyo)',
   color       VARCHAR(7)   NOT NULL DEFAULT '#42A5F5',
   location    VARCHAR(500) NOT NULL DEFAULT '',
   memo        TEXT         NOT NULL,

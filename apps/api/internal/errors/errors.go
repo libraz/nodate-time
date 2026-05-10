@@ -31,6 +31,10 @@ var (
 	AuthEmailExists    = &Spec{Status: 409, Code: "AUTH.EMAIL_EXISTS", Message: "Email address is already registered"}
 	AuthBadCredentials    = &Spec{Status: 401, Code: "AUTH.BAD_CREDENTIALS", Message: "Invalid email or password"}
 	AuthWrongPassword    = &Spec{Status: 400, Code: "AUTH.WRONG_PASSWORD", Message: "Current password is incorrect"}
+	AuthResetInvalid     = &Spec{Status: 400, Code: "AUTH.RESET_INVALID", Message: "Reset token is invalid or expired"}
+	AuthOAuthFailed      = &Spec{Status: 400, Code: "AUTH.OAUTH_FAILED", Message: "OAuth authentication failed"}
+	AuthAdminRequired    = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
+	SecretsUnavailable   = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
 )
 
 // --- Calendar errors ---

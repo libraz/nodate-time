@@ -26,7 +26,7 @@ export function SettingsModal() {
       />
 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="glass-surface-heavy w-full max-w-[400px] rounded-2xl ring-1 ring-[var(--color-border)]">
+        <div className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]">
           <div className="flex items-center justify-between px-6 py-4">
             <h2 className="text-[18px] font-semibold text-[var(--color-text-primary)]">
               {t('tabs.settings')}
@@ -34,7 +34,8 @@ export function SettingsModal() {
             <button
               type="button"
               onClick={toggleSettings}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+              className="flex h-9 w-9 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+              style={{ borderRadius: 'var(--radius-sm)' }}
             >
               <svg
                 width="18"
@@ -216,7 +217,8 @@ export function MemoSection() {
               <button
                 type="button"
                 onClick={() => deleteMemo(memo.calendarId, memo.id)}
-                className="flex h-[22px] w-[22px] items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                className="flex h-[22px] w-[22px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                style={{ borderRadius: 'var(--radius-sm)' }}
               >
                 <svg
                   width="14"
@@ -294,7 +296,7 @@ export function ShareModal({ calendarId, onClose }: { calendarId: string; onClos
       />
 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="glass-surface-heavy w-full max-w-[400px] rounded-2xl ring-1 ring-[var(--color-border)]">
+        <div className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]">
           <div className="flex items-center justify-between px-6 py-4">
             <h2 className="text-[18px] font-semibold text-[var(--color-text-primary)]">
               {t('panel.share')}
@@ -302,7 +304,8 @@ export function ShareModal({ calendarId, onClose }: { calendarId: string; onClos
             <button
               type="button"
               onClick={onClose}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+              className="flex h-9 w-9 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+              style={{ borderRadius: 'var(--radius-sm)' }}
             >
               <svg
                 width="18"
@@ -340,7 +343,10 @@ export function ShareModal({ calendarId, onClose }: { calendarId: string; onClos
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)] px-3 py-2">
+                <div
+                  className="flex items-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface-secondary)] px-3 py-2"
+                  style={{ borderRadius: 'var(--radius-sm)' }}
+                >
                   <input
                     type="text"
                     readOnly

@@ -13,6 +13,24 @@ type Config struct {
 	S3SecretKey        string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
 	S3Bucket           string `env:"TC_S3_BUCKET" envDefault:"nodate-time"`
 	S3UseSSL           bool   `env:"TC_S3_USE_SSL" envDefault:"false"`
+
+	WebURL    string `env:"TC_WEB_URL" envDefault:"http://localhost:5173"`
+	APIPublic string `env:"TC_API_PUBLIC_URL" envDefault:"http://localhost:8080"`
+
+	GoogleClientID     string `env:"TC_GOOGLE_CLIENT_ID" envDefault:""`
+	GoogleClientSecret string `env:"TC_GOOGLE_CLIENT_SECRET" envDefault:""`
+
+	LINEClientID     string `env:"TC_LINE_CLIENT_ID" envDefault:""`
+	LINEClientSecret string `env:"TC_LINE_CLIENT_SECRET" envDefault:""`
+
+	// Comma-separated email allowlist for platform-wide admin access
+	// (used to gate /admin/* endpoints).
+	AdminEmails string `env:"TC_ADMIN_EMAILS" envDefault:""`
+
+	// 32-byte key used to encrypt secrets stored in the DB (e.g. OAuth client
+	// secrets). Accepts hex (64 chars) or base64. If empty, admin OAuth config
+	// edits are rejected so secrets are never written in plaintext.
+	SecretsKey string `env:"TC_SECRETS_KEY" envDefault:""`
 }
 
 func Load() (*Config, error) {

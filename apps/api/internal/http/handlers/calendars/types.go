@@ -20,9 +20,9 @@ type MemberResponse struct {
 }
 
 type LabelResponse struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID      string `json:"id"`
+	NameKey string `json:"nameKey" doc:"i18n key for label name (e.g. 'label.1')"`
+	Color   string `json:"color"`
 }
 
 // --- Inputs/Outputs ---
@@ -92,6 +92,17 @@ type RemoveMemberInput struct {
 	UserID     string `path:"userId"`
 }
 type RemoveMemberOutput struct{}
+
+type UpdateMemberRoleInput struct {
+	CalendarID string `path:"calendarId"`
+	UserID     string `path:"userId"`
+	Body       struct {
+		Role string `json:"role" enum:"admin,member,viewer"`
+	}
+}
+type UpdateMemberRoleOutput struct {
+	Body MemberResponse
+}
 
 // Labels
 

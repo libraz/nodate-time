@@ -19,11 +19,11 @@ WHERE cm.user_id = ? AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at;
 
 -- name: CreateEvent :execresult
-INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateEvent :exec
-UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
+UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, timezone = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
 WHERE id = ?;
 
 -- name: DeleteEvent :exec

@@ -1,8 +1,8 @@
 import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
 import { useCalendarStore } from '@/stores/calendar-store';
-import { useUiStore } from '@/stores/ui-store';
 import { MEMBER_COLORS } from '@/types/calendar';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
 export function LeftSidebar() {
@@ -12,7 +12,7 @@ export function LeftSidebar() {
   const toggleCalendarFilter = useCalendarStore((s) => s.toggleCalendarFilter);
   const setActiveCalendarIds = useCalendarStore((s) => s.setActiveCalendarIds);
   const addCalendar = useCalendarStore((s) => s.addCalendar);
-  const toggleSettings = useUiStore((s) => s.toggleSettings);
+  const navigate = useNavigate();
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [memoExpanded, setMemoExpanded] = useState(true);
@@ -229,7 +229,7 @@ export function LeftSidebar() {
       <div className="border-t border-[var(--color-border)] px-3 py-2">
         <button
           type="button"
-          onClick={toggleSettings}
+          onClick={() => navigate({ to: '/settings' })}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
         >
           <svg

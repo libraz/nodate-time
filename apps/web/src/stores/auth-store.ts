@@ -9,6 +9,7 @@ interface User {
   email: string;
   icon: string;
   color: string;
+  isAdmin?: boolean;
 }
 
 interface AuthState {

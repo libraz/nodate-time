@@ -33,6 +33,8 @@ interface UiState {
   theme: ThemeStyle;
   colorMode: ColorMode;
   locale: Locale;
+  timezone: string;
+  holidaysCountry: string | null;
 
   setCalendarView: (view: CalendarView) => void;
   setSelectedDate: (date: DateTime) => void;
@@ -51,6 +53,8 @@ interface UiState {
   setTheme: (theme: ThemeStyle) => void;
   setColorMode: (mode: ColorMode) => void;
   setLocale: (locale: Locale) => void;
+  setTimezone: (tz: string) => void;
+  setHolidaysCountry: (country: string | null) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -70,6 +74,8 @@ export const useUiStore = create<UiState>((set) => ({
   theme: loadJson<ThemeStyle>('theme', 'glass'),
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
   locale: loadJson<Locale>('locale', 'ja'),
+  timezone: loadJson<string>('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+  holidaysCountry: loadJson<string | null>('holidaysCountry', 'JP'),
 
   setCalendarView: (view) => set({ calendarView: view }),
   setSelectedDate: (date) => set({ selectedDate: date }),
@@ -111,5 +117,13 @@ export const useUiStore = create<UiState>((set) => ({
   setLocale: (locale) => {
     saveJson('locale', locale);
     set({ locale });
+  },
+  setTimezone: (tz) => {
+    saveJson('timezone', tz);
+    set({ timezone: tz });
+  },
+  setHolidaysCountry: (country) => {
+    saveJson('holidaysCountry', country);
+    set({ holidaysCountry: country });
   },
 }));

@@ -13,8 +13,8 @@ import (
 )
 
 const createEvent = `-- name: CreateEvent :execresult
-INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateEventParams struct {
@@ -24,6 +24,7 @@ type CreateEventParams struct {
 	AllDay             bool             `json:"allDay"`
 	StartAt            time.Time        `json:"startAt"`
 	EndAt              time.Time        `json:"endAt"`
+	Timezone           string           `json:"timezone"`
 	Color              string           `json:"color"`
 	Location           string           `json:"location"`
 	Memo               string           `json:"memo"`
@@ -43,6 +44,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (sql.R
 		arg.AllDay,
 		arg.StartAt,
 		arg.EndAt,
+		arg.Timezone,
 		arg.Color,
 		arg.Location,
 		arg.Memo,
@@ -65,7 +67,7 @@ func (q *Queries) DeleteEvent(ctx context.Context, id uint32) error {
 }
 
 const getEventByPublicID = `-- name: GetEventByPublicID :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE public_id = ?
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE public_id = ?
 `
 
 func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Event, error) {
@@ -79,6 +81,7 @@ func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Even
 		&i.AllDay,
 		&i.StartAt,
 		&i.EndAt,
+		&i.Timezone,
 		&i.Color,
 		&i.Location,
 		&i.Memo,
@@ -95,7 +98,7 @@ func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Even
 }
 
 const listEventsByCalendarAndRange = `-- name: ListEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
 WHERE calendar_id = ? AND recurrence_rule IS NULL AND start_at < ? AND end_at > ?
 ORDER BY start_at
 `
@@ -123,6 +126,7 @@ func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEven
 			&i.AllDay,
 			&i.StartAt,
 			&i.EndAt,
+			&i.Timezone,
 			&i.Color,
 			&i.Location,
 			&i.Memo,
@@ -149,7 +153,7 @@ func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEven
 }
 
 const listEventsByUserAndRange = `-- name: ListEventsByUserAndRange :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_members cm ON cm.calendar_id = e.calendar_id
 WHERE cm.user_id = ? AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at
@@ -178,6 +182,7 @@ func (q *Queries) ListEventsByUserAndRange(ctx context.Context, arg ListEventsBy
 			&i.AllDay,
 			&i.StartAt,
 			&i.EndAt,
+			&i.Timezone,
 			&i.Color,
 			&i.Location,
 			&i.Memo,
@@ -204,7 +209,7 @@ func (q *Queries) ListEventsByUserAndRange(ctx context.Context, arg ListEventsBy
 }
 
 const listRecurringEventsByCalendarAndRange = `-- name: ListRecurringEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
 WHERE calendar_id = ? AND recurrence_rule IS NOT NULL
   AND start_at < ? AND recurrence_end > ?
 ORDER BY start_at
@@ -233,6 +238,7 @@ func (q *Queries) ListRecurringEventsByCalendarAndRange(ctx context.Context, arg
 			&i.AllDay,
 			&i.StartAt,
 			&i.EndAt,
+			&i.Timezone,
 			&i.Color,
 			&i.Location,
 			&i.Memo,
@@ -259,7 +265,7 @@ func (q *Queries) ListRecurringEventsByCalendarAndRange(ctx context.Context, arg
 }
 
 const updateEvent = `-- name: UpdateEvent :exec
-UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
+UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, timezone = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
 WHERE id = ?
 `
 
@@ -268,6 +274,7 @@ type UpdateEventParams struct {
 	AllDay             bool             `json:"allDay"`
 	StartAt            time.Time        `json:"startAt"`
 	EndAt              time.Time        `json:"endAt"`
+	Timezone           string           `json:"timezone"`
 	Color              string           `json:"color"`
 	Location           string           `json:"location"`
 	Memo               string           `json:"memo"`
@@ -285,6 +292,7 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) error 
 		arg.AllDay,
 		arg.StartAt,
 		arg.EndAt,
+		arg.Timezone,
 		arg.Color,
 		arg.Location,
 		arg.Memo,
