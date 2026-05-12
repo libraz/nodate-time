@@ -5,14 +5,7 @@ import type { CalendarView } from '@/types/calendar';
 import { DateTime } from 'luxon';
 import { create } from 'zustand';
 
-export type RightPanelId =
-  | 'memo'
-  | 'album'
-  | 'members'
-  | 'notifications'
-  | 'settings'
-  | 'share'
-  | null;
+export type RightPanelId = 'memo' | 'album' | 'members' | 'notifications' | 'share' | null;
 
 export type MobileTab = 'calendar' | 'memo' | 'search' | 'settings';
 

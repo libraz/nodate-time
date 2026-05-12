@@ -2,8 +2,10 @@ import { useT } from '@/i18n';
 import type { TranslationKey } from '@/i18n';
 import { type RightPanelId, useUiStore } from '@/stores/ui-store';
 
+type SidebarItemId = Exclude<RightPanelId, null> | 'settings';
+
 interface SidebarItemDef {
-  id: RightPanelId;
+  id: SidebarItemId;
   labelKey: TranslationKey;
   icon: React.ReactNode;
 }
@@ -83,17 +85,25 @@ const ITEM_DEFS: SidebarItemDef[] = [
 export function RightSidebar() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
+  const showSettings = useUiStore((s) => s.showSettings);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const toggleSettings = useUiStore((s) => s.toggleSettings);
 
   return (
     <div className="flex w-10 shrink-0 flex-col items-center gap-1.5 border-l border-[var(--color-border)] pt-3 sm:w-14 sm:gap-2 sm:pt-4">
       {ITEM_DEFS.map((item) => {
-        const active = rightPanel === item.id;
+        const active = item.id === 'settings' ? showSettings : rightPanel === item.id;
         return (
           <button
             key={item.id}
             type="button"
-            onClick={() => toggleRightPanel(item.id)}
+            onClick={() => {
+              if (item.id === 'settings') {
+                toggleSettings();
+                return;
+              }
+              toggleRightPanel(item.id satisfies RightPanelId);
+            }}
             className={[
               'relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors sm:h-11 sm:w-11',
               active

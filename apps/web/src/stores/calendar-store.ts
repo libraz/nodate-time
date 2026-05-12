@@ -1,6 +1,13 @@
 import { api } from '@/lib/api';
 import { loadJson, saveJson } from '@/lib/storage';
-import type { Calendar, CalendarEvent, Member, Memo, RecurrenceRule } from '@/types/calendar';
+import type {
+  Calendar,
+  CalendarEvent,
+  Label,
+  Member,
+  Memo,
+  RecurrenceRule,
+} from '@/types/calendar';
 import { create } from 'zustand';
 
 interface CalendarState {
@@ -8,6 +15,7 @@ interface CalendarState {
   events: CalendarEvent[];
   memos: Memo[];
   membersMap: Record<string, Member[]>;
+  labels: Label[];
   activeCalendarIds: string[];
   isLoading: boolean;
 
@@ -15,6 +23,7 @@ interface CalendarState {
   fetchEvents: (start: string, end: string) => Promise<void>;
   fetchMemos: () => Promise<void>;
   fetchMembers: (calendarId: string) => Promise<void>;
+  fetchLabels: (calendarId: string) => Promise<void>;
 
   addCalendar: (cal: { name: string; color: string }) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
@@ -67,6 +76,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   events: [],
   memos: [],
   membersMap: {},
+  labels: [],
   activeCalendarIds: loadJson<string[]>('activeCalendarIds', []),
   isLoading: false,
 
@@ -79,8 +89,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ calendars: cals, activeCalendarIds: ids });
       saveJson('activeCalendarIds', ids);
 
-      // Fetch members for each calendar
       await Promise.all(cals.map((c) => get().fetchMembers(c.id)));
+      const first = cals[0];
+      if (first && get().labels.length === 0) {
+        await get().fetchLabels(first.id);
+      }
     } finally {
       set({ isLoading: false });
     }
@@ -121,6 +134,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((s) => ({
       membersMap: { ...s.membersMap, [calendarId]: members },
     }));
+  },
+
+  async fetchLabels(calendarId) {
+    const labels = await api.get<Label[]>(`/calendars/${calendarId}/labels`);
+    set({ labels });
   },
 
   async addCalendar(cal) {
