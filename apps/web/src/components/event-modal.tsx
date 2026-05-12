@@ -10,7 +10,7 @@ import type {
   RecurrencePreset,
   RecurrenceRule,
 } from '@/types/calendar';
-import { LABEL_COLORS, NOTIFICATION_OFFSETS } from '@/types/calendar';
+import { FALLBACK_LABEL_COLOR, NOTIFICATION_OFFSETS } from '@/types/calendar';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -730,6 +730,7 @@ export function EventModal() {
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
+  const labels = useCalendarStore((s) => s.labels);
 
   const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -739,7 +740,7 @@ export function EventModal() {
     allDay: true,
     startAt: '',
     endAt: '',
-    color: LABEL_COLORS[0]?.value ?? '#47B2F7',
+    color: FALLBACK_LABEL_COLOR,
     calendarId: '',
     location: '',
     memo: '',
@@ -780,7 +781,7 @@ export function EventModal() {
         allDay: true,
         startAt: toLocalDatetime(start.toISO() ?? ''),
         endAt: toLocalDatetime(end.toISO() ?? ''),
-        color: LABEL_COLORS[0]?.value ?? '#47B2F7',
+        color: FALLBACK_LABEL_COLOR,
         calendarId: calendars[0]?.id ?? '',
         location: '',
         memo: '',
@@ -1366,20 +1367,20 @@ export function EventModal() {
             <circle cx="7" cy="7" r="1" />
           </svg>
           <div className="flex flex-wrap gap-2.5">
-            {LABEL_COLORS.map((c) => (
+            {labels.map((c) => (
               <button
-                key={c.value}
+                key={c.id}
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, color: c.value }))}
+                onClick={() => setForm((f) => ({ ...f, color: c.color }))}
                 className="color-dot h-7 w-7"
                 style={{
-                  backgroundColor: c.value,
+                  backgroundColor: c.color,
                   boxShadow:
-                    form.color === c.value
-                      ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${c.value}`
+                    form.color === c.color
+                      ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${c.color}`
                       : 'none',
                 }}
-                aria-label={c.name}
+                aria-label={t(c.nameKey as TranslationKey)}
               />
             ))}
           </div>

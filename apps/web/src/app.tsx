@@ -6,9 +6,12 @@ import { EventModal } from '@/components/event-modal';
 import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { ListView } from '@/components/list-view';
+import { MembersPanel } from '@/components/members-panel';
+import { NotificationsPanel } from '@/components/notifications-panel';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
 import { SearchPanel } from '@/components/search-panel';
+import { SharePanel } from '@/components/share-panel';
 import { WeeklyTimeline } from '@/components/weekly-timeline';
 import { YearView } from '@/components/year-view';
 import { useT } from '@/i18n';
@@ -385,6 +388,15 @@ export function App() {
 
       {/* Album overlay */}
       <AlbumPanel />
+
+      {/* Members overlay */}
+      <MembersPanel />
+
+      {/* Notifications overlay */}
+      <NotificationsPanel />
+
+      {/* Share overlay */}
+      <SharePanel />
     </div>
   );
 }

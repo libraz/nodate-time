@@ -98,21 +98,13 @@ export interface Memo {
 
 export type CalendarView = 'month' | 'week' | 'list' | 'year';
 
-/** TimeTree actual event label colors (extracted via DevTools) */
-export const LABEL_COLORS = [
-  { name: 'Blue', value: '#47B2F7' },
-  { name: 'Pink', value: '#F35F8C' },
-  { name: 'Purple', value: '#B38BDC' },
-  { name: 'Yellow', value: '#FDC02D' },
-  { name: 'Red', value: '#E73B3B' },
-  { name: 'Green', value: '#2ECC87' },
-  { name: 'Orange', value: '#F5A623' },
-  { name: 'Cyan', value: '#26C6DA' },
-  { name: 'Gray', value: '#8F8F8F' },
-  { name: 'Dark', value: '#757575' },
-  { name: 'Black', value: '#212121' },
-  { name: 'Teal', value: '#26A69A' },
-] as const;
+export interface Label {
+  id: string;
+  nameKey: string;
+  color: string;
+}
+
+export const FALLBACK_LABEL_COLOR = '#47B2F7';
 
 export const MEMBER_COLORS = [
   '#47B2F7',
