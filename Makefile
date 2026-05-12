@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed sqlc web api build-api test-api test-e2e
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed sqlc web api build-api test-api test-e2e test-e2e-storage minio-up
 
 # Development – start everything (DB + API + Web) in parallel
 dev: db-up
@@ -42,6 +42,12 @@ test-api:
 
 test-e2e:
 	cd apps/api && TC_TEST_INTEGRATION=1 go test ./tests/e2e/ -v -count=1
+
+test-e2e-storage:
+	cd apps/api && TC_TEST_INTEGRATION=1 TC_TEST_MINIO=1 go test ./tests/e2e/ -v -count=1
+
+minio-up:
+	docker compose up -d minio
 
 # Frontend
 web:

@@ -73,6 +73,21 @@ var (
 	StorageUnavailable = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
 )
 
+// --- Avatar errors ---
+
+var (
+	AvatarNotFound          = &Spec{Status: 404, Code: "AVATAR.NOT_FOUND", Message: "Avatar upload session not found"}
+	AvatarTooLarge          = &Spec{Status: 400, Code: "AVATAR.TOO_LARGE", Message: "Avatar exceeds maximum size of 5MB"}
+	InvalidImageContentType = &Spec{Status: 400, Code: "IMAGE.INVALID_CONTENT_TYPE", Message: "Only JPEG, PNG, and WebP images are accepted"}
+)
+
+// --- Album errors ---
+
+var (
+	AlbumPhotoNotFound = &Spec{Status: 404, Code: "ALBUM.NOT_FOUND", Message: "Album photo not found"}
+	AlbumPhotoTooLarge = &Spec{Status: 400, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
+)
+
 // --- Member errors ---
 
 var (

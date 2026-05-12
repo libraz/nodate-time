@@ -66,6 +66,37 @@ func (q *Queries) DeleteEvent(ctx context.Context, id uint32) error {
 	return err
 }
 
+const getEventByID = `-- name: GetEventByID :one
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE id = ?
+`
+
+func (q *Queries) GetEventByID(ctx context.Context, id uint32) (Event, error) {
+	row := q.db.QueryRowContext(ctx, getEventByID, id)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.CalendarID,
+		&i.Title,
+		&i.AllDay,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Color,
+		&i.Location,
+		&i.Memo,
+		&i.Url,
+		&i.CreatedBy,
+		&i.AssignedTo,
+		&i.NotificationOffset,
+		&i.RecurrenceRule,
+		&i.RecurrenceEnd,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEventByPublicID = `-- name: GetEventByPublicID :one
 SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE public_id = ?
 `

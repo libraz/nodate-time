@@ -513,6 +513,9 @@ func TestNewFieldsInListEvents(t *testing.T) {
 
 func TestAttachmentWithoutStorage(t *testing.T) {
 	bootstrap(t)
+	if helpers.StorageEnabled() {
+		t.Skip("only meaningful when storage is disabled")
+	}
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)

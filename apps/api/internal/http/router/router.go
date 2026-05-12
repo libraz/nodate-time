@@ -10,6 +10,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/albums"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/calendars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/invites"
@@ -46,7 +47,7 @@ func Build(deps Deps) http.Handler {
 	r.Group(func(pub chi.Router) {
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins, Storage: deps.Storage}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "register",
@@ -132,11 +133,12 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins, Storage: deps.Storage}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}
 		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
+		albumDeps := albums.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 
 		// User
 		huma.Register(api, huma.Operation{
@@ -163,6 +165,30 @@ func Build(deps Deps) http.Handler {
 			Tags:          []string{"User"},
 			DefaultStatus: 204,
 		}, users.ChangePassword(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "presign-avatar",
+			Method:      http.MethodPost,
+			Path:        "/user/avatar/presign",
+			Summary:     "Get a presigned URL for uploading a profile avatar",
+			Tags:        []string{"User"},
+		}, users.PresignAvatar(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "confirm-avatar",
+			Method:      http.MethodPut,
+			Path:        "/user/avatar",
+			Summary:     "Confirm a previously uploaded avatar",
+			Tags:        []string{"User"},
+		}, users.ConfirmAvatar(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "delete-avatar",
+			Method:      http.MethodDelete,
+			Path:        "/user/avatar",
+			Summary:     "Remove the current avatar",
+			Tags:        []string{"User"},
+		}, users.DeleteAvatar(userDeps))
 
 		// Calendars
 		huma.Register(api, huma.Operation{
@@ -399,6 +425,48 @@ func Build(deps Deps) http.Handler {
 			Tags:          []string{"Attachment"},
 			DefaultStatus: 204,
 		}, events.DeleteAttachment(evtDeps))
+
+		// Album
+		huma.Register(api, huma.Operation{
+			OperationID: "list-album-photos",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/albums",
+			Summary:     "List photos in the calendar album",
+			Tags:        []string{"Album"},
+		}, albums.ListPhotos(albumDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "presign-album-photo",
+			Method:      http.MethodPost,
+			Path:        "/calendars/{calendarId}/albums/presign",
+			Summary:     "Get a presigned URL for uploading an album photo",
+			Tags:        []string{"Album"},
+		}, albums.PresignUpload(albumDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "update-album-photo",
+			Method:      http.MethodPut,
+			Path:        "/calendars/{calendarId}/albums/{photoId}",
+			Summary:     "Update an album photo's caption or linked event",
+			Tags:        []string{"Album"},
+		}, albums.UpdatePhoto(albumDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "delete-album-photo",
+			Method:        http.MethodDelete,
+			Path:          "/calendars/{calendarId}/albums/{photoId}",
+			Summary:       "Delete an album photo",
+			Tags:          []string{"Album"},
+			DefaultStatus: 204,
+		}, albums.DeletePhoto(albumDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "get-album-photo-download",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/albums/{photoId}/download",
+			Summary:     "Get a presigned download URL for a single photo",
+			Tags:        []string{"Album"},
+		}, albums.GetDownload(albumDeps))
 
 		// Memos
 		huma.Register(api, huma.Operation{

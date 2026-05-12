@@ -166,6 +166,8 @@ export const en: Record<TranslationKey, string> = {
   'profile.passwordChangeFailed': 'Failed to change password',
   'profile.saving': 'Saving...',
   'profile.changing': 'Changing...',
+  'profile.avatar': 'Profile photo',
+  'profile.removeAvatar': 'Remove photo',
 
   'settings.calendarName': 'Calendar name',
   'settings.themeColor': 'Theme color',

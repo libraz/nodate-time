@@ -182,6 +182,25 @@ func (ns NullOauthStatesProvider) Value() (driver.Value, error) {
 	return string(ns.OauthStatesProvider), nil
 }
 
+type AlbumPhoto struct {
+	ID          uint32        `json:"id"`
+	PublicID    []byte        `json:"publicId"`
+	CalendarID  uint32        `json:"calendarId"`
+	UploadedBy  uint32        `json:"uploadedBy"`
+	EventID     sql.NullInt32 `json:"eventId"`
+	Caption     string        `json:"caption"`
+	ContentType string        `json:"contentType"`
+	ByteSize    int64         `json:"byteSize"`
+	Width       sql.NullInt32 `json:"width"`
+	Height      sql.NullInt32 `json:"height"`
+	StorageKey  string        `json:"storageKey"`
+	// soft delete flag
+	Enabled bool `json:"enabled"`
+	// EXIF or upload time
+	TakenAt   time.Time `json:"takenAt"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Calendar struct {
 	ID        uint32    `json:"id"`
 	PublicID  []byte    `json:"publicId"`
@@ -339,13 +358,15 @@ type PasswordReset struct {
 }
 
 type User struct {
-	ID           uint32    `json:"id"`
-	PublicID     []byte    `json:"publicId"`
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	Icon         string    `json:"icon"`
-	Color        string    `json:"color"`
-	PasswordHash string    `json:"passwordHash"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID                uint32         `json:"id"`
+	PublicID          []byte         `json:"publicId"`
+	Name              string         `json:"name"`
+	Email             string         `json:"email"`
+	Icon              string         `json:"icon"`
+	Color             string         `json:"color"`
+	AvatarStorageKey  sql.NullString `json:"avatarStorageKey"`
+	AvatarContentType sql.NullString `json:"avatarContentType"`
+	PasswordHash      string         `json:"passwordHash"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
 }

@@ -1,10 +1,12 @@
 package e2e
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
 
+	"github.com/libraz/nodate-time/apps/api/internal/storage"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 )
 
@@ -12,6 +14,7 @@ var (
 	testServerURL string
 	testDB        *sql.DB
 	testMailer    *helpers.CapturingMailer
+	testStorage   *storage.Client
 )
 
 func TestMain(m *testing.M) {
@@ -29,6 +32,7 @@ func TestMain(m *testing.M) {
 	srv := helpers.NewTestServerForMain(db)
 	testServerURL = srv.BaseURL
 	testMailer = srv.Mailer
+	testStorage = srv.Storage
 
 	code := m.Run()
 	srv.Server.Close()
@@ -45,3 +49,9 @@ func bootstrap(t *testing.T) {
 		t.Fatal("test server not started")
 	}
 }
+
+// getTestStorage returns the package-wide storage client (may be nil).
+func getTestStorage() *storage.Client { return testStorage }
+
+// testCtx returns a fresh context for ad-hoc storage assertions in tests.
+func testCtx() context.Context { return context.Background() }

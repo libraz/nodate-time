@@ -16,3 +16,9 @@ UPDATE users SET name = ?, icon = ?, color = ? WHERE id = ?;
 
 -- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = ? WHERE id = ?;
+
+-- name: UpdateUserAvatar :exec
+UPDATE users SET avatar_storage_key = ?, avatar_content_type = ? WHERE id = ?;
+
+-- name: ClearUserAvatar :exec
+UPDATE users SET avatar_storage_key = NULL, avatar_content_type = NULL WHERE id = ?;
