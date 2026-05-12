@@ -1,6 +1,9 @@
 -- name: GetEventByPublicID :one
 SELECT * FROM events WHERE public_id = ?;
 
+-- name: GetEventByID :one
+SELECT * FROM events WHERE id = ?;
+
 -- name: ListEventsByCalendarAndRange :many
 SELECT * FROM events
 WHERE calendar_id = ? AND recurrence_rule IS NULL AND start_at < ? AND end_at > ?

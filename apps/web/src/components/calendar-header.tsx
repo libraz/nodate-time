@@ -23,6 +23,10 @@ export function CalendarHeader() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const updateProfile = useAuthStore((s) => s.updateProfile);
+  const uploadAvatar = useAuthStore((s) => s.uploadAvatar);
+  const removeAvatar = useAuthStore((s) => s.removeAvatar);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
@@ -61,6 +65,31 @@ export function CalendarHeader() {
       setIsEditing(true);
     }
   }, [user]);
+
+  const handleAvatarFile = useCallback(
+    async (file: File) => {
+      setAvatarBusy(true);
+      try {
+        await uploadAvatar(file);
+      } catch {
+        // ignore
+      } finally {
+        setAvatarBusy(false);
+      }
+    },
+    [uploadAvatar],
+  );
+
+  const handleAvatarRemove = useCallback(async () => {
+    setAvatarBusy(true);
+    try {
+      await removeAvatar();
+    } catch {
+      // ignore
+    } finally {
+      setAvatarBusy(false);
+    }
+  }, [removeAvatar]);
 
   const handleSaveProfile = useCallback(async () => {
     if (!editName.trim()) return;
@@ -178,49 +207,75 @@ export function CalendarHeader() {
     </svg>
   );
 
-  const AvatarButton = ({ size = 'default' }: { size?: 'default' | 'sm' }) => (
-    <button
-      type="button"
-      onClick={() => setShowProfileMenu(!showProfileMenu)}
-      className={
-        size === 'sm'
-          ? 'flex h-8 w-8 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]'
-          : 'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--color-hover)] active:bg-[var(--color-active)] sm:h-11 sm:w-11'
-      }
-      aria-label={t('profile.profile')}
-    >
-      {user?.icon ? (
-        <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.icon}</span>
-      ) : (
-        <svg
-          width={size === 'sm' ? '20' : '22'}
-          height={size === 'sm' ? '20' : '22'}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-primary)"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={size === 'sm' ? undefined : 'sm:h-6 sm:w-6'}
-        >
-          <circle cx="12" cy="8" r="4" />
-          <path d="M20 21a8 8 0 1 0-16 0" />
-        </svg>
-      )}
-    </button>
-  );
+  const AvatarButton = ({ size = 'default' }: { size?: 'default' | 'sm' }) => {
+    const dimensions =
+      size === 'sm' ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl sm:h-11 sm:w-11';
+    return (
+      <button
+        type="button"
+        onClick={() => setShowProfileMenu(!showProfileMenu)}
+        className={`flex items-center justify-center overflow-hidden hover:bg-[var(--color-hover)] active:bg-[var(--color-active)] ${dimensions}`}
+        aria-label={t('profile.profile')}
+      >
+        {user?.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt=""
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        ) : user?.icon ? (
+          <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.icon}</span>
+        ) : (
+          <svg
+            width={size === 'sm' ? '20' : '22'}
+            height={size === 'sm' ? '20' : '22'}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-text-primary)"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={size === 'sm' ? undefined : 'sm:h-6 sm:w-6'}
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M20 21a8 8 0 1 0-16 0" />
+          </svg>
+        )}
+      </button>
+    );
+  };
 
   const profileDropdown = showProfileMenu && (
     <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-2xl py-2 ring-1 ring-[var(--color-border)]">
       {user && !isEditing && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
-            <span
-              className="flex h-9 w-9 items-center justify-center rounded-full text-lg text-white"
+            <button
+              type="button"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={avatarBusy}
+              className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-lg text-white disabled:opacity-50"
               style={{ backgroundColor: user.color }}
+              aria-label={t('profile.avatar')}
             >
-              {user.icon}
-            </span>
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span>{user.icon}</span>
+              )}
+            </button>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleAvatarFile(f);
+                if (e.target) e.target.value = '';
+              }}
+            />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[14px] font-bold text-[var(--color-text-primary)]">
                 {user.name}
@@ -228,6 +283,16 @@ export function CalendarHeader() {
               <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
                 {user.email}
               </p>
+              {user.avatarUrl && (
+                <button
+                  type="button"
+                  onClick={handleAvatarRemove}
+                  disabled={avatarBusy}
+                  className="mt-0.5 text-[11px] text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                >
+                  {t('profile.removeAvatar')}
+                </button>
+              )}
             </div>
           </div>
         </div>

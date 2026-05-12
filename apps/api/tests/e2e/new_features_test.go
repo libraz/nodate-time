@@ -122,13 +122,13 @@ func TestUpdateMemberRole(t *testing.T) {
 		map[string]any{"role": "admin"}, nil)
 
 	var members []struct {
-		UserID string `json:"userId"`
-		Role   string `json:"role"`
+		ID   string `json:"id"`
+		Role string `json:"role"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/members", owner.AccessToken, nil, &members)
 	roles := map[string]string{}
 	for _, m := range members {
-		roles[m.UserID] = m.Role
+		roles[m.ID] = m.Role
 	}
 	assert.Equal(t, "admin", roles[guest.UserID])
 }

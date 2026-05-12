@@ -1,5 +1,6 @@
 import { getT } from '@/i18n';
 import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
+import { resizeImageForAvatar } from '@/lib/image-resize';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { create } from 'zustand';
 
@@ -9,6 +10,7 @@ interface User {
   email: string;
   icon: string;
   color: string;
+  avatarUrl?: string;
   isAdmin?: boolean;
 }
 
@@ -24,6 +26,8 @@ interface AuthState {
   logout: () => void;
   fetchMe: () => Promise<void>;
   updateProfile: (data: { name: string; icon: string; color: string }) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<void>;
+  removeAvatar: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -104,6 +108,27 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   updateProfile: async (data) => {
     const user = await api.put<User>('/user', data);
+    set({ user });
+  },
+
+  uploadAvatar: async (file: File) => {
+    const resized = await resizeImageForAvatar(file);
+    const presign = await api.post<{ avatarId: string; uploadUrl: string }>(
+      '/user/avatar/presign',
+      { contentType: resized.contentType, byteSize: resized.bytes.byteLength },
+    );
+    const putRes = await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': resized.contentType },
+      body: resized.bytes,
+    });
+    if (!putRes.ok) throw new ApiError(putRes.status, 'avatar upload failed');
+    const user = await api.put<User>('/user/avatar', { avatarId: presign.avatarId });
+    set({ user });
+  },
+
+  removeAvatar: async () => {
+    const user = await api.delete<User>('/user/avatar');
     set({ user });
   },
 

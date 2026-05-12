@@ -10,6 +10,15 @@ import (
 	"database/sql"
 )
 
+const clearUserAvatar = `-- name: ClearUserAvatar :exec
+UPDATE users SET avatar_storage_key = NULL, avatar_content_type = NULL WHERE id = ?
+`
+
+func (q *Queries) ClearUserAvatar(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, clearUserAvatar, id)
+	return err
+}
+
 const createUser = `-- name: CreateUser :execresult
 INSERT INTO users (public_id, name, email, icon, color, password_hash)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -36,7 +45,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, public_id, name, email, icon, color, password_hash, created_at, updated_at FROM users WHERE email = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -49,6 +58,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.Icon,
 		&i.Color,
+		&i.AvatarStorageKey,
+		&i.AvatarContentType,
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -57,7 +68,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, public_id, name, email, icon, color, password_hash, created_at, updated_at FROM users WHERE id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
@@ -70,6 +81,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 		&i.Email,
 		&i.Icon,
 		&i.Color,
+		&i.AvatarStorageKey,
+		&i.AvatarContentType,
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -78,7 +91,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, name, email, icon, color, password_hash, created_at, updated_at FROM users WHERE public_id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE public_id = ?
 `
 
 func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User, error) {
@@ -91,6 +104,8 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User,
 		&i.Email,
 		&i.Icon,
 		&i.Color,
+		&i.AvatarStorageKey,
+		&i.AvatarContentType,
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -116,6 +131,21 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.Color,
 		arg.ID,
 	)
+	return err
+}
+
+const updateUserAvatar = `-- name: UpdateUserAvatar :exec
+UPDATE users SET avatar_storage_key = ?, avatar_content_type = ? WHERE id = ?
+`
+
+type UpdateUserAvatarParams struct {
+	AvatarStorageKey  sql.NullString `json:"avatarStorageKey"`
+	AvatarContentType sql.NullString `json:"avatarContentType"`
+	ID                uint32         `json:"id"`
+}
+
+func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserAvatar, arg.AvatarStorageKey, arg.AvatarContentType, arg.ID)
 	return err
 }
 

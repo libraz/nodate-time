@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
   email      VARCHAR(255) NOT NULL,
   icon       VARCHAR(10)  NOT NULL DEFAULT '👤',
   color      VARCHAR(7)   NOT NULL DEFAULT '#42A5F5',
+  avatar_storage_key  VARCHAR(1000) NULL,
+  avatar_content_type VARCHAR(255)  NULL,
   password_hash VARCHAR(255) NOT NULL,
   created_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -235,5 +237,30 @@ CREATE TABLE IF NOT EXISTS oauth_provider_configs (
   updated_by             INT UNSIGNED   NULL,
   PRIMARY KEY (provider),
   CONSTRAINT fk_opc_user FOREIGN KEY (updated_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/015_album_photos.sql =====
+CREATE TABLE IF NOT EXISTS album_photos (
+  id           INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  public_id    BINARY(16)    NOT NULL,
+  calendar_id  INT UNSIGNED  NOT NULL,
+  uploaded_by  INT UNSIGNED  NOT NULL,
+  event_id     INT UNSIGNED  NULL,
+  caption      VARCHAR(500)  NOT NULL DEFAULT '',
+  content_type VARCHAR(255)  NOT NULL DEFAULT 'image/jpeg',
+  byte_size    BIGINT        NOT NULL DEFAULT 0,
+  width        INT UNSIGNED  NULL,
+  height       INT UNSIGNED  NULL,
+  storage_key  VARCHAR(1000) NOT NULL,
+  enabled      TINYINT(1)    NOT NULL DEFAULT 1 COMMENT 'soft delete flag',
+  taken_at     DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'EXIF or upload time',
+  created_at   DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_album_pub (public_id),
+  KEY idx_album_cal_taken (calendar_id, enabled, taken_at, id),
+  KEY idx_album_event (event_id),
+  CONSTRAINT fk_album_cal   FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
+  CONSTRAINT fk_album_user  FOREIGN KEY (uploaded_by) REFERENCES users     (id) ON DELETE CASCADE,
+  CONSTRAINT fk_album_event FOREIGN KEY (event_id)    REFERENCES events    (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -173,6 +173,8 @@ export const ja = {
   'profile.passwordChangeFailed': 'パスワードの変更に失敗しました',
   'profile.saving': '保存中...',
   'profile.changing': '変更中...',
+  'profile.avatar': 'プロフィール画像',
+  'profile.removeAvatar': '画像を削除',
 
   // Settings
   'settings.calendarName': 'カレンダー名',

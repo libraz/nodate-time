@@ -55,3 +55,24 @@ func (c *Client) PresignGet(ctx context.Context, key string, expires time.Durati
 	}
 	return u.String(), nil
 }
+
+// DeleteObject removes an object from the bucket. Returns nil if the key is empty.
+func (c *Client) DeleteObject(ctx context.Context, key string) error {
+	if key == "" {
+		return nil
+	}
+	return c.mc.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
+}
+
+// StatObject returns true if the object exists in the bucket.
+func (c *Client) StatObject(ctx context.Context, key string) (bool, error) {
+	_, err := c.mc.StatObject(ctx, c.bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		resp := minio.ToErrorResponse(err)
+		if resp.StatusCode == 404 || resp.Code == "NoSuchKey" {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

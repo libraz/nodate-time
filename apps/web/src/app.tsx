@@ -1,3 +1,4 @@
+import { AlbumPanel } from '@/components/album-panel';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
 import { DayDetail } from '@/components/day-detail';
@@ -6,6 +7,7 @@ import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { ListView } from '@/components/list-view';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
+import { RightSidebar } from '@/components/right-sidebar';
 import { SearchPanel } from '@/components/search-panel';
 import { WeeklyTimeline } from '@/components/weekly-timeline';
 import { YearView } from '@/components/year-view';
@@ -337,6 +339,7 @@ export function App() {
       <div className="relative z-[1] hidden flex-1 overflow-hidden sm:flex">
         <LeftSidebar />
         {calendarContent}
+        <RightSidebar />
       </div>
 
       {/* SP layout: tab-switched content */}
@@ -379,6 +382,9 @@ export function App() {
 
       {/* Search overlay / panel (PC only) */}
       <SearchPanel />
+
+      {/* Album overlay */}
+      <AlbumPanel />
     </div>
   );
 }

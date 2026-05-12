@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,12 +13,16 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
+
+const avatarDownloadTTL = 5 * time.Minute
 
 type Deps struct {
 	Queries   *generated.Queries
 	JWTSecret string
 	Admins    auth.AdminAllowlist
+	Storage   *storage.Client
 }
 
 func pubIDToHex(b []byte) string {
@@ -26,6 +31,20 @@ func pubIDToHex(b []byte) string {
 		return hex.EncodeToString(b)
 	}
 	return u.String()
+}
+
+// avatarURLFor returns a short-lived presigned GET URL for the user's avatar,
+// or an empty string if no avatar is set or storage is unavailable.
+func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
+	if deps.Storage == nil || !u.AvatarStorageKey.Valid || u.AvatarStorageKey.String == "" {
+		return ""
+	}
+	url, err := deps.Storage.PresignGet(ctx, u.AvatarStorageKey.String, avatarDownloadTTL)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to presign avatar URL", "userID", u.ID, "error", err)
+		return ""
+	}
+	return url
 }
 
 func mapUser(u generated.User, admins auth.AdminAllowlist) UserResponse {
@@ -38,6 +57,13 @@ func mapUser(u generated.User, admins auth.AdminAllowlist) UserResponse {
 		IsAdmin:   admins.Contains(u.Email),
 		CreatedAt: u.CreatedAt,
 	}
+}
+
+// mapUserWithAvatar is like mapUser but also fills AvatarURL via presigned GET.
+func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserResponse {
+	resp := mapUser(u, deps.Admins)
+	resp.AvatarURL = avatarURLFor(ctx, deps, u)
+	return resp
 }
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {
@@ -111,7 +137,7 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 
 		out := &LoginOutput{}
 		out.Body.Token = token
-		out.Body.User = mapUser(user, deps.Admins)
+		out.Body.User = mapUserWithAvatar(ctx, deps, user)
 		return out, nil
 	}
 }
@@ -126,7 +152,7 @@ func GetMe(deps Deps) func(context.Context, *GetMeInput) (*GetMeOutput, error) {
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &GetMeOutput{Body: mapUser(user, deps.Admins)}, nil
+		return &GetMeOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
 	}
 }
 
@@ -182,6 +208,6 @@ func UpdateMe(deps Deps) func(context.Context, *UpdateMeInput) (*UpdateMeOutput,
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &UpdateMeOutput{Body: mapUser(user, deps.Admins)}, nil
+		return &UpdateMeOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
 	}
 }

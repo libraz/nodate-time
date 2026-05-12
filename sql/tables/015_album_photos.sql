@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS album_photos (
+  id           INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  public_id    BINARY(16)    NOT NULL,
+  calendar_id  INT UNSIGNED  NOT NULL,
+  uploaded_by  INT UNSIGNED  NOT NULL,
+  event_id     INT UNSIGNED  NULL,
+  caption      VARCHAR(500)  NOT NULL DEFAULT '',
+  content_type VARCHAR(255)  NOT NULL DEFAULT 'image/jpeg',
+  byte_size    BIGINT        NOT NULL DEFAULT 0,
+  width        INT UNSIGNED  NULL,
+  height       INT UNSIGNED  NULL,
+  storage_key  VARCHAR(1000) NOT NULL,
+  enabled      TINYINT(1)    NOT NULL DEFAULT 1 COMMENT 'soft delete flag',
+  taken_at     DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'EXIF or upload time',
+  created_at   DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_album_pub (public_id),
+  KEY idx_album_cal_taken (calendar_id, enabled, taken_at, id),
+  KEY idx_album_event (event_id),
+  CONSTRAINT fk_album_cal   FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
+  CONSTRAINT fk_album_user  FOREIGN KEY (uploaded_by) REFERENCES users     (id) ON DELETE CASCADE,
+  CONSTRAINT fk_album_event FOREIGN KEY (event_id)    REFERENCES events    (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

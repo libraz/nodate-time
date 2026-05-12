@@ -8,6 +8,7 @@ type UserResponse struct {
 	Email     string    `json:"email"`
 	Icon      string    `json:"icon"`
 	Color     string    `json:"color"`
+	AvatarURL string    `json:"avatarUrl,omitempty"`
 	IsAdmin   bool      `json:"isAdmin"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -115,4 +116,37 @@ type OAuthCallbackInput struct {
 type OAuthCallbackOutput struct {
 	Status int
 	URL    string `header:"Location"`
+}
+
+// --- Avatar ---
+
+type PresignAvatarInput struct {
+	Body struct {
+		ContentType string `json:"contentType" doc:"MIME type, e.g. image/jpeg"`
+		ByteSize    int64  `json:"byteSize" minimum:"1" doc:"File size in bytes"`
+	}
+}
+
+type PresignAvatarOutput struct {
+	Body struct {
+		AvatarID   string `json:"avatarId" doc:"Opaque ID to send back to ConfirmAvatar"`
+		UploadURL  string `json:"uploadUrl" doc:"Presigned PUT URL, valid for 15 minutes"`
+		StorageKey string `json:"storageKey" doc:"Internal key, mostly for debugging"`
+	}
+}
+
+type ConfirmAvatarInput struct {
+	Body struct {
+		AvatarID string `json:"avatarId" minLength:"1"`
+	}
+}
+
+type ConfirmAvatarOutput struct {
+	Body UserResponse
+}
+
+type DeleteAvatarInput struct{}
+
+type DeleteAvatarOutput struct {
+	Body UserResponse
 }
