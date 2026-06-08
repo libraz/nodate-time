@@ -1,7 +1,7 @@
+import { useState } from 'react';
 import { useT } from '@/i18n';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useState } from 'react';
 
 export function SettingsModal() {
   const t = useT();
@@ -18,10 +18,11 @@ export function SettingsModal() {
 
   return (
     <>
-      <div
+      <button
+        type="button"
+        aria-label={t('common.close')}
         className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
         onClick={toggleSettings}
-        onKeyDown={undefined}
       />
 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

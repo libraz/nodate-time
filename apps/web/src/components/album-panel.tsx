@@ -1,9 +1,9 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { ApiError, api } from '@/lib/api';
 import { resizeImageForAlbum } from '@/lib/image-resize';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface AlbumPhoto {
   id: string;
@@ -114,10 +114,11 @@ export function AlbumPanel() {
 
   return (
     <>
-      <div
+      <button
+        type="button"
+        aria-label={t('common.close')}
         className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('album')}
-        onKeyDown={undefined}
       />
       <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
@@ -197,11 +198,13 @@ export function AlbumPanel() {
       </div>
 
       {lightbox && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setLightbox(null)}
-          onKeyDown={undefined}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
+          <button
+            type="button"
+            aria-label={t('common.close')}
+            className="absolute inset-0 cursor-default"
+            onClick={() => setLightbox(null)}
+          />
           <div className="relative max-h-full max-w-full">
             <img
               src={lightbox.imageUrl}

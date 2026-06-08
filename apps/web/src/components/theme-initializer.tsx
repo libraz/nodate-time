@@ -1,6 +1,6 @@
+import { useEffect } from 'react';
 import { applyColorMode, applyTheme, watchSystemColorScheme } from '@/lib/theme';
 import { useUiStore } from '@/stores/ui-store';
-import { useEffect } from 'react';
 
 export function ThemeInitializer() {
   const theme = useUiStore((s) => s.theme);

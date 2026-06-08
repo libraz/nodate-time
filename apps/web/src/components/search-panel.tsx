@@ -1,8 +1,8 @@
+import { DateTime } from 'luxon';
+import { useEffect, useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { DateTime } from 'luxon';
-import { useEffect, useMemo, useRef } from 'react';
 
 export function SearchPanel() {
   const t = useT();
@@ -180,8 +180,12 @@ export function SearchPanel() {
       {/* PC: dropdown panel */}
       <div className="hidden sm:block">
         {/* backdrop */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss */}
-        <div className="fixed inset-0 z-40" onClick={toggleSearch} />
+        <button
+          type="button"
+          aria-label={t('common.close')}
+          className="fixed inset-0 z-40"
+          onClick={toggleSearch}
+        />
         <div className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 flex max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
           {searchInput}
           {resultsList}

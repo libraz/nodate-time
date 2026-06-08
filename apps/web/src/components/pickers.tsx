@@ -1,7 +1,7 @@
-import { useUiStore } from '@/stores/ui-store';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useUiStore } from '@/stores/ui-store';
 
 /* ============================================
    useFloating — positions a floating element
@@ -29,7 +29,6 @@ function useFloating(open: boolean, floatingWidth = 280) {
     });
   }, [open, floatingWidth]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reposition is a stable callback
   useLayoutEffect(reposition, [reposition]);
 
   // Re-measure after floating element mounts (first render has no ref)

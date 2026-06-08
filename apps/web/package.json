@@ -12,28 +12,28 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tanstack/react-router": "1.168.10",
-    "date-holidays": "^3.28.0",
-    "luxon": "3.5.0",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "zustand": "5.0.1"
+    "@tanstack/react-router": "1.170.15",
+    "date-holidays": "^3.30.2",
+    "luxon": "3.7.2",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zustand": "5.0.14"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.0.0-beta.4",
-    "@tanstack/router-plugin": "1.167.12",
+    "@tailwindcss/vite": "4.3.0",
+    "@tanstack/router-plugin": "1.168.18",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/luxon": "3.4.2",
-    "@types/react": "19.0.0",
-    "@types/react-dom": "19.0.0",
-    "@vitejs/plugin-react": "4.3.3",
-    "jsdom": "^29.0.2",
-    "tailwindcss": "4.0.0-beta.4",
-    "typescript": "5.6.3",
-    "vite": "5.4.10",
-    "vitest": "^4.1.4"
+    "@types/luxon": "3.7.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "4.3.0",
+    "typescript": "6.0.3",
+    "vite": "8.0.16",
+    "vitest": "^4.1.8"
   }
 }

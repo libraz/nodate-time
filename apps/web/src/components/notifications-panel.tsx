@@ -10,10 +10,11 @@ export function NotificationsPanel() {
 
   return (
     <>
-      <div
+      <button
+        type="button"
+        aria-label={t('common.close')}
         className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('notifications')}
-        onKeyDown={undefined}
       />
       <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">

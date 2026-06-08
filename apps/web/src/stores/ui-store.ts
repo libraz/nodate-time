@@ -1,9 +1,9 @@
+import { DateTime } from 'luxon';
+import { create } from 'zustand';
 import type { Locale } from '@/i18n';
 import { loadJson, saveJson } from '@/lib/storage';
 import type { ColorMode, ThemeStyle } from '@/lib/theme';
 import type { CalendarView } from '@/types/calendar';
-import { DateTime } from 'luxon';
-import { create } from 'zustand';
 
 export type RightPanelId = 'memo' | 'album' | 'members' | 'notifications' | 'share' | null;
 
@@ -22,6 +22,7 @@ interface UiState {
   searchQuery: string;
   mobileTab: MobileTab;
   showSettings: boolean;
+  scrollToTodaySignal: number;
 
   theme: ThemeStyle;
   colorMode: ColorMode;
@@ -43,6 +44,7 @@ interface UiState {
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
   toggleSettings: () => void;
+  triggerScrollToToday: () => void;
   setTheme: (theme: ThemeStyle) => void;
   setColorMode: (mode: ColorMode) => void;
   setLocale: (locale: Locale) => void;
@@ -63,6 +65,7 @@ export const useUiStore = create<UiState>((set) => ({
   searchQuery: '',
   mobileTab: 'calendar' as MobileTab,
   showSettings: false,
+  scrollToTodaySignal: 0,
 
   theme: loadJson<ThemeStyle>('theme', 'glass'),
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
@@ -98,6 +101,7 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   setMobileTab: (tab) => set({ mobileTab: tab }),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
+  triggerScrollToToday: () => set((s) => ({ scrollToTodaySignal: s.scrollToTodaySignal + 1 })),
 
   setTheme: (theme) => {
     saveJson('theme', theme);

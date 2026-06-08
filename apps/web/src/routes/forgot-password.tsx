@@ -1,8 +1,8 @@
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { ApiError, api } from '@/lib/api';
-import { Link, createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
 
 export const Route = createFileRoute('/forgot-password')({
   component: ForgotPasswordPage,
