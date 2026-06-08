@@ -1,3 +1,5 @@
+import { DateTime } from 'luxon';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { api } from '@/lib/api';
@@ -11,8 +13,6 @@ import type {
   RecurrenceRule,
 } from '@/types/calendar';
 import { FALLBACK_LABEL_COLOR, NOTIFICATION_OFFSETS } from '@/types/calendar';
-import { DateTime } from 'luxon';
-import { useCallback, useEffect, useRef, useState } from 'react';
 
 function toLocalDatetime(iso: string): string {
   return DateTime.fromISO(iso).toFormat("yyyy-MM-dd'T'HH:mm");
@@ -151,13 +151,7 @@ function recurrenceLabel(
   }
 }
 
-function CommentsSection({
-  calendarId,
-  eventId,
-}: {
-  calendarId: string;
-  eventId: string;
-}) {
+function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId: string }) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const user = useAuthStore((s) => s.user);
@@ -1033,50 +1027,53 @@ export function EventModal() {
           {/* Custom recurrence dialog */}
           {showCustomRecurrence && form.recurrenceRule && (
             <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] text-[var(--color-text-secondary)]">
-                  {t('event.recurrenceInterval')}:
+              <div className="space-y-1.5">
+                <span className="block text-[13px] text-[var(--color-text-secondary)]">
+                  {t('event.recurrenceInterval')}
                 </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={form.recurrenceRule.interval}
-                  onChange={(e) => {
-                    const val = Math.max(1, Math.min(99, Number(e.target.value)));
-                    setForm((f) => ({
-                      ...f,
-                      recurrenceRule: f.recurrenceRule
-                        ? { ...f.recurrenceRule, interval: val }
-                        : null,
-                    }));
-                  }}
-                  className="input-modern w-16 text-center text-[13px]"
-                />
-                <CustomSelect
-                  value={form.recurrenceRule.freq}
-                  options={[
-                    { value: 'daily', label: t('event.unitDay') },
-                    { value: 'weekly', label: t('event.unitWeek') },
-                    { value: 'monthly', label: t('event.unitMonth') },
-                    { value: 'yearly', label: t('event.unitYear') },
-                  ]}
-                  onChange={(val) => {
-                    const freq = val as RecurrenceRule['freq'];
-                    setForm((f) => ({
-                      ...f,
-                      recurrenceRule: f.recurrenceRule
-                        ? {
-                            ...f.recurrenceRule,
-                            freq,
-                            byDay: undefined,
-                            byMonthDay: undefined,
-                            bySetPos: undefined,
-                          }
-                        : null,
-                    }));
-                  }}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={form.recurrenceRule.interval}
+                    onChange={(e) => {
+                      const val = Math.max(1, Math.min(99, Number(e.target.value)));
+                      setForm((f) => ({
+                        ...f,
+                        recurrenceRule: f.recurrenceRule
+                          ? { ...f.recurrenceRule, interval: val }
+                          : null,
+                      }));
+                    }}
+                    style={{ width: '4rem' }}
+                    className="input-modern shrink-0 text-center text-[13px]"
+                  />
+                  <CustomSelect
+                    value={form.recurrenceRule.freq}
+                    options={[
+                      { value: 'daily', label: t('event.unitDay') },
+                      { value: 'weekly', label: t('event.unitWeek') },
+                      { value: 'monthly', label: t('event.unitMonth') },
+                      { value: 'yearly', label: t('event.unitYear') },
+                    ]}
+                    onChange={(val) => {
+                      const freq = val as RecurrenceRule['freq'];
+                      setForm((f) => ({
+                        ...f,
+                        recurrenceRule: f.recurrenceRule
+                          ? {
+                              ...f.recurrenceRule,
+                              freq,
+                              byDay: undefined,
+                              byMonthDay: undefined,
+                              bySetPos: undefined,
+                            }
+                          : null,
+                      }));
+                    }}
+                  />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <span className="text-[13px] text-[var(--color-text-secondary)]">
@@ -1102,7 +1099,7 @@ export function EventModal() {
                       {t('event.recurrenceEndNever')}
                     </span>
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className="flex flex-wrap items-center gap-2">
                     <input
                       type="radio"
                       name="recEnd"
@@ -1120,7 +1117,7 @@ export function EventModal() {
                       }}
                       className="accent-[var(--color-accent)]"
                     />
-                    <span className="text-[13px] text-[var(--color-text-primary)]">
+                    <span className="shrink-0 whitespace-nowrap text-[13px] text-[var(--color-text-primary)]">
                       {t('event.recurrenceEndDate')}:
                     </span>
                     {form.recurrenceRule.until && (
@@ -1141,7 +1138,7 @@ export function EventModal() {
                       />
                     )}
                   </label>
-                  <label className="flex items-center gap-2">
+                  <label className="flex flex-wrap items-center gap-2">
                     <input
                       type="radio"
                       name="recEnd"
@@ -1156,7 +1153,7 @@ export function EventModal() {
                       }
                       className="accent-[var(--color-accent)]"
                     />
-                    <span className="text-[13px] text-[var(--color-text-primary)]">
+                    <span className="shrink-0 whitespace-nowrap text-[13px] text-[var(--color-text-primary)]">
                       {t('event.recurrenceEndCount')}:
                     </span>
                     {form.recurrenceRule.count && (
@@ -1174,7 +1171,8 @@ export function EventModal() {
                               : null,
                           }));
                         }}
-                        className="input-modern w-16 text-center text-[13px]"
+                        style={{ width: '4rem' }}
+                        className="input-modern shrink-0 text-center text-[13px]"
                       />
                     )}
                   </label>
@@ -1425,14 +1423,11 @@ export function EventModal() {
     <>
       {/* Mobile: bottom sheet */}
       <div className="sm:hidden">
-        <div
+        <button
+          type="button"
+          aria-label={t('common.close')}
           className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
           onClick={closeEventModal}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') closeEventModal();
-          }}
-          role="button"
-          tabIndex={-1}
         />
         <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
           <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
@@ -1460,14 +1455,11 @@ export function EventModal() {
 
       {/* Desktop: centered modal */}
       <div className="hidden sm:contents">
-        <div
+        <button
+          type="button"
+          aria-label={t('common.close')}
           className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
           onClick={closeEventModal}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') closeEventModal();
-          }}
-          role="button"
-          tabIndex={-1}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
           <div className="glass-surface-heavy modal-panel pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">

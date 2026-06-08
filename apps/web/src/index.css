@@ -20,9 +20,9 @@
   --color-tt-saturday: #3b82f6;
 
   /* Font stack */
-  --font-sans: "Inter", -apple-system, "system-ui", "Helvetica Neue", Helvetica, Arial,
-    "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif, "Apple Color Emoji",
-    "Segoe UI Emoji";
+  --font-sans:
+    "Inter", -apple-system, "system-ui", "Helvetica Neue", Helvetica, Arial, "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", Meiryo, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 /* ============================================
@@ -88,7 +88,14 @@
   --color-saturday: #007aff;
 
   /* Background — vivid gradient mesh visible through glass */
-  --app-bg: linear-gradient(160deg, #c3dafe 0%, #e0d4f7 25%, #fce7f3 50%, #dbeafe 75%, #c7f9e6 100%);
+  --app-bg: linear-gradient(
+    160deg,
+    #c3dafe 0%,
+    #e0d4f7 25%,
+    #fce7f3 50%,
+    #dbeafe 75%,
+    #c7f9e6 100%
+  );
   --glass-blob-1: radial-gradient(
     ellipse 700px 500px at 10% 15%,
     rgba(99, 102, 241, 0.18),
@@ -409,19 +416,27 @@
   content: "";
   position: fixed;
   inset: 0;
-  background-image: radial-gradient(circle, #00000006 0.8px, transparent 0.8px),
+  background-image:
+    radial-gradient(circle, #00000006 0.8px, transparent 0.8px),
     linear-gradient(to right, #00000003 1px, transparent 1px),
     linear-gradient(to bottom, #00000003 1px, transparent 1px);
-  background-size: 16px 16px, 48px 48px, 48px 48px;
+  background-size:
+    16px 16px,
+    48px 48px,
+    48px 48px;
   pointer-events: none;
   z-index: 0;
 }
 
 :root[data-theme="nothing"][data-mode="dark"] .app-bg::after {
-  background-image: radial-gradient(circle, #ffffff08 0.8px, transparent 0.8px),
+  background-image:
+    radial-gradient(circle, #ffffff08 0.8px, transparent 0.8px),
     linear-gradient(to right, #ffffff04 1px, transparent 1px),
     linear-gradient(to bottom, #ffffff04 1px, transparent 1px);
-  background-size: 16px 16px, 48px 48px, 48px 48px;
+  background-size:
+    16px 16px,
+    48px 48px,
+    48px 48px;
 }
 
 /* All text → monospace */
@@ -483,11 +498,15 @@
 
 /* Red glow on accent elements (dark mode) */
 :root[data-theme="nothing"][data-mode="dark"] .btn-primary {
-  box-shadow: 0 0 20px rgba(215, 25, 33, 0.25), 0 0 4px rgba(215, 25, 33, 0.4);
+  box-shadow:
+    0 0 20px rgba(215, 25, 33, 0.25),
+    0 0 4px rgba(215, 25, 33, 0.4);
 }
 
 :root[data-theme="nothing"][data-mode="dark"] .btn-primary:hover {
-  box-shadow: 0 0 30px rgba(215, 25, 33, 0.35), 0 0 6px rgba(215, 25, 33, 0.5);
+  box-shadow:
+    0 0 30px rgba(215, 25, 33, 0.35),
+    0 0 6px rgba(215, 25, 33, 0.5);
 }
 
 /* Glass surface in Nothing: no blur, just solid dark surface with border */
@@ -536,8 +555,12 @@ html.theme-transition *,
 html.theme-transition *::before,
 html.theme-transition *::after {
   transition:
-    background-color 0.3s ease, color 0.2s ease, border-color 0.3s ease,
-    box-shadow 0.3s ease, fill 0.2s ease, stroke 0.2s ease !important;
+    background-color 0.3s ease,
+    color 0.2s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    fill 0.2s ease,
+    stroke 0.2s ease !important;
 }
 
 /* ============================================
@@ -640,7 +663,9 @@ select {
 .segmented-control button[data-active="true"] {
   background: var(--color-surface);
   color: var(--color-text-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0.5px 0 rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0.5px 0 rgba(0, 0, 0, 0.04);
 }
 
 /* ============================================
@@ -677,7 +702,9 @@ select {
   color: var(--color-text-on-accent);
   font-size: 17px;
   font-weight: 600;
-  transition: opacity 0.15s ease, transform 0.1s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.1s ease;
 }
 
 .btn-primary:hover {
@@ -701,7 +728,9 @@ select {
   color: var(--color-accent);
   font-size: 17px;
   font-weight: 600;
-  transition: opacity 0.15s ease, transform 0.1s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.1s ease;
 }
 
 .btn-secondary:hover {
@@ -747,7 +776,9 @@ select {
 .toggle-knob {
   border-radius: 999px;
   background: var(--color-surface-elevated);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.15),
+    0 0 0 0.5px rgba(0, 0, 0, 0.04);
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -806,7 +837,9 @@ select {
 
 /* Nothing dark: glow effects on modals */
 :root[data-theme="nothing"][data-mode="dark"] .modal-panel {
-  box-shadow: 0 0 40px rgba(215, 25, 33, 0.06), inset 0 0 0 1px rgba(215, 25, 33, 0.08);
+  box-shadow:
+    0 0 40px rgba(215, 25, 33, 0.06),
+    inset 0 0 0 1px rgba(215, 25, 33, 0.08);
 }
 
 :root[data-theme="nothing"][data-mode="dark"] .bottom-sheet {
@@ -853,11 +886,15 @@ select {
 
 /* Nothing dark: red glow FAB */
 :root[data-theme="nothing"][data-mode="dark"] .fab-button {
-  box-shadow: 0 0 24px rgba(215, 25, 33, 0.35), 0 0 6px rgba(215, 25, 33, 0.5);
+  box-shadow:
+    0 0 24px rgba(215, 25, 33, 0.35),
+    0 0 6px rgba(215, 25, 33, 0.5);
 }
 
 :root[data-theme="nothing"][data-mode="dark"] .fab-button:hover {
-  box-shadow: 0 0 32px rgba(215, 25, 33, 0.45), 0 0 8px rgba(215, 25, 33, 0.6);
+  box-shadow:
+    0 0 32px rgba(215, 25, 33, 0.45),
+    0 0 8px rgba(215, 25, 33, 0.6);
 }
 
 /* ============================================

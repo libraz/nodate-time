@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlbumPanel } from '@/components/album-panel';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
@@ -7,6 +8,7 @@ import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { ListView } from '@/components/list-view';
 import { MembersPanel } from '@/components/members-panel';
+import { MonthScroll } from '@/components/month-scroll';
 import { NotificationsPanel } from '@/components/notifications-panel';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
@@ -19,7 +21,6 @@ import { fromISOInZone } from '@/lib/date-utils';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useEffect, useMemo, useRef, useState } from 'react';
 
 function MobileSearchView() {
   const t = useT();
@@ -332,6 +333,22 @@ export function App() {
     </div>
   );
 
+  // Mobile month view is a continuous vertical infinite scroll (no month paging).
+  const mobileCalendarContent = (
+    <div className="relative flex-1 overflow-hidden">
+      {calendarView === 'month' ? (
+        <MonthScroll />
+      ) : calendarView === 'week' ? (
+        <WeeklyTimeline />
+      ) : calendarView === 'list' ? (
+        <ListView />
+      ) : (
+        <YearView />
+      )}
+      <EventModal />
+    </div>
+  );
+
   return (
     <div className="app-bg relative flex h-full flex-col">
       <div className="relative z-[1] contents">
@@ -347,7 +364,7 @@ export function App() {
 
       {/* SP layout: tab-switched content */}
       <div className="relative z-[1] flex flex-1 flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom))] sm:hidden">
-        {mobileTab === 'calendar' && calendarContent}
+        {mobileTab === 'calendar' && mobileCalendarContent}
         {mobileTab === 'memo' && <MemoSection />}
         {mobileTab === 'search' && <MobileSearchView />}
         {mobileTab === 'settings' && <MobileSettingsView />}

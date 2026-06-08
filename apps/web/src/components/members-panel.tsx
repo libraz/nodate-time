@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useT } from '@/i18n';
 import { ApiError, api } from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -5,7 +6,6 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { Member } from '@/types/calendar';
-import { useEffect } from 'react';
 
 export function MembersPanel() {
   const t = useT();
@@ -59,10 +59,11 @@ export function MembersPanel() {
 
   return (
     <>
-      <div
+      <button
+        type="button"
+        aria-label={t('common.close')}
         className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('members')}
-        onKeyDown={undefined}
       />
       <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">

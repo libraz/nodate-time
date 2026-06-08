@@ -1,3 +1,5 @@
+import type { DateTime } from 'luxon';
+import { useCallback, useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
 import {
   fromISOInZone,
@@ -8,74 +10,10 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
-import type { DateTime } from 'luxon';
-import { useCallback, useMemo, useRef } from 'react';
-
-const MAX_VISIBLE_TRACKS = 3;
-
-interface PositionedEvent {
-  event: CalendarEvent;
-  startCol: number;
-  span: number;
-  track: number;
-  continuesLeft: boolean;
-  continuesRight: boolean;
-}
-
-function isMultiDay(evt: CalendarEvent, zone: string): boolean {
-  const s = fromISOInZone(evt.startAt, zone).startOf('day');
-  const e = fromISOInZone(evt.endAt, zone).startOf('day');
-  return e > s;
-}
-
-function layoutWeek(weekStart: DateTime, events: CalendarEvent[], zone: string): PositionedEvent[] {
-  const weekEnd = weekStart.plus({ days: 6 }).endOf('day');
-  const tracks: { end: number }[] = [];
-  const positioned: PositionedEvent[] = [];
-
-  const sorted = [...events].sort((a, b) => {
-    const aMulti = isMultiDay(a, zone);
-    const bMulti = isMultiDay(b, zone);
-    if (aMulti !== bMulti) return aMulti ? -1 : 1;
-    return fromISOInZone(a.startAt, zone).toMillis() - fromISOInZone(b.startAt, zone).toMillis();
-  });
-
-  for (const evt of sorted) {
-    const evtStart = fromISOInZone(evt.startAt, zone);
-    const evtEnd = fromISOInZone(evt.endAt, zone);
-
-    if (evtEnd < weekStart || evtStart > weekEnd) continue;
-
-    const visStart = evtStart < weekStart ? weekStart : evtStart.startOf('day');
-    const visEnd = evtEnd > weekEnd ? weekEnd : evtEnd.startOf('day');
-
-    const startCol = Math.max(0, Math.floor(visStart.diff(weekStart, 'days').days));
-    const endCol = Math.min(6, Math.floor(visEnd.diff(weekStart, 'days').days));
-    const span = Math.max(1, endCol - startCol + 1);
-
-    let track = tracks.findIndex((tr) => tr.end < startCol);
-    if (track < 0) {
-      track = tracks.length;
-      tracks.push({ end: endCol });
-    } else {
-      tracks[track] = { end: endCol };
-    }
-
-    positioned.push({
-      event: evt,
-      startCol,
-      span,
-      track,
-      continuesLeft: evtStart < weekStart,
-      continuesRight: evtEnd > weekEnd,
-    });
-  }
-
-  return positioned;
-}
 
 export function CalendarGrid() {
   const t = useT();

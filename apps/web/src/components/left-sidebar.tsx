@@ -1,9 +1,9 @@
+import { useNavigate } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
 import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { MEMBER_COLORS } from '@/types/calendar';
-import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
 
 export function LeftSidebar() {
   const t = useT();

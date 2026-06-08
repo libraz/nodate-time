@@ -1,5 +1,5 @@
-import { useT } from '@/i18n';
 import type { TranslationKey } from '@/i18n';
+import { useT } from '@/i18n';
 import { type RightPanelId, useUiStore } from '@/stores/ui-store';
 
 type SidebarItemId = Exclude<RightPanelId, null> | 'settings';

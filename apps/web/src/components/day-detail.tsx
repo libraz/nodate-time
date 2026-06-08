@@ -1,8 +1,8 @@
+import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useMemo } from 'react';
 
 export function DayDetail() {
   const t = useT();
@@ -41,14 +41,11 @@ export function DayDetail() {
   return (
     <div className="sm:hidden">
       {/* Backdrop */}
-      <div
+      <button
+        type="button"
+        aria-label={t('common.close')}
         className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
         onClick={closeDayDetail}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') closeDayDetail();
-        }}
-        role="button"
-        tabIndex={-1}
       />
 
       {/* Bottom sheet */}

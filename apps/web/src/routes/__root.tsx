@@ -1,8 +1,8 @@
+import { createRootRoute, Navigate, Outlet, useLocation } from '@tanstack/react-router';
+import { useEffect } from 'react';
 import { ThemeInitializer } from '@/components/theme-initializer';
 import { Toaster } from '@/components/toaster';
 import { useAuthStore } from '@/stores/auth-store';
-import { Navigate, Outlet, createRootRoute, useLocation } from '@tanstack/react-router';
-import { useEffect } from 'react';
 
 export const Route = createRootRoute({
   component: RootLayout,

@@ -1,12 +1,12 @@
+import { useNavigate } from '@tanstack/react-router';
+import { DateTime } from 'luxon';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { ApiError, api } from '@/lib/api';
 import { formatMonthYear } from '@/lib/date-utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { MEMBER_COLORS } from '@/types/calendar';
-import { useNavigate } from '@tanstack/react-router';
-import { DateTime } from 'luxon';
-import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function CalendarHeader() {
   const t = useT();
@@ -17,6 +17,7 @@ export function CalendarHeader() {
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
+  const triggerScrollToToday = useUiStore((s) => s.triggerScrollToToday);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const navigate = useNavigate();
@@ -158,6 +159,8 @@ export function CalendarHeader() {
     const today = DateTime.now();
     setCurrentMonth(today.startOf('month'));
     setSelectedDate(today);
+    // Mobile month view is an infinite scroll; signal it to scroll back to today.
+    triggerScrollToToday();
   };
 
   const ChevronLeft = () => (
@@ -542,26 +545,10 @@ export function CalendarHeader() {
   return (
     <div className="glass-surface-heavy sticky top-0 z-30">
       {/* Mobile header (< sm) */}
-      <div className="flex h-[48px] items-center px-2 sm:hidden">
-        {/* Left: nav arrows + month label */}
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => navigateMonth(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-            aria-label={t('calendar.prevMonth')}
-          >
-            <ChevronLeft />
-          </button>
-          <button
-            type="button"
-            onClick={() => navigateMonth(1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-            aria-label={t('calendar.nextMonth')}
-          >
-            <ChevronRight />
-          </button>
-          <span className="ml-0.5 text-[16px] font-semibold text-[var(--color-text-primary)]">
+      <div className="flex h-[48px] items-center px-3 sm:hidden">
+        {/* Left: month label (follows infinite scroll position) */}
+        <div className="flex items-center">
+          <span className="text-[18px] font-bold text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
         </div>

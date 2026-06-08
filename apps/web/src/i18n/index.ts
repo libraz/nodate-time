@@ -1,7 +1,7 @@
 import { useUiStore } from '@/stores/ui-store';
 import { en } from './en';
-import { ja } from './ja';
 import type { TranslationKey } from './ja';
+import { ja } from './ja';
 
 const translations = { ja, en } as const;
 

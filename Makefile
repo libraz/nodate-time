@@ -18,12 +18,12 @@ db-schema:
 	bash sql/build-schema.sh
 
 db-apply: db-schema
-	docker run --rm --network host -v $(CURDIR)/sql:/sql mysql:8.4 \
-		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < /sql/schema.sql
+	docker run --rm -i --network host mysql:8.4 \
+		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/schema.sql
 
 db-seed: db-apply
-	docker run --rm --network host -v $(CURDIR)/sql:/sql mysql:8.4 \
-		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < /sql/seed.sql
+	docker run --rm -i --network host mysql:8.4 \
+		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/seed.sql
 
 # Code generation
 sqlc:

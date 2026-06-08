@@ -1,8 +1,8 @@
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { useAuthStore } from '@/stores/auth-store';
-import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
 

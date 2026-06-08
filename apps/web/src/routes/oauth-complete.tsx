@@ -1,9 +1,9 @@
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
 
 export interface OAuthSearch {
   redirect?: string | undefined;

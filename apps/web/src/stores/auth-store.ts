@@ -1,8 +1,8 @@
+import { create } from 'zustand';
 import { getT } from '@/i18n';
 import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { useCalendarStore } from '@/stores/calendar-store';
-import { create } from 'zustand';
 
 interface User {
   id: string;
