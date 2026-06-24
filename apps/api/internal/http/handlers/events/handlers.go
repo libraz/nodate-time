@@ -40,25 +40,43 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	return cal, err
+}
+
+// resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
+// members, who may read but not mutate calendar content.
+func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, err
+	}
+	if member.Role == generated.CalendarMembersRoleViewer {
+		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	return cal, nil
+}
+
+func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calPubID)
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 	}
 	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, apierrors.CalendarNotFound
+			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 		}
-		return generated.Calendar{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
 	}
-	_, err = deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: cal.ID,
 		UserID:     userID,
 	})
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarAccessDenied
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
 	}
-	return cal, nil
+	return cal, member, nil
 }
 
 func mapRecurrenceRule(data *json.RawMessage) *RecurrenceRuleResponse {
@@ -308,7 +326,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEventOutput, error) {
 	return func(ctx context.Context, in *CreateEventInput) (*CreateEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -406,7 +424,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEventOutput, error) {
 	return func(ctx context.Context, in *UpdateEventInput) (*UpdateEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -491,7 +509,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
 	return func(ctx context.Context, in *DeleteEventInput) (*DeleteEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -571,7 +589,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*CreateCommentOutput, error) {
 	return func(ctx context.Context, in *CreateCommentInput) (*CreateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -623,7 +641,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*UpdateCommentOutput, error) {
 	return func(ctx context.Context, in *UpdateCommentInput) (*UpdateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		_, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -667,7 +685,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*DeleteCommentOutput, error) {
 	return func(ctx context.Context, in *DeleteCommentInput) (*DeleteCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		_, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)

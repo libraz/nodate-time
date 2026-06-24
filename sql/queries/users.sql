@@ -11,6 +11,13 @@ SELECT * FROM users WHERE email = ?;
 INSERT INTO users (public_id, name, email, icon, color, password_hash)
 VALUES (?, ?, ?, ?, ?, ?);
 
+-- name: CreateUserWithRole :execresult
+INSERT INTO users (public_id, name, email, icon, color, password_hash, is_admin)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: SetUserAdmin :exec
+UPDATE users SET is_admin = ? WHERE id = ?;
+
 -- name: UpdateUser :exec
 UPDATE users SET name = ?, icon = ?, color = ? WHERE id = ?;
 

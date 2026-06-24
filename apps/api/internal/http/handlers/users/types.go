@@ -42,6 +42,19 @@ type LoginOutput struct {
 	}
 }
 
+type DevLoginInput struct {
+	Body struct {
+		Email string `json:"email" format:"email" doc:"Email of a seeded dev account (@example.com only)"`
+	}
+}
+
+type DevLoginOutput struct {
+	Body struct {
+		Token string       `json:"token"`
+		User  UserResponse `json:"user"`
+	}
+}
+
 type GetMeInput struct{}
 type GetMeOutput struct {
 	Body UserResponse

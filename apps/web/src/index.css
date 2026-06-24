@@ -898,6 +898,99 @@ select {
 }
 
 /* ============================================
+   Glass — material & motion refinements
+   ============================================ */
+
+/* Frosted material: a faint light edge catches the top of glass surfaces */
+:root:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+:root:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-elevated),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+:root[data-mode="dark"]:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+:root[data-mode="dark"]:not([data-theme="classic"]):not([data-theme="nothing"])
+  .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-elevated),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Ambient gradient drift — slow, GPU-cheap, only when motion is welcome */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-theme="classic"]):not([data-theme="nothing"]) .app-bg::before {
+    animation: glass-drift 26s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+}
+@keyframes glass-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.02);
+  }
+  to {
+    transform: translate3d(-1.5%, -2%, 0) scale(1.08);
+  }
+}
+
+/* Today badge — soft accent glow lifts it off the grid (glass only) */
+:root:not([data-theme="classic"]):not([data-theme="nothing"]) .today-badge {
+  box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+/* Selected day — soft tinted fill on glass, crisp ring on flat themes */
+.day-selected {
+  background: var(--color-accent-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-subtle);
+}
+:root[data-theme="classic"] .day-selected,
+:root[data-theme="nothing"] .day-selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* Multi-day bars — glassy sheen lifts them off the frosted grid */
+.event-bar {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Calendar entrance — gentle settle when the month changes */
+@media (prefers-reduced-motion: no-preference) {
+  .calendar-enter {
+    animation: calendar-enter 0.34s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}
+@keyframes calendar-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* FAB — accent glow on glass */
+.fab-button {
+  box-shadow: var(--shadow-elevated);
+}
+:root:not([data-theme="classic"]):not([data-theme="nothing"]) .fab-button {
+  box-shadow:
+    var(--shadow-elevated),
+    0 8px 24px -6px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+/* ============================================
    Toaster
    ============================================ */
 @keyframes toast-in {

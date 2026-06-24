@@ -21,7 +21,6 @@ const avatarDownloadTTL = 5 * time.Minute
 type Deps struct {
 	Queries   *generated.Queries
 	JWTSecret string
-	Admins    auth.AdminAllowlist
 	Storage   *storage.Client
 }
 
@@ -47,21 +46,21 @@ func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
 	return url
 }
 
-func mapUser(u generated.User, admins auth.AdminAllowlist) UserResponse {
+func mapUser(u generated.User) UserResponse {
 	return UserResponse{
 		ID:        pubIDToHex(u.PublicID),
 		Name:      u.Name,
 		Email:     u.Email,
 		Icon:      u.Icon,
 		Color:     u.Color,
-		IsAdmin:   admins.Contains(u.Email),
+		IsAdmin:   u.IsAdmin,
 		CreatedAt: u.CreatedAt,
 	}
 }
 
 // mapUserWithAvatar is like mapUser but also fills AvatarURL via presigned GET.
 func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserResponse {
-	resp := mapUser(u, deps.Admins)
+	resp := mapUser(u)
 	resp.AvatarURL = avatarURLFor(ctx, deps, u)
 	return resp
 }
@@ -109,7 +108,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			Email:     in.Body.Email,
 			Icon:      "👤",
 			Color:     "#42A5F5",
-			IsAdmin:   deps.Admins.Contains(in.Body.Email),
+			IsAdmin:   false,
 			CreatedAt: time.Now(),
 		}
 		return out, nil

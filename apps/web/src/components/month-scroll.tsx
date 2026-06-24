@@ -159,18 +159,18 @@ function WeekRow({
             type="button"
             onClick={() => onDayClick(dt)}
             className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1 pb-1 transition-colors active:bg-[var(--color-active)] ${
-              isSelected ? 'ring-1 ring-inset ring-[var(--color-accent)]' : ''
+              isSelected ? 'day-selected' : ''
             }`}
             aria-label={`${isoDate}${holiday ? ` (${holiday.name})` : ''}`}
           >
             <div className="flex w-full items-center pl-0.5" style={{ height: DATE_ROW_H }}>
               {today ? (
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-[13px] font-medium text-white shadow-sm">
+                <span className="today-badge flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-[13px] font-medium tabular-nums text-white">
                   {dt.day}
                 </span>
               ) : (
                 <span
-                  className="flex h-6 w-6 items-center justify-center text-[13px] font-medium"
+                  className="flex h-6 w-6 items-center justify-center text-[13px] font-medium tabular-nums"
                   style={{ color: getDateColor(dow, !!holiday) }}
                 >
                   {dt.day}
@@ -190,7 +190,7 @@ function WeekRow({
                   return (
                     <div
                       key={evt.id}
-                      className="mx-0.5 truncate rounded border-l-[3px] px-1 text-[10px] font-semibold"
+                      className="mx-0.5 truncate rounded border-l-[3px] px-1 text-[10px] font-semibold tabular-nums"
                       style={{
                         height: SLOT_H,
                         lineHeight: `${SLOT_H}px`,
@@ -238,7 +238,7 @@ function WeekRow({
           return (
             <div
               key={`${p.event.id}-${p.startCol}`}
-              className="absolute flex items-center gap-1 truncate px-2 text-[10px] font-semibold text-white shadow-sm"
+              className="event-bar absolute flex items-center gap-1 truncate px-2 text-[10px] font-semibold tabular-nums text-white"
               style={{
                 left,
                 width,

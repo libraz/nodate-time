@@ -15,7 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -98,11 +97,6 @@ func main() {
 		},
 	}
 
-	admins := auth.NewAdminAllowlist(cfg.AdminEmails)
-	if admins.Empty() {
-		slog.Warn("TC_ADMIN_EMAILS is empty; /admin/* endpoints will reject all requests")
-	}
-
 	cipher, err := secrets.New(cfg.SecretsKey)
 	if err != nil {
 		slog.Error("invalid TC_SECRETS_KEY", "error", err)
@@ -120,9 +114,12 @@ func main() {
 		Mailer:    mailerClient,
 		WebURL:    cfg.WebURL,
 		OAuth:     oauthCfg,
-		Admins:    admins,
 		Cipher:    cipher,
+		DevMode:   cfg.IsDev(),
 	})
+	if cfg.IsDev() {
+		slog.Warn("development mode enabled; /auth/dev-login is exposed (password-less login for @example.com accounts)")
+	}
 
 	// Outer router with global middleware
 	outer := chi.NewRouter()

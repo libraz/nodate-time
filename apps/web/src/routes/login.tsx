@@ -25,6 +25,7 @@ function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const login = useAuthStore((s) => s.login);
+  const devLogin = useAuthStore((s) => s.devLogin);
   const register = useAuthStore((s) => s.register);
   const isLoading = useAuthStore((s) => s.isLoading);
   const error = useAuthStore((s) => s.error);
@@ -211,14 +212,27 @@ function LoginPage() {
       </form>
 
       {import.meta.env.DEV && (
-        <button
-          type="button"
-          onClick={() => login('demo@example.com', 'password123').catch(() => {})}
-          disabled={isLoading}
-          className="mt-4 h-[44px] w-full rounded-xl border-2 border-dashed border-[var(--color-accent)] text-[14px] font-semibold text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-bg)] disabled:opacity-50"
-        >
-          {t('auth.demoLogin')} (demo@example.com)
-        </button>
+        <div className="mt-4 space-y-2">
+          <p className="text-center text-[12px] font-medium text-[var(--color-text-tertiary)]">
+            {t('auth.quickLogin')}
+          </p>
+          <button
+            type="button"
+            onClick={() => devLogin('demo@example.com').catch(() => {})}
+            disabled={isLoading}
+            className="h-[44px] w-full rounded-xl border-2 border-dashed border-[var(--color-accent)] text-[14px] font-semibold text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-bg)] disabled:opacity-50"
+          >
+            {t('auth.demoLogin')} (demo@example.com)
+          </button>
+          <button
+            type="button"
+            onClick={() => devLogin('admin@example.com').catch(() => {})}
+            disabled={isLoading}
+            className="h-[44px] w-full rounded-xl border-2 border-dashed border-[var(--color-danger)] text-[14px] font-semibold text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-bg)] disabled:opacity-50"
+          >
+            {t('auth.adminLogin')} (admin@example.com)
+          </button>
+        </div>
       )}
     </AuthShell>
   );

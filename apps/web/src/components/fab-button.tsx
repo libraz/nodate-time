@@ -15,7 +15,6 @@ export function FabButton() {
         right: '16px',
         borderRadius: 'var(--radius-lg)',
         background: 'var(--color-accent)',
-        boxShadow: 'var(--shadow-elevated)',
         color: 'var(--color-text-on-accent, #fff)',
       }}
       aria-label={t('event.addEvent')}

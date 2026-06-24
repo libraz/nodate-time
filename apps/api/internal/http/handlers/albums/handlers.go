@@ -50,25 +50,43 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	return cal, err
+}
+
+// resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
+// members, who may read but not mutate calendar content.
+func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, err
+	}
+	if member.Role == generated.CalendarMembersRoleViewer {
+		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	return cal, nil
+}
+
+func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calPubID)
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 	}
 	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, apierrors.CalendarNotFound
+			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 		}
-		return generated.Calendar{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
 	}
-	_, err = deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: cal.ID,
 		UserID:     userID,
 	})
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarAccessDenied
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
 	}
-	return cal, nil
+	return cal, member, nil
 }
 
 func isImageContentType(ct string) bool {
@@ -251,7 +269,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*PresignPhotoOutput, error) {
 	return func(ctx context.Context, in *PresignPhotoInput) (*PresignPhotoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -344,7 +362,7 @@ func loadPhotoForCalendar(ctx context.Context, deps Deps, calID uint32, photoPub
 func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePhotoOutput, error) {
 	return func(ctx context.Context, in *UpdatePhotoInput) (*UpdatePhotoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -402,7 +420,7 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePhotoOutput, error) {
 	return func(ctx context.Context, in *DeletePhotoInput) (*DeletePhotoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)

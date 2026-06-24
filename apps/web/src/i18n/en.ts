@@ -148,7 +148,9 @@ export const en: Record<TranslationKey, string> = {
   'auth.loginFailed': 'Login failed',
   'auth.registerFailed': 'Registration failed',
   'auth.passwordMinLength': '8 characters min',
+  'auth.quickLogin': 'Quick login (dev only)',
   'auth.demoLogin': 'Demo Login',
+  'auth.adminLogin': 'Admin Login',
 
   'profile.profile': 'Profile',
   'profile.edit': 'Edit profile',

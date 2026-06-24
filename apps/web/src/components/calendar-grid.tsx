@@ -115,7 +115,8 @@ export function CalendarGrid() {
       </div>
 
       <div
-        className="grid flex-1"
+        key={`${currentMonth.year}-${currentMonth.month}-${calendarView}`}
+        className="calendar-enter grid flex-1"
         style={{ gridTemplateRows: `repeat(${weeks.length}, minmax(0, 1fr))` }}
       >
         {weeks.map((week, wIdx) => {
@@ -180,19 +181,19 @@ export function CalendarGrid() {
                       openDayDetail(dt);
                     }}
                     className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1.5 pb-1 transition-colors hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)] focus-visible:outline-none ${
-                      isSelected ? 'ring-1 ring-inset ring-[var(--color-accent)]' : ''
+                      isSelected ? 'day-selected' : ''
                     }`}
                     style={!inMonth ? { opacity: 0.4 } : undefined}
                     aria-label={`${dt.toFormat('yyyy-MM-dd')}${holiday ? ` (${holiday.name})` : ''}`}
                   >
                     <div className="flex w-full items-center justify-between pl-0.5">
                       {today ? (
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-accent)] text-[15px] font-medium text-white shadow-sm max-sm:text-[13px]">
+                        <span className="today-badge flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-accent)] text-[15px] font-medium tabular-nums text-white max-sm:text-[13px]">
                           {dt.day}
                         </span>
                       ) : (
                         <span
-                          className="flex h-7 w-7 items-center justify-center text-[15px] font-medium max-sm:text-[13px]"
+                          className="flex h-7 w-7 items-center justify-center text-[15px] font-medium tabular-nums max-sm:text-[13px]"
                           style={{ color: getDateColor(dow, !!holiday) }}
                         >
                           {dt.day}
@@ -225,7 +226,7 @@ export function CalendarGrid() {
                           return (
                             <div
                               key={evt.id}
-                              className="mx-0.5 truncate rounded-md border-l-[3px] px-1.5 text-[11px] font-semibold leading-[20px] max-sm:text-[10px] max-sm:leading-[15px]"
+                              className="mx-0.5 truncate rounded-md border-l-[3px] px-1.5 text-[11px] font-semibold leading-[20px] tabular-nums max-sm:text-[10px] max-sm:leading-[15px]"
                               style={{
                                 backgroundColor: `${evt.color}1f`,
                                 borderLeftColor: evt.color,
@@ -273,7 +274,7 @@ export function CalendarGrid() {
                   return (
                     <div
                       key={`${p.event.id}-${p.startCol}`}
-                      className="pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-[11px] font-semibold leading-[20px] text-white shadow-sm max-sm:text-[10px] max-sm:leading-[15px]"
+                      className="event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-[11px] font-semibold leading-[20px] tabular-nums text-white max-sm:text-[10px] max-sm:leading-[15px]"
                       style={{
                         left,
                         width,

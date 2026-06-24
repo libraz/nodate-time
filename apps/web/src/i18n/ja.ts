@@ -154,7 +154,9 @@ export const ja = {
   'auth.loginFailed': 'ログインに失敗しました',
   'auth.registerFailed': '登録に失敗しました',
   'auth.passwordMinLength': '8文字以上',
+  'auth.quickLogin': 'クイックログイン（開発用）',
   'auth.demoLogin': 'デモログイン',
+  'auth.adminLogin': '管理者ログイン',
 
   // Profile
   'profile.profile': 'プロフィール',
