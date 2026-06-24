@@ -73,6 +73,10 @@ export const en: Record<TranslationKey, string> = {
   'event.unitMonth': 'months',
   'event.unitYear': 'years',
   'event.deleteRecurring': 'Delete all recurring events',
+  'event.scopeEditTitle': 'Edit recurring event',
+  'event.scopeDeleteTitle': 'Delete recurring event',
+  'event.scopeThis': 'This event only',
+  'event.scopeAll': 'All events in the series',
 
   // Notification offsets
   'event.notification_none': 'None',
@@ -281,6 +285,7 @@ export const en: Record<TranslationKey, string> = {
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'Remove this member?',
   'members.lastAdmin': 'Cannot remove the last admin',
+  'members.selfModify': 'You cannot change your own membership',
 
   'label.1': 'Sky',
   'label.2': 'Pink',

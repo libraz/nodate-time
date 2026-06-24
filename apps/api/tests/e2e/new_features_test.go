@@ -176,6 +176,55 @@ func TestRemoveMember(t *testing.T) {
 	}
 }
 
+// TestUpdateOwnRoleForbidden verifies an admin cannot change their own role even
+// when another admin exists, so the only path to a role change is via someone else.
+func TestUpdateOwnRoleForbidden(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
+	// Promote guest so the calendar has two admins; self-demotion still must fail.
+	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
+		map[string]any{"role": "admin"}, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/members/"+owner.UserID+"/role",
+		owner.AccessToken, map[string]any{"role": "member"})
+	assert.Equal(t, 400, status)
+}
+
+// TestRemoveSelfForbidden verifies an admin cannot remove themselves even when
+// another admin exists (leaving via this endpoint is not allowed).
+func TestRemoveSelfForbidden(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
+	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
+		map[string]any{"role": "admin"}, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+owner.UserID,
+		owner.AccessToken, nil)
+	assert.Equal(t, 400, status)
+}
+
 // --- iCal export / import ---
 
 func TestICalExportImportRoundTrip(t *testing.T) {

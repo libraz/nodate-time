@@ -91,6 +91,7 @@ type CreateEventOutput struct {
 type UpdateEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
+	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"For recurring events: 'this' edits only this occurrence, 'all' edits the whole series"`
 	Body       struct {
 		Title              string           `json:"title" minLength:"1" maxLength:"500"`
 		AllDay             bool             `json:"allDay"`
@@ -114,6 +115,7 @@ type UpdateEventOutput struct {
 type DeleteEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
+	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"For recurring events: 'this' deletes only this occurrence, 'all' deletes the whole series"`
 }
 type DeleteEventOutput struct{}
 
@@ -232,6 +234,15 @@ type PresignUploadOutput struct {
 		AttachmentID string `json:"attachmentId"`
 		UploadURL    string `json:"uploadUrl"`
 	}
+}
+
+type ConfirmAttachmentInput struct {
+	CalendarID   string `path:"calendarId"`
+	EventID      string `path:"eventId"`
+	AttachmentID string `path:"attachmentId"`
+}
+type ConfirmAttachmentOutput struct {
+	Body AttachmentResponse
 }
 
 type ListAttachmentsInput struct {

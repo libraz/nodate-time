@@ -1,8 +1,14 @@
 -- name: CreateAlbumPhoto :execresult
+-- Rows are created disabled and only become visible once ConfirmAlbumPhoto runs
+-- after the object upload succeeds, so a presign that is never uploaded leaves
+-- no dangling row pointing at a nonexistent object.
 INSERT INTO album_photos (
   public_id, calendar_id, uploaded_by, event_id, caption, content_type, byte_size,
-  width, height, storage_key, taken_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  width, height, storage_key, taken_at, enabled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+
+-- name: ConfirmAlbumPhoto :execresult
+UPDATE album_photos SET enabled = 1 WHERE id = ? AND enabled = 0;
 
 -- name: GetAlbumPhotoByPublicID :one
 SELECT * FROM album_photos WHERE public_id = ?;

@@ -12,7 +12,6 @@ func TestCalendarLifecycle(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 
 	// List calendars — should have 1 (created by NewTenant)
@@ -72,7 +71,6 @@ func TestCalendarMembers(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 
 	// List members — should have 1 (creator)
@@ -89,7 +87,6 @@ func TestCalendarLabels(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 
 	var labels []struct {
@@ -105,7 +102,6 @@ func TestCalendarLabels(t *testing.T) {
 func TestCalendarAccessDenied(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
-
 
 	tt1 := helpers.NewTenant(t, testServerURL)
 	tt2 := helpers.NewTenant(t, testServerURL)

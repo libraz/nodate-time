@@ -78,7 +78,7 @@ export function AlbumPanel() {
       setError(null);
       try {
         const resized = await resizeImageForAlbum(file);
-        await uploadViaPresign<PresignResponse>({
+        const presign = await uploadViaPresign<PresignResponse>({
           kind: 'album',
           presignPath: `/calendars/${activeCalendarId}/albums/presign`,
           presignBody: {
@@ -91,6 +91,8 @@ export function AlbumPanel() {
           body: resized.bytes,
           byteSize: resized.bytes.byteLength,
         });
+        // The row is created disabled; confirm enables it once the object is stored.
+        await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
         await reload();
       } catch (e) {
         setError(errorMessage(e));

@@ -12,33 +12,43 @@ import (
 )
 
 const consumeOAuthState = `-- name: ConsumeOAuthState :one
-SELECT provider, redirect, expires_at FROM oauth_states
+SELECT provider, redirect, code_verifier, nonce, expires_at FROM oauth_states
 WHERE state_hash = ? LIMIT 1
 `
 
 type ConsumeOAuthStateRow struct {
-	Provider  OauthStatesProvider `json:"provider"`
-	Redirect  string              `json:"redirect"`
-	ExpiresAt time.Time           `json:"expiresAt"`
+	Provider     OauthStatesProvider `json:"provider"`
+	Redirect     string              `json:"redirect"`
+	CodeVerifier string              `json:"codeVerifier"`
+	Nonce        string              `json:"nonce"`
+	ExpiresAt    time.Time           `json:"expiresAt"`
 }
 
 func (q *Queries) ConsumeOAuthState(ctx context.Context, stateHash string) (ConsumeOAuthStateRow, error) {
 	row := q.db.QueryRowContext(ctx, consumeOAuthState, stateHash)
 	var i ConsumeOAuthStateRow
-	err := row.Scan(&i.Provider, &i.Redirect, &i.ExpiresAt)
+	err := row.Scan(
+		&i.Provider,
+		&i.Redirect,
+		&i.CodeVerifier,
+		&i.Nonce,
+		&i.ExpiresAt,
+	)
 	return i, err
 }
 
 const createOAuthState = `-- name: CreateOAuthState :exec
-INSERT INTO oauth_states (state_hash, provider, redirect, expires_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO oauth_states (state_hash, provider, redirect, code_verifier, nonce, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateOAuthStateParams struct {
-	StateHash string              `json:"stateHash"`
-	Provider  OauthStatesProvider `json:"provider"`
-	Redirect  string              `json:"redirect"`
-	ExpiresAt time.Time           `json:"expiresAt"`
+	StateHash    string              `json:"stateHash"`
+	Provider     OauthStatesProvider `json:"provider"`
+	Redirect     string              `json:"redirect"`
+	CodeVerifier string              `json:"codeVerifier"`
+	Nonce        string              `json:"nonce"`
+	ExpiresAt    time.Time           `json:"expiresAt"`
 }
 
 func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error {
@@ -46,6 +56,8 @@ func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStatePara
 		arg.StateHash,
 		arg.Provider,
 		arg.Redirect,
+		arg.CodeVerifier,
+		arg.Nonce,
 		arg.ExpiresAt,
 	)
 	return err

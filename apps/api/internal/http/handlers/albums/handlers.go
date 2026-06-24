@@ -343,6 +343,49 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 	}
 }
 
+// ConfirmPhoto finalizes a presigned album upload by verifying the object was
+// actually stored, then enabling the row so it becomes visible. Rows whose
+// upload is abandoned stay disabled and never surface, so a presign that is
+// never followed by a PUT leaves no broken photo in the album.
+func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*ConfirmPhotoOutput, error) {
+	return func(ctx context.Context, in *ConfirmPhotoInput) (*ConfirmPhotoOutput, error) {
+		userID, _ := middleware.ActorFromContext(ctx)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if deps.Storage == nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+
+		pub, err := parseUUID(in.PhotoID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
+		}
+		p, err := deps.Queries.GetAlbumPhotoByPublicID(ctx, pub)
+		if err != nil || p.CalendarID != cal.ID {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
+		}
+
+		exists, err := deps.Storage.StatObject(ctx, p.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+		if !exists {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
+		}
+
+		if _, err := deps.Queries.ConfirmAlbumPhoto(ctx, p.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		p.Enabled = true
+		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, p)}, nil
+	}
+}
+
 func loadPhotoForCalendar(ctx context.Context, deps Deps, calID uint32, photoPubID string) (generated.AlbumPhoto, error) {
 	pub, err := parseUUID(photoPubID)
 	if err != nil {

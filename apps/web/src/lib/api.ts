@@ -3,8 +3,40 @@ import { toast } from '@/lib/toast';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
 
+/**
+ * Decodes the `exp` claim (seconds since epoch) from a JWT without verifying
+ * its signature. Returns null when the token is malformed or has no `exp`.
+ */
+export function decodeJwtExp(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    let base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    base64 += '='.repeat((4 - (base64.length % 4)) % 4);
+    const claims = JSON.parse(atob(base64));
+    return typeof claims.exp === 'number' ? claims.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reports whether a JWT is already expired. A token with no decodable `exp` is
+ * treated as not expired so the server, not the client, makes the final call.
+ */
+export function isTokenExpired(token: string): boolean {
+  const exp = decodeJwtExp(token);
+  if (exp === null) return false;
+  return exp * 1000 <= Date.now();
+}
+
 function getToken(): string | null {
-  return localStorage.getItem('tt_token');
+  const token = localStorage.getItem('tt_token');
+  if (token !== null && isTokenExpired(token)) {
+    localStorage.removeItem('tt_token');
+    return null;
+  }
+  return token;
 }
 
 export function setToken(token: string): void {
@@ -37,6 +69,8 @@ function localizeError(err: ApiError): string {
     case 'CALENDAR.ROLE_REQUIRED':
     case 'CALENDAR.ACCESS_DENIED':
       return t('error.noPermission');
+    case 'MEMBER.SELF_MODIFY':
+      return t('members.selfModify');
     case 'AUTH.TOKEN_INVALID':
       return t('error.sessionExpired');
     default:

@@ -67,7 +67,7 @@ func (q *Queries) DeleteEvent(ctx context.Context, id uint32) error {
 }
 
 const getEventByID = `-- name: GetEventByID :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE id = ?
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE id = ?
 `
 
 func (q *Queries) GetEventByID(ctx context.Context, id uint32) (Event, error) {
@@ -91,6 +91,9 @@ func (q *Queries) GetEventByID(ctx context.Context, id uint32) (Event, error) {
 		&i.NotificationOffset,
 		&i.RecurrenceRule,
 		&i.RecurrenceEnd,
+		&i.RecurrenceParentID,
+		&i.RecurrenceOriginalStart,
+		&i.RecurrenceCancelled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -98,7 +101,7 @@ func (q *Queries) GetEventByID(ctx context.Context, id uint32) (Event, error) {
 }
 
 const getEventByPublicID = `-- name: GetEventByPublicID :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events WHERE public_id = ?
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE public_id = ?
 `
 
 func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Event, error) {
@@ -122,6 +125,49 @@ func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Even
 		&i.NotificationOffset,
 		&i.RecurrenceRule,
 		&i.RecurrenceEnd,
+		&i.RecurrenceParentID,
+		&i.RecurrenceOriginalStart,
+		&i.RecurrenceCancelled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRecurrenceException = `-- name: GetRecurrenceException :one
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
+WHERE recurrence_parent_id = ? AND recurrence_original_start = ?
+`
+
+type GetRecurrenceExceptionParams struct {
+	RecurrenceParentID      sql.NullInt32 `json:"recurrenceParentId"`
+	RecurrenceOriginalStart sql.NullTime  `json:"recurrenceOriginalStart"`
+}
+
+func (q *Queries) GetRecurrenceException(ctx context.Context, arg GetRecurrenceExceptionParams) (Event, error) {
+	row := q.db.QueryRowContext(ctx, getRecurrenceException, arg.RecurrenceParentID, arg.RecurrenceOriginalStart)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.CalendarID,
+		&i.Title,
+		&i.AllDay,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Color,
+		&i.Location,
+		&i.Memo,
+		&i.Url,
+		&i.CreatedBy,
+		&i.AssignedTo,
+		&i.NotificationOffset,
+		&i.RecurrenceRule,
+		&i.RecurrenceEnd,
+		&i.RecurrenceParentID,
+		&i.RecurrenceOriginalStart,
+		&i.RecurrenceCancelled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -129,8 +175,9 @@ func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Even
 }
 
 const listEventsByCalendarAndRange = `-- name: ListEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NULL AND start_at < ? AND end_at > ?
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
+WHERE calendar_id = ? AND recurrence_rule IS NULL AND recurrence_parent_id IS NULL
+  AND start_at < ? AND end_at > ?
 ORDER BY start_at
 `
 
@@ -167,6 +214,9 @@ func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEven
 			&i.NotificationOffset,
 			&i.RecurrenceRule,
 			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -184,7 +234,7 @@ func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEven
 }
 
 const listEventsByUserAndRange = `-- name: ListEventsByUserAndRange :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_members cm ON cm.calendar_id = e.calendar_id
 WHERE cm.user_id = ? AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at
@@ -223,6 +273,59 @@ func (q *Queries) ListEventsByUserAndRange(ctx context.Context, arg ListEventsBy
 			&i.NotificationOffset,
 			&i.RecurrenceRule,
 			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecurrenceExceptionsByParent = `-- name: ListRecurrenceExceptionsByParent :many
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE recurrence_parent_id = ? ORDER BY recurrence_original_start
+`
+
+func (q *Queries) ListRecurrenceExceptionsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]Event, error) {
+	rows, err := q.db.QueryContext(ctx, listRecurrenceExceptionsByParent, recurrenceParentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.CalendarID,
+			&i.Title,
+			&i.AllDay,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Timezone,
+			&i.Color,
+			&i.Location,
+			&i.Memo,
+			&i.Url,
+			&i.CreatedBy,
+			&i.AssignedTo,
+			&i.NotificationOffset,
+			&i.RecurrenceRule,
+			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -240,8 +343,8 @@ func (q *Queries) ListEventsByUserAndRange(ctx context.Context, arg ListEventsBy
 }
 
 const listRecurringEventsByCalendarAndRange = `-- name: ListRecurringEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, created_at, updated_at FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NOT NULL
+SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
+WHERE calendar_id = ? AND recurrence_rule IS NOT NULL AND recurrence_parent_id IS NULL
   AND start_at < ? AND recurrence_end > ?
 ORDER BY start_at
 `
@@ -279,6 +382,9 @@ func (q *Queries) ListRecurringEventsByCalendarAndRange(ctx context.Context, arg
 			&i.NotificationOffset,
 			&i.RecurrenceRule,
 			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -335,4 +441,60 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) error 
 		arg.ID,
 	)
 	return err
+}
+
+const upsertRecurrenceException = `-- name: UpsertRecurrenceException :execresult
+INSERT INTO events (
+  public_id, calendar_id, title, all_day, start_at, end_at, timezone, color,
+  location, memo, url, created_by, assigned_to, notification_offset,
+  recurrence_parent_id, recurrence_original_start, recurrence_cancelled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  title = VALUES(title), all_day = VALUES(all_day), start_at = VALUES(start_at),
+  end_at = VALUES(end_at), timezone = VALUES(timezone), color = VALUES(color),
+  location = VALUES(location), memo = VALUES(memo), url = VALUES(url),
+  assigned_to = VALUES(assigned_to), notification_offset = VALUES(notification_offset),
+  recurrence_cancelled = VALUES(recurrence_cancelled)
+`
+
+type UpsertRecurrenceExceptionParams struct {
+	PublicID                []byte        `json:"publicId"`
+	CalendarID              uint32        `json:"calendarId"`
+	Title                   string        `json:"title"`
+	AllDay                  bool          `json:"allDay"`
+	StartAt                 time.Time     `json:"startAt"`
+	EndAt                   time.Time     `json:"endAt"`
+	Timezone                string        `json:"timezone"`
+	Color                   string        `json:"color"`
+	Location                string        `json:"location"`
+	Memo                    string        `json:"memo"`
+	Url                     string        `json:"url"`
+	CreatedBy               uint32        `json:"createdBy"`
+	AssignedTo              sql.NullInt32 `json:"assignedTo"`
+	NotificationOffset      sql.NullInt32 `json:"notificationOffset"`
+	RecurrenceParentID      sql.NullInt32 `json:"recurrenceParentId"`
+	RecurrenceOriginalStart sql.NullTime  `json:"recurrenceOriginalStart"`
+	RecurrenceCancelled     bool          `json:"recurrenceCancelled"`
+}
+
+func (q *Queries) UpsertRecurrenceException(ctx context.Context, arg UpsertRecurrenceExceptionParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, upsertRecurrenceException,
+		arg.PublicID,
+		arg.CalendarID,
+		arg.Title,
+		arg.AllDay,
+		arg.StartAt,
+		arg.EndAt,
+		arg.Timezone,
+		arg.Color,
+		arg.Location,
+		arg.Memo,
+		arg.Url,
+		arg.CreatedBy,
+		arg.AssignedTo,
+		arg.NotificationOffset,
+		arg.RecurrenceParentID,
+		arg.RecurrenceOriginalStart,
+		arg.RecurrenceCancelled,
+	)
 }

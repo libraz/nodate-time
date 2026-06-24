@@ -63,6 +63,15 @@ type PresignPhotoOutput struct {
 	Body PresignPhotoResult
 }
 
+type ConfirmPhotoInput struct {
+	CalendarID string `path:"calendarId"`
+	PhotoID    string `path:"photoId"`
+}
+
+type ConfirmPhotoOutput struct {
+	Body AlbumPhotoResponse
+}
+
 type UpdatePhotoBody struct {
 	Caption *string `json:"caption" required:"false" maxLength:"500"`
 	EventID *string `json:"eventId" required:"false" doc:"Empty string clears the link"`

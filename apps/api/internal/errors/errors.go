@@ -111,6 +111,7 @@ var (
 	MemberNotFound      = &Spec{Status: 404, Code: "MEMBER.NOT_FOUND", Message: "Member not found"}
 	MemberAlreadyExists = &Spec{Status: 409, Code: "MEMBER.ALREADY_EXISTS", Message: "User is already a member of this calendar"}
 	MemberLastAdmin     = &Spec{Status: 400, Code: "MEMBER.LAST_ADMIN", Message: "Cannot remove the last admin"}
+	MemberSelfModify    = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
 )
 
 // --- Invite errors ---

@@ -144,9 +144,10 @@ func (q *Queries) IncrementInviteUseCount(ctx context.Context, id uint32) error 
 }
 
 const listEventsByInviteCalendar = `-- name: ListEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.start_at < ? AND e.end_at > ?
+WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS NULL
+  AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at
 `
 
@@ -183,6 +184,9 @@ func (q *Queries) ListEventsByInviteCalendar(ctx context.Context, arg ListEvents
 			&i.NotificationOffset,
 			&i.RecurrenceRule,
 			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -239,7 +243,7 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 }
 
 const listRecurringEventsByInviteCalendar = `-- name: ListRecurringEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.created_at, e.updated_at FROM events e
+SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL
   AND e.start_at < ? AND e.recurrence_end > ?
@@ -279,6 +283,9 @@ func (q *Queries) ListRecurringEventsByInviteCalendar(ctx context.Context, arg L
 			&i.NotificationOffset,
 			&i.RecurrenceRule,
 			&i.RecurrenceEnd,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.RecurrenceCancelled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

@@ -82,6 +82,11 @@ func buildHandler(db *sql.DB, mc *CapturingMailer, sc *storage.Client) *router.D
 		Mailer:    mc,
 		WebURL:    TestWebURL,
 		Storage:   sc,
+		// Tests register tenants over the email+password flow.
+		PasswordLoginEnabled: true,
+		// Parallel tenants register from one loopback IP; the per-IP limiter would
+		// otherwise reject them with 429.
+		AuthRateLimit: -1,
 	}
 }
 

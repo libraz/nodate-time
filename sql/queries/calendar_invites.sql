@@ -35,7 +35,8 @@ WHERE ci.token = ? AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
 -- name: ListEventsByInviteCalendar :many
 SELECT e.* FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.start_at < ? AND e.end_at > ?
+WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS NULL
+  AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at;
 
 -- name: ListRecurringEventsByInviteCalendar :many

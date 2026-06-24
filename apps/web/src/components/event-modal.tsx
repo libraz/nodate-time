@@ -579,7 +579,7 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
     setUploading(true);
     const contentType = file.type || 'application/octet-stream';
     try {
-      await uploadViaPresign<{ attachmentId: string; uploadUrl: string }>({
+      const presign = await uploadViaPresign<{ attachmentId: string; uploadUrl: string }>({
         kind: 'attachment',
         presignPath: `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
         presignBody: { filename: file.name, contentType, byteSize: file.size },
@@ -587,6 +587,10 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
         body: file,
         byteSize: file.size,
       });
+      // The row is created disabled; confirm enables it once the object is stored.
+      await api.post(
+        `/calendars/${calendarId}/events/${eventId}/attachments/${presign.attachmentId}/confirm`,
+      );
       await fetchAttachments();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -836,68 +840,103 @@ export function EventModal() {
     }
   }, [showEventModal]);
 
-  const handleSave = useCallback(async () => {
-    if (!form.title.trim() || saving || !editable) return;
-    let startIso = fromLocalDatetimeToISO(form.startAt, timezone);
-    let endIso = fromLocalDatetimeToISO(form.endAt, timezone);
-    if (form.allDay) {
-      // All-day events are wall dates anchored at midnight in the selected zone.
-      const startDay = DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day');
-      const endDay = DateTime.fromISO(form.endAt, { zone: timezone }).startOf('day');
-      startIso = startDay.toISO() ?? startIso;
-      // End is exclusive: add 1 day. Clamp end >= start.
-      const effectiveEnd = endDay >= startDay ? endDay : startDay;
-      endIso = effectiveEnd.plus({ days: 1 }).toISO() ?? endIso;
-    } else {
-      // For timed events, ensure end > start
-      const startDt = DateTime.fromISO(startIso);
-      const endDt = DateTime.fromISO(endIso);
-      if (endDt <= startDt) {
-        endIso = startDt.plus({ hours: 1 }).toISO() ?? endIso;
-      }
-    }
-    const data = {
-      title: form.title.trim(),
-      allDay: form.allDay,
-      startAt: startIso,
-      endAt: endIso,
-      timezone,
-      color: form.color,
-      location: form.location,
-      memo: form.memo,
-      url: form.url,
-      notificationOffset: normalizeNotificationOffset(form.notificationOffset),
-      participants: form.participants,
-      assignedTo: form.assignedTo,
-      recurrenceRule: normalizeRuleForApi(form.recurrenceRule, timezone),
-    };
-    setSaving(true);
-    try {
-      if (editingEvent) {
-        await updateEvent(editingEvent.calendarId, editingEvent.id, data);
-      } else {
-        await addEvent(form.calendarId, data);
-      }
-      closeEventModal();
-    } catch (e) {
-      toast.error(errorMessage(e, t('error.saveFailed')));
-    } finally {
-      setSaving(false);
-    }
-  }, [form, editingEvent, addEvent, updateEvent, closeEventModal, saving, editable, timezone, t]);
+  // Recurring events are always opened as an expanded instance (composite id),
+  // so editing or deleting one must ask whether it applies to just this
+  // occurrence or the whole series.
+  const isRecurringInstance =
+    !!editingEvent && (editingEvent.isRecurrence || editingEvent.id.includes('_'));
+  const [scopePrompt, setScopePrompt] = useState<null | 'save' | 'delete'>(null);
 
-  const handleDelete = useCallback(async () => {
-    if (!editingEvent || saving || !editable) return;
-    setSaving(true);
-    try {
-      await deleteEvent(editingEvent.calendarId, editingEvent.id);
-      closeEventModal();
-    } catch (e) {
-      toast.error(errorMessage(e, t('error.deleteFailed')));
-    } finally {
-      setSaving(false);
-    }
-  }, [editingEvent, deleteEvent, closeEventModal, saving, editable, t]);
+  const handleSave = useCallback(
+    async (scope?: 'this' | 'all') => {
+      if (!form.title.trim() || saving || !editable) return;
+      // Editing an occurrence: ask this-vs-series before mutating anything.
+      if (editingEvent && isRecurringInstance && !scope) {
+        setScopePrompt('save');
+        return;
+      }
+      let startIso = fromLocalDatetimeToISO(form.startAt, timezone);
+      let endIso = fromLocalDatetimeToISO(form.endAt, timezone);
+      if (form.allDay) {
+        // All-day events are wall dates anchored at midnight in the selected zone.
+        const startDay = DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day');
+        const endDay = DateTime.fromISO(form.endAt, { zone: timezone }).startOf('day');
+        startIso = startDay.toISO() ?? startIso;
+        // End is exclusive: add 1 day. Clamp end >= start.
+        const effectiveEnd = endDay >= startDay ? endDay : startDay;
+        endIso = effectiveEnd.plus({ days: 1 }).toISO() ?? endIso;
+      } else {
+        // For timed events, ensure end > start
+        const startDt = DateTime.fromISO(startIso);
+        const endDt = DateTime.fromISO(endIso);
+        if (endDt <= startDt) {
+          endIso = startDt.plus({ hours: 1 }).toISO() ?? endIso;
+        }
+      }
+      const data = {
+        title: form.title.trim(),
+        allDay: form.allDay,
+        startAt: startIso,
+        endAt: endIso,
+        timezone,
+        color: form.color,
+        location: form.location,
+        memo: form.memo,
+        url: form.url,
+        notificationOffset: normalizeNotificationOffset(form.notificationOffset),
+        participants: form.participants,
+        assignedTo: form.assignedTo,
+        recurrenceRule: normalizeRuleForApi(form.recurrenceRule, timezone),
+      };
+      setSaving(true);
+      try {
+        if (editingEvent) {
+          await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope);
+        } else {
+          await addEvent(form.calendarId, data);
+        }
+        setScopePrompt(null);
+        closeEventModal();
+      } catch (e) {
+        toast.error(errorMessage(e, t('error.saveFailed')));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      form,
+      editingEvent,
+      isRecurringInstance,
+      addEvent,
+      updateEvent,
+      closeEventModal,
+      saving,
+      editable,
+      timezone,
+      t,
+    ],
+  );
+
+  const handleDelete = useCallback(
+    async (scope?: 'this' | 'all') => {
+      if (!editingEvent || saving || !editable) return;
+      if (isRecurringInstance && !scope) {
+        setScopePrompt('delete');
+        return;
+      }
+      setSaving(true);
+      try {
+        await deleteEvent(editingEvent.calendarId, editingEvent.id, scope);
+        setScopePrompt(null);
+        closeEventModal();
+      } catch (e) {
+        toast.error(errorMessage(e, t('error.deleteFailed')));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [editingEvent, isRecurringInstance, deleteEvent, closeEventModal, saving, editable, t],
+  );
 
   if (!showEventModal) return null;
 
@@ -1644,7 +1683,7 @@ export function EventModal() {
         <div className="px-6 pt-4">
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => handleDelete()}
             disabled={saving}
             className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-default font-medium text-[var(--color-danger)] disabled:opacity-50"
             style={{ borderRadius: 'var(--radius-md)' }}
@@ -1684,7 +1723,7 @@ export function EventModal() {
             {editable && (
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={() => handleSave()}
                 disabled={saving || !form.title.trim()}
                 className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
               >
@@ -1718,7 +1757,7 @@ export function EventModal() {
               {editable && (
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={() => handleSave()}
                   disabled={saving || !form.title.trim()}
                   className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
                 >
@@ -1729,6 +1768,53 @@ export function EventModal() {
           </div>
         </div>
       </div>
+
+      {/* This-vs-series scope chooser for recurring occurrences */}
+      {scopePrompt && (
+        <>
+          <button
+            type="button"
+            aria-label={t('common.cancel')}
+            className="fixed inset-0 z-[60] bg-[var(--color-overlay)]"
+            onClick={() => setScopePrompt(null)}
+          />
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
+            <div
+              className="glass-surface-heavy pointer-events-auto flex w-full max-w-[360px] flex-col gap-3 p-6 ring-1 ring-[var(--color-border)]"
+              style={{ borderRadius: 'var(--radius-lg)' }}
+            >
+              <p className="text-default font-semibold">
+                {scopePrompt === 'delete' ? t('event.scopeDeleteTitle') : t('event.scopeEditTitle')}
+              </p>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  scopePrompt === 'delete' ? handleDelete('this') : handleSave('this')
+                }
+                className="btn-secondary py-3 text-default font-medium disabled:opacity-50"
+              >
+                {t('event.scopeThis')}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => (scopePrompt === 'delete' ? handleDelete('all') : handleSave('all'))}
+                className="btn-secondary py-3 text-default font-medium disabled:opacity-50"
+              >
+                {t('event.scopeAll')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopePrompt(null)}
+                className="py-2 text-sm text-[var(--color-text-secondary)]"
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

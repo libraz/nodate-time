@@ -260,8 +260,14 @@ type Event struct {
 	RecurrenceRule *json.RawMessage `json:"recurrenceRule"`
 	// effective end date for recurrence expansion queries
 	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
-	CreatedAt     time.Time    `json:"createdAt"`
-	UpdatedAt     time.Time    `json:"updatedAt"`
+	// set on exception rows: the master recurring event this occurrence overrides
+	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
+	// original occurrence start (UTC) this exception replaces
+	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
+	// tombstone: this single occurrence was deleted from the series
+	RecurrenceCancelled bool      `json:"recurrenceCancelled"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 type EventAttachment struct {
@@ -352,8 +358,12 @@ type OauthState struct {
 	StateHash string              `json:"stateHash"`
 	Provider  OauthStatesProvider `json:"provider"`
 	Redirect  string              `json:"redirect"`
-	ExpiresAt time.Time           `json:"expiresAt"`
-	CreatedAt time.Time           `json:"createdAt"`
+	// PKCE code_verifier bound to this auth request
+	CodeVerifier string `json:"codeVerifier"`
+	// OIDC nonce, verified against the returned id_token
+	Nonce     string    `json:"nonce"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type PasswordReset struct {

@@ -70,7 +70,11 @@ func TestInviteCannotGrantAdmin(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
 		map[string]any{"role": "admin"})
-	require.Equal(t, 400, status)
+	// The admin role is rejected at the schema layer (enum: member,viewer), which
+	// Huma reports as 422; a 400 from the handler is equally acceptable. Either way
+	// an invite must never be able to grant admin.
+	require.True(t, status == http.StatusBadRequest || status == http.StatusUnprocessableEntity,
+		"expected admin role to be rejected, got %d", status)
 }
 
 // TestSingleUseInviteCannotBeReused verifies the atomic use-count guard: a

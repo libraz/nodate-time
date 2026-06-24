@@ -10,9 +10,17 @@ import (
 	"database/sql"
 )
 
+const confirmEventAttachment = `-- name: ConfirmEventAttachment :execresult
+UPDATE event_attachments SET enabled = 1 WHERE id = ? AND enabled = 0
+`
+
+func (q *Queries) ConfirmEventAttachment(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, confirmEventAttachment, id)
+}
+
 const createEventAttachment = `-- name: CreateEventAttachment :execresult
-INSERT INTO event_attachments (public_id, event_id, uploaded_by, filename, content_type, byte_size, storage_key)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO event_attachments (public_id, event_id, uploaded_by, filename, content_type, byte_size, storage_key, enabled)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0)
 `
 
 type CreateEventAttachmentParams struct {
@@ -25,6 +33,8 @@ type CreateEventAttachmentParams struct {
 	StorageKey  string `json:"storageKey"`
 }
 
+// Created disabled; ConfirmEventAttachment enables it once the upload lands, so
+// an abandoned presign never leaves a row pointing at a missing object.
 func (q *Queries) CreateEventAttachment(ctx context.Context, arg CreateEventAttachmentParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createEventAttachment,
 		arg.PublicID,

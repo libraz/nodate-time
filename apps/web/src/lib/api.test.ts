@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, clearToken, hasToken, setToken } from './api';
+import { ApiError, api, clearToken, decodeJwtExp, hasToken, isTokenExpired, setToken } from './api';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+/** Builds an unsigned JWT (`header.payload.signature`) carrying the given claims. */
+function makeJwt(claims: Record<string, unknown>): string {
+  const encode = (obj: unknown) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claims)}.sig`;
 }
 
 const fetchMock = vi.fn();
@@ -28,6 +35,56 @@ describe('token helpers', () => {
     expect(localStorage.getItem('tt_token')).toBe('abc');
     clearToken();
     expect(hasToken()).toBe(false);
+  });
+});
+
+describe('JWT expiry helpers', () => {
+  it('decodes the exp claim from a well-formed token', () => {
+    expect(decodeJwtExp(makeJwt({ exp: 1700000000 }))).toBe(1700000000);
+  });
+
+  it('returns null for a token without an exp claim', () => {
+    expect(decodeJwtExp(makeJwt({ sub: 'user' }))).toBeNull();
+  });
+
+  it('returns null for a malformed token', () => {
+    expect(decodeJwtExp('not-a-jwt')).toBeNull();
+    expect(decodeJwtExp('')).toBeNull();
+    expect(decodeJwtExp('a.b.c')).toBeNull();
+  });
+
+  it('reports an expired token as expired', () => {
+    const past = Math.floor(Date.now() / 1000) - 60;
+    expect(isTokenExpired(makeJwt({ exp: past }))).toBe(true);
+  });
+
+  it('reports a still-valid token as not expired', () => {
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    expect(isTokenExpired(makeJwt({ exp: future }))).toBe(false);
+  });
+
+  it('treats a token with no decodable exp as not expired', () => {
+    expect(isTokenExpired(makeJwt({ sub: 'user' }))).toBe(false);
+    expect(isTokenExpired('garbage')).toBe(false);
+  });
+});
+
+describe('getToken expiry handling', () => {
+  it('clears an expired stored token and reports no token', () => {
+    const past = Math.floor(Date.now() / 1000) - 60;
+    setToken(makeJwt({ exp: past }));
+
+    expect(hasToken()).toBe(false);
+    expect(localStorage.getItem('tt_token')).toBeNull();
+  });
+
+  it('keeps a still-valid stored token', () => {
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    const token = makeJwt({ exp: future });
+    setToken(token);
+
+    expect(hasToken()).toBe(true);
+    expect(localStorage.getItem('tt_token')).toBe(token);
   });
 });
 

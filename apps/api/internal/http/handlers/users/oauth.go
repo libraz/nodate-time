@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -105,6 +106,51 @@ func hashState(state string) string {
 	return hex.EncodeToString(h[:])
 }
 
+const oauthStateCookieName = "oauth_state"
+
+// oauthStateCookie builds the Set-Cookie value that binds an OAuth flow to the
+// browser that started it. SameSite=Lax keeps it on the top-level redirect back
+// from the provider; HttpOnly hides it from script. A negative maxAge clears it.
+func oauthStateCookie(state string, secure bool, maxAge int) string {
+	c := &http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    state,
+		Path:     "/auth/oauth",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+	return c.String()
+}
+
+// secureCookies reports whether OAuth cookies should carry the Secure attribute,
+// inferred from whether the public redirect base is served over HTTPS.
+func secureCookies(deps OAuthDeps) bool {
+	return strings.HasPrefix(strings.ToLower(deps.Config.RedirectBase), "https://")
+}
+
+// idTokenNonce extracts the nonce claim from a JWT id_token without verifying
+// its signature: the token was just received over TLS directly from the
+// provider's token endpoint, so only the nonce binding needs checking here.
+func idTokenNonce(idToken string) string {
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return claims.Nonce
+}
+
 // safeRedirect returns a path safe to redirect the user to after OAuth.
 // Only same-origin paths starting with "/" (and not "//") are accepted to avoid open redirect.
 func safeRedirect(raw string) string {
@@ -149,11 +195,29 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		// PKCE (RFC 7636): bind the authorization code to a one-time verifier so a
+		// stolen/injected code cannot be exchanged without it.
+		verifier, challenge, err := auth.GeneratePKCE()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// OIDC nonce: bind the returned id_token to this request (LINE).
+		nonce := ""
+		if in.Provider == "line" {
+			nonce, err = auth.RandomHex(16)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+		}
+
 		if err := deps.Queries.CreateOAuthState(ctx, generated.CreateOAuthStateParams{
-			StateHash: hashState(state),
-			Provider:  generated.OauthStatesProvider(in.Provider),
-			Redirect:  safeRedirect(in.Redirect),
-			ExpiresAt: time.Now().Add(oauthStateTTL),
+			StateHash:    hashState(state),
+			Provider:     generated.OauthStatesProvider(in.Provider),
+			Redirect:     safeRedirect(in.Redirect),
+			CodeVerifier: verifier,
+			Nonce:        nonce,
+			ExpiresAt:    time.Now().Add(oauthStateTTL),
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -164,17 +228,16 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 		params.Set("redirect_uri", redirectURI(deps.Config, in.Provider))
 		params.Set("scope", pc.Scopes)
 		params.Set("state", state)
-		if in.Provider == "line" {
-			nonce, err := auth.RandomHex(16)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
+		params.Set("code_challenge", challenge)
+		params.Set("code_challenge_method", "S256")
+		if nonce != "" {
 			params.Set("nonce", nonce)
 		}
 
 		out := &OAuthStartOutput{
-			Status: http.StatusFound,
-			URL:    pc.AuthURL + "?" + params.Encode(),
+			Status:    http.StatusFound,
+			URL:       pc.AuthURL + "?" + params.Encode(),
+			SetCookie: oauthStateCookie(state, secureCookies(deps), int(oauthStateTTL.Seconds())),
 		}
 		out.Body.AuthorizeURL = out.URL
 		out.Body.State = state
@@ -201,35 +264,38 @@ type lineUserinfo struct {
 	Email string `json:"email"`
 }
 
-func exchangeCode(ctx context.Context, pc OAuthProviderConfig, code, redirect string) (string, error) {
+func exchangeCode(ctx context.Context, pc OAuthProviderConfig, code, redirect, codeVerifier string) (accessToken, idToken string, err error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirect)
 	form.Set("client_id", pc.ClientID)
 	form.Set("client_secret", pc.ClientSecret)
+	if codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pc.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("oauth token exchange failed: %s: %s", resp.Status, body)
+		return "", "", fmt.Errorf("oauth token exchange failed: %s: %s", resp.Status, body)
 	}
 	var tr tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return tr.AccessToken, nil
+	return tr.AccessToken, tr.IDToken, nil
 }
 
 func fetchUserinfo(ctx context.Context, pc OAuthProviderConfig, accessToken string, dst any) error {
@@ -251,26 +317,36 @@ func fetchUserinfo(ctx context.Context, pc OAuthProviderConfig, accessToken stri
 	return json.NewDecoder(resp.Body).Decode(dst)
 }
 
-func consumeState(ctx context.Context, q *generated.Queries, state, provider string) (string, error) {
+type consumedState struct {
+	Redirect     string
+	CodeVerifier string
+	Nonce        string
+}
+
+func consumeState(ctx context.Context, q *generated.Queries, state, provider string) (consumedState, error) {
 	hash := hashState(state)
 	row, err := q.ConsumeOAuthState(ctx, hash)
 	if err != nil {
-		return "", err
+		return consumedState{}, err
 	}
 	// Atomically claim the state by deleting it: exactly one concurrent caller
 	// observes RowsAffected == 1, so a replayed or duplicated callback cannot
 	// consume the same state twice (CSRF replay window).
 	res, derr := q.DeleteOAuthState(ctx, hash)
 	if derr != nil {
-		return "", derr
+		return consumedState{}, derr
 	}
 	if n, aerr := res.RowsAffected(); aerr != nil || n != 1 {
-		return "", errors.New("oauth: state already consumed")
+		return consumedState{}, errors.New("oauth: state already consumed")
 	}
 	if string(row.Provider) != provider || time.Now().After(row.ExpiresAt) {
-		return "", errors.New("oauth: state mismatch or expired")
+		return consumedState{}, errors.New("oauth: state mismatch or expired")
 	}
-	return safeRedirect(row.Redirect), nil
+	return consumedState{
+		Redirect:     safeRedirect(row.Redirect),
+		CodeVerifier: row.CodeVerifier,
+		Nonce:        row.Nonce,
+	}, nil
 }
 
 // oauthDenied redirects back to the login page with an error code so the user
@@ -278,22 +354,40 @@ func consumeState(ctx context.Context, q *generated.Queries, state, provider str
 // account is not permitted to sign in (domain not allowed / email unverified).
 func oauthDenied(deps OAuthDeps) *OAuthCallbackOutput {
 	dest := strings.TrimRight(deps.WebURL, "/") + "/login?error=oauth_not_allowed"
-	return &OAuthCallbackOutput{Status: http.StatusFound, URL: dest}
+	return &OAuthCallbackOutput{
+		Status:    http.StatusFound,
+		URL:       dest,
+		SetCookie: oauthStateCookie("", secureCookies(deps), -1),
+	}
 }
 
 func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*OAuthCallbackOutput, error) {
 	return func(ctx context.Context, in *OAuthCallbackInput) (*OAuthCallbackOutput, error) {
-		redirectPath, err := consumeState(ctx, deps.Queries, in.State, in.Provider)
+		// Bind the callback to the browser that started the flow: the state cookie
+		// (set at OAuthStart) must be present and match the state query param.
+		// This defeats login CSRF where an attacker feeds a victim their own code.
+		if in.StateCookie == "" || in.StateCookie != in.State {
+			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+		}
+
+		st, err := consumeState(ctx, deps.Queries, in.State, in.Provider)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
 		}
+		redirectPath := st.Redirect
 		pc, ok := resolveProvider(ctx, deps, in.Provider)
 		if !ok {
 			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
 		}
 
-		accessToken, err := exchangeCode(ctx, pc, in.Code, redirectURI(deps.Config, in.Provider))
+		accessToken, idToken, err := exchangeCode(ctx, pc, in.Code, redirectURI(deps.Config, in.Provider), st.CodeVerifier)
 		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+		}
+
+		// Verify the OIDC nonce echoes back in the id_token, rejecting a token
+		// that was minted for a different authorization request (replay).
+		if st.Nonce != "" && idTokenNonce(idToken) != st.Nonce {
 			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
 		}
 
@@ -361,7 +455,11 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		// to the server, recorded in access logs, or leaked via Referer header.
 		dest := strings.TrimRight(deps.WebURL, "/") + "/oauth-complete?redirect=" +
 			url.QueryEscape(redirectPath) + "#token=" + url.QueryEscape(token)
-		return &OAuthCallbackOutput{Status: http.StatusFound, URL: dest}, nil
+		return &OAuthCallbackOutput{
+			Status:    http.StatusFound,
+			URL:       dest,
+			SetCookie: oauthStateCookie("", secureCookies(deps), -1),
+		}, nil
 	}
 }
 
