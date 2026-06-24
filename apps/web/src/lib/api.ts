@@ -1,3 +1,6 @@
+import { getT } from '@/i18n';
+import { toast } from '@/lib/toast';
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
 
 function getToken(): string | null {
@@ -20,9 +23,45 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public detail: string,
+    /** Machine-readable error code from the API envelope (e.g. `CALENDAR.ROLE_REQUIRED`). */
+    public code = '',
   ) {
     super(detail);
   }
+}
+
+/** Maps known API error codes to localized message keys for user-facing toasts. */
+function localizeError(err: ApiError): string {
+  const t = getT();
+  switch (err.code) {
+    case 'CALENDAR.ROLE_REQUIRED':
+    case 'CALENDAR.ACCESS_DENIED':
+      return t('error.noPermission');
+    case 'AUTH.TOKEN_INVALID':
+      return t('error.sessionExpired');
+    default:
+      if (err.status === 403) return t('error.noPermission');
+      return err.detail;
+  }
+}
+
+/** Returns a localized, user-facing message for any thrown error. */
+export function errorMessage(e: unknown, fallback?: string): string {
+  if (e instanceof ApiError) return localizeError(e);
+  return fallback ?? getT()('error.generic');
+}
+
+async function buildError(res: Response): Promise<ApiError> {
+  let detail = res.statusText;
+  let code = '';
+  try {
+    const body = await res.json();
+    detail = body.detail ?? body.message ?? detail;
+    code = typeof body.code === 'string' ? body.code : '';
+  } catch {
+    // ignore non-JSON bodies
+  }
+  return new ApiError(res.status, detail, code);
 }
 
 async function request<T>(
@@ -45,17 +84,11 @@ async function request<T>(
   if (!res.ok) {
     if (res.status === 401 && !skipAuthRedirect) {
       clearToken();
+      toast.error(getT()('error.sessionExpired'));
       window.location.href = '/login';
-      throw new ApiError(401, 'Unauthorized');
+      throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
     }
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body.detail ?? body.message ?? detail;
-    } catch {
-      // ignore
-    }
-    throw new ApiError(res.status, detail);
+    throw await buildError(res);
   }
 
   if (res.status === 204) return undefined as T;
@@ -69,4 +102,21 @@ export const api = {
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', ...(body != null ? { body: JSON.stringify(body) } : {}) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** Fetches a binary response through the central client (auth + 401 handling). */
+  getBlob: async (path: string): Promise<Blob> => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}${path}`, { headers });
+    if (!res.ok) {
+      if (res.status === 401) {
+        clearToken();
+        toast.error(getT()('error.sessionExpired'));
+        window.location.href = '/login';
+        throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
+      }
+      throw await buildError(res);
+    }
+    return res.blob();
+  },
 };

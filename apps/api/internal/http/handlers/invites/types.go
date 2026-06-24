@@ -15,8 +15,9 @@ type InviteResponse struct {
 type CreateInviteInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
-		Role    string `json:"role" enum:"admin,member,viewer" default:"member"`
-		MaxUses *int32 `json:"maxUses,omitempty" required:"false"`
+		Role           string `json:"role" enum:"member,viewer" default:"member"`
+		MaxUses        *int32 `json:"maxUses,omitempty" required:"false" minimum:"1"`
+		ExpiresInHours *int   `json:"expiresInHours,omitempty" required:"false" minimum:"1" maximum:"8760"`
 	}
 }
 type CreateInviteOutput struct {
@@ -51,7 +52,7 @@ type DeleteInviteOutput struct{}
 // --- Public share ---
 
 type PublicCalendarInput struct {
-	Token     string `path:"token"`
+	Token string `path:"token"`
 }
 type PublicCalendarOutput struct {
 	Body struct {

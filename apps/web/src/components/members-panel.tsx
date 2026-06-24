@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
+import { ROLE_OPTIONS, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -42,7 +44,7 @@ export function MembersPanel() {
       await fetchMembers(calendarId);
       toast.success(t('panel.updated'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     }
   };
 
@@ -53,7 +55,7 @@ export function MembersPanel() {
       await fetchMembers(calendarId);
       toast.success(t('panel.updated'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : t('members.lastAdmin'));
+      toast.error(errorMessage(e));
     }
   };
 
@@ -62,15 +64,15 @@ export function MembersPanel() {
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
+        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('members')}
       />
-      <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <div className="min-w-0">
-            <h2 className="truncate text-[16px] font-semibold">{t('panel.members')}</h2>
+            <h2 className="truncate text-subhead font-semibold">{t('panel.members')}</h2>
             {calendar && (
-              <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
+              <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                 {calendar.name}
               </p>
             )}
@@ -80,7 +82,7 @@ export function MembersPanel() {
               <button
                 type="button"
                 onClick={() => toggleRightPanel('share')}
-                className="btn-primary px-3 py-1.5 text-[12px]"
+                className="btn-primary px-3 py-1.5 text-footnote"
               >
                 {t('invites.create')}
               </button>
@@ -108,9 +110,9 @@ export function MembersPanel() {
 
         <div className="flex-1 overflow-y-auto">
           {!calendarId ? (
-            <p className="py-10 text-center text-[13px] text-[var(--color-text-tertiary)]">—</p>
+            <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
           ) : members.length === 0 ? (
-            <p className="py-10 text-center text-[13px] text-[var(--color-text-tertiary)]">—</p>
+            <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
           ) : (
             <ul className="divide-y divide-[var(--color-separator)]">
               {members.map((m) => {
@@ -122,41 +124,35 @@ export function MembersPanel() {
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     <span
                       aria-hidden
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold text-white"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
                       style={{ backgroundColor: m.color }}
                     >
                       {m.icon || m.name.slice(0, 1)}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[14px] font-semibold text-[var(--color-text-primary)]">
+                      <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
                         {m.name}
                         {isMe && (
-                          <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent)]">
+                          <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
                             you
                           </span>
                         )}
                       </p>
-                      <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
+                      <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                         {m.email}
                       </p>
                     </div>
                     {canChangeRole ? (
-                      <select
+                      <CustomSelect
                         value={m.role}
-                        onChange={(e) => handleRoleChange(m, e.target.value)}
-                        className="input-modern shrink-0 text-[12px]"
-                      >
-                        <option value="admin">{t('members.roleAdmin')}</option>
-                        <option value="member">{t('members.roleMember')}</option>
-                        <option value="viewer">{t('members.roleViewer')}</option>
-                      </select>
+                        onChange={(v) => handleRoleChange(m, v)}
+                        className="shrink-0"
+                        triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                      />
                     ) : (
-                      <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-[12px] text-[var(--color-text-secondary)]">
-                        {m.role === 'admin'
-                          ? t('members.roleAdmin')
-                          : m.role === 'viewer'
-                            ? t('members.roleViewer')
-                            : t('members.roleMember')}
+                      <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
+                        {t(roleLabelKey(m.role))}
                       </span>
                     )}
                     {canRemove && (

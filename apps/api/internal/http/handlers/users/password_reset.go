@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
@@ -53,11 +54,16 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 				"This link expires in 1 hour:\n\n%s\n\nIf you did not request this, ignore this email.",
 			user.Name, resetURL,
 		)
-		_ = deps.Mailer.Send(ctx, mailer.Message{
+		// The response is always {ok:true} regardless of delivery so the
+		// endpoint cannot be used to probe which emails exist. A delivery
+		// failure is logged (without the token) so operators can still notice.
+		if err := deps.Mailer.Send(ctx, mailer.Message{
 			To:      user.Email,
 			Subject: "Reset your Nodate Time password",
 			Text:    body,
-		})
+		}); err != nil {
+			slog.ErrorContext(ctx, "failed to send password reset email", "userID", user.ID, "error", err)
+		}
 
 		return out, nil
 	}
@@ -96,6 +102,11 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		if err := q.MarkPasswordResetUsed(ctx, row.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Invalidate every other outstanding reset for this user so a second
+		// stolen/leaked token cannot be used after a successful reset.
+		if err := q.InvalidateUserPasswordResets(ctx, row.UserID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		if err := tx.Commit(); err != nil {

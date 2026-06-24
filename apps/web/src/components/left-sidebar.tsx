@@ -46,7 +46,7 @@ export function LeftSidebar() {
     <div className="glass-surface hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
       {/* Calendars section */}
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+        <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
           {t('calendar.calendarList')}
         </span>
         <div className="flex items-center gap-1">
@@ -130,7 +130,7 @@ export function LeftSidebar() {
                 }}
               />
               <span
-                className="flex-1 truncate text-[14px]"
+                className="flex-1 truncate text-default"
                 style={{
                   color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
                 }}
@@ -171,14 +171,14 @@ export function LeftSidebar() {
               <button
                 type="button"
                 onClick={() => setShowNewForm(false)}
-                className="btn-secondary h-8 flex-1 text-[12px]"
+                className="btn-secondary h-8 flex-1 text-footnote"
               >
                 {t('common.cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleCreateCalendar}
-                className="btn-primary h-8 flex-1 text-[12px]"
+                className="btn-primary h-8 flex-1 text-footnote"
               >
                 {t('common.create')}
               </button>
@@ -192,7 +192,7 @@ export function LeftSidebar() {
 
       {/* Memo section */}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+        <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
           {t('tabs.memo')}
         </span>
         <button
@@ -245,7 +245,7 @@ export function LeftSidebar() {
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
           </svg>
-          <span className="text-[13px]">{t('tabs.settings')}</span>
+          <span className="text-body">{t('tabs.settings')}</span>
         </button>
       </div>
     </div>

@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -60,7 +61,11 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		calPubHex := pubIDToHex(cal.PublicID)
 		evtPubHex := pubIDToHex(evt.PublicID)
 		attachPubHex := attachPubID.String()
-		storageKey := fmt.Sprintf("attachments/%s/%s/%s/%s", calPubHex, evtPubHex, attachPubHex, in.Body.Filename)
+		// The storage key is composed only of server-generated identifiers. The
+		// client-supplied filename is persisted in the DB (and surfaced via
+		// Content-Disposition on download) but never concatenated into the key,
+		// which would otherwise allow "../" path traversal into other namespaces.
+		storageKey := fmt.Sprintf("attachments/%s/%s/%s", calPubHex, evtPubHex, attachPubHex)
 
 		_, err = deps.Queries.CreateEventAttachment(ctx, generated.CreateEventAttachmentParams{
 			PublicID:    attachPubID[:],
@@ -124,7 +129,18 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
 	return func(ctx context.Context, in *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// The attachment must belong to an event in the resolved calendar.
+		// Without this scoping check any member could download another tenant's
+		// files by passing a foreign attachment UUID (cross-tenant IDOR).
+		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -138,6 +154,9 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 		}
 		att, err := deps.Queries.GetAttachmentByPublicID(ctx, attPub)
 		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+		if att.EventID != evt.ID || !att.Enabled {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
@@ -191,6 +210,13 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		err = deps.Queries.SoftDeleteAttachment(ctx, att.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Remove the underlying object best-effort so deleted attachments are no
+		// longer retrievable and do not accumulate as orphaned storage.
+		if deps.Storage != nil {
+			if derr := deps.Storage.DeleteObject(ctx, att.StorageKey); derr != nil {
+				slog.WarnContext(ctx, "failed to delete attachment object", "key", att.StorageKey, "error", derr)
+			}
 		}
 
 		return &DeleteAttachmentOutput{}, nil

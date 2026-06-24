@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { useT } from '@/i18n';
+import { errorMessage } from '@/lib/api';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { toast } from '@/lib/toast';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
+import type { Memo } from '@/types/calendar';
 
 export function SettingsModal() {
   const t = useT();
@@ -21,14 +26,14 @@ export function SettingsModal() {
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
+        className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
         onClick={toggleSettings}
       />
 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]">
           <div className="flex items-center justify-between px-6 py-4">
-            <h2 className="text-[18px] font-semibold text-[var(--color-text-primary)]">
+            <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
               {t('tabs.settings')}
             </h2>
             <button
@@ -53,7 +58,7 @@ export function SettingsModal() {
           <div className="px-6 pb-6 space-y-5">
             {/* Theme */}
             <div>
-              <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+              <span className="mb-2 block text-body text-[var(--color-text-primary)]">
                 {t('settings.theme')}
               </span>
               <div className="segmented-control w-full">
@@ -77,7 +82,7 @@ export function SettingsModal() {
 
             {/* Color mode */}
             <div>
-              <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+              <span className="mb-2 block text-body text-[var(--color-text-primary)]">
                 {t('settings.colorMode')}
               </span>
               <div className="segmented-control w-full">
@@ -101,7 +106,7 @@ export function SettingsModal() {
 
             {/* Language */}
             <div>
-              <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+              <span className="mb-2 block text-body text-[var(--color-text-primary)]">
                 {t('settings.language')}
               </span>
               <div className="segmented-control w-full">
@@ -132,33 +137,67 @@ export function MemoSection() {
   const toggleMemo = useCalendarStore((s) => s.toggleMemo);
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
   const calendars = useCalendarStore((s) => s.calendars);
+  const membersMap = useCalendarStore((s) => s.membersMap);
+  const me = useAuthStore((s) => s.user);
   const [newTitle, setNewTitle] = useState('');
+  const [adding, setAdding] = useState(false);
 
-  const handleAdd = () => {
-    if (!newTitle.trim()) return;
-    const calendarId = calendars[0]?.id ?? '';
-    addMemo(calendarId, { title: newTitle.trim() });
-    setNewTitle('');
+  const calendarId = calendars[0]?.id ?? '';
+  const editable = canEdit(roleForCalendar(membersMap[calendarId], me?.email));
+
+  const handleAdd = async () => {
+    const title = newTitle.trim();
+    if (!title || adding || !editable) return;
+    setAdding(true);
+    try {
+      await addMemo(calendarId, { title });
+      setNewTitle('');
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleToggle = async (memo: Memo) => {
+    if (!editable) return;
+    try {
+      await toggleMemo(memo.calendarId, memo.id, !memo.done, memo.title);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  const handleDelete = async (memo: Memo) => {
+    if (!editable) return;
+    try {
+      await deleteMemo(memo.calendarId, memo.id);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
   };
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-5 py-4">
-        <input
-          type="text"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleAdd();
-          }}
-          placeholder={t('panel.enterToPost')}
-          className="input-modern h-10 flex-1 text-sm"
-        />
-      </div>
+      {editable && (
+        <div className="flex items-center gap-2 px-5 py-4">
+          <input
+            type="text"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAdd();
+            }}
+            disabled={adding}
+            placeholder={t('panel.enterToPost')}
+            className="input-modern h-10 flex-1 text-sm disabled:opacity-50"
+          />
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         {memos.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-tertiary)]">
-            <p className="text-[14px]">{t('panel.noMemos')}</p>
+            <p className="text-default">{t('panel.noMemos')}</p>
           </div>
         ) : (
           memos.map((memo) => (
@@ -168,8 +207,9 @@ export function MemoSection() {
             >
               <button
                 type="button"
-                onClick={() => toggleMemo(memo.calendarId, memo.id, !memo.done, memo.title)}
-                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded"
+                onClick={() => handleToggle(memo)}
+                disabled={!editable}
+                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded disabled:opacity-60"
               >
                 {memo.done ? (
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -206,7 +246,7 @@ export function MemoSection() {
                 )}
               </button>
               <span
-                className="flex-1 text-[14px]"
+                className="flex-1 text-default"
                 style={{
                   textDecoration: memo.done ? 'line-through' : 'none',
                   color: memo.done ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
@@ -214,23 +254,25 @@ export function MemoSection() {
               >
                 {memo.title}
               </span>
-              <button
-                type="button"
-                onClick={() => deleteMemo(memo.calendarId, memo.id)}
-                className="flex h-[22px] w-[22px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
-                style={{ borderRadius: 'var(--radius-sm)' }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(memo)}
+                  className="flex h-[22px] w-[22px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                  style={{ borderRadius: 'var(--radius-sm)' }}
                 >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           ))
         )}

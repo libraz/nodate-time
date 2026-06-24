@@ -29,6 +29,7 @@ function MobileSearchView() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
+  const openEventModal = useUiStore((s) => s.openEventModal);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,11 +49,12 @@ function MobileSearchView() {
   }, [q, events]);
 
   const timezone = useUiStore((s) => s.timezone);
-  const handleSelect = (startAt: string) => {
+  const handleSelect = (eventId: string, startAt: string) => {
     const dt = fromISOInZone(startAt, timezone);
     setCurrentMonth(dt.startOf('month'));
     setSelectedDate(dt);
     setMobileTab('calendar');
+    openEventModal(eventId);
   };
 
   return (
@@ -78,7 +80,7 @@ function MobileSearchView() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('search.placeholder')}
-            className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-[var(--color-text-tertiary)]"
+            className="flex-1 bg-transparent text-callout outline-none placeholder:text-[var(--color-text-tertiary)]"
           />
         </div>
       </div>
@@ -97,10 +99,10 @@ function MobileSearchView() {
               <circle cx="11" cy="11" r="7" />
               <line x1="16.65" y1="16.65" x2="21" y2="21" />
             </svg>
-            <span className="text-[15px]">{t('search.searchEvents')}</span>
+            <span className="text-callout">{t('search.searchEvents')}</span>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-[15px] text-[var(--color-text-tertiary)]">
+          <div className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]">
             {t('search.noResults')}
           </div>
         ) : (
@@ -115,7 +117,7 @@ function MobileSearchView() {
                 <button
                   key={evt.id}
                   type="button"
-                  onClick={() => handleSelect(evt.startAt)}
+                  onClick={() => handleSelect(evt.id, evt.startAt)}
                   className="flex w-full items-start gap-3 px-4 py-3.5 text-left hover:bg-[var(--color-hover)]"
                 >
                   <span
@@ -123,12 +125,12 @@ function MobileSearchView() {
                     style={{ backgroundColor: evt.color }}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[15px] font-medium text-[var(--color-text-primary)]">
+                    <p className="truncate text-callout font-medium text-[var(--color-text-primary)]">
                       {evt.title}
                     </p>
-                    <p className="text-[13px] text-[var(--color-text-secondary)]">{dateLabel}</p>
+                    <p className="text-body text-[var(--color-text-secondary)]">{dateLabel}</p>
                     {evt.location && (
-                      <p className="truncate text-[13px] text-[var(--color-text-tertiary)]">
+                      <p className="truncate text-body text-[var(--color-text-tertiary)]">
                         {evt.location}
                       </p>
                     )}
@@ -154,12 +156,12 @@ function MobileSettingsView() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto px-4 py-4">
-      <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
+      <h3 className="mb-3 text-footnote font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
         {t('settings.appearance')}
       </h3>
 
       <div className="mb-4">
-        <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+        <span className="mb-2 block text-body text-[var(--color-text-primary)]">
           {t('settings.theme')}
         </span>
         <div className="segmented-control w-full">
@@ -182,7 +184,7 @@ function MobileSettingsView() {
       </div>
 
       <div className="mb-4">
-        <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+        <span className="mb-2 block text-body text-[var(--color-text-primary)]">
           {t('settings.colorMode')}
         </span>
         <div className="segmented-control w-full">
@@ -205,7 +207,7 @@ function MobileSettingsView() {
       </div>
 
       <div className="mb-4">
-        <span className="mb-2 block text-[13px] text-[var(--color-text-primary)]">
+        <span className="mb-2 block text-body text-[var(--color-text-primary)]">
           {t('settings.language')}
         </span>
         <div className="segmented-control w-full">
@@ -386,7 +388,7 @@ export function App() {
             }}
           >
             {TAB_ICONS[tab]}
-            <span className="text-[10px] font-medium">{t(`tabs.${tab}`)}</span>
+            <span className="text-micro font-medium">{t(`tabs.${tab}`)}</span>
           </button>
         ))}
       </div>

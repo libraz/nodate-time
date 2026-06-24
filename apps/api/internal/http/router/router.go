@@ -3,6 +3,7 @@ package router
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -30,8 +31,14 @@ type Deps struct {
 	WebURL    string
 	OAuth     users.OAuthConfig
 	Cipher    *secrets.Cipher
+	// GoogleAllowedDomains restricts Google sign-in to these email domains.
+	// Empty means unrestricted. See config.GoogleAllowedDomainList.
+	GoogleAllowedDomains []string
 	// DevMode enables development-only endpoints (e.g. /auth/dev-login).
 	DevMode bool
+	// PasswordLoginEnabled gates the email+password auth routes (register,
+	// login, password reset). When false, only OAuth/OIDC sign-in is offered.
+	PasswordLoginEnabled bool
 }
 
 func Build(deps Deps) http.Handler {
@@ -44,28 +51,39 @@ func Build(deps Deps) http.Handler {
 	})
 
 	// --- Public routes (no auth) ---
+	// Sensitive unauthenticated endpoints (login, register, password reset,
+	// OAuth, public share) are rate-limited per client IP to blunt credential
+	// brute-force and password-reset mail-bombing.
+	authLimiter := middleware.NewRateLimiter(60, time.Minute)
 	r.Group(func(pub chi.Router) {
+		pub.Use(authLimiter.Middleware())
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
 
-		huma.Register(api, huma.Operation{
-			OperationID: "register",
-			Method:      http.MethodPost,
-			Path:        "/auth/register",
-			Summary:     "Register a new user",
-			Tags:        []string{"Auth"},
-		}, users.Register(userDeps))
+		// Email+password auth (register, login, password reset) is registered
+		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
+		if deps.PasswordLoginEnabled {
+			huma.Register(api, huma.Operation{
+				OperationID: "register",
+				Method:      http.MethodPost,
+				Path:        "/auth/register",
+				Summary:     "Register a new user",
+				Tags:        []string{"Auth"},
+			}, users.Register(userDeps))
 
-		huma.Register(api, huma.Operation{
-			OperationID: "login",
-			Method:      http.MethodPost,
-			Path:        "/auth/login",
-			Summary:     "Login with email and password",
-			Tags:        []string{"Auth"},
-		}, users.Login(userDeps))
+			huma.Register(api, huma.Operation{
+				OperationID: "login",
+				Method:      http.MethodPost,
+				Path:        "/auth/login",
+				Summary:     "Login with email and password",
+				Tags:        []string{"Auth"},
+			}, users.Login(userDeps))
+		}
 
 		// Development-only: password-less login for seeded sample accounts.
+		// Gated by DevMode alone, so it survives even when password login is
+		// disabled — dev verification is never blocked.
 		if deps.DevMode {
 			huma.Register(api, huma.Operation{
 				OperationID: "dev-login",
@@ -76,32 +94,45 @@ func Build(deps Deps) http.Handler {
 			}, users.DevLogin(userDeps))
 		}
 
-		resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL}
+		// Password reset only makes sense when password login is enabled.
+		if deps.PasswordLoginEnabled {
+			resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL}
 
-		huma.Register(api, huma.Operation{
-			OperationID: "request-password-reset",
-			Method:      http.MethodPost,
-			Path:        "/auth/password-reset/request",
-			Summary:     "Request a password reset email",
-			Tags:        []string{"Auth"},
-		}, users.RequestPasswordReset(resetDeps))
+			huma.Register(api, huma.Operation{
+				OperationID: "request-password-reset",
+				Method:      http.MethodPost,
+				Path:        "/auth/password-reset/request",
+				Summary:     "Request a password reset email",
+				Tags:        []string{"Auth"},
+			}, users.RequestPasswordReset(resetDeps))
 
-		huma.Register(api, huma.Operation{
-			OperationID: "confirm-password-reset",
-			Method:      http.MethodPost,
-			Path:        "/auth/password-reset/confirm",
-			Summary:     "Confirm password reset with token",
-			Tags:        []string{"Auth"},
-		}, users.ConfirmPasswordReset(resetDeps))
+			huma.Register(api, huma.Operation{
+				OperationID: "confirm-password-reset",
+				Method:      http.MethodPost,
+				Path:        "/auth/password-reset/confirm",
+				Summary:     "Confirm password reset with token",
+				Tags:        []string{"Auth"},
+			}, users.ConfirmPasswordReset(resetDeps))
+		}
 
 		oauthDeps := users.OAuthDeps{
-			DB:        deps.DB,
-			Queries:   deps.Queries,
-			JWTSecret: deps.JWTSecret,
-			WebURL:    deps.WebURL,
-			Config:    deps.OAuth,
-			Cipher:    deps.Cipher,
+			DB:                   deps.DB,
+			Queries:              deps.Queries,
+			JWTSecret:            deps.JWTSecret,
+			WebURL:               deps.WebURL,
+			Config:               deps.OAuth,
+			Cipher:               deps.Cipher,
+			AllowedDomains:       deps.GoogleAllowedDomains,
+			PasswordLoginEnabled: deps.PasswordLoginEnabled,
 		}
+
+		huma.Register(api, huma.Operation{
+			OperationID: "list-oauth-providers-public",
+			Method:      http.MethodGet,
+			Path:        "/auth/oauth/providers",
+			Summary:     "List enabled OAuth providers for the login screen",
+			Tags:        []string{"Auth"},
+		}, users.ListEnabledProviders(oauthDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "oauth-start",
@@ -144,7 +175,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}
@@ -561,7 +592,7 @@ func Build(deps Deps) http.Handler {
 			}
 			return false
 		}
-		adminDeps := admin.Deps{Queries: deps.Queries, Cipher: deps.Cipher, EnvFallback: envHas}
+		adminDeps := admin.Deps{Queries: deps.Queries, Cipher: deps.Cipher, EnvFallback: envHas, AllowedDomains: deps.GoogleAllowedDomains}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "list-oauth-providers",
@@ -587,6 +618,31 @@ func Build(deps Deps) http.Handler {
 			Tags:          []string{"Admin"},
 			DefaultStatus: 204,
 		}, admin.DeleteOAuthProvider(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "list-allowed-emails",
+			Method:      http.MethodGet,
+			Path:        "/admin/allowed-emails",
+			Summary:     "List individually allowed OAuth sign-in emails (admin only)",
+			Tags:        []string{"Admin"},
+		}, admin.ListAllowedEmails(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "create-allowed-email",
+			Method:      http.MethodPost,
+			Path:        "/admin/allowed-emails",
+			Summary:     "Allow an individual email to sign in via OAuth (admin only)",
+			Tags:        []string{"Admin"},
+		}, admin.CreateAllowedEmail(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "delete-allowed-email",
+			Method:        http.MethodDelete,
+			Path:          "/admin/allowed-emails/{id}",
+			Summary:       "Remove an individually allowed email (admin only)",
+			Tags:          []string{"Admin"},
+			DefaultStatus: 204,
+		}, admin.DeleteAllowedEmail(adminDeps))
 	})
 
 	return r

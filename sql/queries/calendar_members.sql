@@ -20,3 +20,9 @@ DELETE FROM calendar_members WHERE calendar_id = ? AND user_id = ?;
 
 -- name: CountCalendarAdmins :one
 SELECT COUNT(*) FROM calendar_members WHERE calendar_id = ? AND role = 'admin';
+
+-- name: CountCalendarAdminsForUpdate :one
+SELECT COUNT(*) FROM calendar_members WHERE calendar_id = ? AND role = 'admin' FOR UPDATE;
+
+-- name: GetCalendarMemberForUpdate :one
+SELECT * FROM calendar_members WHERE calendar_id = ? AND user_id = ? FOR UPDATE;

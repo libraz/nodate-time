@@ -13,7 +13,7 @@ import { useUiStore } from '@/stores/ui-store';
 function useFloating(open: boolean, floatingWidth = 280) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const floatingRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
 
   // Recompute position when open changes or after floating renders
   const reposition = useCallback(() => {
@@ -26,6 +26,7 @@ function useFloating(open: boolean, floatingWidth = 280) {
     setPos({
       top: goAbove ? Math.max(8, rect.top - floatingHeight - 4) : rect.bottom + 4,
       left: Math.max(8, Math.min(rect.left, window.innerWidth - floatingWidth - 8)),
+      width: rect.width,
     });
   }, [open, floatingWidth]);
 
@@ -143,7 +144,7 @@ function DatePickerDropdown({
             <path d="M15 18l-6-6 6-6" />
           </svg>
         </button>
-        <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+        <span className="text-default font-semibold tabular-nums text-[var(--color-text-primary)]">
           {monthLabel}
         </span>
         <button
@@ -171,7 +172,7 @@ function DatePickerDropdown({
         {weekdays.map((wd, i) => (
           <div
             key={wd}
-            className="py-1 text-center text-[11px] font-medium"
+            className="py-1 text-center text-caption font-medium"
             style={{
               color:
                 i === 0
@@ -201,7 +202,7 @@ function DatePickerDropdown({
               onClick={() => handleSelect(day)}
               disabled={isDisabled}
               aria-label={day.toFormat('yyyy-MM-dd')}
-              className="flex h-9 w-full items-center justify-center rounded-full text-[13px] transition-colors"
+              className="flex h-9 w-full items-center justify-center rounded-full text-body tabular-nums transition-colors"
               style={{
                 backgroundColor: isSelected ? 'var(--color-accent)' : 'transparent',
                 color: isSelected
@@ -292,7 +293,7 @@ function TimePickerDropdown({
               onChange(slot);
               onClose();
             }}
-            className="flex w-full items-center justify-center py-2 text-[14px] transition-colors"
+            className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
             style={{
               backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
               color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
@@ -321,10 +322,19 @@ interface CustomSelectProps {
   value: string;
   options: SelectOption[];
   onChange: (value: string) => void;
+  /** Class applied to the wrapper element (e.g. width constraints). */
   className?: string;
+  /** Overrides the default filled trigger look (e.g. "input-modern" or a pill). */
+  triggerClassName?: string;
 }
 
-export function CustomSelect({ value, options, onChange, className }: CustomSelectProps) {
+export function CustomSelect({
+  value,
+  options,
+  onChange,
+  className,
+  triggerClassName,
+}: CustomSelectProps) {
   const [open, setOpen] = useState(false);
   const { anchorRef, floatingRef, pos } = useFloating(open, 160);
   const selectedRef = useRef<HTMLButtonElement>(null);
@@ -346,8 +356,12 @@ export function CustomSelect({ value, options, onChange, className }: CustomSele
         ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-[14px] text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]"
-        style={{ borderRadius: 'var(--radius-sm)' }}
+        className={
+          triggerClassName
+            ? `flex w-full items-center justify-between gap-2 text-left transition-colors ${triggerClassName}`
+            : 'flex w-full items-center justify-between gap-2 bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-default text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]'
+        }
+        style={triggerClassName ? undefined : { borderRadius: 'var(--radius-sm)' }}
       >
         <span className="truncate">{selected?.label ?? value}</span>
         <svg
@@ -370,10 +384,11 @@ export function CustomSelect({ value, options, onChange, className }: CustomSele
         createPortal(
           <div
             ref={floatingRef}
-            className="dropdown-panel fixed z-[9999] max-h-[240px] min-w-[160px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
+            className="dropdown-panel fixed z-[9999] max-h-[240px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
             style={{
               top: pos.top,
               left: pos.left,
+              minWidth: Math.max(pos.width, 160),
               boxShadow: 'var(--shadow-elevated)',
               backdropFilter: 'blur(20px)',
             }}
@@ -389,7 +404,7 @@ export function CustomSelect({ value, options, onChange, className }: CustomSele
                     onChange(opt.value);
                     setOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2.5 text-left text-[14px] transition-colors"
+                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2.5 text-left text-default transition-colors"
                   style={{
                     backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
                     color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
@@ -460,7 +475,7 @@ export function DateTimeField({
 
   return (
     <div className="flex items-center justify-between py-2.5">
-      {label && <span className="text-[14px] text-[var(--color-text-secondary)]">{label}</span>}
+      {label && <span className="text-default text-[var(--color-text-secondary)]">{label}</span>}
       <div className="flex items-center gap-2">
         <button
           ref={dateFloating.anchorRef}
@@ -469,7 +484,7 @@ export function DateTimeField({
             setShowDatePicker((v) => !v);
             setShowTimePicker(false);
           }}
-          className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+          className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
         >
           {dateLabel}
         </button>
@@ -492,7 +507,7 @@ export function DateTimeField({
                 setShowTimePicker((v) => !v);
                 setShowDatePicker(false);
               }}
-              className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-[14px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+              className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
             >
               {timeValue}
             </button>

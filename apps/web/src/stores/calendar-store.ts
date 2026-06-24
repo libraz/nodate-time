@@ -1,6 +1,8 @@
+import { DateTime } from 'luxon';
 import { create } from 'zustand';
 import { api } from '@/lib/api';
 import { loadJson, saveJson } from '@/lib/storage';
+import { useUiStore } from '@/stores/ui-store';
 import type {
   Calendar,
   CalendarEvent,
@@ -9,6 +11,23 @@ import type {
   Memo,
   RecurrenceRule,
 } from '@/types/calendar';
+
+/** Request body shared by event create and update. */
+export interface EventInput {
+  title: string;
+  allDay: boolean;
+  startAt: string;
+  endAt: string;
+  timezone?: string | undefined;
+  color?: string | undefined;
+  location?: string | undefined;
+  memo?: string | undefined;
+  url?: string | undefined;
+  notificationOffset?: number | null | undefined;
+  participants?: string[] | undefined;
+  assignedTo?: string | null | undefined;
+  recurrenceRule?: RecurrenceRule | null | undefined;
+}
 
 interface CalendarState {
   calendars: Calendar[];
@@ -26,41 +45,14 @@ interface CalendarState {
   fetchLabels: (calendarId: string) => Promise<void>;
 
   addCalendar: (cal: { name: string; color: string }) => Promise<void>;
+  updateCalendar: (
+    id: string,
+    patch: { name?: string; color?: string; coverUrl?: string },
+  ) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
 
-  addEvent: (
-    calendarId: string,
-    evt: {
-      title: string;
-      allDay: boolean;
-      startAt: string;
-      endAt: string;
-      color?: string | undefined;
-      location?: string | undefined;
-      memo?: string | undefined;
-      url?: string | undefined;
-      notificationOffset?: number | null | undefined;
-      participants?: string[] | undefined;
-      recurrenceRule?: RecurrenceRule | null | undefined;
-    },
-  ) => Promise<void>;
-  updateEvent: (
-    calendarId: string,
-    eventId: string,
-    evt: {
-      title: string;
-      allDay: boolean;
-      startAt: string;
-      endAt: string;
-      color?: string | undefined;
-      location?: string | undefined;
-      memo?: string | undefined;
-      url?: string | undefined;
-      notificationOffset?: number | null | undefined;
-      participants?: string[] | undefined;
-      recurrenceRule?: RecurrenceRule | null | undefined;
-    },
-  ) => Promise<void>;
+  addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
+  updateEvent: (calendarId: string, eventId: string, evt: EventInput) => Promise<void>;
   deleteEvent: (calendarId: string, eventId: string) => Promise<void>;
 
   addMemo: (calendarId: string, memo: { title: string }) => Promise<void>;
@@ -69,6 +61,9 @@ interface CalendarState {
 
   toggleCalendarFilter: (calId: string) => void;
   setActiveCalendarIds: (ids: string[]) => void;
+
+  /** Returns the currently visible event window as ISO date strings. */
+  visibleRange: () => { start: string; end: string };
 }
 
 export const useCalendarStore = create<CalendarState>((set, get) => ({
@@ -154,6 +149,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     await get().fetchMembers(newCal.id);
   },
 
+  async updateCalendar(id, patch) {
+    const updated = await api.put<Calendar>(`/calendars/${id}`, patch);
+    set((s) => ({
+      calendars: s.calendars.map((c) => (c.id === id ? { ...c, ...updated } : c)),
+    }));
+  },
+
   async deleteCalendar(id) {
     await api.delete(`/calendars/${id}`);
     set((s) => {
@@ -180,12 +182,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async updateEvent(calendarId, eventId, evt) {
     const updated = await api.put<CalendarEvent>(`/calendars/${calendarId}/events/${eventId}`, evt);
-    if (updated.recurrenceRule || eventId.includes('_')) {
-      // Recurring event: parent ID changed, re-fetch to get all expanded instances
+    const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
+    if (updated.recurrenceRule || wasRecurring) {
+      // Recurring event: expanded instances change, so re-fetch the visible range
+      // to replace the stale (or removed) occurrences with fresh ones.
       const parentId = eventId.includes('_') ? eventId.substring(0, 36) : eventId;
       set((s) => ({
         events: s.events.filter((e) => !e.id.startsWith(parentId)),
       }));
+      const { start, end } = get().visibleRange();
+      await get().fetchEvents(start, end);
     } else {
       set((s) => ({
         events: s.events.map((e) => (e.id === eventId ? { ...updated, calendarId } : e)),
@@ -251,5 +257,15 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   setActiveCalendarIds(ids) {
     saveJson('activeCalendarIds', ids);
     set({ activeCalendarIds: ids });
+  },
+
+  visibleRange() {
+    const { currentMonth } = useUiStore.getState();
+    const start = currentMonth.minus({ months: 1 }).startOf('month');
+    const end = currentMonth.plus({ months: 2 }).startOf('month');
+    return {
+      start: (start.toISODate() ?? DateTime.now().toISODate()) as string,
+      end: (end.toISODate() ?? DateTime.now().toISODate()) as string,
+    };
   },
 }));

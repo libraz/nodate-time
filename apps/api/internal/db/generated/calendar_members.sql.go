@@ -43,6 +43,17 @@ func (q *Queries) CountCalendarAdmins(ctx context.Context, calendarID uint32) (i
 	return count, err
 }
 
+const countCalendarAdminsForUpdate = `-- name: CountCalendarAdminsForUpdate :one
+SELECT COUNT(*) FROM calendar_members WHERE calendar_id = ? AND role = 'admin' FOR UPDATE
+`
+
+func (q *Queries) CountCalendarAdminsForUpdate(ctx context.Context, calendarID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countCalendarAdminsForUpdate, calendarID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getCalendarMember = `-- name: GetCalendarMember :one
 SELECT id, calendar_id, user_id, role, color, joined_at FROM calendar_members WHERE calendar_id = ? AND user_id = ?
 `
@@ -54,6 +65,29 @@ type GetCalendarMemberParams struct {
 
 func (q *Queries) GetCalendarMember(ctx context.Context, arg GetCalendarMemberParams) (CalendarMember, error) {
 	row := q.db.QueryRowContext(ctx, getCalendarMember, arg.CalendarID, arg.UserID)
+	var i CalendarMember
+	err := row.Scan(
+		&i.ID,
+		&i.CalendarID,
+		&i.UserID,
+		&i.Role,
+		&i.Color,
+		&i.JoinedAt,
+	)
+	return i, err
+}
+
+const getCalendarMemberForUpdate = `-- name: GetCalendarMemberForUpdate :one
+SELECT id, calendar_id, user_id, role, color, joined_at FROM calendar_members WHERE calendar_id = ? AND user_id = ? FOR UPDATE
+`
+
+type GetCalendarMemberForUpdateParams struct {
+	CalendarID uint32 `json:"calendarId"`
+	UserID     uint32 `json:"userId"`
+}
+
+func (q *Queries) GetCalendarMemberForUpdate(ctx context.Context, arg GetCalendarMemberForUpdateParams) (CalendarMember, error) {
+	row := q.db.QueryRowContext(ctx, getCalendarMemberForUpdate, arg.CalendarID, arg.UserID)
 	var i CalendarMember
 	err := row.Scan(
 		&i.ID,

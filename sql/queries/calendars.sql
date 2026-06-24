@@ -1,6 +1,9 @@
 -- name: GetCalendarByPublicID :one
 SELECT * FROM calendars WHERE public_id = ?;
 
+-- name: GetCalendarByID :one
+SELECT * FROM calendars WHERE id = ?;
+
 -- name: ListCalendarsByUser :many
 SELECT c.* FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id

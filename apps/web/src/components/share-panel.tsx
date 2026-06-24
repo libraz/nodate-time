@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
-import { api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
+import { DEFAULT_INVITE_ROLE } from '@/lib/permissions';
+import { toast } from '@/lib/toast';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -29,23 +31,38 @@ export function SharePanel() {
 
   const linkUrl = invite ? `${window.location.origin}/share/${invite.token}` : '';
 
+  // Load the most recent existing invite when the panel opens.
   useEffect(() => {
     if (rightPanel !== 'share') {
       setInvite(null);
       setCopied(false);
+      return;
     }
-  }, [rightPanel]);
+    if (!calendarId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.get<InviteData[]>(`/calendars/${calendarId}/invites`);
+        if (!cancelled) setInvite(list[0] ?? null);
+      } catch (e) {
+        if (!cancelled) toast.error(errorMessage(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rightPanel, calendarId]);
 
   const createLink = useCallback(async () => {
     if (!calendarId) return;
     setLoading(true);
     try {
       const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
-        role: 'viewer',
+        role: DEFAULT_INVITE_ROLE,
       });
       setInvite(data);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -56,8 +73,8 @@ export function SharePanel() {
     try {
       await api.delete(`/calendars/${calendarId}/invites/${invite.id}`);
       setInvite(null);
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   }, [calendarId, invite]);
 
@@ -74,15 +91,15 @@ export function SharePanel() {
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
+        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('share')}
       />
-      <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <div className="min-w-0">
-            <h2 className="truncate text-[16px] font-semibold">{t('panel.share')}</h2>
+            <h2 className="truncate text-subhead font-semibold">{t('panel.share')}</h2>
             {calendar && (
-              <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
+              <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                 {calendar.name}
               </p>
             )}
@@ -109,13 +126,13 @@ export function SharePanel() {
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {!calendarId ? (
-            <p className="py-10 text-center text-[13px] text-[var(--color-text-tertiary)]">—</p>
+            <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
           ) : !invite ? (
             <button
               type="button"
               onClick={createLink}
               disabled={loading}
-              className="btn-primary flex w-full items-center justify-center gap-2 text-[13px] disabled:opacity-50"
+              className="btn-primary flex w-full items-center justify-center gap-2 text-body disabled:opacity-50"
             >
               <svg
                 width="16"
@@ -140,23 +157,23 @@ export function SharePanel() {
                   type="text"
                   readOnly
                   value={linkUrl}
-                  className="flex-1 truncate bg-transparent text-[12px] text-[var(--color-text-secondary)] outline-none"
+                  className="flex-1 truncate bg-transparent text-footnote text-[var(--color-text-secondary)] outline-none"
                 />
                 <button
                   type="button"
                   onClick={copyLink}
-                  className="btn-primary shrink-0 px-3 py-1 text-[12px]"
+                  className="btn-primary shrink-0 px-3 py-1 text-footnote"
                 >
                   {copied ? t('common.copied') : t('common.copy')}
                 </button>
               </div>
-              <p className="text-[11px] text-[var(--color-text-secondary)]">
+              <p className="text-caption text-[var(--color-text-secondary)]">
                 {t('share.linkDescription')}
               </p>
               <button
                 type="button"
                 onClick={revokeLink}
-                className="text-[12px] text-[var(--color-danger)] hover:underline"
+                className="text-footnote text-[var(--color-danger)] hover:underline"
               >
                 {t('share.revokeLink')}
               </button>

@@ -52,21 +52,23 @@ function ForgotPasswordPage() {
               />
             </svg>
           </div>
-          <p className="text-[15px] text-[var(--color-text-primary)]">{t('auth.resetEmailSent')}</p>
+          <p className="text-callout text-[var(--color-text-primary)]">
+            {t('auth.resetEmailSent')}
+          </p>
         </output>
       ) : (
         <form onSubmit={handleSubmit} noValidate>
           {error && (
             <div
               role="alert"
-              className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-[14px] text-[var(--color-danger)]"
+              className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
             >
               {error}
             </div>
           )}
           <label
             htmlFor="email"
-            className="mb-1 block text-[14px] font-medium text-[var(--color-text-primary)]"
+            className="mb-1 block text-default font-medium text-[var(--color-text-primary)]"
           >
             {t('auth.email')}
           </label>
@@ -83,7 +85,7 @@ function ForgotPasswordPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="btn-primary mt-6 w-full rounded-xl text-[16px]"
+            className="btn-primary mt-6 w-full rounded-xl text-subhead"
           >
             {submitting ? '...' : t('auth.sendResetEmail')}
           </button>

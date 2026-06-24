@@ -330,6 +330,14 @@ type OauthAccount struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
+type OauthAllowedEmail struct {
+	ID        uint32        `json:"id"`
+	Email     string        `json:"email"`
+	Note      string        `json:"note"`
+	CreatedBy sql.NullInt32 `json:"createdBy"`
+	CreatedAt time.Time     `json:"createdAt"`
+}
+
 type OauthProviderConfig struct {
 	Provider        string        `json:"provider"`
 	ClientID        string        `json:"clientId"`

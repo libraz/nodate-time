@@ -58,8 +58,50 @@ func ComputeEnd(rule *Rule, eventStart time.Time) time.Time {
 	return time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
 }
 
+// ComputeEndInZone is ComputeEnd anchored in the event's IANA timezone, with the
+// result normalized to UTC. Used to populate the recurrence_end column so SQL
+// range queries select the right master events regardless of DST.
+func ComputeEndInZone(rule *Rule, eventStart time.Time, tz string) time.Time {
+	loc := loadLocation(tz)
+	return ComputeEnd(rule, eventStart.In(loc)).UTC()
+}
+
+// maxExpansionIterations bounds how many candidates Expand will ever step
+// through, protecting against pathological rules (e.g. daily forever queried
+// over a decade-wide window) regardless of the requested window size.
+const maxExpansionIterations = 10000
+
+// loadLocation resolves an IANA timezone name, falling back to UTC for empty or
+// unknown values so callers never have to nil-check.
+func loadLocation(tz string) *time.Location {
+	if tz == "" {
+		return time.UTC
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	return time.UTC
+}
+
+// ExpandInZone expands occurrences while anchoring the recurrence in the event's
+// IANA timezone, so daily/weekly/monthly steps preserve the wall-clock time
+// across DST transitions. The returned occurrences are normalized back to UTC
+// for storage and serialization. tz may be empty (treated as UTC).
+func ExpandInZone(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time, tz string) []Occurrence {
+	loc := loadLocation(tz)
+	occ := Expand(rule, eventStart.In(loc), eventEnd.In(loc), windowStart, windowEnd)
+	for i := range occ {
+		occ[i].StartAt = occ[i].StartAt.UTC()
+		occ[i].EndAt = occ[i].EndAt.UTC()
+	}
+	return occ
+}
+
 // Expand generates all occurrences of a recurring event within the given window.
-// The first occurrence is at eventStart. Duration is preserved from the original event.
+// The first occurrence is at eventStart. Duration is preserved from the original
+// event. Recurrence math is performed in eventStart's location, so callers that
+// need DST-correct wall-clock behavior should pass eventStart in the event's
+// timezone (see ExpandInZone).
 func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) []Occurrence {
 	if rule == nil {
 		return nil
@@ -68,9 +110,9 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	duration := eventEnd.Sub(eventStart)
 	var results []Occurrence
 	count := 0
-	maxCount := rule.Count
-	if maxCount == 0 {
-		maxCount = 1000 // safety limit for infinite recurrence
+	hardCap := rule.Count
+	if hardCap <= 0 || hardCap > maxExpansionIterations {
+		hardCap = maxExpansionIterations // safety limit for unbounded recurrence
 	}
 
 	var untilTime time.Time
@@ -83,7 +125,9 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	}
 
 	iterator := newIterator(rule, eventStart)
-	for {
+	iterations := 0
+	for iterations < maxExpansionIterations {
+		iterations++
 		candidate := iterator.next()
 		if candidate.IsZero() {
 			break
@@ -100,7 +144,7 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		}
 
 		count++
-		if rule.Count > 0 && count > rule.Count {
+		if count > hardCap {
 			break
 		}
 

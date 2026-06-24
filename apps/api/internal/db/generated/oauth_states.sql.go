@@ -7,6 +7,7 @@ package generated
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -59,11 +60,10 @@ func (q *Queries) DeleteExpiredOAuthStates(ctx context.Context, expiresAt time.T
 	return err
 }
 
-const deleteOAuthState = `-- name: DeleteOAuthState :exec
+const deleteOAuthState = `-- name: DeleteOAuthState :execresult
 DELETE FROM oauth_states WHERE state_hash = ?
 `
 
-func (q *Queries) DeleteOAuthState(ctx context.Context, stateHash string) error {
-	_, err := q.db.ExecContext(ctx, deleteOAuthState, stateHash)
-	return err
+func (q *Queries) DeleteOAuthState(ctx context.Context, stateHash string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteOAuthState, stateHash)
 }

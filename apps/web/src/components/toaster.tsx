@@ -17,14 +17,13 @@ export function Toaster() {
           key={t.id}
           type="button"
           onClick={() => dismiss(t.id)}
-          className={`pointer-events-auto flex max-w-[420px] items-center gap-3 rounded-2xl px-4 py-3 text-[14px] shadow-lg ring-1 backdrop-blur transition ${
+          className={`toast-item pointer-events-auto flex max-w-[420px] items-center gap-3 rounded-2xl px-4 py-3 text-default shadow-lg ring-1 backdrop-blur transition ${
             t.tone === 'success'
               ? 'bg-[var(--color-accent-bg)]/95 text-[var(--color-accent)] ring-[var(--color-accent)]/30'
               : t.tone === 'error'
                 ? 'bg-[var(--color-danger-bg)]/95 text-[var(--color-danger)] ring-[var(--color-danger)]/30'
                 : 'bg-[var(--color-surface)]/95 text-[var(--color-text-primary)] ring-[var(--color-border)]'
           }`}
-          style={{ animation: 'toast-in 200ms ease-out' }}
         >
           <span aria-hidden className="shrink-0">
             {t.tone === 'success' ? (

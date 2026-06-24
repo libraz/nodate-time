@@ -203,6 +203,21 @@ func TestViewerIsReadOnly(t *testing.T) {
 		map[string]any{"title": "viewer memo", "sortOrder": 0})
 	require.Equal(t, 403, memoStatus)
 
+	// Viewer CANNOT add a checklist item to the event.
+	checklistStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/checklist", viewer.AccessToken,
+		map[string]any{"title": "viewer task"})
+	require.Equal(t, 403, checklistStatus)
+
+	// Viewer CANNOT request an attachment upload URL (rejected before storage is consulted).
+	attachStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", viewer.AccessToken,
+		map[string]any{"filename": "viewer.jpg", "byteSize": 1024})
+	require.Equal(t, 403, attachStatus)
+
+	// Viewer CANNOT request an album photo upload URL.
+	albumStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/albums/presign", viewer.AccessToken,
+		map[string]any{"contentType": "image/jpeg", "byteSize": 1024})
+	require.Equal(t, 403, albumStatus)
+
 	// The original event is untouched.
 	var stillThere []struct {
 		Title string `json:"title"`

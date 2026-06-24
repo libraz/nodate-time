@@ -154,6 +154,11 @@ export const ja = {
   'auth.loginFailed': 'ログインに失敗しました',
   'auth.registerFailed': '登録に失敗しました',
   'auth.passwordMinLength': '8文字以上',
+  'auth.oauthNotAllowed':
+    'このアカウントはログインを許可されていません。管理者にアドレスの許可を依頼するか、許可されたドメインのアカウントを使用してください。',
+  'auth.oauthOnlySubtitle': 'アカウントでログイン',
+  'auth.showPassword': 'パスワードを表示',
+  'auth.hidePassword': 'パスワードを隠す',
   'auth.quickLogin': 'クイックログイン（開発用）',
   'auth.demoLogin': 'デモログイン',
   'auth.adminLogin': '管理者ログイン',
@@ -272,6 +277,18 @@ export const ja = {
   'settings.adminProviderEnable': '有効化',
   'settings.adminProviderUnconfigured': '未設定',
   'settings.adminProviderRemoveConfirm': '{provider} の設定を削除しますか?',
+  'settings.adminAllowedEmails': 'ログイン許可メール',
+  'settings.adminAllowedEmailsDescription':
+    'ドメイン制限が有効なとき、個別の Google アカウントのログインを許可します。',
+  'settings.adminAllowedEmailsRestricted':
+    'Google ログインは次のドメインに制限されています: {domains}。以下のアドレスはそれらに加えて許可されます。',
+  'settings.adminAllowedEmailsUnrestricted':
+    '現在 Google ログインは無制限（どの Google アカウントでもログイン可）のため、このリストは適用されません。ドメイン制限するには TC_GOOGLE_ALLOWED_DOMAINS を設定してください。',
+  'settings.adminAllowedEmailsEmailPlaceholder': 'name@gmail.com',
+  'settings.adminAllowedEmailsNotePlaceholder': 'メモ（任意）',
+  'settings.adminAllowedEmailsAdd': '追加',
+  'settings.adminAllowedEmailsEmpty': '個別許可されたメールはまだありません。',
+  'settings.adminAllowedEmailsRemove': '削除',
 
   // Members admin
   'members.role': '権限',
@@ -301,6 +318,43 @@ export const ja = {
   'invites.copy': 'リンクをコピー',
   'invites.revoke': '取り消す',
   'invites.empty': '招待リンクがありません',
+
+  // Errors
+  'error.generic': 'エラーが発生しました',
+  'error.noPermission': 'この操作を行う権限がありません',
+  'error.sessionExpired': 'セッションの有効期限が切れました。再度ログインしてください',
+  'error.saveFailed': '保存に失敗しました',
+  'error.deleteFailed': '削除に失敗しました',
+  'error.uploadFailed': 'アップロードに失敗しました',
+  'error.fileTooLarge': 'ファイルサイズが大きすぎます',
+  'error.unsupportedFileType': 'このファイル形式には対応していません',
+
+  // Recurrence (custom builder)
+  'event.recurrenceWeekdaysLabel': '曜日',
+  'event.recurrenceMonthlyMode': '繰り返し方',
+  'event.recurrenceMonthlyByDate': '日付で指定',
+  'event.recurrenceMonthlyByWeekday': '曜日で指定',
+  'event.recurrenceNthFirst': '第1',
+  'event.recurrenceNthSecond': '第2',
+  'event.recurrenceNthThird': '第3',
+  'event.recurrenceNthFourth': '第4',
+  'event.recurrenceNthLast': '最終',
+
+  // Assignee
+  'event.assignee': '担当者',
+  'event.assigneeNone': '担当者なし',
+
+  // Album
+  'album.caption': 'キャプション',
+  'album.captionPlaceholder': 'キャプションを追加...',
+  'album.saveCaption': '保存',
+  'album.download': 'ダウンロード',
+
+  // Calendar settings (name / color / cover)
+  'settings.calendarColor': 'カラー',
+  'settings.calendarCover': 'カバー画像',
+  'settings.calendarCoverUpload': 'カバー画像をアップロード',
+  'settings.calendarDetails': 'カレンダー設定',
 } as const;
 
 export type TranslationKey = keyof typeof ja;

@@ -14,41 +14,57 @@ export interface PositionedEvent {
   continuesRight: boolean;
 }
 
+/**
+ * Returns the inclusive last calendar day an event occupies in `zone`.
+ *
+ * End times are stored exclusively (e.g. an all-day event ending on the 16th is
+ * stored as the 17th at 00:00, and a timed event from 23:00 to 00:00 ends at the
+ * next day's midnight). An end that lands exactly on midnight therefore belongs to
+ * the previous day and must not bleed the event onto the next cell.
+ */
+export function eventEndDay(evt: CalendarEvent, zone: string): DateTime {
+  const start = fromISOInZone(evt.startAt, zone);
+  const end = fromISOInZone(evt.endAt, zone);
+  const endDay = end.startOf('day');
+  if (+end === +endDay && end > start) return endDay.minus({ days: 1 });
+  return endDay;
+}
+
 /** Returns true when an event spans more than one calendar day in the given zone. */
 export function isMultiDay(evt: CalendarEvent, zone: string): boolean {
-  const s = fromISOInZone(evt.startAt, zone).startOf('day');
-  const e = fromISOInZone(evt.endAt, zone).startOf('day');
-  return e > s;
+  const startDay = fromISOInZone(evt.startAt, zone).startOf('day');
+  return eventEndDay(evt, zone) > startDay;
 }
 
 /**
  * Lays out multi-day events for a single Sunday-aligned week into non-overlapping
- * horizontal tracks, returning each event's column span and track index.
+ * horizontal tracks, returning each event's column span and track index. Single-day
+ * events are intentionally excluded — callers render those as per-day chips.
  */
 export function layoutWeek(
   weekStart: DateTime,
   events: CalendarEvent[],
   zone: string,
 ): PositionedEvent[] {
-  const weekEnd = weekStart.plus({ days: 6 }).endOf('day');
+  const weekEnd = weekStart.plus({ days: 6 }); // start of the week's Saturday
   const tracks: { end: number }[] = [];
   const positioned: PositionedEvent[] = [];
 
-  const sorted = [...events].sort((a, b) => {
-    const aMulti = isMultiDay(a, zone);
-    const bMulti = isMultiDay(b, zone);
-    if (aMulti !== bMulti) return aMulti ? -1 : 1;
-    return fromISOInZone(a.startAt, zone).toMillis() - fromISOInZone(b.startAt, zone).toMillis();
-  });
+  const multiDay = events
+    .filter((evt) => isMultiDay(evt, zone))
+    .sort(
+      (a, b) =>
+        fromISOInZone(a.startAt, zone).toMillis() - fromISOInZone(b.startAt, zone).toMillis(),
+    );
 
-  for (const evt of sorted) {
-    const evtStart = fromISOInZone(evt.startAt, zone);
-    const evtEnd = fromISOInZone(evt.endAt, zone);
+  for (const evt of multiDay) {
+    const startDay = fromISOInZone(evt.startAt, zone).startOf('day');
+    const endDay = eventEndDay(evt, zone);
 
-    if (evtEnd < weekStart || evtStart > weekEnd) continue;
+    if (endDay < weekStart || startDay > weekEnd) continue;
 
-    const visStart = evtStart < weekStart ? weekStart : evtStart.startOf('day');
-    const visEnd = evtEnd > weekEnd ? weekEnd : evtEnd.startOf('day');
+    const visStart = startDay < weekStart ? weekStart : startDay;
+    const visEnd = endDay > weekEnd ? weekEnd : endDay;
 
     const startCol = Math.max(0, Math.floor(visStart.diff(weekStart, 'days').days));
     const endCol = Math.min(6, Math.floor(visEnd.diff(weekStart, 'days').days));
@@ -67,8 +83,8 @@ export function layoutWeek(
       startCol,
       span,
       track,
-      continuesLeft: evtStart < weekStart,
-      continuesRight: evtEnd > weekEnd,
+      continuesLeft: startDay < weekStart,
+      continuesRight: endDay > weekEnd,
     });
   }
 

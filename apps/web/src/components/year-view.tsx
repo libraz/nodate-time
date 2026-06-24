@@ -9,6 +9,7 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { eventEndDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -29,7 +30,8 @@ export function YearView() {
     for (const evt of events) {
       if (!activeCalendarIds.includes(evt.calendarId)) continue;
       const start = fromISOInZone(evt.startAt, timezone).startOf('day');
-      const end = fromISOInZone(evt.endAt, timezone).startOf('day');
+      // Exclusive end: an event ending exactly at midnight does not occupy that day.
+      const end = eventEndDay(evt, timezone);
       let cur = start;
       // cap to avoid pathological multi-year events
       const maxDays = 366;
@@ -49,14 +51,16 @@ export function YearView() {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center justify-between border-b border-[var(--color-separator)] px-4 py-3">
-        <h2 className="text-[18px] font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-title font-semibold tabular-nums text-[var(--color-text-primary)]">
           {currentMonth.year}
         </h2>
-        <span className="text-[12px] text-[var(--color-text-tertiary)]">{t('calendar.year')}</span>
+        <span className="text-footnote text-[var(--color-text-tertiary)]">
+          {t('calendar.year')}
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:gap-4">
         {months.map((m) => {
-          const days = getMonthDays(currentMonth.year, m);
+          const days = getMonthDays(currentMonth.year, m, timezone);
           const monthLabel = DateTime.local(currentMonth.year, m + 1, 1).toFormat(
             locale === 'ja' ? 'M月' : 'MMM',
           );
@@ -69,13 +73,14 @@ export function YearView() {
                 setCurrentMonth(DateTime.local(currentMonth.year, m + 1, 1));
                 setCalendarView('month');
               }}
-              className={`flex flex-col gap-1.5 rounded-2xl border bg-[var(--color-surface)] p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-[var(--color-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+              style={{ animationDelay: `${m * 0.03}s` }}
+              className={`year-card flex flex-col gap-1.5 rounded-2xl border bg-[var(--color-surface)] p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-[var(--color-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 monthHasToday ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'
               }`}
             >
               <div className="flex items-baseline justify-between">
                 <span
-                  className={`text-[15px] font-semibold ${
+                  className={`text-callout font-semibold ${
                     monthHasToday
                       ? 'text-[var(--color-accent)]'
                       : 'text-[var(--color-text-primary)]'
@@ -84,7 +89,7 @@ export function YearView() {
                   {monthLabel}
                 </span>
               </div>
-              <div className="grid grid-cols-7 gap-px text-center text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
+              <div className="grid grid-cols-7 gap-px text-center text-micro font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
                 {[0, 1, 2, 3, 4, 5, 6].map((i) => (
                   <span
                     key={i}
@@ -117,7 +122,7 @@ export function YearView() {
                   return (
                     <span
                       key={isoDate}
-                      className="relative flex h-7 items-center justify-center text-[11px] font-medium"
+                      className="relative flex h-7 items-center justify-center text-caption font-medium tabular-nums"
                       style={{
                         color: today ? 'white' : color,
                         opacity: inMonth ? 1 : 0.28,
