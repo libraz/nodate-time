@@ -119,11 +119,11 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 
 		pubID, _ := uuid.NewV7()
 		_, err = deps.Queries.CreateMemo(ctx, generated.CreateMemoParams{
-			PublicID:    pubID[:],
-			CalendarID:  cal.ID,
-			Title:       in.Body.Title,
-			SortOrder:   in.Body.SortOrder,
-			CreatedBy:   userID,
+			PublicID:   pubID[:],
+			CalendarID: cal.ID,
+			Title:      in.Body.Title,
+			SortOrder:  in.Body.SortOrder,
+			CreatedBy:  userID,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)

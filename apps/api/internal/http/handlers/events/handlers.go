@@ -282,6 +282,76 @@ func isMember(ctx context.Context, deps Deps, calID, userID uint32) bool {
 	return err == nil
 }
 
+// exceptionInfo holds a single-occurrence override row for a recurring series.
+type exceptionInfo struct {
+	child     generated.Event
+	cancelled bool
+}
+
+// loadExceptions returns the override rows for a recurring master keyed by the
+// UTC millisecond of the original occurrence they replace, so the expander can
+// substitute or skip individual instances.
+func loadExceptions(ctx context.Context, deps Deps, parentID uint32) map[int64]exceptionInfo {
+	rows, err := deps.Queries.ListRecurrenceExceptionsByParent(ctx, sql.NullInt32{Int32: int32(parentID), Valid: true})
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	m := make(map[int64]exceptionInfo, len(rows))
+	for _, r := range rows {
+		if !r.RecurrenceOriginalStart.Valid {
+			continue
+		}
+		m[r.RecurrenceOriginalStart.Time.UTC().UnixMilli()] = exceptionInfo{child: r, cancelled: r.RecurrenceCancelled}
+	}
+	return m
+}
+
+// mapExceptionInstance renders a modified occurrence using the override row's own
+// fields while keeping the composite ID anchored to the original occurrence date,
+// so a subsequent edit resolves back to the same override.
+func mapExceptionInstance(master, child generated.Event, calPubID []byte, originalStart time.Time) EventResponse {
+	parentID := pubIDToHex(master.PublicID)
+	dateStr := originalStart.UTC().Format("20060102")
+	return EventResponse{
+		ID:                 fmt.Sprintf("%s_%s", parentID, dateStr),
+		CalendarID:         pubIDToHex(calPubID),
+		Title:              child.Title,
+		AllDay:             child.AllDay,
+		StartAt:            child.StartAt,
+		EndAt:              child.EndAt,
+		Timezone:           child.Timezone,
+		Color:              child.Color,
+		Location:           child.Location,
+		Memo:               child.Memo,
+		URL:                child.Url,
+		NotificationOffset: nullInt32ToPtr(child.NotificationOffset),
+		Participants:       []string{},
+		RecurrenceRule:     mapRecurrenceRule(master.RecurrenceRule),
+		IsRecurrence:       true,
+		RecurrenceDate:     &dateStr,
+		CreatedAt:          child.CreatedAt,
+		UpdatedAt:          child.UpdatedAt,
+	}
+}
+
+// occurrenceStartForDate resolves the exact UTC start instant of the occurrence
+// falling on dateStr (YYYYMMDD), confirming it is a genuine occurrence of the
+// rule rather than an arbitrary date crafted into a composite ID.
+func occurrenceStartForDate(rule *recurrence.Rule, evt generated.Event, dateStr string) (time.Time, error) {
+	instanceDate, err := time.Parse("20060102", dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+	dayStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(), 0, 0, 0, 0, time.UTC)
+	dayEnd := dayStart.AddDate(0, 0, 1)
+	for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt, evt.EndAt, dayStart, dayEnd, evt.Timezone) {
+		if occ.StartAt.UTC().Format("20060102") == dateStr {
+			return occ.StartAt.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("date %s is not an occurrence", dateStr)
+}
+
 func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsOutput, error) {
 	return func(ctx context.Context, in *ListEventsInput) (*ListEventsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -345,10 +415,37 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				continue
 			}
 			assignee := assigneePublicID(ctx, deps, e.AssignedTo)
+			exceptions := loadExceptions(ctx, deps, e.ID)
+			consumed := make(map[int64]bool, len(exceptions))
 			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, startTime, endTime, e.Timezone)
 			for _, occ := range occurrences {
+				key := occ.StartAt.UTC().UnixMilli()
+				if ex, ok := exceptions[key]; ok {
+					consumed[key] = true
+					if ex.cancelled {
+						continue // this occurrence was deleted from the series
+					}
+					inst := mapExceptionInstance(e, ex.child, cal.PublicID, occ.StartAt)
+					inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
+					results = append(results, inst)
+					continue
+				}
 				inst := mapRecurringInstance(e, cal.PublicID, occ)
 				inst.AssignedTo = assignee
+				results = append(results, inst)
+			}
+			// Modified overrides whose original occurrence no longer exists (e.g.
+			// the series rule or time changed) still surface at their own time so
+			// the user's edit is not silently lost.
+			for key, ex := range exceptions {
+				if consumed[key] || ex.cancelled {
+					continue
+				}
+				if ex.child.StartAt.Before(startTime) || !ex.child.StartAt.Before(endTime) {
+					continue
+				}
+				inst := mapExceptionInstance(e, ex.child, cal.PublicID, ex.child.RecurrenceOriginalStart.Time.UTC())
+				inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
 				results = append(results, inst)
 			}
 		}
@@ -415,6 +512,20 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 			}
 			if matched == nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+
+			// Honor a single-occurrence override if one exists for this instant.
+			ex, err := deps.Queries.GetRecurrenceException(ctx, generated.GetRecurrenceExceptionParams{
+				RecurrenceParentID:      sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+				RecurrenceOriginalStart: sql.NullTime{Time: matched.StartAt.UTC(), Valid: true},
+			})
+			if err == nil {
+				if ex.RecurrenceCancelled {
+					return nil, apierrors.ToHuma(apierrors.EventNotFound)
+				}
+				resp := mapExceptionInstance(evt, ex, cal.PublicID, matched.StartAt)
+				resp.AssignedTo = assigneePublicID(ctx, deps, ex.AssignedTo)
+				return &GetEventOutput{Body: resp}, nil
 			}
 
 			resp := mapRecurringInstance(evt, cal.PublicID, *matched)
@@ -574,9 +685,11 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// For composite IDs (recurring instances), update the parent event
+		// For composite IDs (recurring instances), resolve the parent series.
+		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
+		isOccurrence := parentUUID != ""
 		eventID := in.EventID
-		if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
+		if isOccurrence {
 			eventID = parentUUID
 		}
 
@@ -617,6 +730,53 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
+		}
+
+		// Single-occurrence edit: write an override row instead of mutating the
+		// whole series, so editing one instance no longer rewrites every instance.
+		if isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil {
+			rule := recurrence.ParseRule(*evt.RecurrenceRule)
+			if rule == nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
+			if oerr != nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			pubID, _ := uuid.NewV7()
+			parentRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
+			originalRef := sql.NullTime{Time: originalStart, Valid: true}
+			if _, err := deps.Queries.UpsertRecurrenceException(ctx, generated.UpsertRecurrenceExceptionParams{
+				PublicID:                pubID[:],
+				CalendarID:              cal.ID,
+				Title:                   in.Body.Title,
+				AllDay:                  in.Body.AllDay,
+				StartAt:                 startAt,
+				EndAt:                   endAt,
+				Timezone:                tz,
+				Color:                   in.Body.Color,
+				Location:                in.Body.Location,
+				Memo:                    in.Body.Memo,
+				Url:                     in.Body.URL,
+				CreatedBy:               userID,
+				AssignedTo:              assignedTo,
+				NotificationOffset:      ptrIntToNullInt32(in.Body.NotificationOffset),
+				RecurrenceParentID:      parentRef,
+				RecurrenceOriginalStart: originalRef,
+				RecurrenceCancelled:     false,
+			}); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			child, err := deps.Queries.GetRecurrenceException(ctx, generated.GetRecurrenceExceptionParams{
+				RecurrenceParentID:      parentRef,
+				RecurrenceOriginalStart: originalRef,
+			})
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			resp := mapExceptionInstance(evt, child, cal.PublicID, originalStart)
+			resp.AssignedTo = assigneePublicID(ctx, deps, child.AssignedTo)
+			return &UpdateEventOutput{Body: resp}, nil
 		}
 
 		err = deps.Queries.UpdateEvent(ctx, generated.UpdateEventParams{
@@ -681,9 +841,11 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// For composite IDs, delete the parent (all instances)
+		// For composite IDs, resolve the parent series.
+		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
+		isOccurrence := parentUUID != ""
 		eventID := in.EventID
-		if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
+		if isOccurrence {
 			eventID = parentUUID
 		}
 
@@ -696,6 +858,41 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 
+		// Single-occurrence delete: record a cancellation tombstone so only this
+		// instance disappears while the rest of the series is preserved.
+		if isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil {
+			rule := recurrence.ParseRule(*evt.RecurrenceRule)
+			if rule == nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
+			if oerr != nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			pubID, _ := uuid.NewV7()
+			if _, err := deps.Queries.UpsertRecurrenceException(ctx, generated.UpsertRecurrenceExceptionParams{
+				PublicID:                pubID[:],
+				CalendarID:              cal.ID,
+				Title:                   evt.Title,
+				AllDay:                  evt.AllDay,
+				StartAt:                 originalStart,
+				EndAt:                   originalStart.Add(evt.EndAt.Sub(evt.StartAt)),
+				Timezone:                evt.Timezone,
+				Color:                   evt.Color,
+				Location:                evt.Location,
+				Memo:                    evt.Memo,
+				Url:                     evt.Url,
+				CreatedBy:               userID,
+				RecurrenceParentID:      sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+				RecurrenceOriginalStart: sql.NullTime{Time: originalStart, Valid: true},
+				RecurrenceCancelled:     true,
+			}); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			return &DeleteEventOutput{}, nil
+		}
+
+		// Whole-series delete: removing the master cascades to its override rows.
 		err = deps.Queries.DeleteEvent(ctx, evt.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -779,9 +976,9 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 		pubID, _ := uuid.NewV7()
 		_, err = deps.Queries.CreateEventComment(ctx, generated.CreateEventCommentParams{
 			PublicID: pubID[:],
-			EventID: evt.ID,
-			UserID:  userID,
-			Body:    in.Body.Content,
+			EventID:  evt.ID,
+			UserID:   userID,
+			Body:     in.Body.Content,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -876,4 +1073,3 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 		return &DeleteCommentOutput{}, nil
 	}
 }
-

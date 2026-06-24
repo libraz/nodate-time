@@ -31,12 +31,12 @@ const SecretMask = "********"
 // --- DTOs ---
 
 type ProviderInfo struct {
-	Provider   string    `json:"provider"`
-	ClientID   string    `json:"clientId"`
-	HasSecret  bool      `json:"hasSecret"`
-	Enabled    bool      `json:"enabled"`
-	Source     string    `json:"source" doc:"db | env | none"`
-	UpdatedAt  time.Time `json:"updatedAt,omitempty"`
+	Provider  string    `json:"provider"`
+	ClientID  string    `json:"clientId"`
+	HasSecret bool      `json:"hasSecret"`
+	Enabled   bool      `json:"enabled"`
+	Source    string    `json:"source" doc:"db | env | none"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 }
 
 type ListProvidersInput struct{}

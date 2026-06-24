@@ -236,15 +236,21 @@ export function CalendarGrid() {
                                 key={evt.id}
                                 type="button"
                                 onClick={() => openEventModal(evt.id)}
-                                className="pointer-events-auto mx-0.5 cursor-pointer truncate rounded-md border-l-[3px] px-1.5 text-left text-caption font-semibold leading-[20px] tabular-nums hover:brightness-95 max-sm:text-micro max-sm:leading-[15px]"
+                                className="pointer-events-auto mx-0.5 flex cursor-pointer items-center gap-1 rounded-[5px] px-1.5 text-left text-caption font-semibold leading-[20px] tabular-nums hover:brightness-95 max-sm:gap-0.5 max-sm:text-micro max-sm:leading-[15px]"
                                 style={{
                                   backgroundColor: `${evt.color}1f`,
-                                  borderLeftColor: evt.color,
                                   color: evt.color,
                                 }}
                               >
-                                {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
-                                {evt.title}
+                                <span
+                                  aria-hidden
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full max-sm:h-1 max-sm:w-1"
+                                  style={{ backgroundColor: evt.color }}
+                                />
+                                <span className="truncate">
+                                  {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
+                                  {evt.title}
+                                </span>
                               </button>
                             );
                           }
@@ -278,10 +284,10 @@ export function CalendarGrid() {
                     p.continuesLeft && p.continuesRight
                       ? '0'
                       : p.continuesLeft
-                        ? '0 9999px 9999px 0'
+                        ? '0 5px 5px 0'
                         : p.continuesRight
-                          ? '9999px 0 0 9999px'
-                          : '9999px';
+                          ? '5px 0 0 5px'
+                          : '5px';
                   return (
                     <button
                       key={`${p.event.id}-${p.startCol}`}

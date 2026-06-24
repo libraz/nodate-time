@@ -201,17 +201,22 @@ function WeekRow({
                         key={evt.id}
                         type="button"
                         onClick={() => onEventClick(evt.id)}
-                        className="pointer-events-auto mx-0.5 truncate rounded border-l-[3px] px-1 text-left text-micro font-semibold tabular-nums"
+                        className="pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[4px] px-1 text-left text-micro font-semibold tabular-nums"
                         style={{
                           height: SLOT_H,
-                          lineHeight: `${SLOT_H}px`,
                           backgroundColor: `${evt.color}1f`,
-                          borderLeftColor: evt.color,
                           color: evt.color,
                         }}
                       >
-                        {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
-                        {evt.title}
+                        <span
+                          aria-hidden
+                          className="h-1 w-1 shrink-0 rounded-full"
+                          style={{ backgroundColor: evt.color }}
+                        />
+                        <span className="truncate">
+                          {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
+                          {evt.title}
+                        </span>
                       </button>
                     );
                   }
@@ -243,10 +248,10 @@ function WeekRow({
             p.continuesLeft && p.continuesRight
               ? '0'
               : p.continuesLeft
-                ? '0 9999px 9999px 0'
+                ? '0 5px 5px 0'
                 : p.continuesRight
-                  ? '9999px 0 0 9999px'
-                  : '9999px';
+                  ? '5px 0 0 5px'
+                  : '5px';
           return (
             <button
               key={`${p.event.id}-${p.startCol}`}

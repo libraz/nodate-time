@@ -39,6 +39,10 @@ type Deps struct {
 	// PasswordLoginEnabled gates the email+password auth routes (register,
 	// login, password reset). When false, only OAuth/OIDC sign-in is offered.
 	PasswordLoginEnabled bool
+	// AuthRateLimit sets the per-IP request budget for sensitive unauthenticated
+	// endpoints. Zero applies the default (60/min); a negative value disables the
+	// limiter entirely (used by parallel integration tests).
+	AuthRateLimit int
 }
 
 func Build(deps Deps) http.Handler {
@@ -54,9 +58,14 @@ func Build(deps Deps) http.Handler {
 	// Sensitive unauthenticated endpoints (login, register, password reset,
 	// OAuth, public share) are rate-limited per client IP to blunt credential
 	// brute-force and password-reset mail-bombing.
-	authLimiter := middleware.NewRateLimiter(60, time.Minute)
+	authLimit := deps.AuthRateLimit
+	if authLimit == 0 {
+		authLimit = 60
+	}
 	r.Group(func(pub chi.Router) {
-		pub.Use(authLimiter.Middleware())
+		if authLimit > 0 {
+			pub.Use(middleware.NewRateLimiter(authLimit, time.Minute).Middleware())
+		}
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
 		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
@@ -452,6 +461,14 @@ func Build(deps Deps) http.Handler {
 		}, events.PresignUpload(evtDeps))
 
 		huma.Register(api, huma.Operation{
+			OperationID: "confirm-attachment",
+			Method:      http.MethodPost,
+			Path:        "/calendars/{calendarId}/events/{eventId}/attachments/{attachmentId}/confirm",
+			Summary:     "Confirm a previously uploaded attachment",
+			Tags:        []string{"Attachment"},
+		}, events.ConfirmAttachment(evtDeps))
+
+		huma.Register(api, huma.Operation{
 			OperationID: "get-attachment-download",
 			Method:      http.MethodGet,
 			Path:        "/calendars/{calendarId}/events/{eventId}/attachments/{attachmentId}/download",
@@ -484,6 +501,14 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Get a presigned URL for uploading an album photo",
 			Tags:        []string{"Album"},
 		}, albums.PresignUpload(albumDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "confirm-album-photo",
+			Method:      http.MethodPost,
+			Path:        "/calendars/{calendarId}/albums/{photoId}/confirm",
+			Summary:     "Confirm a previously uploaded album photo",
+			Tags:        []string{"Album"},
+		}, albums.ConfirmPhoto(albumDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "update-album-photo",

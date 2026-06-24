@@ -12,7 +12,6 @@ func TestMemoLifecycle(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 

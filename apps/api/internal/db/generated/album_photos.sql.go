@@ -11,11 +11,19 @@ import (
 	"time"
 )
 
+const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
+UPDATE album_photos SET enabled = 1 WHERE id = ? AND enabled = 0
+`
+
+func (q *Queries) ConfirmAlbumPhoto(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, confirmAlbumPhoto, id)
+}
+
 const createAlbumPhoto = `-- name: CreateAlbumPhoto :execresult
 INSERT INTO album_photos (
   public_id, calendar_id, uploaded_by, event_id, caption, content_type, byte_size,
-  width, height, storage_key, taken_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  width, height, storage_key, taken_at, enabled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 `
 
 type CreateAlbumPhotoParams struct {
@@ -32,6 +40,9 @@ type CreateAlbumPhotoParams struct {
 	TakenAt     time.Time     `json:"takenAt"`
 }
 
+// Rows are created disabled and only become visible once ConfirmAlbumPhoto runs
+// after the object upload succeeds, so a presign that is never uploaded leaves
+// no dangling row pointing at a nonexistent object.
 func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createAlbumPhoto,
 		arg.PublicID,

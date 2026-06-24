@@ -127,21 +127,27 @@ type OAuthStartInput struct {
 type OAuthStartOutput struct {
 	Status int
 	URL    string `header:"Location"`
-	Body   struct {
+	// SetCookie binds the OAuth flow to the initiating browser: the callback only
+	// proceeds if it presents this same state cookie, defeating login CSRF.
+	SetCookie string `header:"Set-Cookie"`
+	Body      struct {
 		AuthorizeURL string `json:"authorizeUrl"`
 		State        string `json:"state"`
 	}
 }
 
 type OAuthCallbackInput struct {
-	Provider string `path:"provider" enum:"google,line"`
-	Code     string `query:"code"`
-	State    string `query:"state"`
+	Provider    string `path:"provider" enum:"google,line"`
+	Code        string `query:"code"`
+	State       string `query:"state"`
+	StateCookie string `cookie:"oauth_state"`
 }
 
 type OAuthCallbackOutput struct {
 	Status int
 	URL    string `header:"Location"`
+	// SetCookie clears the one-time state cookie once the flow completes.
+	SetCookie string `header:"Set-Cookie"`
 }
 
 // --- Avatar ---

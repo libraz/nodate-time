@@ -76,6 +76,10 @@ export const ja = {
   'event.unitMonth': '月ごと',
   'event.unitYear': '年ごと',
   'event.deleteRecurring': 'すべての繰り返しイベントを削除',
+  'event.scopeEditTitle': '繰り返しイベントの編集',
+  'event.scopeDeleteTitle': '繰り返しイベントの削除',
+  'event.scopeThis': 'この予定のみ',
+  'event.scopeAll': 'シリーズ全体',
 
   // Notification offsets
   'event.notification_none': '通知なし',
@@ -297,6 +301,7 @@ export const ja = {
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このメンバーを削除しますか?',
   'members.lastAdmin': '最後の管理者は削除できません',
+  'members.selfModify': '自分自身の権限は変更できません',
 
   // Invites
   // Labels (color palette)

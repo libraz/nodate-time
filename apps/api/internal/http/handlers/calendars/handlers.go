@@ -190,10 +190,20 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
+		// Color and cover are optional: when omitted, keep the current values so a
+		// rename does not blank them out.
+		color := cal.Color
+		if in.Body.Color != nil {
+			color = *in.Body.Color
+		}
+		coverURL := cal.CoverUrl
+		if in.Body.CoverURL != nil {
+			coverURL = *in.Body.CoverURL
+		}
 		err = deps.Queries.UpdateCalendar(ctx, generated.UpdateCalendarParams{
 			Name:     in.Body.Name,
-			Color:    in.Body.Color,
-			CoverUrl: in.Body.CoverURL,
+			Color:    color,
+			CoverUrl: coverURL,
 			ID:       cal.ID,
 		})
 		if err != nil {
@@ -286,6 +296,11 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
+		// Admins manage other members' roles, not their own. Changing your own role
+		// must go through another admin.
+		if target.ID == actorID {
+			return nil, apierrors.ToHuma(apierrors.MemberSelfModify)
+		}
 		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
@@ -357,12 +372,13 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
 
-		// Self-removal allowed; otherwise admin only
-		if target.ID != actorID {
-			actor, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: actorID})
-			if err != nil || actor.Role != "admin" {
-				return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-			}
+		// Only admins remove members, and they cannot remove themselves.
+		if target.ID == actorID {
+			return nil, apierrors.ToHuma(apierrors.MemberSelfModify)
+		}
+		actor, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: actorID})
+		if err != nil || actor.Role != "admin" {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		// Lock the admin count and remove the member atomically so concurrent

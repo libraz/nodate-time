@@ -222,3 +222,54 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		return &DeleteAttachmentOutput{}, nil
 	}
 }
+
+// ConfirmAttachment finalizes a presigned attachment upload: it verifies the
+// object actually landed in storage, then enables the row. An abandoned presign
+// never enables, so it leaves no attachment pointing at a missing object.
+func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
+	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
+		userID, _ := middleware.ActorFromContext(ctx)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		if deps.Storage == nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+
+		attPub, err := parseUUID(in.AttachmentID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+		att, err := deps.Queries.GetAttachmentByPublicID(ctx, attPub)
+		if err != nil || att.EventID != evt.ID {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+
+		exists, err := deps.Storage.StatObject(ctx, att.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+		if !exists {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+
+		if _, err := deps.Queries.ConfirmEventAttachment(ctx, att.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		att.Enabled = true
+		return &ConfirmAttachmentOutput{Body: mapAttachment(att)}, nil
+	}
+}

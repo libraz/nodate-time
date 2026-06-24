@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS events (
   notification_offset INT          NULL     COMMENT 'minutes before event to notify; NULL = none',
   recurrence_rule JSON         NULL     COMMENT 'recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}',
   recurrence_end  DATETIME(3)  NULL     COMMENT 'effective end date for recurrence expansion queries',
+  recurrence_parent_id      INT UNSIGNED NULL COMMENT 'set on exception rows: the master recurring event this occurrence overrides',
+  recurrence_original_start DATETIME(3)  NULL COMMENT 'original occurrence start (UTC) this exception replaces',
+  recurrence_cancelled      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'tombstone: this single occurrence was deleted from the series',
   created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
@@ -23,7 +26,9 @@ CREATE TABLE IF NOT EXISTS events (
   KEY idx_events_calendar_start (calendar_id, start_at),
   KEY idx_events_calendar_end (calendar_id, end_at),
   KEY idx_events_recurrence (calendar_id, recurrence_end),
+  UNIQUE KEY uk_events_recurrence_exception (recurrence_parent_id, recurrence_original_start),
   CONSTRAINT fk_events_calendar FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
   CONSTRAINT fk_events_created_by FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE,
-  CONSTRAINT fk_events_assigned_to FOREIGN KEY (assigned_to) REFERENCES users (id) ON DELETE SET NULL
+  CONSTRAINT fk_events_assigned_to FOREIGN KEY (assigned_to) REFERENCES users (id) ON DELETE SET NULL,
+  CONSTRAINT fk_events_recurrence_parent FOREIGN KEY (recurrence_parent_id) REFERENCES events (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -52,8 +52,13 @@ interface CalendarState {
   deleteCalendar: (id: string) => Promise<void>;
 
   addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
-  updateEvent: (calendarId: string, eventId: string, evt: EventInput) => Promise<void>;
-  deleteEvent: (calendarId: string, eventId: string) => Promise<void>;
+  updateEvent: (
+    calendarId: string,
+    eventId: string,
+    evt: EventInput,
+    scope?: 'this' | 'all',
+  ) => Promise<void>;
+  deleteEvent: (calendarId: string, eventId: string, scope?: 'this' | 'all') => Promise<void>;
 
   addMemo: (calendarId: string, memo: { title: string }) => Promise<void>;
   toggleMemo: (calendarId: string, memoId: string, done: boolean, title: string) => Promise<void>;
@@ -180,8 +185,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
-  async updateEvent(calendarId, eventId, evt) {
-    const updated = await api.put<CalendarEvent>(`/calendars/${calendarId}/events/${eventId}`, evt);
+  async updateEvent(calendarId, eventId, evt, scope) {
+    const query = scope ? `?scope=${scope}` : '';
+    const updated = await api.put<CalendarEvent>(
+      `/calendars/${calendarId}/events/${eventId}${query}`,
+      evt,
+    );
     const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
     if (updated.recurrenceRule || wasRecurring) {
       // Recurring event: expanded instances change, so re-fetch the visible range
@@ -199,14 +208,19 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }
   },
 
-  async deleteEvent(calendarId, eventId) {
-    await api.delete(`/calendars/${calendarId}/events/${eventId}`);
+  async deleteEvent(calendarId, eventId, scope) {
+    const query = scope ? `?scope=${scope}` : '';
+    await api.delete(`/calendars/${calendarId}/events/${eventId}${query}`);
     if (eventId.includes('_')) {
-      // Recurring event: remove all instances from same parent
+      // Recurring instance: drop the affected occurrences, then re-fetch the
+      // visible range so a single-occurrence delete leaves the rest of the
+      // series intact rather than clearing every instance.
       const parentId = eventId.substring(0, 36);
       set((s) => ({
         events: s.events.filter((e) => !e.id.startsWith(parentId)),
       }));
+      const { start, end } = get().visibleRange();
+      await get().fetchEvents(start, end);
     } else {
       set((s) => ({
         events: s.events.filter((e) => e.id !== eventId),

@@ -11,12 +11,12 @@ type CalendarResponse struct {
 }
 
 type MemberResponse struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Icon     string `json:"icon"`
-	Role     string `json:"role"`
-	Color    string `json:"color"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Icon  string `json:"icon"`
+	Role  string `json:"role"`
+	Color string `json:"color"`
 }
 
 type LabelResponse struct {
@@ -52,9 +52,9 @@ type CreateCalendarOutput struct {
 type UpdateCalendarInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
-		Name     string `json:"name" minLength:"1" maxLength:"200"`
-		Color    string `json:"color" maxLength:"7"`
-		CoverURL string `json:"coverUrl" maxLength:"500"`
+		Name     string  `json:"name" minLength:"1" maxLength:"200"`
+		Color    *string `json:"color,omitempty" maxLength:"7" required:"false"`
+		CoverURL *string `json:"coverUrl,omitempty" maxLength:"500" required:"false"`
 	}
 }
 type UpdateCalendarOutput struct {

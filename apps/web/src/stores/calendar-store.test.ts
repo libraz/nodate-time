@@ -157,11 +157,18 @@ describe('deleteEvent', () => {
     expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['keep']);
   });
 
-  it('removes all instances sharing a recurring parent', async () => {
+  it('re-syncs from the server after deleting a recurring instance', async () => {
     mockApi.delete.mockResolvedValue(undefined as never);
     const parent = 'a'.repeat(32);
     const other = 'b'.repeat(32);
+    // A single-occurrence delete preserves the rest of the series, so the store
+    // re-fetches the visible range; the server returns the surviving instances.
+    mockApi.get.mockResolvedValue([
+      evt(`${parent}_20260410`, 'cal-1'),
+      evt(other, 'cal-1'),
+    ] as never);
     useCalendarStore.setState({
+      calendars: [{ id: 'cal-1' } as never],
       events: [
         evt(`${parent}_20260403`, 'cal-1'),
         evt(`${parent}_20260410`, 'cal-1'),
@@ -169,8 +176,14 @@ describe('deleteEvent', () => {
       ],
     });
 
-    await useCalendarStore.getState().deleteEvent('cal-1', `${parent}_20260403`);
+    await useCalendarStore.getState().deleteEvent('cal-1', `${parent}_20260403`, 'this');
 
-    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual([other]);
+    expect(mockApi.delete).toHaveBeenCalledWith(
+      `/calendars/cal-1/events/${parent}_20260403?scope=this`,
+    );
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual([
+      `${parent}_20260410`,
+      other,
+    ]);
   });
 });

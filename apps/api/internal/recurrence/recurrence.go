@@ -12,8 +12,8 @@ type Rule struct {
 	ByDay      []string `json:"byDay,omitempty"`      // MO,TU,WE,TH,FR,SA,SU
 	ByMonthDay int      `json:"byMonthDay,omitempty"` // 1-31
 	BySetPos   int      `json:"bySetPos,omitempty"`   // Nth weekday of month (1-5)
-	Until      *string  `json:"until,omitempty"`       // ISO 8601 date string
-	Count      int      `json:"count,omitempty"`       // max occurrences (1-365)
+	Until      *string  `json:"until,omitempty"`      // ISO 8601 date string
+	Count      int      `json:"count,omitempty"`      // max occurrences (1-365)
 }
 
 // Occurrence represents a single expanded instance of a recurring event.

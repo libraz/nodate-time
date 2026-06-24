@@ -14,7 +14,6 @@ func TestEventLifecycle(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
@@ -90,12 +89,11 @@ func TestEventAllDay(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	var evt struct {
-		ID    string `json:"id"`
+		ID     string `json:"id"`
 		AllDay bool   `json:"allDay"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
@@ -113,12 +111,13 @@ func TestEventComments(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	// Create event
-	var evt struct{ ID string `json:"id"` }
+	var evt struct {
+		ID string `json:"id"`
+	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 		map[string]any{
 			"title": "MTG", "allDay": false,
@@ -224,7 +223,9 @@ func TestRecurringEventWithCount(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	// Create daily event with count=3
-	var evt struct{ ID string `json:"id"` }
+	var evt struct {
+		ID string `json:"id"`
+	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 		map[string]any{
 			"title":   "Standup",
@@ -255,7 +256,9 @@ func TestRecurringEventUpdate(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	// Create weekly recurring event
-	var evt struct{ ID string `json:"id"` }
+	var evt struct {
+		ID string `json:"id"`
+	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 		map[string]any{
 			"title":   "Team sync",
@@ -279,7 +282,9 @@ func TestRecurringEventUpdate(t *testing.T) {
 	require.True(t, len(evts) >= 3)
 
 	// Update via an instance ID — should update the parent
-	var updated struct{ Title string `json:"title"` }
+	var updated struct {
+		Title string `json:"title"`
+	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[0].ID, tt.AccessToken,
 		map[string]any{
 			"title":   "Team sync v2",

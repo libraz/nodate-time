@@ -15,10 +15,10 @@ type Config struct {
 	// Env selects the runtime environment. When set to "development"/"dev" it
 	// enables developer conveniences such as the password-less /auth/dev-login
 	// endpoint. Defaults to "production" so those are off unless opted in.
-	Env                string `env:"TC_ENV" envDefault:"production"`
-	Port               int    `env:"TC_PORT" envDefault:"8080"`
-	DbDsn              string `env:"TC_DB_DSN" envDefault:"ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true"`
-	JWTSecret          string `env:"TC_JWT_SECRET" envDefault:"dev-secret-change-me-in-production"`
+	Env       string `env:"TC_ENV" envDefault:"production"`
+	Port      int    `env:"TC_PORT" envDefault:"8080"`
+	DbDsn     string `env:"TC_DB_DSN" envDefault:"ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true"`
+	JWTSecret string `env:"TC_JWT_SECRET" envDefault:"dev-secret-change-me-in-production"`
 
 	// PasswordLoginEnabled controls whether email+password authentication
 	// (register, login, password reset) is available. Set to false to allow
@@ -29,11 +29,11 @@ type Config struct {
 	// SMTP delivery. When SMTPHost is set, password-reset and invite mails are
 	// sent via SMTP; otherwise mails are logged to stdout (development only —
 	// Validate rejects an unset host in production).
-	SMTPHost     string `env:"TC_SMTP_HOST" envDefault:""`
-	SMTPPort     int    `env:"TC_SMTP_PORT" envDefault:"587"`
-	SMTPUsername string `env:"TC_SMTP_USERNAME" envDefault:""`
-	SMTPPassword string `env:"TC_SMTP_PASSWORD" envDefault:""`
-	SMTPFrom     string `env:"TC_SMTP_FROM" envDefault:"no-reply@nodate-time.local"`
+	SMTPHost           string `env:"TC_SMTP_HOST" envDefault:""`
+	SMTPPort           int    `env:"TC_SMTP_PORT" envDefault:"587"`
+	SMTPUsername       string `env:"TC_SMTP_USERNAME" envDefault:""`
+	SMTPPassword       string `env:"TC_SMTP_PASSWORD" envDefault:""`
+	SMTPFrom           string `env:"TC_SMTP_FROM" envDefault:"no-reply@nodate-time.local"`
 	CORSAllowedOrigins string `env:"TC_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:5173,http://127.0.0.1:5173"`
 	CookieSecure       bool   `env:"TC_COOKIE_SECURE" envDefault:"false"`
 	S3Endpoint         string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`

@@ -118,8 +118,9 @@ export function MembersPanel() {
               {members.map((m) => {
                 const isMe = m.email === me?.email;
                 const lastAdmin = m.role === 'admin' && adminCount <= 1;
-                const canChangeRole = isAdmin && !lastAdmin;
-                const canRemove = (isAdmin || isMe) && !(lastAdmin && isMe);
+                // You manage other members, not yourself: no self role change or self removal.
+                const canChangeRole = isAdmin && !isMe && !lastAdmin;
+                const canRemove = isAdmin && !isMe && !lastAdmin;
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     <span

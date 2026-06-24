@@ -16,14 +16,14 @@ type albumPresignResp struct {
 }
 
 type albumPhotoResp struct {
-	ID         string `json:"id"`
-	CalendarID string `json:"calendarId"`
-	Caption    string `json:"caption"`
+	ID          string `json:"id"`
+	CalendarID  string `json:"calendarId"`
+	Caption     string `json:"caption"`
 	ContentType string `json:"contentType"`
-	EventID    string `json:"eventId"`
-	ByteSize   int64  `json:"byteSize"`
-	ImageURL   string `json:"imageUrl"`
-	UploadedBy struct {
+	EventID     string `json:"eventId"`
+	ByteSize    int64  `json:"byteSize"`
+	ImageURL    string `json:"imageUrl"`
+	UploadedBy  struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"uploadedBy"`
@@ -44,6 +44,10 @@ func uploadOnePhoto(t *testing.T, tt *helpers.TestTenant, body map[string]any) a
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
 		tt.AccessToken, body, &pres)
 	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	// Presign creates the row disabled; confirm makes it visible.
+	helpers.DoJSON(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm",
+		tt.AccessToken, nil, nil)
 	return pres
 }
 

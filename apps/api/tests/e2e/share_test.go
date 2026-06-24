@@ -135,7 +135,9 @@ func TestShareNonAdminCannotCreateInvite(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + tt1.CalendarID
 
 	// tt1 invites tt2 as member
-	var invite struct{ Token string `json:"token"` }
+	var invite struct {
+		Token string `json:"token"`
+	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
 		map[string]any{"role": "member"}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken, nil, nil)
@@ -156,7 +158,9 @@ func TestShareMaxUses(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + tt1.CalendarID
 
 	// Create invite with max_uses=1
-	var invite struct{ Token string `json:"token"` }
+	var invite struct {
+		Token string `json:"token"`
+	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
 		map[string]any{"role": "viewer", "maxUses": 1}, &invite)
 
