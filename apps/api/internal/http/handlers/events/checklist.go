@@ -72,7 +72,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -116,7 +116,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -169,7 +169,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 	return func(ctx context.Context, in *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)

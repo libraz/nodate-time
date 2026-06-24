@@ -548,7 +548,7 @@ export function CalendarHeader() {
       <div className="flex h-[48px] items-center px-3 sm:hidden">
         {/* Left: month label (follows infinite scroll position) */}
         <div className="flex items-center">
-          <span className="text-[18px] font-bold text-[var(--color-text-primary)]">
+          <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
         </div>
@@ -602,7 +602,7 @@ export function CalendarHeader() {
       <div className="hidden h-[56px] items-center px-3 sm:flex">
         {/* Left: month label + nav arrows + today */}
         <div className="flex items-center gap-1">
-          <span className="mr-1 text-[16px] font-semibold text-[var(--color-text-primary)]">
+          <span className="mr-1 text-[16px] font-semibold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
 

@@ -7,7 +7,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
-	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/albums"
@@ -30,8 +29,9 @@ type Deps struct {
 	Mailer    mailer.Mailer
 	WebURL    string
 	OAuth     users.OAuthConfig
-	Admins    auth.AdminAllowlist
 	Cipher    *secrets.Cipher
+	// DevMode enables development-only endpoints (e.g. /auth/dev-login).
+	DevMode bool
 }
 
 func Build(deps Deps) http.Handler {
@@ -47,7 +47,7 @@ func Build(deps Deps) http.Handler {
 	r.Group(func(pub chi.Router) {
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins, Storage: deps.Storage}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "register",
@@ -64,6 +64,17 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Login with email and password",
 			Tags:        []string{"Auth"},
 		}, users.Login(userDeps))
+
+		// Development-only: password-less login for seeded sample accounts.
+		if deps.DevMode {
+			huma.Register(api, huma.Operation{
+				OperationID: "dev-login",
+				Method:      http.MethodPost,
+				Path:        "/auth/dev-login",
+				Summary:     "Password-less login for seeded dev accounts (development only)",
+				Tags:        []string{"Auth"},
+			}, users.DevLogin(userDeps))
+		}
 
 		resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL}
 
@@ -133,7 +144,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Admins: deps.Admins, Storage: deps.Storage}
+		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}
@@ -538,7 +549,7 @@ func Build(deps Deps) http.Handler {
 	// --- Admin routes (require auth + admin allowlist) ---
 	r.Group(func(adm chi.Router) {
 		adm.Use(middleware.RequireAuth(deps.JWTSecret))
-		adm.Use(middleware.RequireAdmin(deps.Queries, deps.Admins))
+		adm.Use(middleware.RequireAdmin(deps.Queries))
 		api := humachi.New(adm, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
 		envHas := func(p string) bool {

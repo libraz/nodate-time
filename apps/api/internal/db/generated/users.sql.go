@@ -44,8 +44,35 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 	)
 }
 
+const createUserWithRole = `-- name: CreateUserWithRole :execresult
+INSERT INTO users (public_id, name, email, icon, color, password_hash, is_admin)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateUserWithRoleParams struct {
+	PublicID     []byte `json:"publicId"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	Icon         string `json:"icon"`
+	Color        string `json:"color"`
+	PasswordHash string `json:"passwordHash"`
+	IsAdmin      bool   `json:"isAdmin"`
+}
+
+func (q *Queries) CreateUserWithRole(ctx context.Context, arg CreateUserWithRoleParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, createUserWithRole,
+		arg.PublicID,
+		arg.Name,
+		arg.Email,
+		arg.Icon,
+		arg.Color,
+		arg.PasswordHash,
+		arg.IsAdmin,
+	)
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE email = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -61,6 +88,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -68,7 +96,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
@@ -84,6 +112,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -91,7 +120,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, created_at, updated_at FROM users WHERE public_id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE public_id = ?
 `
 
 func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User, error) {
@@ -107,10 +136,25 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User,
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setUserAdmin = `-- name: SetUserAdmin :exec
+UPDATE users SET is_admin = ? WHERE id = ?
+`
+
+type SetUserAdminParams struct {
+	IsAdmin bool   `json:"isAdmin"`
+	ID      uint32 `json:"id"`
+}
+
+func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) error {
+	_, err := q.db.ExecContext(ctx, setUserAdmin, arg.IsAdmin, arg.ID)
+	return err
 }
 
 const updateUser = `-- name: UpdateUser :exec

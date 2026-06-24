@@ -22,6 +22,7 @@ interface AuthState {
   error: string | null;
 
   login: (email: string, password: string) => Promise<void>;
+  devLogin: (email: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   fetchMe: () => Promise<void>;
@@ -54,6 +55,18 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const data = await api.post<AuthResponse>('/auth/login', { email, password });
+      setToken(data.token);
+      set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
+    } catch (e) {
+      set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
+      throw e;
+    }
+  },
+
+  devLogin: async (email) => {
+    set({ isLoading: true, error: null });
+    try {
+      const data = await api.post<AuthResponse>('/auth/dev-login', { email });
       setToken(data.token);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
     } catch (e) {

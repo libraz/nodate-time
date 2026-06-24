@@ -27,7 +27,7 @@ func mapAttachment(att generated.EventAttachment) AttachmentResponse {
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -160,7 +160,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 	return func(ctx context.Context, in *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)

@@ -1,9 +1,13 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed sqlc web api build-api test-api test-e2e test-e2e-storage minio-up
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage minio-up
+
+# Local dev defaults: enable dev-login (admin rights come from the users.is_admin
+# flag, seeded for admin@example.com). Respects values already set in the shell.
+DEV_API_ENV = TC_ENV=$${TC_ENV:-development}
 
 # Development – start everything (DB + API + Web) in parallel
 dev: db-up
 	@trap 'kill 0' EXIT; \
-	(cd apps/api && go run ./cmd/api) & \
+	(cd apps/api && $(DEV_API_ENV) go run ./cmd/api) & \
 	(cd apps/web && bun run dev) & \
 	wait
 
@@ -21,9 +25,17 @@ db-apply: db-schema
 	docker run --rm -i --network host mysql:8.4 \
 		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/schema.sql
 
-db-seed: db-apply
+# Create the demo/admin accounts via the helper (no password hashes in SQL),
+# then load the sample calendars/events/memos that reference them by email.
+db-seed: db-apply db-seed-users
 	docker run --rm -i --network host mysql:8.4 \
 		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/seed.sql
+
+db-seed-users:
+	cd apps/api && go run ./cmd/createuser -skip-existing \
+		-email demo@example.com -password password123 -name "Demo User" -icon 😊 -color "#2ECC87"
+	cd apps/api && go run ./cmd/createuser -skip-existing -admin \
+		-email admin@example.com -password password123 -name "Admin User" -icon 🛠️ -color "#E73B3B"
 
 # Code generation
 sqlc:
@@ -31,10 +43,15 @@ sqlc:
 
 # API
 api:
-	cd apps/api && go run ./cmd/api
+	cd apps/api && $(DEV_API_ENV) go run ./cmd/api
 
 build-api:
 	cd apps/api && go build -o ../../bin/api ./cmd/api
+
+# Create a user. Example:
+#   make create-user ARGS="-email admin@foo.com -password secret123 -admin"
+create-user:
+	cd apps/api && go run ./cmd/createuser $(ARGS)
 
 # Testing
 test-api:

@@ -33,24 +33,42 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := resolveCalendarMember(ctx, q, calPubID, userID)
+	return cal, err
+}
+
+// resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
+// members, who may read but not mutate calendar content.
+func resolveCalendarWrite(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := resolveCalendarMember(ctx, q, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, err
+	}
+	if member.Role == generated.CalendarMembersRoleViewer {
+		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	return cal, nil
+}
+
+func resolveCalendarMember(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calPubID)
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 	}
 	cal, err := q.GetCalendarByPublicID(ctx, pubBytes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, apierrors.CalendarNotFound
+			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 		}
-		return generated.Calendar{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
 	}
-	_, err = q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+	member, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: cal.ID, UserID: userID,
 	})
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarAccessDenied
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
 	}
-	return cal, nil
+	return cal, member, nil
 }
 
 func mapMemo(m generated.Memo) MemoResponse {
@@ -91,7 +109,7 @@ func ListMemos(deps Deps) func(context.Context, *ListMemosInput) (*ListMemosOutp
 func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoOutput, error) {
 	return func(ctx context.Context, in *CreateMemoInput) (*CreateMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -126,7 +144,7 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoOutput, error) {
 	return func(ctx context.Context, in *UpdateMemoInput) (*UpdateMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -175,7 +193,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoOutput, error) {
 	return func(ctx context.Context, in *DeleteMemoInput) (*DeleteMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
