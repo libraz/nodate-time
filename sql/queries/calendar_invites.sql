@@ -10,6 +10,10 @@ VALUES (?, ?, ?, ?, ?, ?);
 -- name: IncrementInviteUseCount :exec
 UPDATE calendar_invites SET use_count = use_count + 1 WHERE id = ?;
 
+-- name: ConsumeInviteUse :execresult
+UPDATE calendar_invites SET use_count = use_count + 1
+WHERE id = ? AND (max_uses IS NULL OR use_count < max_uses);
+
 -- name: DeleteInvite :exec
 DELETE FROM calendar_invites WHERE id = ?;
 

@@ -6,7 +6,7 @@ VALUES (?, ?, ?, ?);
 SELECT provider, redirect, expires_at FROM oauth_states
 WHERE state_hash = ? LIMIT 1;
 
--- name: DeleteOAuthState :exec
+-- name: DeleteOAuthState :execresult
 DELETE FROM oauth_states WHERE state_hash = ?;
 
 -- name: DeleteExpiredOAuthStates :exec

@@ -13,12 +13,12 @@ export function NotificationsPanel() {
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-40 bg-[var(--color-overlay)]"
+        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('notifications')}
       />
-      <div className="glass-surface-heavy fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
-          <h2 className="text-[16px] font-semibold">{t('panel.notifications')}</h2>
+          <h2 className="text-subhead font-semibold">{t('panel.notifications')}</h2>
           <button
             type="button"
             onClick={() => toggleRightPanel('notifications')}
@@ -52,7 +52,7 @@ export function NotificationsPanel() {
             <path d="M18 8A6 6 0 106 8c0 7-3 9-3 9h18s-3-2-3-9z" />
             <path d="M13.73 21a2 2 0 01-3.46 0" />
           </svg>
-          <p className="text-[14px]">{t('panel.noNotifications')}</p>
+          <p className="text-default">{t('panel.noNotifications')}</p>
         </div>
       </div>
     </>

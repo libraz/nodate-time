@@ -64,6 +64,17 @@ export const NOTIFICATION_OFFSETS = [
   { label: '2days', value: 2880 },
 ] as const;
 
+/** The set of notification offsets (in minutes) the API accepts. */
+export const ALLOWED_NOTIFICATION_OFFSETS: ReadonlySet<number> = new Set(
+  NOTIFICATION_OFFSETS.flatMap((o) => (o.value === null ? [] : [o.value as number])),
+);
+
+/** Returns `offset` if it is an accepted notification value, otherwise `null`. */
+export function normalizeNotificationOffset(offset: number | null | undefined): number | null {
+  if (offset == null) return null;
+  return ALLOWED_NOTIFICATION_OFFSETS.has(offset) ? offset : null;
+}
+
 export interface CalendarEvent {
   id: string;
   calendarId: string;

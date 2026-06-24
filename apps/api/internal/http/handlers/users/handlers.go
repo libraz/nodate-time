@@ -18,10 +18,18 @@ import (
 
 const avatarDownloadTTL = 5 * time.Minute
 
+// dummyPasswordHash is a valid bcrypt hash compared against when a login is
+// attempted for a non-existent account, so that the response time does not
+// reveal whether the email exists (user-enumeration side channel).
+var dummyPasswordHash, _ = auth.HashPassword("nodate-time-login-timing-equalizer")
+
 type Deps struct {
 	Queries   *generated.Queries
 	JWTSecret string
 	Storage   *storage.Client
+	// AllowedDomains restricts which email domains may register a password
+	// account, mirroring the Google OIDC policy. Empty means unrestricted.
+	AllowedDomains []string
 }
 
 func pubIDToHex(b []byte) string {
@@ -67,8 +75,17 @@ func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserRes
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {
 	return func(ctx context.Context, in *RegisterInput) (*RegisterOutput, error) {
+		// Enforce the same access policy as Google OIDC sign-in.
+		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, in.Body.Email)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if !allowed {
+			return nil, apierrors.ToHuma(apierrors.AuthSignupNotAllowed)
+		}
+
 		// Check existing
-		_, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
+		_, err = deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err == nil {
 			return nil, apierrors.ToHuma(apierrors.AuthEmailExists)
 		}
@@ -120,6 +137,9 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 		user, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
+				// Run a comparison anyway so the response time matches the
+				// found-user path and does not leak account existence.
+				auth.CheckPassword(in.Body.Password, dummyPasswordHash)
 				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)

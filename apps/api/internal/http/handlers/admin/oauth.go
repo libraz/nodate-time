@@ -20,6 +20,10 @@ type Deps struct {
 	// value for a given provider. The frontend uses this to show that the
 	// provider is configured even when no DB row exists yet.
 	EnvFallback func(provider string) bool
+	// AllowedDomains is the configured Google sign-in domain restriction
+	// (TC_GOOGLE_ALLOWED_DOMAINS). Empty means unrestricted. Read-only here;
+	// surfaced to the admin panel so operators know the active policy.
+	AllowedDomains []string
 }
 
 const SecretMask = "********"
@@ -112,8 +116,15 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		case in.Body.ClientSecret == "" && hadRow:
 			encSecret = existing.ClientSecretEnc
 		case in.Body.ClientSecret == "":
-			// New row but no secret provided: fail rather than create a useless row.
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
+			// New row but no secret provided. Allow it only when the environment
+			// supplies the secret for this provider (resolveProvider merges the
+			// env secret at runtime), so admins can override clientId/enabled
+			// without re-entering an env-managed secret. Otherwise fail rather
+			// than create a useless row that can never authenticate.
+			if deps.EnvFallback == nil || !deps.EnvFallback(in.Provider) {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			encSecret = nil
 		case in.Body.ClientSecret == "__clear__":
 			encSecret = nil
 		default:

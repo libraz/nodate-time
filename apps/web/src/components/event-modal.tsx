@@ -2,7 +2,10 @@ import { DateTime } from 'luxon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
-import { api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { toast } from '@/lib/toast';
+import { uploadViaPresign } from '@/lib/upload';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -12,14 +15,20 @@ import type {
   RecurrencePreset,
   RecurrenceRule,
 } from '@/types/calendar';
-import { FALLBACK_LABEL_COLOR, NOTIFICATION_OFFSETS } from '@/types/calendar';
+import {
+  FALLBACK_LABEL_COLOR,
+  NOTIFICATION_OFFSETS,
+  normalizeNotificationOffset,
+} from '@/types/calendar';
 
-function toLocalDatetime(iso: string): string {
-  return DateTime.fromISO(iso).toFormat("yyyy-MM-dd'T'HH:mm");
+/** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
+function toLocalDatetime(iso: string, zone: string): string {
+  return DateTime.fromISO(iso, { zone }).toFormat("yyyy-MM-dd'T'HH:mm");
 }
 
-function fromLocalDatetimeToISO(s: string): string {
-  return DateTime.fromISO(s).toISO() ?? s;
+/** Interprets a wall-clock `yyyy-MM-ddTHH:mm` string as an instant in the given zone. */
+function fromLocalDatetimeToISO(s: string, zone: string): string {
+  return DateTime.fromISO(s, { zone }).toISO() ?? s;
 }
 
 interface Activity {
@@ -89,6 +98,25 @@ function presetToRule(preset: RecurrencePreset, dt: DateTime): RecurrenceRule | 
     case 'custom':
       return null;
   }
+}
+
+/**
+ * Produces an API-valid recurrence rule:
+ * - drops a monthly `byDay` that lacks `bySetPos` (the server rejects it),
+ * - serializes a date-only `until` to an RFC3339 instant at the end of that
+ *   day in the event timezone so non-UTC users don't lose the final occurrence.
+ */
+function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): RecurrenceRule | null {
+  if (!rule) return null;
+  const next: RecurrenceRule = { ...rule };
+  if (next.freq === 'monthly' && next.byDay && !next.bySetPos) {
+    next.byDay = undefined;
+  }
+  if (next.until && next.until.length === 10) {
+    const end = DateTime.fromISO(next.until, { zone }).endOf('day');
+    next.until = end.toISO() ?? next.until;
+  }
+  return next;
 }
 
 function ruleToPreset(rule: RecurrenceRule | null, dt: DateTime): RecurrencePreset {
@@ -217,19 +245,19 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
         >
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </svg>
-        <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+        <span className="text-default font-semibold text-[var(--color-text-primary)]">
           {t('event.comments')}
         </span>
       </div>
 
       {isLoading && comments.length === 0 && (
-        <p className="py-2 text-center text-[13px] text-[var(--color-text-tertiary)]">
+        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('common.loading')}
         </p>
       )}
 
       {!isLoading && comments.length === 0 && (
-        <p className="py-2 text-center text-[13px] text-[var(--color-text-tertiary)]">
+        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('event.noComments')}
         </p>
       )}
@@ -239,17 +267,17 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
           {comments.map((c) => (
             <div key={c.id} className="group flex gap-2">
               <span
-                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-surface-inset)] text-[14px]"
+                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-surface-inset)] text-default"
                 style={{ borderRadius: 'var(--radius-sm)' }}
               >
                 {c.userIcon || '\uD83D\uDC64'}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[13px] font-medium text-[var(--color-text-primary)]">
+                  <span className="text-body font-medium text-[var(--color-text-primary)]">
                     {c.userName}
                   </span>
-                  <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                  <span className="text-caption text-[var(--color-text-tertiary)]">
                     {formatRelativeTime(c.createdAt, locale)}
                   </span>
                   {c.userPublicId === user?.id && editingId !== c.id && (
@@ -260,7 +288,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                           setEditingId(c.id);
                           setEditContent(c.content);
                         }}
-                        className="text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
+                        className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
                       >
                         {t('event.editComment')}
                       </button>
@@ -272,7 +300,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                           );
                           fetchComments();
                         }}
-                        className="text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
+                        className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                       >
                         {t('event.deleteComment')}
                       </button>
@@ -285,7 +313,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                       type="text"
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
-                      className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-text-primary)] outline-none"
+                      className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-body text-[var(--color-text-primary)] outline-none"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           api
@@ -312,14 +340,14 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                             fetchComments();
                           });
                       }}
-                      className="bg-[var(--color-accent)] px-2 py-1 text-[11px] text-white"
+                      className="bg-[var(--color-accent)] px-2 py-1 text-caption text-white"
                       style={{ borderRadius: 'var(--radius-sm)' }}
                     >
                       {t('event.saveComment')}
                     </button>
                   </div>
                 ) : (
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[14px] text-[var(--color-text-primary)]">
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-default text-[var(--color-text-primary)]">
                     {c.content}
                   </p>
                 )}
@@ -342,7 +370,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
             }
           }}
           placeholder={t('event.commentPlaceholder')}
-          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
         />
         <button
@@ -437,13 +465,13 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
           <path d="M9 11l3 3L22 4" />
           <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
         </svg>
-        <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+        <span className="text-default font-semibold text-[var(--color-text-primary)]">
           {t('event.checklist')}
         </span>
       </div>
 
       {isLoading && items.length === 0 && (
-        <p className="py-2 text-center text-[13px] text-[var(--color-text-tertiary)]">
+        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('common.loading')}
         </p>
       )}
@@ -475,7 +503,7 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
                 )}
               </button>
               <span
-                className="flex-1 text-[14px]"
+                className="flex-1 text-default"
                 style={{
                   color: item.done ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
                   textDecoration: item.done ? 'line-through' : 'none',
@@ -516,7 +544,7 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
             }
           }}
           placeholder={t('event.checklistPlaceholder')}
-          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-[14px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
         />
       </div>
@@ -549,19 +577,19 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
+    const contentType = file.type || 'application/octet-stream';
     try {
-      const presign = await api.post<{ attachmentId: string; uploadUrl: string }>(
-        `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
-        { filename: file.name, contentType: file.type, byteSize: file.size },
-      );
-      await fetch(presign.uploadUrl, {
-        method: 'PUT',
+      await uploadViaPresign<{ attachmentId: string; uploadUrl: string }>({
+        kind: 'attachment',
+        presignPath: `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
+        presignBody: { filename: file.name, contentType, byteSize: file.size },
+        contentType,
         body: file,
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        byteSize: file.size,
       });
       await fetchAttachments();
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -607,7 +635,7 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
         >
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
         </svg>
-        <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+        <span className="text-default font-semibold text-[var(--color-text-primary)]">
           {t('event.attachments')}
         </span>
       </div>
@@ -633,17 +661,17 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
                 <path d="M14 2v6h6" />
               </svg>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] text-[var(--color-text-primary)]">
+                <p className="truncate text-body text-[var(--color-text-primary)]">
                   {att.filename}
                 </p>
-                <p className="text-[11px] text-[var(--color-text-tertiary)]">
+                <p className="text-caption text-[var(--color-text-tertiary)]">
                   {formatSize(att.byteSize)}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => handleDownload(att)}
-                className="shrink-0 text-[var(--color-accent)] hover:underline text-[12px]"
+                className="shrink-0 text-[var(--color-accent)] hover:underline text-footnote"
               >
                 {t('event.download')}
               </button>
@@ -673,7 +701,7 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-[13px] text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-body text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
         style={{ borderRadius: 'var(--radius-md)' }}
       >
         <svg
@@ -706,6 +734,7 @@ interface FormState {
   url: string;
   notificationOffset: number | null;
   participants: string[];
+  assignedTo: string | null;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
 }
@@ -713,6 +742,7 @@ interface FormState {
 export function EventModal() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
   const showEventModal = useUiStore((s) => s.showEventModal);
   const editingEventId = useUiStore((s) => s.editingEventId);
   const closeEventModal = useUiStore((s) => s.closeEventModal);
@@ -725,9 +755,11 @@ export function EventModal() {
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
   const labels = useCalendarStore((s) => s.labels);
+  const me = useAuthStore((s) => s.user);
 
   const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     title: '',
@@ -741,22 +773,28 @@ export function EventModal() {
     url: '',
     notificationOffset: null,
     participants: [],
+    assignedTo: null,
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
   const [showCustomRecurrence, setShowCustomRecurrence] = useState(false);
+
+  // The current user's role for the event's calendar gates all mutating UI.
+  const formCalendarId = form.calendarId || (editingEvent?.calendarId ?? '');
+  const myRole = roleForCalendar(membersMap[formCalendarId], me?.email);
+  const editable = canEdit(myRole);
 
   useEffect(() => {
     if (!showEventModal) return;
     setShowCustomRecurrence(false);
     if (editingEvent) {
       const rule = editingEvent.recurrenceRule ?? null;
-      const startDt = DateTime.fromISO(editingEvent.startAt);
+      const startDt = DateTime.fromISO(editingEvent.startAt, { zone: timezone });
       setForm({
         title: editingEvent.title,
         allDay: editingEvent.allDay,
-        startAt: toLocalDatetime(editingEvent.startAt),
-        endAt: toLocalDatetime(editingEvent.endAt),
+        startAt: toLocalDatetime(editingEvent.startAt, timezone),
+        endAt: toLocalDatetime(editingEvent.endAt, timezone),
         color: editingEvent.color,
         calendarId: editingEvent.calendarId,
         location: editingEvent.location,
@@ -764,17 +802,20 @@ export function EventModal() {
         url: editingEvent.url ?? '',
         notificationOffset: editingEvent.notificationOffset ?? null,
         participants: editingEvent.participants ?? [],
+        assignedTo: editingEvent.assignedTo ?? null,
         recurrenceRule: rule,
         recurrencePreset: ruleToPreset(rule, startDt),
       });
     } else {
-      const start = selectedDate.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
-      const end = selectedDate.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+      // Interpret the selected day as a wall date in the user's timezone.
+      const base = selectedDate.setZone(timezone, { keepLocalTime: true });
+      const start = base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+      const end = base.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
       setForm({
         title: '',
         allDay: true,
-        startAt: toLocalDatetime(start.toISO() ?? ''),
-        endAt: toLocalDatetime(end.toISO() ?? ''),
+        startAt: start.toFormat("yyyy-MM-dd'T'HH:mm"),
+        endAt: end.toFormat("yyyy-MM-dd'T'HH:mm"),
         color: FALLBACK_LABEL_COLOR,
         calendarId: calendars[0]?.id ?? '',
         location: '',
@@ -782,11 +823,12 @@ export function EventModal() {
         url: '',
         notificationOffset: null,
         participants: [],
+        assignedTo: null,
         recurrencePreset: 'none',
         recurrenceRule: null,
       });
     }
-  }, [editingEvent, showEventModal, selectedDate, calendars]);
+  }, [editingEvent, showEventModal, selectedDate, calendars, timezone]);
 
   useEffect(() => {
     if (showEventModal) {
@@ -794,13 +836,14 @@ export function EventModal() {
     }
   }, [showEventModal]);
 
-  const handleSave = useCallback(() => {
-    if (!form.title.trim()) return;
-    let startIso = fromLocalDatetimeToISO(form.startAt);
-    let endIso = fromLocalDatetimeToISO(form.endAt);
+  const handleSave = useCallback(async () => {
+    if (!form.title.trim() || saving || !editable) return;
+    let startIso = fromLocalDatetimeToISO(form.startAt, timezone);
+    let endIso = fromLocalDatetimeToISO(form.endAt, timezone);
     if (form.allDay) {
-      const startDay = DateTime.fromISO(form.startAt).startOf('day');
-      const endDay = DateTime.fromISO(form.endAt).startOf('day');
+      // All-day events are wall dates anchored at midnight in the selected zone.
+      const startDay = DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day');
+      const endDay = DateTime.fromISO(form.endAt, { zone: timezone }).startOf('day');
       startIso = startDay.toISO() ?? startIso;
       // End is exclusive: add 1 day. Clamp end >= start.
       const effectiveEnd = endDay >= startDay ? endDay : startDay;
@@ -818,28 +861,43 @@ export function EventModal() {
       allDay: form.allDay,
       startAt: startIso,
       endAt: endIso,
+      timezone,
       color: form.color,
       location: form.location,
       memo: form.memo,
       url: form.url,
-      notificationOffset: form.notificationOffset,
+      notificationOffset: normalizeNotificationOffset(form.notificationOffset),
       participants: form.participants,
-      recurrenceRule: form.recurrenceRule,
+      assignedTo: form.assignedTo,
+      recurrenceRule: normalizeRuleForApi(form.recurrenceRule, timezone),
     };
-    if (editingEvent) {
-      updateEvent(editingEvent.calendarId, editingEvent.id, data);
-    } else {
-      addEvent(form.calendarId, data);
-    }
-    closeEventModal();
-  }, [form, editingEvent, addEvent, updateEvent, closeEventModal]);
-
-  const handleDelete = useCallback(() => {
-    if (editingEvent) {
-      deleteEvent(editingEvent.calendarId, editingEvent.id);
+    setSaving(true);
+    try {
+      if (editingEvent) {
+        await updateEvent(editingEvent.calendarId, editingEvent.id, data);
+      } else {
+        await addEvent(form.calendarId, data);
+      }
       closeEventModal();
+    } catch (e) {
+      toast.error(errorMessage(e, t('error.saveFailed')));
+    } finally {
+      setSaving(false);
     }
-  }, [editingEvent, deleteEvent, closeEventModal]);
+  }, [form, editingEvent, addEvent, updateEvent, closeEventModal, saving, editable, timezone, t]);
+
+  const handleDelete = useCallback(async () => {
+    if (!editingEvent || saving || !editable) return;
+    setSaving(true);
+    try {
+      await deleteEvent(editingEvent.calendarId, editingEvent.id);
+      closeEventModal();
+    } catch (e) {
+      toast.error(errorMessage(e, t('error.deleteFailed')));
+    } finally {
+      setSaving(false);
+    }
+  }, [editingEvent, deleteEvent, closeEventModal, saving, editable, t]);
 
   if (!showEventModal) return null;
 
@@ -865,7 +923,7 @@ export function EventModal() {
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
-        <span className="text-[15px] font-medium text-[var(--color-text-secondary)]">
+        <span className="text-callout font-medium text-[var(--color-text-secondary)]">
           {editingEvent ? t('event.editEvent') : t('event.createEvent')}
         </span>
       </div>
@@ -878,7 +936,7 @@ export function EventModal() {
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           placeholder={t('event.titlePlaceholder')}
           rows={1}
-          className="w-full resize-none border-b-2 border-transparent bg-transparent text-[24px] font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+          className="w-full resize-none border-b-2 border-transparent bg-transparent text-display font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
         />
       </div>
 
@@ -956,7 +1014,7 @@ export function EventModal() {
 
           {/* All day toggle */}
           <div className="flex items-center justify-between py-2.5">
-            <span className="text-[14px] text-[var(--color-text-primary)]">
+            <span className="text-default text-[var(--color-text-primary)]">
               {t('calendar.allDay')}
             </span>
             <button
@@ -976,7 +1034,7 @@ export function EventModal() {
 
           {/* Recurrence */}
           <div className="flex items-center justify-between py-2.5">
-            <span className="text-[14px] text-[var(--color-text-primary)]">
+            <span className="text-default text-[var(--color-text-primary)]">
               {t('event.recurrenceNone').split('/')[0] || 'Repeat'}
             </span>
             <CustomSelect
@@ -1028,7 +1086,7 @@ export function EventModal() {
           {showCustomRecurrence && form.recurrenceRule && (
             <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
               <div className="space-y-1.5">
-                <span className="block text-[13px] text-[var(--color-text-secondary)]">
+                <span className="block text-body text-[var(--color-text-secondary)]">
                   {t('event.recurrenceInterval')}
                 </span>
                 <div className="flex items-center gap-2">
@@ -1047,7 +1105,7 @@ export function EventModal() {
                       }));
                     }}
                     style={{ width: '4rem' }}
-                    className="input-modern shrink-0 text-center text-[13px]"
+                    className="input-modern shrink-0 text-center text-body"
                   />
                   <CustomSelect
                     value={form.recurrenceRule.freq}
@@ -1059,24 +1117,172 @@ export function EventModal() {
                     ]}
                     onChange={(val) => {
                       const freq = val as RecurrenceRule['freq'];
-                      setForm((f) => ({
-                        ...f,
-                        recurrenceRule: f.recurrenceRule
-                          ? {
-                              ...f.recurrenceRule,
-                              freq,
-                              byDay: undefined,
-                              byMonthDay: undefined,
-                              bySetPos: undefined,
-                            }
-                          : null,
-                      }));
+                      const startDt = DateTime.fromISO(form.startAt);
+                      const dayCode = WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU';
+                      setForm((f) => {
+                        if (!f.recurrenceRule) return f;
+                        // Seed defaults so the rule stays valid for its frequency.
+                        const base = {
+                          ...f.recurrenceRule,
+                          freq,
+                          byDay: undefined as string[] | undefined,
+                          byMonthDay: undefined as number | undefined,
+                          bySetPos: undefined as number | undefined,
+                        };
+                        if (freq === 'weekly') base.byDay = [dayCode];
+                        if (freq === 'monthly') base.byMonthDay = startDt.day;
+                        return { ...f, recurrenceRule: base };
+                      });
                     }}
                   />
                 </div>
               </div>
+
+              {/* Weekly: pick one or more weekdays */}
+              {form.recurrenceRule.freq === 'weekly' && (
+                <div className="space-y-1.5">
+                  <span className="block text-body text-[var(--color-text-secondary)]">
+                    {t('event.recurrenceWeekdaysLabel')}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {WEEKDAY_CODES.map((code, idx) => {
+                      const selected = form.recurrenceRule?.byDay?.includes(code) ?? false;
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() =>
+                            setForm((f) => {
+                              if (!f.recurrenceRule) return f;
+                              const cur = f.recurrenceRule.byDay ?? [];
+                              const next = cur.includes(code)
+                                ? cur.filter((d) => d !== code)
+                                : [...cur, code];
+                              // Keep at least one weekday selected.
+                              return {
+                                ...f,
+                                recurrenceRule: {
+                                  ...f.recurrenceRule,
+                                  byDay: next.length > 0 ? next : cur,
+                                },
+                              };
+                            })
+                          }
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold transition-colors"
+                          style={{
+                            backgroundColor: selected
+                              ? 'var(--color-accent)'
+                              : 'var(--color-surface-secondary)',
+                            color: selected ? '#fff' : 'var(--color-text-secondary)',
+                          }}
+                        >
+                          {WEEKDAY_LABELS_JA[idx]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Monthly: by day-of-month or by nth weekday */}
+              {form.recurrenceRule.freq === 'monthly' && (
+                <div className="space-y-1.5">
+                  <span className="block text-body text-[var(--color-text-secondary)]">
+                    {t('event.recurrenceMonthlyMode')}
+                  </span>
+                  <CustomSelect
+                    value={form.recurrenceRule.bySetPos ? 'weekday' : 'date'}
+                    options={[
+                      { value: 'date', label: t('event.recurrenceMonthlyByDate') },
+                      { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
+                    ]}
+                    onChange={(mode) => {
+                      const startDt = DateTime.fromISO(form.startAt);
+                      setForm((f) => {
+                        if (!f.recurrenceRule) return f;
+                        if (mode === 'weekday') {
+                          return {
+                            ...f,
+                            recurrenceRule: {
+                              ...f.recurrenceRule,
+                              bySetPos: getNthWeekday(startDt),
+                              byDay: [WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU'],
+                              byMonthDay: undefined,
+                            },
+                          };
+                        }
+                        return {
+                          ...f,
+                          recurrenceRule: {
+                            ...f.recurrenceRule,
+                            byMonthDay: startDt.day,
+                            bySetPos: undefined,
+                            byDay: undefined,
+                          },
+                        };
+                      });
+                    }}
+                  />
+                  {form.recurrenceRule.bySetPos ? (
+                    <div className="flex items-center gap-2">
+                      <CustomSelect
+                        value={String(form.recurrenceRule.bySetPos)}
+                        options={[
+                          { value: '1', label: t('event.recurrenceNthFirst') },
+                          { value: '2', label: t('event.recurrenceNthSecond') },
+                          { value: '3', label: t('event.recurrenceNthThird') },
+                          { value: '4', label: t('event.recurrenceNthFourth') },
+                          { value: '-1', label: t('event.recurrenceNthLast') },
+                        ]}
+                        onChange={(pos) =>
+                          setForm((f) => ({
+                            ...f,
+                            recurrenceRule: f.recurrenceRule
+                              ? { ...f.recurrenceRule, bySetPos: Number(pos) }
+                              : null,
+                          }))
+                        }
+                      />
+                      <CustomSelect
+                        value={form.recurrenceRule.byDay?.[0] ?? 'SU'}
+                        options={WEEKDAY_CODES.map((code, idx) => ({
+                          value: code,
+                          label: WEEKDAY_LABELS_JA[idx] ?? code,
+                        }))}
+                        onChange={(day) =>
+                          setForm((f) => ({
+                            ...f,
+                            recurrenceRule: f.recurrenceRule
+                              ? { ...f.recurrenceRule, byDay: [day] }
+                              : null,
+                          }))
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={form.recurrenceRule.byMonthDay ?? DateTime.fromISO(form.startAt).day}
+                      onChange={(e) => {
+                        const val = Math.max(1, Math.min(31, Number(e.target.value)));
+                        setForm((f) => ({
+                          ...f,
+                          recurrenceRule: f.recurrenceRule
+                            ? { ...f.recurrenceRule, byMonthDay: val }
+                            : null,
+                        }));
+                      }}
+                      style={{ width: '4rem' }}
+                      className="input-modern shrink-0 text-center text-body"
+                    />
+                  )}
+                </div>
+              )}
+
               <div className="space-y-1.5">
-                <span className="text-[13px] text-[var(--color-text-secondary)]">
+                <span className="text-body text-[var(--color-text-secondary)]">
                   {t('event.recurrenceEndLabel')}
                 </span>
                 <div className="flex flex-col gap-1.5">
@@ -1095,7 +1301,7 @@ export function EventModal() {
                       }
                       className="accent-[var(--color-accent)]"
                     />
-                    <span className="text-[13px] text-[var(--color-text-primary)]">
+                    <span className="text-body text-[var(--color-text-primary)]">
                       {t('event.recurrenceEndNever')}
                     </span>
                   </label>
@@ -1117,7 +1323,7 @@ export function EventModal() {
                       }}
                       className="accent-[var(--color-accent)]"
                     />
-                    <span className="shrink-0 whitespace-nowrap text-[13px] text-[var(--color-text-primary)]">
+                    <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
                       {t('event.recurrenceEndDate')}:
                     </span>
                     {form.recurrenceRule.until && (
@@ -1153,7 +1359,7 @@ export function EventModal() {
                       }
                       className="accent-[var(--color-accent)]"
                     />
-                    <span className="shrink-0 whitespace-nowrap text-[13px] text-[var(--color-text-primary)]">
+                    <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
                       {t('event.recurrenceEndCount')}:
                     </span>
                     {form.recurrenceRule.count && (
@@ -1172,7 +1378,7 @@ export function EventModal() {
                           }));
                         }}
                         style={{ width: '4rem' }}
-                        className="input-modern shrink-0 text-center text-[13px]"
+                        className="input-modern shrink-0 text-center text-body"
                       />
                     )}
                   </label>
@@ -1183,7 +1389,7 @@ export function EventModal() {
 
           {/* Recurrence label for editing recurring events */}
           {editingEvent?.isRecurrence && form.recurrenceRule && (
-            <p className="mt-1 text-[12px] text-[var(--color-text-tertiary)]">
+            <p className="mt-1 text-footnote text-[var(--color-text-tertiary)]">
               {recurrenceLabel(form.recurrenceRule, DateTime.fromISO(form.startAt), t, locale)}
             </p>
           )}
@@ -1211,7 +1417,7 @@ export function EventModal() {
               value={form.location}
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
               placeholder={t('event.location')}
-              className="flex-1 bg-transparent text-[15px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
             />
           </div>
           <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
@@ -1233,7 +1439,7 @@ export function EventModal() {
               value={form.url}
               onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
               placeholder={t('event.urlPlaceholder')}
-              className="flex-1 bg-transparent text-[15px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
             />
           </div>
           <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
@@ -1255,7 +1461,7 @@ export function EventModal() {
               onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
               placeholder={t('event.memo')}
               rows={2}
-              className="flex-1 resize-none bg-transparent text-[15px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
             />
           </div>
         </div>
@@ -1295,7 +1501,7 @@ export function EventModal() {
                       }))
                     }
                     title={m.name}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-[14px] transition-opacity"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-default transition-opacity"
                     style={{
                       backgroundColor: m.color,
                       opacity: isSelected ? 1 : 0.3,
@@ -1308,7 +1514,7 @@ export function EventModal() {
                 );
               })}
               {form.participants.length === 0 && (
-                <span className="text-[14px] text-[var(--color-text-tertiary)]">
+                <span className="text-default text-[var(--color-text-tertiary)]">
                   {t('event.selectParticipants')}
                 </span>
               )}
@@ -1342,6 +1548,39 @@ export function EventModal() {
                   ...f,
                   notificationOffset: v === 'none' ? null : Number(v),
                 }));
+              }}
+              className="flex-1"
+            />
+          </div>
+
+          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+
+          {/* Assignee */}
+          <div className="flex items-center gap-3 py-1.5">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-text-tertiary)"
+              strokeWidth="2"
+              className="shrink-0"
+            >
+              <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 11l-3 3-1.5-1.5" />
+            </svg>
+            <CustomSelect
+              value={form.assignedTo ?? 'none'}
+              options={[
+                { value: 'none', label: t('event.assigneeNone') },
+                ...(membersMap[form.calendarId] ?? []).map((m) => ({
+                  value: m.id,
+                  label: m.name,
+                })),
+              ]}
+              onChange={(v) => {
+                setForm((f) => ({ ...f, assignedTo: v === 'none' ? null : v }));
               }}
               className="flex-1"
             />
@@ -1400,13 +1639,14 @@ export function EventModal() {
         <CommentsSection calendarId={editingEvent.calendarId} eventId={editingEvent.id} />
       )}
 
-      {/* Delete (edit mode) */}
-      {editingEvent && (
+      {/* Delete (edit mode, editors only) */}
+      {editingEvent && editable && (
         <div className="px-6 pt-4">
           <button
             type="button"
             onClick={handleDelete}
-            className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-[14px] font-medium text-[var(--color-danger)]"
+            disabled={saving}
+            className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-default font-medium text-[var(--color-danger)] disabled:opacity-50"
             style={{ borderRadius: 'var(--radius-md)' }}
           >
             {editingEvent?.recurrenceRule ? t('event.deleteRecurring') : t('event.deleteEvent')}
@@ -1426,7 +1666,7 @@ export function EventModal() {
         <button
           type="button"
           aria-label={t('common.close')}
-          className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
+          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
           onClick={closeEventModal}
         />
         <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
@@ -1437,18 +1677,20 @@ export function EventModal() {
             <button
               type="button"
               onClick={closeEventModal}
-              className="btn-secondary flex-1 py-3 text-[14px] font-medium"
+              className="btn-secondary flex-1 py-3 text-default font-medium"
             >
-              {t('common.cancel')}
+              {editable ? t('common.cancel') : t('common.close')}
             </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="btn-primary flex-1 py-3 text-[14px] font-medium"
-              style={{ opacity: form.title.trim() ? 1 : 0.5 }}
-            >
-              {t('common.save')}
-            </button>
+            {editable && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !form.title.trim()}
+                className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+              >
+                {saving ? t('common.saving') : t('common.save')}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1458,7 +1700,7 @@ export function EventModal() {
         <button
           type="button"
           aria-label={t('common.close')}
-          className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
+          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
           onClick={closeEventModal}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
@@ -1469,18 +1711,20 @@ export function EventModal() {
               <button
                 type="button"
                 onClick={closeEventModal}
-                className="btn-secondary flex-1 py-3 text-[14px] font-medium"
+                className="btn-secondary flex-1 py-3 text-default font-medium"
               >
-                {t('common.cancel')}
+                {editable ? t('common.cancel') : t('common.close')}
               </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                className="btn-primary flex-1 py-3 text-[14px] font-medium"
-                style={{ opacity: form.title.trim() ? 1 : 0.5 }}
-              >
-                {t('common.save')}
-              </button>
+              {editable && (
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving || !form.title.trim()}
+                  className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+                >
+                  {saving ? t('common.saving') : t('common.save')}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -45,6 +45,33 @@ describe('isMultiDay', () => {
     });
     expect(isMultiDay(evt, ZONE)).toBe(true);
   });
+
+  it('is false for a timed event ending exactly at midnight', () => {
+    // 23:00 -> next day 00:00 occupies only the first day.
+    const evt = makeEvent({
+      startAt: '2026-04-20T23:00:00+09:00',
+      endAt: '2026-04-21T00:00:00+09:00',
+    });
+    expect(isMultiDay(evt, ZONE)).toBe(false);
+  });
+
+  it('is false for a single all-day event (exclusive end)', () => {
+    const evt = makeEvent({
+      allDay: true,
+      startAt: '2026-04-20T00:00:00+09:00',
+      endAt: '2026-04-21T00:00:00+09:00',
+    });
+    expect(isMultiDay(evt, ZONE)).toBe(false);
+  });
+
+  it('is true for a two-day all-day event (exclusive end)', () => {
+    const evt = makeEvent({
+      allDay: true,
+      startAt: '2026-04-20T00:00:00+09:00',
+      endAt: '2026-04-22T00:00:00+09:00',
+    });
+    expect(isMultiDay(evt, ZONE)).toBe(true);
+  });
 });
 
 describe('layoutWeek', () => {
@@ -54,7 +81,7 @@ describe('layoutWeek', () => {
     const evt = makeEvent({
       title: 'Trip',
       startAt: '2026-04-20T00:00:00+09:00', // Monday (col 1)
-      endAt: '2026-04-22T00:00:00+09:00', // Wednesday (col 3)
+      endAt: '2026-04-23T00:00:00+09:00', // exclusive end -> last day Wednesday (col 3)
     });
     const result = layoutWeek(weekStart, [evt], ZONE);
     expect(result).toHaveLength(1);
@@ -64,6 +91,23 @@ describe('layoutWeek', () => {
     expect(positioned?.track).toBe(0);
     expect(positioned?.continuesLeft).toBe(false);
     expect(positioned?.continuesRight).toBe(false);
+  });
+
+  it('excludes single-day events (rendered as chips, not bars)', () => {
+    const timed = makeEvent({
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+    });
+    const nightToMidnight = makeEvent({
+      startAt: '2026-04-20T23:00:00+09:00',
+      endAt: '2026-04-21T00:00:00+09:00',
+    });
+    const singleAllDay = makeEvent({
+      allDay: true,
+      startAt: '2026-04-20T00:00:00+09:00',
+      endAt: '2026-04-21T00:00:00+09:00',
+    });
+    expect(layoutWeek(weekStart, [timed, nightToMidnight, singleAllDay], ZONE)).toHaveLength(0);
   });
 
   it('clamps events that overflow the week and flags continuation', () => {
@@ -99,21 +143,22 @@ describe('layoutWeek', () => {
     const a = makeEvent({
       id: 'a',
       startAt: '2026-04-19T00:00:00+09:00', // Sunday (col 0)
-      endAt: '2026-04-20T00:00:00+09:00', // Monday (col 1)
+      endAt: '2026-04-21T00:00:00+09:00', // exclusive end -> through Monday (col 1)
     });
     const b = makeEvent({
       id: 'b',
       startAt: '2026-04-23T00:00:00+09:00', // Thursday (col 4)
-      endAt: '2026-04-24T00:00:00+09:00', // Friday (col 5)
+      endAt: '2026-04-25T00:00:00+09:00', // exclusive end -> through Friday (col 5)
     });
     const result = layoutWeek(weekStart, [a, b], ZONE);
+    expect(result).toHaveLength(2);
     expect(result.every((p) => p.track === 0)).toBe(true);
   });
 
   it('excludes events that fall entirely outside the week', () => {
     const evt = makeEvent({
       startAt: '2026-05-01T00:00:00+09:00',
-      endAt: '2026-05-02T00:00:00+09:00',
+      endAt: '2026-05-03T00:00:00+09:00',
     });
     expect(layoutWeek(weekStart, [evt], ZONE)).toHaveLength(0);
   });

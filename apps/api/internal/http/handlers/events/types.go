@@ -52,7 +52,7 @@ type ListEventsInput struct {
 	CalendarID string `path:"calendarId"`
 	StartDate  string `query:"start" doc:"ISO date YYYY-MM-DD"`
 	EndDate    string `query:"end" doc:"ISO date YYYY-MM-DD"`
-	Days       int    `query:"days" default:"30" doc:"Number of days ahead (used if start/end not set)"`
+	Days       int    `query:"days" default:"30" minimum:"1" maximum:"366" doc:"Number of days ahead (used if start/end not set)"`
 }
 type ListEventsOutput struct {
 	Body []EventResponse
@@ -80,6 +80,7 @@ type CreateEventInput struct {
 		URL                string           `json:"url,omitempty" maxLength:"2000" required:"false"`
 		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
 		Participants       []string         `json:"participants,omitempty" required:"false"`
+		AssignedTo         *string          `json:"assignedTo,omitempty" required:"false" doc:"public user ID of the assigned member"`
 		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false"`
 	}
 }
@@ -102,6 +103,7 @@ type UpdateEventInput struct {
 		URL                string           `json:"url,omitempty" maxLength:"2000" required:"false"`
 		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
 		Participants       []string         `json:"participants,omitempty" required:"false"`
+		AssignedTo         *string          `json:"assignedTo,omitempty" required:"false" doc:"public user ID of the assigned member"`
 		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false"`
 	}
 }

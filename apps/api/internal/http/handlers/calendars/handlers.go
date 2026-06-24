@@ -47,26 +47,45 @@ func mapCalendar(c generated.Calendar) CalendarResponse {
 
 // resolveCalendar converts public UUID to internal calendar row + verifies membership.
 func resolveCalendar(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := resolveCalendarMember(ctx, deps, calendarPubID, userID)
+	return cal, err
+}
+
+// resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
+// members, who may read but not mutate calendar content.
+func resolveCalendarWrite(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := resolveCalendarMember(ctx, deps, calendarPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, err
+	}
+	if member.Role == generated.CalendarMembersRoleViewer {
+		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	return cal, nil
+}
+
+// resolveCalendarMember resolves the calendar row and the requesting user's
+// membership, returning both for callers that need the member's role.
+func resolveCalendarMember(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calendarPubID)
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 	}
 	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, apierrors.CalendarNotFound
+			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 		}
-		return generated.Calendar{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
 	}
-	// Check membership
-	_, err = deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: cal.ID,
 		UserID:     userID,
 	})
 	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarAccessDenied
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
 	}
-	return cal, nil
+	return cal, member, nil
 }
 
 func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListCalendarsOutput, error) {
@@ -161,6 +180,14 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 				return nil, apierrors.ToHuma(spec)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Check admin role
+		member, _ := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+			CalendarID: cal.ID,
+			UserID:     userID,
+		})
+		if member.Role != "admin" {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		err = deps.Queries.UpdateCalendar(ctx, generated.UpdateCalendarParams{
@@ -264,18 +291,34 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
 
+		// Lock the admin count and apply the role change atomically so concurrent
+		// demotions cannot drop the calendar below one admin.
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		qtx := deps.Queries.WithTx(tx)
+
 		if current.Role == "admin" && in.Body.Role != "admin" {
-			adminCount, _ := deps.Queries.CountCalendarAdmins(ctx, cal.ID)
+			adminCount, err := qtx.CountCalendarAdminsForUpdate(ctx, cal.ID)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			if adminCount <= 1 {
 				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
 			}
 		}
 
-		if err := deps.Queries.UpdateCalendarMemberRole(ctx, generated.UpdateCalendarMemberRoleParams{
+		if err := qtx.UpdateCalendarMemberRole(ctx, generated.UpdateCalendarMemberRoleParams{
 			Role:       generated.CalendarMembersRole(in.Body.Role),
 			CalendarID: cal.ID,
 			UserID:     target.ID,
 		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		if err := tx.Commit(); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -322,17 +365,33 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			}
 		}
 
+		// Lock the admin count and remove the member atomically so concurrent
+		// removals cannot drop the calendar below one admin.
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		qtx := deps.Queries.WithTx(tx)
+
 		if current.Role == "admin" {
-			adminCount, _ := deps.Queries.CountCalendarAdmins(ctx, cal.ID)
+			adminCount, err := qtx.CountCalendarAdminsForUpdate(ctx, cal.ID)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			if adminCount <= 1 {
 				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
 			}
 		}
 
-		if err := deps.Queries.RemoveCalendarMember(ctx, generated.RemoveCalendarMemberParams{
+		if err := qtx.RemoveCalendarMember(ctx, generated.RemoveCalendarMemberParams{
 			CalendarID: cal.ID,
 			UserID:     target.ID,
 		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		if err := tx.Commit(); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &RemoveMemberOutput{}, nil

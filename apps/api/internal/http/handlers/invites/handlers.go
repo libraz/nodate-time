@@ -67,10 +67,10 @@ func resolveCalendarAdmin(ctx context.Context, deps Deps, calPubID string) (gene
 
 func mapInvite(inv generated.CalendarInvite) InviteResponse {
 	resp := InviteResponse{
-		ID:       inv.ID,
-		Token:    inv.Token,
-		Role:     string(inv.Role),
-		UseCount: inv.UseCount,
+		ID:        inv.ID,
+		Token:     inv.Token,
+		Role:      string(inv.Role),
+		UseCount:  inv.UseCount,
 		CreatedAt: inv.CreatedAt,
 	}
 	if inv.MaxUses.Valid {
@@ -99,10 +99,19 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 		if role == "" {
 			role = "member"
 		}
+		// Invite links may not grant admin; admin promotion goes through UpdateMemberRole.
+		if role == "admin" {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
 
 		var maxUses sql.NullInt32
 		if in.Body.MaxUses != nil {
 			maxUses = sql.NullInt32{Int32: *in.Body.MaxUses, Valid: true}
+		}
+
+		var expiresAt sql.NullTime
+		if in.Body.ExpiresInHours != nil {
+			expiresAt = sql.NullTime{Time: time.Now().Add(time.Duration(*in.Body.ExpiresInHours) * time.Hour), Valid: true}
 		}
 
 		result, err := deps.Queries.CreateInvite(ctx, generated.CreateInviteParams{
@@ -110,7 +119,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			Token:      token,
 			Role:       generated.CalendarInvitesRole(role),
 			MaxUses:    maxUses,
-			ExpiresAt:  sql.NullTime{},
+			ExpiresAt:  expiresAt,
 			CreatedBy:  userID,
 		})
 		if err != nil {
@@ -136,6 +145,27 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		cal, err := deps.Queries.GetCalendarByID(ctx, invite.CalendarID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		out := &AcceptInviteOutput{}
+		out.Body.CalendarID = pubIDToHex(cal.PublicID)
+
+		// Idempotent re-accept: an existing member must not burn a use.
+		existing, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+			CalendarID: invite.CalendarID,
+			UserID:     userID,
+		})
+		if err == nil {
+			out.Body.Role = string(existing.Role)
+			return out, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
 		tx, err := deps.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -143,19 +173,21 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		defer tx.Rollback()
 		qtx := deps.Queries.WithTx(tx)
 
-		// Add member
+		// Atomically claim a use; 0 rows means the invite is exhausted (race-safe).
+		res, err := qtx.ConsumeInviteUse(ctx, invite.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return nil, apierrors.ToHuma(apierrors.InviteExpired)
+		}
+
 		_, err = qtx.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
 			CalendarID: invite.CalendarID,
 			UserID:     userID,
 			Role:       generated.CalendarMembersRole(invite.Role),
 			Color:      "#42A5F5",
 		})
-		if err != nil {
-			// Might already be a member
-			return nil, apierrors.ToHuma(apierrors.MemberAlreadyExists)
-		}
-
-		err = qtx.IncrementInviteUseCount(ctx, invite.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -164,21 +196,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		cal, _ := deps.Queries.GetCalendarByPublicID(ctx, nil)
-		// Get calendar public ID
-		calRow, _ := deps.Queries.ListCalendarsByUser(ctx, userID)
-		calPubID := ""
-		for _, c := range calRow {
-			if c.ID == invite.CalendarID {
-				calPubID = pubIDToHex(c.PublicID)
-				break
-			}
-		}
-
-		out := &AcceptInviteOutput{}
-		out.Body.CalendarID = calPubID
 		out.Body.Role = string(invite.Role)
-		_ = cal
 		return out, nil
 	}
 }

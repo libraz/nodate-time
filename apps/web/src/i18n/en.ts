@@ -148,6 +148,11 @@ export const en: Record<TranslationKey, string> = {
   'auth.loginFailed': 'Login failed',
   'auth.registerFailed': 'Registration failed',
   'auth.passwordMinLength': '8 characters min',
+  'auth.oauthNotAllowed':
+    'This account is not permitted to sign in. Ask an administrator to allow your address or use an account in an allowed domain.',
+  'auth.oauthOnlySubtitle': 'Sign in with your account',
+  'auth.showPassword': 'Show password',
+  'auth.hidePassword': 'Hide password',
   'auth.quickLogin': 'Quick login (dev only)',
   'auth.demoLogin': 'Demo Login',
   'auth.adminLogin': 'Admin Login',
@@ -257,6 +262,18 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminProviderEnable': 'Enabled',
   'settings.adminProviderUnconfigured': 'Not configured',
   'settings.adminProviderRemoveConfirm': 'Remove {provider} configuration?',
+  'settings.adminAllowedEmails': 'Allowed sign-in emails',
+  'settings.adminAllowedEmailsDescription':
+    'Individually permit Google accounts to sign in when domain restriction is active.',
+  'settings.adminAllowedEmailsRestricted':
+    'Google sign-in is restricted to: {domains}. Addresses below are allowed in addition to those domains.',
+  'settings.adminAllowedEmailsUnrestricted':
+    'Google sign-in is currently unrestricted (any Google account may sign in), so this list is not enforced. Set TC_GOOGLE_ALLOWED_DOMAINS to restrict by domain.',
+  'settings.adminAllowedEmailsEmailPlaceholder': 'name@gmail.com',
+  'settings.adminAllowedEmailsNotePlaceholder': 'Note (optional)',
+  'settings.adminAllowedEmailsAdd': 'Add',
+  'settings.adminAllowedEmailsEmpty': 'No individually allowed emails yet.',
+  'settings.adminAllowedEmailsRemove': 'Remove',
 
   'members.role': 'Role',
   'members.roleAdmin': 'Admin',
@@ -283,4 +300,41 @@ export const en: Record<TranslationKey, string> = {
   'invites.copy': 'Copy link',
   'invites.revoke': 'Revoke',
   'invites.empty': 'No invite links',
+
+  // Errors
+  'error.generic': 'Something went wrong',
+  'error.noPermission': "You don't have permission to do this",
+  'error.sessionExpired': 'Your session has expired. Please log in again',
+  'error.saveFailed': 'Failed to save',
+  'error.deleteFailed': 'Failed to delete',
+  'error.uploadFailed': 'Upload failed',
+  'error.fileTooLarge': 'File is too large',
+  'error.unsupportedFileType': 'Unsupported file type',
+
+  // Recurrence (custom builder)
+  'event.recurrenceWeekdaysLabel': 'Days',
+  'event.recurrenceMonthlyMode': 'Repeat by',
+  'event.recurrenceMonthlyByDate': 'Day of month',
+  'event.recurrenceMonthlyByWeekday': 'Day of week',
+  'event.recurrenceNthFirst': 'First',
+  'event.recurrenceNthSecond': 'Second',
+  'event.recurrenceNthThird': 'Third',
+  'event.recurrenceNthFourth': 'Fourth',
+  'event.recurrenceNthLast': 'Last',
+
+  // Assignee
+  'event.assignee': 'Assignee',
+  'event.assigneeNone': 'Unassigned',
+
+  // Album
+  'album.caption': 'Caption',
+  'album.captionPlaceholder': 'Add a caption...',
+  'album.saveCaption': 'Save',
+  'album.download': 'Download',
+
+  // Calendar settings (name / color / cover)
+  'settings.calendarColor': 'Color',
+  'settings.calendarCover': 'Cover image',
+  'settings.calendarCoverUpload': 'Upload cover image',
+  'settings.calendarDetails': 'Calendar settings',
 };

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -76,7 +75,13 @@ func main() {
 	}
 
 	// Build app router
-	mailerClient := mailer.New()
+	mailerClient := mailer.New(mailer.SMTPConfig{
+		Host:     cfg.SMTPHost,
+		Port:     cfg.SMTPPort,
+		Username: cfg.SMTPUsername,
+		Password: cfg.SMTPPassword,
+		From:     cfg.SMTPFrom,
+	}, cfg.IsDev())
 	oauthCfg := users.OAuthConfig{
 		RedirectBase: cfg.APIPublic,
 		Google: users.OAuthProviderConfig{
@@ -107,16 +112,26 @@ func main() {
 	}
 
 	appRouter := router.Build(router.Deps{
-		DB:        db,
-		Queries:   queries,
-		JWTSecret: cfg.JWTSecret,
-		Storage:   storageClient,
-		Mailer:    mailerClient,
-		WebURL:    cfg.WebURL,
-		OAuth:     oauthCfg,
-		Cipher:    cipher,
-		DevMode:   cfg.IsDev(),
+		DB:                   db,
+		Queries:              queries,
+		JWTSecret:            cfg.JWTSecret,
+		Storage:              storageClient,
+		Mailer:               mailerClient,
+		WebURL:               cfg.WebURL,
+		OAuth:                oauthCfg,
+		Cipher:               cipher,
+		GoogleAllowedDomains: cfg.GoogleAllowedDomainList(),
+		DevMode:              cfg.IsDev(),
+		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
 	})
+	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
+		slog.Info("Google sign-in restricted to domains", "domains", domains)
+	} else {
+		slog.Info("Google sign-in is unrestricted (any Google account may sign in)")
+	}
+	if !cfg.PasswordLoginEnabled {
+		slog.Info("password login disabled; only OAuth/OIDC sign-in is available")
+	}
 	if cfg.IsDev() {
 		slog.Warn("development mode enabled; /auth/dev-login is exposed (password-less login for @example.com accounts)")
 	}
@@ -125,7 +140,7 @@ func main() {
 	outer := chi.NewRouter()
 	outer.Use(middleware.SecurityHeaders())
 	outer.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   strings.Split(cfg.CORSAllowedOrigins, ","),
+		AllowedOrigins:   cfg.CORSAllowedOriginList(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},

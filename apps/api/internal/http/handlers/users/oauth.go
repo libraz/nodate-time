@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	oauthStateTTL  = 10 * time.Minute
+	oauthStateTTL   = 10 * time.Minute
 	oauthStateBytes = 24
 )
 
@@ -48,6 +48,12 @@ type OAuthDeps struct {
 	WebURL    string
 	Config    OAuthConfig
 	Cipher    *secrets.Cipher
+	// AllowedDomains restricts which email domains may sign in via Google.
+	// Empty means unrestricted. See config.GoogleAllowedDomainList.
+	AllowedDomains []string
+	// PasswordLoginEnabled reflects whether email+password auth is available,
+	// surfaced to the login screen so it can hide the password form.
+	PasswordLoginEnabled bool
 }
 
 // resolveProvider returns the merged provider configuration: DB row overrides
@@ -56,8 +62,14 @@ type OAuthDeps struct {
 func resolveProvider(ctx context.Context, deps OAuthDeps, name string) (OAuthProviderConfig, bool) {
 	envCfg, _ := providerConfig(deps.Config, name)
 	row, err := deps.Queries.GetOAuthProviderConfig(ctx, name)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+		// No DB override configured; fall back to env-based defaults.
 		return envCfg, envCfg.ClientID != ""
+	}
+	if err != nil {
+		// A real DB error must fail closed — never silently fall back to env
+		// credentials for a provider an admin may have intentionally disabled.
+		return OAuthProviderConfig{}, false
 	}
 	if !row.Enabled {
 		return OAuthProviderConfig{}, false
@@ -106,6 +118,23 @@ func safeRedirect(raw string) string {
 		return "/"
 	}
 	return raw
+}
+
+// ListEnabledProviders reports which OAuth providers are usable (have a client
+// ID from env or DB and are not disabled). Public, so the login screen can show
+// only the buttons that will actually work. No secrets are exposed.
+func ListEnabledProviders(deps OAuthDeps) func(context.Context, *OAuthProvidersInput) (*OAuthProvidersOutput, error) {
+	return func(ctx context.Context, _ *OAuthProvidersInput) (*OAuthProvidersOutput, error) {
+		out := &OAuthProvidersOutput{}
+		out.Body.Providers = make([]string, 0, 2)
+		out.Body.PasswordEnabled = deps.PasswordLoginEnabled
+		for _, p := range []string{"google", "line"} {
+			if _, ok := resolveProvider(ctx, deps, p); ok {
+				out.Body.Providers = append(out.Body.Providers, p)
+			}
+		}
+		return out, nil
+	}
 }
 
 func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthStartOutput, error) {
@@ -159,9 +188,11 @@ type tokenResponse struct {
 }
 
 type googleUserinfo struct {
-	Sub   string `json:"sub"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Sub           string `json:"sub"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	Hd            string `json:"hd"`
 }
 
 type lineUserinfo struct {
@@ -226,12 +257,28 @@ func consumeState(ctx context.Context, q *generated.Queries, state, provider str
 	if err != nil {
 		return "", err
 	}
-	// Always delete (best-effort) so a state cannot be reused.
-	_ = q.DeleteOAuthState(ctx, hash)
+	// Atomically claim the state by deleting it: exactly one concurrent caller
+	// observes RowsAffected == 1, so a replayed or duplicated callback cannot
+	// consume the same state twice (CSRF replay window).
+	res, derr := q.DeleteOAuthState(ctx, hash)
+	if derr != nil {
+		return "", derr
+	}
+	if n, aerr := res.RowsAffected(); aerr != nil || n != 1 {
+		return "", errors.New("oauth: state already consumed")
+	}
 	if string(row.Provider) != provider || time.Now().After(row.ExpiresAt) {
 		return "", errors.New("oauth: state mismatch or expired")
 	}
 	return safeRedirect(row.Redirect), nil
+}
+
+// oauthDenied redirects back to the login page with an error code so the user
+// sees a friendly message instead of a raw API error. Used when a Google
+// account is not permitted to sign in (domain not allowed / email unverified).
+func oauthDenied(deps OAuthDeps) *OAuthCallbackOutput {
+	dest := strings.TrimRight(deps.WebURL, "/") + "/login?error=oauth_not_allowed"
+	return &OAuthCallbackOutput{Status: http.StatusFound, URL: dest}
 }
 
 func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*OAuthCallbackOutput, error) {
@@ -251,19 +298,47 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		}
 
 		var subject, email, name string
+		// emailVerified gates automatic account linking by email: only a provider
+		// that proves the user owns the address may link to an existing account.
+		emailVerified := false
 		switch in.Provider {
 		case "google":
 			var u googleUserinfo
 			if err := fetchUserinfo(ctx, pc, accessToken, &u); err != nil {
 				return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
 			}
+			// OIDC: only trust a verified email for access decisions.
+			if u.Email == "" || !u.EmailVerified {
+				return oauthDenied(deps), nil
+			}
+			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			if !allowed {
+				return oauthDenied(deps), nil
+			}
 			subject, email, name = u.Sub, u.Email, u.Name
+			emailVerified = true
 		case "line":
 			var u lineUserinfo
 			if err := fetchUserinfo(ctx, pc, accessToken, &u); err != nil {
 				return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
 			}
+			// The allow-list applies to every provider. LINE does not return a
+			// verified-email proof, so when a domain/email restriction is active
+			// and LINE gives no allow-listed address, sign-in is denied.
+			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			if !allowed {
+				return oauthDenied(deps), nil
+			}
+			// LINE's email claim is not a verified ownership proof: never use it
+			// to auto-link to a pre-existing account.
 			subject, email, name = u.Sub, u.Email, u.Name
+			emailVerified = false
 		}
 		if subject == "" {
 			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
@@ -271,8 +346,9 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		if name == "" {
 			name = "OAuth User"
 		}
+		email = strings.ToLower(strings.TrimSpace(email))
 
-		userID, err := upsertOAuthUser(ctx, deps.DB, in.Provider, subject, email, name)
+		userID, err := upsertOAuthUser(ctx, deps.DB, in.Provider, subject, email, name, emailVerified)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -292,7 +368,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 // upsertOAuthUser links an OAuth identity to a user, creating one if needed.
 // Wrapped in a transaction so concurrent callbacks for the same subject cannot
 // produce duplicate users or orphan oauth_account rows.
-func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, name string) (uint32, error) {
+func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, name string, emailVerified bool) (uint32, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -313,7 +389,11 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 		return 0, err
 	}
 
-	if email != "" {
+	// Auto-link to an existing account by email only when the provider has
+	// verified the user owns that address. Without this, an attacker who sets a
+	// victim's email on an unverified provider profile (e.g. LINE) could take
+	// over the victim's account.
+	if emailVerified && email != "" {
 		if u, err := q.GetUserByEmail(ctx, email); err == nil {
 			if _, err := q.CreateOAuthAccount(ctx, generated.CreateOAuthAccountParams{
 				UserID:          u.ID,
@@ -336,13 +416,21 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 	if err != nil {
 		return 0, err
 	}
-	if email == "" {
-		email = subject + "@oauth." + provider + ".local"
+	// When the email is missing or unverified, mint a synthetic, namespaced
+	// address for the users row so it can never collide with — or be mistaken
+	// for — a real, verified account.
+	userEmail := email
+	if !emailVerified || userEmail == "" {
+		userEmail = subject + "@oauth." + provider + ".local"
+	}
+	accountEmail := email
+	if accountEmail == "" {
+		accountEmail = userEmail
 	}
 	res, err := q.CreateUser(ctx, generated.CreateUserParams{
 		PublicID:     pubID[:],
 		Name:         name,
-		Email:        email,
+		Email:        userEmail,
 		Icon:         "👤",
 		Color:        "#42A5F5",
 		PasswordHash: "!", // placeholder — user has no password, must use OAuth
@@ -360,7 +448,7 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 		UserID:          uid,
 		Provider:        generated.OauthAccountsProvider(provider),
 		ProviderSubject: subject,
-		Email:           email,
+		Email:           accountEmail,
 	}); err != nil {
 		return 0, err
 	}

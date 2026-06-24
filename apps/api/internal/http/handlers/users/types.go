@@ -106,6 +106,19 @@ type ConfirmResetOutput struct {
 	}
 }
 
+type OAuthProvidersInput struct{}
+
+type OAuthProvidersOutput struct {
+	Body struct {
+		// Providers lists the OAuth providers that are configured and enabled,
+		// so the login screen can render only the buttons that actually work.
+		Providers []string `json:"providers"`
+		// PasswordEnabled reports whether email+password sign-in is available.
+		// When false the login screen shows OAuth/OIDC sign-in only.
+		PasswordEnabled bool `json:"passwordEnabled"`
+	}
+}
+
 type OAuthStartInput struct {
 	Provider string `path:"provider" enum:"google,line"`
 	Redirect string `query:"redirect"`

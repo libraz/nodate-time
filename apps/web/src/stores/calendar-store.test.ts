@@ -1,0 +1,176 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CalendarEvent, Memo } from '@/types/calendar';
+
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+}));
+
+import { api } from '@/lib/api';
+import { useCalendarStore } from './calendar-store';
+
+const mockApi = vi.mocked(api);
+
+function evt(
+  id: string,
+  calendarId: string,
+  overrides: Partial<CalendarEvent> = {},
+): CalendarEvent {
+  return {
+    id,
+    calendarId,
+    title: `Event ${id}`,
+    allDay: false,
+    startAt: '2026-04-20T10:00:00+09:00',
+    endAt: '2026-04-20T11:00:00+09:00',
+    color: '#47B2F7',
+    assignedTo: null,
+    location: '',
+    memo: '',
+    url: '',
+    notificationOffset: null,
+    participants: [],
+    recurrenceRule: null,
+    isRecurrence: false,
+    recurrenceDate: null,
+    createdAt: '',
+    updatedAt: '',
+    ...overrides,
+  };
+}
+
+function memo(id: string, calendarId: string): Memo {
+  return {
+    id,
+    calendarId,
+    title: `Memo ${id}`,
+    done: false,
+    sortOrder: 0,
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  useCalendarStore.setState({
+    calendars: [],
+    events: [],
+    memos: [],
+    membersMap: {},
+    labels: [],
+    activeCalendarIds: [],
+    isLoading: false,
+  });
+});
+
+describe('fetchEvents', () => {
+  it('aggregates events from every calendar and stamps the calendarId', async () => {
+    useCalendarStore.setState({
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '' },
+        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '' },
+      ],
+    });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url.includes('/calendars/cal-1/events')) return [evt('e1', 'cal-1')] as never;
+      if (url.includes('/calendars/cal-2/events')) return [evt('e2', 'cal-2')] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+
+    const { events } = useCalendarStore.getState();
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.calendarId).sort()).toEqual(['cal-1', 'cal-2']);
+  });
+});
+
+describe('deleteCalendar', () => {
+  it('removes the calendar and cascades its events, memos, and members', async () => {
+    mockApi.delete.mockResolvedValue(undefined as never);
+    useCalendarStore.setState({
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '' },
+        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '' },
+      ],
+      events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
+      memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
+      membersMap: { 'cal-1': [], 'cal-2': [] },
+      activeCalendarIds: ['cal-1', 'cal-2'],
+    });
+
+    await useCalendarStore.getState().deleteCalendar('cal-1');
+
+    const s = useCalendarStore.getState();
+    expect(s.calendars.map((c) => c.id)).toEqual(['cal-2']);
+    expect(s.events.map((e) => e.id)).toEqual(['e2']);
+    expect(s.memos.map((m) => m.id)).toEqual(['m2']);
+    expect(s.membersMap['cal-1']).toBeUndefined();
+    expect(s.activeCalendarIds).toEqual(['cal-2']);
+    expect(localStorage.getItem('tt_activeCalendarIds')).toBe('["cal-2"]');
+  });
+});
+
+describe('toggleCalendarFilter', () => {
+  it('removes an active id and persists the change', () => {
+    useCalendarStore.setState({ activeCalendarIds: ['cal-1', 'cal-2'] });
+    useCalendarStore.getState().toggleCalendarFilter('cal-1');
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-2']);
+    expect(localStorage.getItem('tt_activeCalendarIds')).toBe('["cal-2"]');
+  });
+
+  it('adds an inactive id back', () => {
+    useCalendarStore.setState({ activeCalendarIds: ['cal-2'] });
+    useCalendarStore.getState().toggleCalendarFilter('cal-1');
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-2', 'cal-1']);
+  });
+});
+
+describe('addMemo', () => {
+  it('sets sortOrder to the count of existing memos for that calendar', async () => {
+    useCalendarStore.setState({ memos: [memo('m1', 'cal-1'), memo('m2', 'cal-1')] });
+    mockApi.post.mockResolvedValue(memo('m3', 'cal-1') as never);
+
+    await useCalendarStore.getState().addMemo('cal-1', { title: 'third' });
+
+    expect(mockApi.post).toHaveBeenCalledWith('/calendars/cal-1/memos', {
+      title: 'third',
+      sortOrder: 2,
+    });
+    expect(useCalendarStore.getState().memos.map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
+  });
+});
+
+describe('deleteEvent', () => {
+  it('removes a single non-recurring event', async () => {
+    mockApi.delete.mockResolvedValue(undefined as never);
+    useCalendarStore.setState({ events: [evt('keep', 'cal-1'), evt('drop', 'cal-1')] });
+
+    await useCalendarStore.getState().deleteEvent('cal-1', 'drop');
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['keep']);
+  });
+
+  it('removes all instances sharing a recurring parent', async () => {
+    mockApi.delete.mockResolvedValue(undefined as never);
+    const parent = 'a'.repeat(32);
+    const other = 'b'.repeat(32);
+    useCalendarStore.setState({
+      events: [
+        evt(`${parent}_20260403`, 'cal-1'),
+        evt(`${parent}_20260410`, 'cal-1'),
+        evt(other, 'cal-1'),
+      ],
+    });
+
+    await useCalendarStore.getState().deleteEvent('cal-1', `${parent}_20260403`);
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual([other]);
+  });
+});

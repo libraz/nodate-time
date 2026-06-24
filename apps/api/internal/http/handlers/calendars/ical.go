@@ -2,6 +2,7 @@ package calendars
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 // --- Export ---
@@ -31,6 +33,16 @@ const (
 	exportWindowPast   = -5 * 365 * 24 * time.Hour
 	exportWindowFuture = 10 * 365 * 24 * time.Hour
 )
+
+// exportEvent is a single event instance to render. For non-recurring events it
+// mirrors the stored row; for recurring masters it carries one expanded
+// occurrence's start/end plus a uidSuffix to keep the UID unique per instance.
+type exportEvent struct {
+	event     generated.Event
+	startAt   time.Time
+	endAt     time.Time
+	uidSuffix string
+}
 
 func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput, error) {
 	return func(ctx context.Context, in *ExportInput) (*ExportOutput, error) {
@@ -60,16 +72,50 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		exports := make([]exportEvent, 0, len(rows))
+		for _, e := range rows {
+			exports = append(exports, exportEvent{event: e, startAt: e.StartAt, endAt: e.EndAt})
+		}
+
+		// Recurring masters are stored once; expand each into its occurrences
+		// within the export window so they are not silently dropped.
+		recurringRows, err := deps.Queries.ListRecurringEventsByCalendarAndRange(ctx, generated.ListRecurringEventsByCalendarAndRangeParams{
+			CalendarID:    cal.ID,
+			StartAt:       windowEnd,
+			RecurrenceEnd: sql.NullTime{Time: windowStart, Valid: true},
+		})
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		for _, e := range recurringRows {
+			if e.RecurrenceRule == nil {
+				continue
+			}
+			rule := recurrence.ParseRule(*e.RecurrenceRule)
+			if rule == nil {
+				continue
+			}
+			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, windowStart, windowEnd, e.Timezone)
+			for _, occ := range occurrences {
+				exports = append(exports, exportEvent{
+					event:     e,
+					startAt:   occ.StartAt,
+					endAt:     occ.EndAt,
+					uidSuffix: "-" + occ.StartAt.UTC().Format("20060102T150405"),
+				})
+			}
+		}
+
 		switch in.Format {
 		case "csv":
-			body := buildCSV(rows)
+			body := buildCSV(exports)
 			return &ExportOutput{
 				ContentType:        "text/csv; charset=utf-8",
 				ContentDisposition: fmt.Sprintf(`attachment; filename="%s.csv"`, sanitizeFilename(cal.Name)),
 				Body:               []byte(body),
 			}, nil
 		default:
-			body := buildICS(cal.Name, rows)
+			body := buildICS(cal.Name, exports)
 			return &ExportOutput{
 				ContentType:        "text/calendar; charset=utf-8",
 				ContentDisposition: fmt.Sprintf(`attachment; filename="%s.ics"`, sanitizeFilename(cal.Name)),
@@ -85,6 +131,10 @@ func sanitizeFilename(s string) string {
 }
 
 func icsEscape(s string) string {
+	// Normalize all newline variants to a single \n before escaping so bare CR
+	// and CRLF do not leak raw control characters into the output.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 	r := strings.NewReplacer(
 		"\\", `\\`,
 		";", `\;`,
@@ -94,12 +144,37 @@ func icsEscape(s string) string {
 	return r.Replace(s)
 }
 
+// icsURI sanitizes a URI value for a property whose value type is URI (not TEXT).
+// URI values must not be TEXT-escaped, so commas and semicolons are kept as-is;
+// only line breaks are stripped to avoid injecting extra content lines.
+func icsURI(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
+}
+
 func icsTime(t time.Time) string {
 	return t.UTC().Format("20060102T150405Z")
 }
 
-func icsDate(t time.Time) string {
-	return t.UTC().Format("20060102")
+// icsDate renders an all-day date in the event's own timezone so the calendar
+// day does not shift for non-UTC users. Falls back to UTC on an unknown zone.
+func icsDate(t time.Time, tz string) string {
+	loc := loadLocationOrUTC(tz)
+	return t.In(loc).Format("20060102")
+}
+
+// loadLocationOrUTC resolves an IANA timezone name, falling back to UTC.
+func loadLocationOrUTC(tz string) *time.Location {
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // writeFolded writes a content line, folding at 75 octets per RFC 5545 §3.1.
@@ -130,23 +205,30 @@ func writeFolded(b *strings.Builder, line string) {
 	}
 }
 
-func buildICS(calName string, rows []generated.Event) string {
+func buildICS(calName string, rows []exportEvent) string {
 	var b strings.Builder
 	writeFolded(&b, "BEGIN:VCALENDAR")
 	writeFolded(&b, "VERSION:2.0")
 	writeFolded(&b, "PRODID:-//Nodate Time//EN")
 	writeFolded(&b, "CALSCALE:GREGORIAN")
 	writeFolded(&b, "X-WR-CALNAME:"+icsEscape(calName))
-	for _, e := range rows {
+	for _, x := range rows {
+		e := x.event
 		writeFolded(&b, "BEGIN:VEVENT")
-		writeFolded(&b, "UID:"+hex.EncodeToString(e.PublicID)+"@nodate-time")
+		writeFolded(&b, "UID:"+hex.EncodeToString(e.PublicID)+x.uidSuffix+"@nodate-time")
 		writeFolded(&b, "DTSTAMP:"+icsTime(time.Now()))
 		if e.AllDay {
-			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(e.StartAt))
-			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(e.EndAt))
+			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt, e.Timezone))
+			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt, e.Timezone))
+		} else if tz := e.Timezone; tz != "" && tz != "UTC" {
+			// Emit local wall time anchored to the event's timezone so the
+			// original zone survives the round-trip.
+			loc := loadLocationOrUTC(tz)
+			writeFolded(&b, "DTSTART;TZID="+tz+":"+x.startAt.In(loc).Format("20060102T150405"))
+			writeFolded(&b, "DTEND;TZID="+tz+":"+x.endAt.In(loc).Format("20060102T150405"))
 		} else {
-			writeFolded(&b, "DTSTART:"+icsTime(e.StartAt))
-			writeFolded(&b, "DTEND:"+icsTime(e.EndAt))
+			writeFolded(&b, "DTSTART:"+icsTime(x.startAt))
+			writeFolded(&b, "DTEND:"+icsTime(x.endAt))
 		}
 		writeFolded(&b, "SUMMARY:"+icsEscape(e.Title))
 		if e.Location != "" {
@@ -156,7 +238,7 @@ func buildICS(calName string, rows []generated.Event) string {
 			writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Memo))
 		}
 		if e.Url != "" {
-			writeFolded(&b, "URL:"+icsEscape(e.Url))
+			writeFolded(&b, "URL:"+icsURI(e.Url))
 		}
 		writeFolded(&b, "END:VEVENT")
 	}
@@ -171,16 +253,29 @@ func csvEscape(s string) string {
 	return s
 }
 
-func buildCSV(rows []generated.Event) string {
+func buildCSV(rows []exportEvent) string {
 	var b strings.Builder
 	b.WriteString("Subject,Start Date,Start Time,End Date,End Time,All Day,Location,Description,URL\r\n")
-	for _, e := range rows {
+	for _, x := range rows {
+		e := x.event
+		// Render dates/times in the event's own timezone so all-day events do
+		// not shift a day for non-UTC users.
+		loc := loadLocationOrUTC(e.Timezone)
+		start := x.startAt.In(loc)
+		end := x.endAt.In(loc)
+		// All-day end is stored exclusively (midnight after the last day); show the
+		// inclusive last day so a one-day event reads as the same start/end date and
+		// round-trips correctly into spreadsheet/calendar importers.
+		endDate := end.Format("2006-01-02")
+		if e.AllDay && end.After(start) {
+			endDate = end.AddDate(0, 0, -1).Format("2006-01-02")
+		}
 		fields := []string{
 			csvEscape(e.Title),
-			e.StartAt.UTC().Format("2006-01-02"),
-			e.StartAt.UTC().Format("15:04:05"),
-			e.EndAt.UTC().Format("2006-01-02"),
-			e.EndAt.UTC().Format("15:04:05"),
+			start.Format("2006-01-02"),
+			start.Format("15:04:05"),
+			endDate,
+			end.Format("15:04:05"),
 			fmt.Sprintf("%t", e.AllDay),
 			csvEscape(e.Location),
 			csvEscape(e.Memo),
@@ -310,7 +405,7 @@ func unescapeICS(s string) string {
 func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutput, error) {
 	return func(ctx context.Context, in *ImportInputAlt) (*ImportOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)

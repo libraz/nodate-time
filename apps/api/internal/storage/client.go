@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -38,9 +40,21 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
-// PresignPut returns a presigned PUT URL for uploading an object.
+// PresignPut returns a presigned PUT URL for uploading an object. When
+// contentType is non-empty it is bound into the signature so the client must
+// send a matching Content-Type header, preventing callers from uploading an
+// arbitrary type (e.g. HTML) to an image-only slot.
 func (c *Client) PresignPut(ctx context.Context, key string, contentType string, expires time.Duration) (string, error) {
-	u, err := c.mc.PresignedPutObject(ctx, c.bucket, key, expires)
+	if contentType == "" {
+		u, err := c.mc.PresignedPutObject(ctx, c.bucket, key, expires)
+		if err != nil {
+			return "", err
+		}
+		return u.String(), nil
+	}
+	headers := http.Header{}
+	headers.Set("Content-Type", contentType)
+	u, err := c.mc.PresignHeader(ctx, http.MethodPut, c.bucket, key, expires, url.Values{}, headers)
 	if err != nil {
 		return "", err
 	}

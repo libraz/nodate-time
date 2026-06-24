@@ -53,6 +53,16 @@ func (q *Queries) GetPasswordResetByTokenHash(ctx context.Context, tokenHash str
 	return i, err
 }
 
+const invalidateUserPasswordResets = `-- name: InvalidateUserPasswordResets :exec
+UPDATE password_resets SET used_at = CURRENT_TIMESTAMP(3)
+WHERE user_id = ? AND used_at IS NULL
+`
+
+func (q *Queries) InvalidateUserPasswordResets(ctx context.Context, userID uint32) error {
+	_, err := q.db.ExecContext(ctx, invalidateUserPasswordResets, userID)
+	return err
+}
+
 const markPasswordResetUsed = `-- name: MarkPasswordResetUsed :exec
 UPDATE password_resets SET used_at = CURRENT_TIMESTAMP(3) WHERE id = ?
 `

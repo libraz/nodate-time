@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   resolve: {
@@ -12,5 +12,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
     css: false,
+    // `tsc -b` emits compiled copies of the tests into dist/; only run the
+    // TypeScript sources under src/.
+    exclude: [...configDefaults.exclude, '**/dist/**'],
   },
 });

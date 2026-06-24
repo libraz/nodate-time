@@ -1,7 +1,13 @@
 import { DateTime } from 'luxon';
 import { useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
-import { getWeekDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
+import {
+  fromISOInZone,
+  getWeekDays,
+  getWeekdayLabel,
+  isToday,
+  jsDayOfWeek,
+} from '@/lib/date-utils';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -13,12 +19,17 @@ export function WeeklyTimeline() {
   const t = useT();
   const selectedDate = useUiStore((s) => s.selectedDate);
   const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const days = useMemo(() => getWeekDays(selectedDate), [selectedDate]);
+  // Anchor week days to the user's timezone so cell boundaries match event bucketing.
+  const days = useMemo(
+    () => getWeekDays(selectedDate.setZone(timezone, { keepLocalTime: true })),
+    [selectedDate, timezone],
+  );
 
   const { allDayEvents, timedEvents } = useMemo(() => {
     const allDay: Map<string, CalendarEvent[]> = new Map();
@@ -26,8 +37,8 @@ export function WeeklyTimeline() {
 
     for (const evt of events) {
       if (!activeCalendarIds.includes(evt.calendarId)) continue;
-      const evtStartMs = DateTime.fromISO(evt.startAt).toMillis();
-      const evtEndMs = DateTime.fromISO(evt.endAt).toMillis();
+      const evtStartMs = fromISOInZone(evt.startAt, timezone).toMillis();
+      const evtEndMs = fromISOInZone(evt.endAt, timezone).toMillis();
       for (const day of days) {
         const dayStart = day.startOf('day').toMillis();
         const dayEnd = day.endOf('day').toMillis() + 1;
@@ -46,16 +57,16 @@ export function WeeklyTimeline() {
       }
     }
     return { allDayEvents: allDay, timedEvents: timed };
-  }, [events, activeCalendarIds, days]);
+  }, [events, activeCalendarIds, days, timezone]);
 
   /** Convert ISO string to pixel offset within the day column. */
   const timeToY = (iso: string, dayStartMs: number): number => {
-    const ms = DateTime.fromISO(iso).toMillis() - dayStartMs;
+    const ms = fromISOInZone(iso, timezone).toMillis() - dayStartMs;
     const hours = ms / 3600000;
     return Math.max(0, hours * HOUR_HEIGHT);
   };
 
-  const now = DateTime.now();
+  const now = DateTime.now().setZone(timezone);
   const nowMinutes = now.hour * 60 + now.minute;
   const currentTimeY = (nowMinutes / 60) * HOUR_HEIGHT;
 
@@ -70,11 +81,13 @@ export function WeeklyTimeline() {
           const dow = jsDayOfWeek(day);
           return (
             <div key={day.toISO()} className="flex flex-1 flex-col items-center py-2.5">
-              <span className="text-[13px] font-medium tracking-wide text-[var(--color-text-secondary)]">
+              <span className="text-body font-medium tracking-wide text-[var(--color-text-secondary)]">
                 {getWeekdayLabel(dow, locale)}
               </span>
               <span
-                className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-[17px] font-semibold"
+                className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-title font-semibold tabular-nums ${
+                  today ? 'today-badge' : ''
+                }`}
                 style={{
                   backgroundColor: today ? 'var(--color-accent)' : 'transparent',
                   color: today
@@ -96,7 +109,7 @@ export function WeeklyTimeline() {
       {/* All-day events row */}
       {Array.from(allDayEvents.values()).some((a) => a.length > 0) && (
         <div className="flex border-b border-[var(--color-separator)]">
-          <div className="flex w-14 shrink-0 items-start justify-end pr-2 pt-1 text-[11px] font-medium text-[var(--color-text-tertiary)]">
+          <div className="flex w-14 shrink-0 items-start justify-end pr-2 pt-1 text-caption font-medium text-[var(--color-text-tertiary)]">
             {t('calendar.allDay')}
           </div>
           {days.map((day) => {
@@ -112,7 +125,7 @@ export function WeeklyTimeline() {
                     key={evt.id}
                     type="button"
                     onClick={() => openEventModal(evt.id)}
-                    className="truncate rounded-full px-2 text-[11px] font-semibold leading-[18px]"
+                    className="truncate rounded-full px-2 text-caption font-semibold leading-[18px]"
                     style={{
                       backgroundColor: `${evt.color}20`,
                       color: evt.color,
@@ -135,7 +148,7 @@ export function WeeklyTimeline() {
             {HOURS.map((h) => (
               <div
                 key={h}
-                className="absolute right-2 text-[11px] font-medium text-[var(--color-text-tertiary)]"
+                className="absolute right-2 text-caption font-medium tabular-nums text-[var(--color-text-tertiary)]"
                 style={{ top: h * HOUR_HEIGHT - 6 }}
               >
                 {h}
@@ -165,7 +178,7 @@ export function WeeklyTimeline() {
                 {today && (
                   <div className="absolute left-0 right-0 z-10" style={{ top: currentTimeY }}>
                     <div className="flex items-start">
-                      <div className="-ml-1 -mt-[3px] h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
+                      <div className="now-dot -ml-1 -mt-[3px] h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
                       <div className="h-[2px] w-full bg-[var(--color-accent)]" />
                     </div>
                   </div>
@@ -173,8 +186,8 @@ export function WeeklyTimeline() {
 
                 {/* Timed event blocks */}
                 {dayTimed.map((evt) => {
-                  const evtStartMs = DateTime.fromISO(evt.startAt).toMillis();
-                  const evtEndMs = DateTime.fromISO(evt.endAt).toMillis();
+                  const evtStartMs = fromISOInZone(evt.startAt, timezone).toMillis();
+                  const evtEndMs = fromISOInZone(evt.endAt, timezone).toMillis();
                   const clampedStart =
                     DateTime.fromMillis(Math.max(evtStartMs, dayStartMs)).toISO() ?? evt.startAt;
                   const clampedEnd =
@@ -182,8 +195,8 @@ export function WeeklyTimeline() {
                     evt.endAt;
                   const top = timeToY(clampedStart, dayStartMs);
                   const height = Math.max(timeToY(clampedEnd, dayStartMs) - top, 20);
-                  const startDt = DateTime.fromISO(evt.startAt);
-                  const endDt = DateTime.fromISO(evt.endAt);
+                  const startDt = fromISOInZone(evt.startAt, timezone);
+                  const endDt = fromISOInZone(evt.endAt, timezone);
 
                   return (
                     <button
@@ -198,10 +211,10 @@ export function WeeklyTimeline() {
                         borderLeft: `4px solid ${evt.color}`,
                       }}
                     >
-                      <p className="truncate text-[13px] font-semibold text-[var(--color-text-primary)]">
+                      <p className="truncate text-body font-semibold text-[var(--color-text-primary)]">
                         {evt.title}
                       </p>
-                      <p className="text-[11px] text-[var(--color-text-secondary)]">
+                      <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
                         {startDt.toFormat('H:mm')} - {endDt.toFormat('H:mm')}
                       </p>
                     </button>

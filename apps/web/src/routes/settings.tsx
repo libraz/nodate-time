@@ -1,9 +1,16 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, errorMessage } from '@/lib/api';
 import { HOLIDAY_COUNTRIES } from '@/lib/holidays';
+import {
+  DEFAULT_INVITE_ROLE,
+  isAdmin as isAdminRole,
+  ROLE_OPTIONS,
+  roleLabelKey,
+} from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -161,49 +168,26 @@ function SettingsPage() {
   ];
 
   return (
-    <div className="mx-auto flex h-full max-w-[1080px] flex-col px-4 py-6 sm:px-6">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-[24px] font-bold text-[var(--color-text-primary)] sm:text-[28px]">
-            {t('settings.title')}
-          </h1>
-        </div>
-        <Link
-          to="/"
-          className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-[13px] font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]"
-        >
-          {t('common.close')}
-        </Link>
-      </header>
-
-      {/* Mobile tab strip */}
-      <nav
-        className="mb-4 flex gap-2 overflow-x-auto pb-1 sm:hidden"
-        aria-label={t('settings.title')}
-      >
-        {tabs.map((td) => (
-          <button
-            key={td.id}
-            type="button"
-            onClick={() => setTab(td.id)}
-            aria-current={tab === td.id ? 'page' : undefined}
-            className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[13px] font-medium transition ${
-              tab === td.id
-                ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                : 'bg-[var(--color-surface-inset)] text-[var(--color-text-primary)]'
-            }`}
+    <div className="app-bg h-full">
+      <div className="mx-auto flex h-full max-w-[1080px] flex-col px-4 py-6 sm:px-6">
+        <header className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
+              {t('settings.title')}
+            </h1>
+          </div>
+          <Link
+            to="/"
+            className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-body font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]"
           >
-            <span aria-hidden>{td.icon}</span>
-            {td.label}
-          </button>
-        ))}
-      </nav>
+            {t('common.close')}
+          </Link>
+        </header>
 
-      <div className="flex flex-1 gap-6 overflow-hidden">
-        {/* Desktop sidebar */}
+        {/* Mobile tab strip */}
         <nav
+          className="mb-4 flex gap-2 overflow-x-auto pb-1 sm:hidden"
           aria-label={t('settings.title')}
-          className="hidden w-[240px] shrink-0 flex-col gap-1 sm:flex"
         >
           {tabs.map((td) => (
             <button
@@ -211,39 +195,64 @@ function SettingsPage() {
               type="button"
               onClick={() => setTab(td.id)}
               aria-current={tab === td.id ? 'page' : undefined}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+              className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-body font-medium transition ${
                 tab === td.id
-                  ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
-                  : 'text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
+                  ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                  : 'bg-[var(--color-surface-inset)] text-[var(--color-text-primary)]'
               }`}
             >
-              <span
-                aria-hidden
-                className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-                  tab === td.id
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]'
-                }`}
-              >
-                {td.icon}
-              </span>
-              <span className="flex flex-col">
-                <span className="text-[14px] font-semibold">{td.label}</span>
-                <span className="text-[12px] text-[var(--color-text-tertiary)]">
-                  {td.description}
-                </span>
-              </span>
+              <span aria-hidden>{td.icon}</span>
+              {td.label}
             </button>
           ))}
         </nav>
 
-        <main className="flex-1 overflow-y-auto pb-12 sm:pr-2">
-          {tab === 'profile' && <ProfileSection />}
-          {tab === 'appearance' && <AppearanceSection />}
-          {tab === 'calendars' && <CalendarsSection />}
-          {tab === 'export' && <ExportSection />}
-          {tab === 'admin' && isAdmin && <AdminSection />}
-        </main>
+        <div className="flex flex-1 gap-6 overflow-hidden">
+          {/* Desktop sidebar */}
+          <nav
+            aria-label={t('settings.title')}
+            className="hidden w-[240px] shrink-0 flex-col gap-1 sm:flex"
+          >
+            {tabs.map((td) => (
+              <button
+                key={td.id}
+                type="button"
+                onClick={() => setTab(td.id)}
+                aria-current={tab === td.id ? 'page' : undefined}
+                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                  tab === td.id
+                    ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
+                    : 'text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                    tab === td.id
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  {td.icon}
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-default font-semibold">{td.label}</span>
+                  <span className="text-footnote text-[var(--color-text-tertiary)]">
+                    {td.description}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </nav>
+
+          <main key={tab} className="calendar-enter flex-1 overflow-y-auto pb-12 sm:pr-2">
+            {tab === 'profile' && <ProfileSection />}
+            {tab === 'appearance' && <AppearanceSection />}
+            {tab === 'calendars' && <CalendarsSection />}
+            {tab === 'export' && <ExportSection />}
+            {tab === 'admin' && isAdmin && <AdminSection />}
+          </main>
+        </div>
       </div>
     </div>
   );
@@ -259,9 +268,9 @@ function Section({ title, description, children }: SectionProps) {
   return (
     <section className="mb-6">
       <header className="mb-3">
-        <h2 className="text-[16px] font-semibold text-[var(--color-text-primary)]">{title}</h2>
+        <h2 className="text-subhead font-semibold text-[var(--color-text-primary)]">{title}</h2>
         {description && (
-          <p className="mt-0.5 text-[13px] text-[var(--color-text-secondary)]">{description}</p>
+          <p className="mt-0.5 text-body text-[var(--color-text-secondary)]">{description}</p>
         )}
       </header>
       <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
@@ -283,8 +292,8 @@ function FieldRow({
   return (
     <div className="mb-5 last:mb-0">
       <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[13px] font-medium text-[var(--color-text-primary)]">{label}</span>
-        {hint && <span className="text-[11px] text-[var(--color-text-tertiary)]">{hint}</span>}
+        <span className="text-body font-medium text-[var(--color-text-primary)]">{label}</span>
+        {hint && <span className="text-caption text-[var(--color-text-tertiary)]">{hint}</span>}
       </div>
       {children}
     </div>
@@ -350,36 +359,38 @@ function ProfileSection() {
         <div className="mb-6 flex items-center gap-4">
           <div
             aria-hidden
-            className="flex h-16 w-16 items-center justify-center rounded-2xl text-[26px] font-bold text-white shadow-sm"
+            className="flex h-16 w-16 items-center justify-center rounded-2xl text-hero font-bold text-white shadow-sm"
             style={{ backgroundColor: color }}
           >
             {icon || (name ? name.slice(0, 1) : '👤')}
           </div>
           <div>
-            <p className="text-[16px] font-semibold text-[var(--color-text-primary)]">
+            <p className="text-subhead font-semibold text-[var(--color-text-primary)]">
               {name || '—'}
             </p>
-            <p className="text-[13px] text-[var(--color-text-secondary)]">{user?.email}</p>
+            <p className="text-body text-[var(--color-text-secondary)]">{user?.email}</p>
           </div>
         </div>
 
-        <FieldRow label={t('profile.name')}>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="input-modern w-full"
-            autoComplete="name"
-          />
-        </FieldRow>
-        <FieldRow label={t('profile.icon')} hint="emoji">
-          <input
-            type="text"
-            value={icon}
-            maxLength={4}
-            onChange={(e) => setIcon(e.target.value)}
-            className="input-modern w-24 text-center text-[18px]"
-          />
+        <FieldRow label={t('profile.name')} hint={t('profile.icon')}>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={icon}
+              maxLength={4}
+              onChange={(e) => setIcon(e.target.value)}
+              aria-label={t('profile.icon')}
+              placeholder="🙂"
+              className="input-modern w-11 shrink-0 px-0 text-center text-title"
+            />
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input-modern w-full"
+              autoComplete="name"
+            />
+          </div>
         </FieldRow>
         <FieldRow label={t('profile.color')}>
           <div className="flex flex-wrap items-center gap-2">
@@ -411,12 +422,12 @@ function ProfileSection() {
             type="button"
             onClick={save}
             disabled={saving || !dirty}
-            className="btn-primary px-5 text-[14px] disabled:opacity-50"
+            className="btn-primary px-5 text-default disabled:opacity-50"
           >
             {saving ? t('common.saving') : t('common.save')}
           </button>
           {!dirty && !saving && (
-            <span className="text-[12px] text-[var(--color-text-tertiary)]">
+            <span className="text-footnote text-[var(--color-text-tertiary)]">
               {t('panel.updated')}
             </span>
           )}
@@ -447,7 +458,7 @@ function ProfileSection() {
           type="button"
           onClick={changePassword}
           disabled={pwSaving || !currentPw || !newPw}
-          className="btn-primary px-5 text-[14px] disabled:opacity-50"
+          className="btn-primary px-5 text-default disabled:opacity-50"
         >
           {pwSaving ? t('profile.changing') : t('profile.changePassword')}
         </button>
@@ -551,27 +562,26 @@ function AppearanceSection() {
 
       <Section title={t('settings.timezone')}>
         <FieldRow label={t('settings.timezone')} hint={detectedTz}>
-          <select
+          <CustomSelect
             value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            className="input-modern w-full max-w-[420px]"
-          >
-            {Array.from(new Set([detectedTz, ...TIMEZONE_OPTIONS])).map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </select>
+            onChange={setTimezone}
+            className="w-full max-w-[420px]"
+            triggerClassName="input-modern"
+            options={Array.from(new Set([detectedTz, ...TIMEZONE_OPTIONS])).map((tz) => ({
+              value: tz,
+              label: tz,
+            }))}
+          />
         </FieldRow>
       </Section>
 
       <Section title={t('settings.holidays')}>
         <label className="mb-4 flex cursor-pointer items-center justify-between gap-4">
           <span>
-            <span className="block text-[14px] font-medium text-[var(--color-text-primary)]">
+            <span className="block text-default font-medium text-[var(--color-text-primary)]">
               {t('settings.holidays')}
             </span>
-            <span className="text-[12px] text-[var(--color-text-secondary)]">
+            <span className="text-footnote text-[var(--color-text-secondary)]">
               {t('calendar.holidayLabel')}
             </span>
           </span>
@@ -594,17 +604,16 @@ function AppearanceSection() {
         </label>
         {holidaysCountry !== null && (
           <FieldRow label={t('settings.holidaysCountry')}>
-            <select
+            <CustomSelect
               value={holidaysCountry}
-              onChange={(e) => setHolidaysCountry(e.target.value)}
-              className="input-modern w-full max-w-[420px]"
-            >
-              {HOLIDAY_COUNTRIES.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {locale === 'ja' ? c.nameJa : c.nameEn}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setHolidaysCountry(v)}
+              className="w-full max-w-[420px]"
+              triggerClassName="input-modern"
+              options={HOLIDAY_COUNTRIES.map((c) => ({
+                value: c.code,
+                label: locale === 'ja' ? c.nameJa : c.nameEn,
+              }))}
+            />
           </FieldRow>
         )}
       </Section>
@@ -620,6 +629,84 @@ interface InviteData {
   useCount: number;
   expiresAt: string | null;
   createdAt: string;
+}
+
+function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
+  const t = useT();
+  const calendars = useCalendarStore((s) => s.calendars);
+  const updateCalendar = useCalendarStore((s) => s.updateCalendar);
+  const calendar = calendars.find((c) => c.id === calendarId);
+
+  const [name, setName] = useState(calendar?.name ?? '');
+  const [color, setColor] = useState(calendar?.color ?? '#42A5F5');
+  const [coverUrl, setCoverUrl] = useState(calendar?.coverUrl ?? '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (calendar) {
+      setName(calendar.name);
+      setColor(calendar.color);
+      setCoverUrl(calendar.coverUrl ?? '');
+    }
+  }, [calendar]);
+
+  const dirty =
+    !!calendar &&
+    (name !== calendar.name || color !== calendar.color || coverUrl !== (calendar.coverUrl ?? ''));
+
+  const save = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await updateCalendar(calendarId, { name: name.trim(), color, coverUrl });
+      toast.success(t('panel.updated'));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Section title={t('settings.calendarDetails')}>
+      <FieldRow label={t('settings.calendarName')}>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="input-modern w-full max-w-[420px]"
+          maxLength={200}
+        />
+      </FieldRow>
+      <FieldRow label={t('settings.calendarColor')}>
+        <input
+          type="color"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          aria-label={t('settings.calendarColor')}
+          className="h-9 w-9 cursor-pointer rounded-full border-2 border-[var(--color-border)] bg-transparent"
+        />
+      </FieldRow>
+      <FieldRow label={t('settings.calendarCover')}>
+        <input
+          type="url"
+          value={coverUrl}
+          onChange={(e) => setCoverUrl(e.target.value)}
+          placeholder="https://..."
+          className="input-modern w-full max-w-[420px]"
+          maxLength={500}
+        />
+      </FieldRow>
+      <button
+        type="button"
+        onClick={save}
+        disabled={saving || !dirty || !name.trim()}
+        className="btn-primary px-5 text-default disabled:opacity-50"
+      >
+        {saving ? t('common.saving') : t('common.save')}
+      </button>
+    </Section>
+  );
 }
 
 function CalendarsSection() {
@@ -662,7 +749,7 @@ function CalendarsSection() {
 
   const members = (selectedId && membersMap[selectedId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
-  const isAdmin = myMembership?.role === 'admin';
+  const isAdmin = isAdminRole(myMembership?.role);
   const adminCount = members.filter((m) => m.role === 'admin').length;
 
   const handleRoleChange = async (member: Member, role: string) => {
@@ -675,7 +762,7 @@ function CalendarsSection() {
       await fetchMembers(selectedId);
       toast.success(t('panel.updated'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     }
   };
 
@@ -686,7 +773,7 @@ function CalendarsSection() {
       await fetchMembers(selectedId);
       toast.success(t('panel.updated'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : t('members.lastAdmin'));
+      toast.error(errorMessage(e));
     }
   };
 
@@ -694,14 +781,14 @@ function CalendarsSection() {
     setCreatingInvite(true);
     try {
       const inv = await api.post<InviteData>(`/calendars/${selectedId}/invites`, {
-        role: 'member',
+        role: DEFAULT_INVITE_ROLE,
         maxUses: null,
         expiresAt: null,
       });
       setInvites((cur) => [inv, ...cur]);
       toast.success(t('invites.create'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       setCreatingInvite(false);
     }
@@ -713,7 +800,7 @@ function CalendarsSection() {
       setInvites((cur) => cur.filter((i) => i.id !== id));
       toast.success(t('invites.revoke'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     }
   };
 
@@ -727,26 +814,24 @@ function CalendarsSection() {
     <>
       <Section title={t('settings.calendars')}>
         <FieldRow label={t('calendar.calendarName')}>
-          <select
+          <CustomSelect
             value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="input-modern w-full max-w-[420px]"
-          >
-            {calendars.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setSelectedId}
+            className="w-full max-w-[420px]"
+            triggerClassName="input-modern"
+            options={calendars.map((c) => ({ value: c.id, label: c.name }))}
+          />
         </FieldRow>
       </Section>
+
+      {isAdmin && selectedId && <CalendarDetailsSection calendarId={selectedId} />}
 
       <Section
         title={t('settings.members')}
         description={`${members.length} · ${t('members.role')}`}
       >
         {members.length === 0 ? (
-          <p className="py-2 text-[13px] text-[var(--color-text-secondary)]">—</p>
+          <p className="py-2 text-body text-[var(--color-text-secondary)]">—</p>
         ) : (
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
             {members.map((m) => {
@@ -756,41 +841,35 @@ function CalendarsSection() {
                 <li key={m.id} className="flex items-center gap-3 py-3">
                   <span
                     aria-hidden
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold text-white"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
                     style={{ backgroundColor: m.color }}
                   >
                     {m.icon || m.name.slice(0, 1)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[14px] font-semibold text-[var(--color-text-primary)]">
+                    <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
                       {m.name}
                       {isMe && (
-                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent)]">
+                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
                           you
                         </span>
                       )}
                     </p>
-                    <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
+                    <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                       {m.email}
                     </p>
                   </div>
                   {isAdmin && !cannotChange ? (
-                    <select
+                    <CustomSelect
                       value={m.role}
-                      onChange={(e) => handleRoleChange(m, e.target.value)}
-                      className="input-modern shrink-0 text-[12px]"
-                    >
-                      <option value="admin">{t('members.roleAdmin')}</option>
-                      <option value="member">{t('members.roleMember')}</option>
-                      <option value="viewer">{t('members.roleViewer')}</option>
-                    </select>
+                      onChange={(v) => handleRoleChange(m, v)}
+                      className="shrink-0"
+                      triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                    />
                   ) : (
-                    <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-[12px] text-[var(--color-text-secondary)]">
-                      {m.role === 'admin'
-                        ? t('members.roleAdmin')
-                        : m.role === 'viewer'
-                          ? t('members.roleViewer')
-                          : t('members.roleMember')}
+                    <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
+                      {t(roleLabelKey(m.role))}
                     </span>
                   )}
                   {(isAdmin || isMe) && !(cannotChange && isMe) && (
@@ -828,37 +907,37 @@ function CalendarsSection() {
           type="button"
           onClick={handleCreateInvite}
           disabled={creatingInvite || !isAdmin}
-          className="btn-primary mb-4 px-5 text-[14px] disabled:opacity-50"
+          className="btn-primary mb-4 px-5 text-default disabled:opacity-50"
         >
           {creatingInvite ? t('share.creating') : t('invites.create')}
         </button>
         {loadingInvites ? (
-          <p className="text-[13px] text-[var(--color-text-secondary)]">{t('common.loading')}</p>
+          <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
         ) : invites.length === 0 ? (
-          <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-[13px] text-[var(--color-text-secondary)]">
+          <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
             {t('invites.empty')}
           </p>
         ) : (
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
             {invites.map((inv) => (
               <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
-                <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-[12px] text-[var(--color-text-secondary)]">
+                <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
                   /share/{inv.token}
                 </code>
-                <span className="shrink-0 text-[12px] text-[var(--color-text-tertiary)]">
+                <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
                   {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
                 </span>
                 <button
                   type="button"
                   onClick={() => copyInvite(inv.token)}
-                  className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
+                  className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
                 >
                   {t('invites.copy')}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleRevokeInvite(inv.id)}
-                  className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
+                  className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
                 >
                   {t('invites.revoke')}
                 </button>
@@ -890,30 +969,17 @@ function ExportSection() {
   const downloadFile = async (format: 'ics' | 'csv') => {
     setExporting(format);
     try {
-      const token = localStorage.getItem('tt_token');
-      const apiBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
-      const headers = new Headers();
-      if (token) headers.set('Authorization', `Bearer ${token}`);
-      const res = await fetch(`${apiBase}/calendars/${selectedId}/export?format=${format}`, {
-        headers,
-      });
-      if (!res.ok) {
-        toast.error(`Export failed (${res.status})`);
-        return;
-      }
-      const blob = await res.blob();
+      const blob = await api.getBlob(`/calendars/${selectedId}/export?format=${format}`);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download =
-        res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] ??
-        `calendar.${format}`;
+      a.download = `calendar.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Export failed');
+      toast.error(errorMessage(e));
     } finally {
       setExporting(null);
     }
@@ -952,17 +1018,13 @@ function ExportSection() {
     <>
       <Section title={t('settings.calendars')}>
         <FieldRow label={t('calendar.calendarName')}>
-          <select
+          <CustomSelect
             value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="input-modern w-full max-w-[420px]"
-          >
-            {calendars.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setSelectedId}
+            className="w-full max-w-[420px]"
+            triggerClassName="input-modern"
+            options={calendars.map((c) => ({ value: c.id, label: c.name }))}
+          />
         </FieldRow>
       </Section>
 
@@ -972,7 +1034,7 @@ function ExportSection() {
             type="button"
             onClick={() => downloadFile('ics')}
             disabled={!selectedId || exporting !== null}
-            className="btn-primary px-5 text-[14px] disabled:opacity-50"
+            className="btn-primary px-5 text-default disabled:opacity-50"
           >
             {exporting === 'ics' ? '...' : t('settings.exportIcal')}
           </button>
@@ -980,7 +1042,7 @@ function ExportSection() {
             type="button"
             onClick={() => downloadFile('csv')}
             disabled={!selectedId || exporting !== null}
-            className="btn-secondary px-5 text-[14px] disabled:opacity-50"
+            className="btn-secondary px-5 text-default disabled:opacity-50"
           >
             {exporting === 'csv' ? '...' : t('settings.exportCsv')}
           </button>
@@ -991,7 +1053,7 @@ function ExportSection() {
             type="file"
             accept=".ics,text/calendar"
             onChange={handleFileChange}
-            className="block w-full max-w-[420px] text-[13px] text-[var(--color-text-secondary)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--color-surface-inset)] file:px-3 file:py-1.5 file:text-[13px] file:font-medium file:text-[var(--color-text-primary)]"
+            className="block w-full max-w-[420px] text-body text-[var(--color-text-secondary)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--color-surface-inset)] file:px-3 file:py-1.5 file:text-body file:font-medium file:text-[var(--color-text-primary)]"
           />
         </FieldRow>
         <FieldRow label={t('settings.importPasted')}>
@@ -999,14 +1061,14 @@ function ExportSection() {
             value={icsText}
             onChange={(e) => setIcsText(e.target.value)}
             placeholder={t('settings.importPlaceholder')}
-            className="input-modern h-32 w-full font-mono text-[12px]"
+            className="input-modern h-32 w-full font-mono text-footnote"
           />
         </FieldRow>
         <button
           type="button"
           onClick={handleImport}
           disabled={!icsText.trim() || importing}
-          className="btn-primary px-5 text-[14px] disabled:opacity-50"
+          className="btn-primary px-5 text-default disabled:opacity-50"
         >
           {importing ? '...' : t('settings.importPasted')}
         </button>
@@ -1059,17 +1121,144 @@ function AdminSection() {
   return (
     <>
       <Section title={t('settings.admin')} description={t('settings.adminOAuthDescription')}>
-        <p className="text-[13px] text-[var(--color-text-secondary)]">
+        <p className="text-body text-[var(--color-text-secondary)]">
           {t('settings.adminOAuthHelp')}
         </p>
       </Section>
 
       {loading ? (
-        <p className="text-[13px] text-[var(--color-text-secondary)]">{t('common.loading')}</p>
+        <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
       ) : (
         providers.map((p) => <ProviderCard key={p.provider} info={p} onChange={refresh} />)
       )}
+
+      <AllowedEmailsSection />
     </>
+  );
+}
+
+interface AllowedEmail {
+  id: number;
+  email: string;
+  note: string;
+  createdAt: string;
+}
+
+interface AllowedEmailsResponse {
+  allowedDomains: string[];
+  restricted: boolean;
+  emails: AllowedEmail[];
+}
+
+function AllowedEmailsSection() {
+  const t = useT();
+  const [data, setData] = useState<AllowedEmailsResponse | null>(null);
+  const [email, setEmail] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setData(await api.get<AllowedEmailsResponse>('/admin/allowed-emails'));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.detail : 'Error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSaving(true);
+    try {
+      await api.post('/admin/allowed-emails', { email: email.trim(), note: note.trim() });
+      setEmail('');
+      setNote('');
+      await refresh();
+      toast.success(t('panel.updated'));
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.detail : 'Error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (id: number) => {
+    try {
+      await api.delete(`/admin/allowed-emails/${id}`);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.detail : 'Error');
+    }
+  };
+
+  if (!data) return null;
+
+  return (
+    <Section
+      title={t('settings.adminAllowedEmails')}
+      description={t('settings.adminAllowedEmailsDescription')}
+    >
+      <p className="mb-3 text-body text-[var(--color-text-secondary)]">
+        {data.restricted
+          ? t('settings.adminAllowedEmailsRestricted', { domains: data.allowedDomains.join(', ') })
+          : t('settings.adminAllowedEmailsUnrestricted')}
+      </p>
+
+      <form onSubmit={add} className="mb-4 flex flex-wrap items-end gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          placeholder={t('settings.adminAllowedEmailsEmailPlaceholder')}
+          className="input-modern min-w-[220px] flex-1"
+        />
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={t('settings.adminAllowedEmailsNotePlaceholder')}
+          className="input-modern min-w-[160px] flex-1"
+        />
+        <button type="submit" disabled={saving} className="btn-primary rounded-xl px-4">
+          {t('settings.adminAllowedEmailsAdd')}
+        </button>
+      </form>
+
+      {data.emails.length === 0 ? (
+        <p className="text-body text-[var(--color-text-tertiary)]">
+          {t('settings.adminAllowedEmailsEmpty')}
+        </p>
+      ) : (
+        <ul className="divide-y divide-[var(--color-separator)]">
+          {data.emails.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-2 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-default text-[var(--color-text-primary)]">
+                  {row.email}
+                </p>
+                {row.note && (
+                  <p className="truncate text-footnote text-[var(--color-text-tertiary)]">
+                    {row.note}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => remove(row.id)}
+                className="shrink-0 text-body text-[var(--color-danger)] hover:underline"
+              >
+                {t('settings.adminAllowedEmailsRemove')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 
@@ -1126,15 +1315,15 @@ function ProviderCard({
 
   const sourceBadge =
     info.source === 'db' ? (
-      <span className="rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent)]">
+      <span className="rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
         DB
       </span>
     ) : info.source === 'env' ? (
-      <span className="rounded-full bg-[var(--color-surface-inset)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+      <span className="rounded-full bg-[var(--color-surface-inset)] px-2 py-0.5 text-caption font-medium text-[var(--color-text-secondary)]">
         ENV
       </span>
     ) : (
-      <span className="rounded-full bg-[var(--color-surface-inset)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-text-tertiary)]">
+      <span className="rounded-full bg-[var(--color-surface-inset)] px-2 py-0.5 text-caption font-medium text-[var(--color-text-tertiary)]">
         {t('settings.adminProviderUnconfigured')}
       </span>
     );
@@ -1146,7 +1335,7 @@ function ProviderCard({
           {sourceBadge}
           {info.source !== 'none' && (
             <span
-              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+              className={`rounded-full px-2 py-0.5 text-caption font-medium ${
                 info.enabled
                   ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
                   : 'bg-[var(--color-surface-inset)] text-[var(--color-text-tertiary)]'
@@ -1158,7 +1347,7 @@ function ProviderCard({
             </span>
           )}
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[var(--color-text-secondary)]">
+        <label className="flex cursor-pointer items-center gap-2 text-body text-[var(--color-text-secondary)]">
           <span>{t('settings.adminProviderEnable')}</span>
           <span className="relative inline-flex h-5 w-9 items-center">
             <input
@@ -1184,7 +1373,7 @@ function ProviderCard({
           type="text"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
-          className="input-modern w-full max-w-[520px] font-mono text-[13px]"
+          className="input-modern w-full max-w-[520px] font-mono text-body"
           placeholder="xxxxxxxx.apps.googleusercontent.com"
           autoComplete="off"
           spellCheck={false}
@@ -1201,7 +1390,7 @@ function ProviderCard({
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-              className="input-modern w-full max-w-[520px] font-mono text-[13px]"
+              className="input-modern w-full max-w-[520px] font-mono text-body"
               autoComplete="off"
               spellCheck={false}
             />
@@ -1212,7 +1401,7 @@ function ProviderCard({
                   setEditingSecret(false);
                   setSecret('');
                 }}
-                className="text-[12px] text-[var(--color-text-secondary)] hover:underline"
+                className="text-footnote text-[var(--color-text-secondary)] hover:underline"
               >
                 {t('common.cancel')}
               </button>
@@ -1220,13 +1409,13 @@ function ProviderCard({
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <span className="font-mono text-[13px] text-[var(--color-text-secondary)]">
+            <span className="font-mono text-body text-[var(--color-text-secondary)]">
               ••••••••••••
             </span>
             <button
               type="button"
               onClick={() => setEditingSecret(true)}
-              className="text-[12px] font-medium text-[var(--color-accent)] hover:underline"
+              className="text-footnote font-medium text-[var(--color-accent)] hover:underline"
             >
               {t('settings.adminProviderReplaceSecret')}
             </button>
@@ -1243,7 +1432,7 @@ function ProviderCard({
             (!clientId && !info.hasSecret) ||
             (editingSecret && !secret && !info.hasSecret)
           }
-          className="btn-primary px-5 text-[14px] disabled:opacity-50"
+          className="btn-primary px-5 text-default disabled:opacity-50"
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>
@@ -1251,7 +1440,7 @@ function ProviderCard({
           <button
             type="button"
             onClick={remove}
-            className="text-[13px] font-medium text-[var(--color-danger)] hover:underline"
+            className="text-body font-medium text-[var(--color-danger)] hover:underline"
           >
             {t('settings.adminProviderClear')}
           </button>

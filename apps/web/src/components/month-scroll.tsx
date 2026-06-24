@@ -76,6 +76,7 @@ interface WeekRowProps {
   holidaysCountry: string | null;
   selectedDate: DateTime;
   onDayClick: (date: DateTime) => void;
+  onEventClick: (eventId: string) => void;
 }
 
 function WeekRow({
@@ -85,6 +86,7 @@ function WeekRow({
   holidaysCountry,
   selectedDate,
   onDayClick,
+  onEventClick,
 }: WeekRowProps) {
   const week = useMemo(
     () => Array.from({ length: 7 }, (_, i) => weekStart.plus({ days: i })),
@@ -154,65 +156,75 @@ function WeekRow({
         const isSelected = dt.hasSame(selectedDate, 'day');
 
         return (
-          <button
+          <div
             key={isoDate}
-            type="button"
-            onClick={() => onDayClick(dt)}
-            className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1 pb-1 transition-colors active:bg-[var(--color-active)] ${
+            className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1 pb-1 ${
               isSelected ? 'day-selected' : ''
             }`}
-            aria-label={`${isoDate}${holiday ? ` (${holiday.name})` : ''}`}
           >
-            <div className="flex w-full items-center pl-0.5" style={{ height: DATE_ROW_H }}>
-              {today ? (
-                <span className="today-badge flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-[13px] font-medium tabular-nums text-white">
-                  {dt.day}
-                </span>
-              ) : (
-                <span
-                  className="flex h-6 w-6 items-center justify-center text-[13px] font-medium tabular-nums"
-                  style={{ color: getDateColor(dow, !!holiday) }}
-                >
-                  {dt.day}
-                </span>
-              )}
-            </div>
+            {/* Background target: tapping empty space opens the day detail. */}
+            <button
+              type="button"
+              onClick={() => onDayClick(dt)}
+              className="absolute inset-0 z-0 transition-colors active:bg-[var(--color-active)]"
+              aria-label={`${isoDate}${holiday ? ` (${holiday.name})` : ''}`}
+            />
 
-            <div className="flex w-full flex-col" style={{ height: bodyHeight }}>
-              {(['t0', 't1', 't2'] as const).map((slotKey, slot) => {
-                if (reserved.includes(slot)) {
-                  return <div key={`${isoDate}-spacer-${slotKey}`} style={{ height: SLOT_H }} />;
-                }
-                const filler = singleSlots.find((s) => s.track === slot);
-                if (filler) {
-                  const evt = filler.evt;
-                  const start = fromISOInZone(evt.startAt, zone);
-                  return (
-                    <div
-                      key={evt.id}
-                      className="mx-0.5 truncate rounded border-l-[3px] px-1 text-[10px] font-semibold tabular-nums"
-                      style={{
-                        height: SLOT_H,
-                        lineHeight: `${SLOT_H}px`,
-                        backgroundColor: `${evt.color}1f`,
-                        borderLeftColor: evt.color,
-                        color: evt.color,
-                      }}
-                    >
-                      {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
-                      {evt.title}
-                    </div>
-                  );
-                }
-                return <div key={`${isoDate}-empty-${slotKey}`} style={{ height: SLOT_H }} />;
-              })}
-              {overflow > 0 && (
-                <span className="text-center text-[10px] font-medium text-[var(--color-accent)]">
-                  +{overflow}
-                </span>
-              )}
+            {/* Content passes pointer events through to the day button, except event chips. */}
+            <div className="pointer-events-none relative z-10 flex w-full flex-col">
+              <div className="flex w-full items-center pl-0.5" style={{ height: DATE_ROW_H }}>
+                {today ? (
+                  <span className="today-badge flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-body font-medium tabular-nums text-white">
+                    {dt.day}
+                  </span>
+                ) : (
+                  <span
+                    className="flex h-6 w-6 items-center justify-center text-body font-medium tabular-nums"
+                    style={{ color: getDateColor(dow, !!holiday) }}
+                  >
+                    {dt.day}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex w-full flex-col" style={{ height: bodyHeight }}>
+                {(['t0', 't1', 't2'] as const).map((slotKey, slot) => {
+                  if (reserved.includes(slot)) {
+                    return <div key={`${isoDate}-spacer-${slotKey}`} style={{ height: SLOT_H }} />;
+                  }
+                  const filler = singleSlots.find((s) => s.track === slot);
+                  if (filler) {
+                    const evt = filler.evt;
+                    const start = fromISOInZone(evt.startAt, zone);
+                    return (
+                      <button
+                        key={evt.id}
+                        type="button"
+                        onClick={() => onEventClick(evt.id)}
+                        className="pointer-events-auto mx-0.5 truncate rounded border-l-[3px] px-1 text-left text-micro font-semibold tabular-nums"
+                        style={{
+                          height: SLOT_H,
+                          lineHeight: `${SLOT_H}px`,
+                          backgroundColor: `${evt.color}1f`,
+                          borderLeftColor: evt.color,
+                          color: evt.color,
+                        }}
+                      >
+                        {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
+                        {evt.title}
+                      </button>
+                    );
+                  }
+                  return <div key={`${isoDate}-empty-${slotKey}`} style={{ height: SLOT_H }} />;
+                })}
+                {overflow > 0 && (
+                  <span className="text-center text-micro font-medium text-[var(--color-accent)]">
+                    +{overflow}
+                  </span>
+                )}
+              </div>
             </div>
-          </button>
+          </div>
         );
       })}
 
@@ -236,9 +248,11 @@ function WeekRow({
                   ? '9999px 0 0 9999px'
                   : '9999px';
           return (
-            <div
+            <button
               key={`${p.event.id}-${p.startCol}`}
-              className="event-bar absolute flex items-center gap-1 truncate px-2 text-[10px] font-semibold tabular-nums text-white"
+              type="button"
+              onClick={() => onEventClick(p.event.id)}
+              className="event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-micro font-semibold tabular-nums text-white"
               style={{
                 left,
                 width,
@@ -266,7 +280,7 @@ function WeekRow({
                   ›
                 </span>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -281,6 +295,7 @@ export function MonthScroll() {
   const timezone = useUiStore((s) => s.timezone);
   const scrollToTodaySignal = useUiStore((s) => s.scrollToTodaySignal);
   const openDayDetail = useUiStore((s) => s.openDayDetail);
+  const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const events = useCalendarStore((s) => s.events);
@@ -377,7 +392,7 @@ export function MonthScroll() {
         {[0, 1, 2, 3, 4, 5, 6].map((i) => (
           <div
             key={i}
-            className="py-1.5 text-center text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
+            className="py-1.5 text-center text-caption font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
           >
             {getWeekdayLabel(i, locale)}
           </div>
@@ -391,7 +406,7 @@ export function MonthScroll() {
             <div
               key={item.key}
               data-month={item.month.toFormat('yyyy-MM')}
-              className="glass-surface-heavy sticky top-0 z-10 flex items-center px-3 text-[13px] font-bold text-[var(--color-text-primary)]"
+              className="glass-surface-heavy sticky top-0 z-10 flex items-center px-3 text-body font-bold text-[var(--color-text-primary)]"
               style={{ height: MONTH_HEADER_H }}
             >
               {formatMonthYear(item.month, locale)}
@@ -405,6 +420,7 @@ export function MonthScroll() {
               holidaysCountry={holidaysCountry}
               selectedDate={selectedDate}
               onDayClick={handleDayClick}
+              onEventClick={openEventModal}
             />
           ),
         )}

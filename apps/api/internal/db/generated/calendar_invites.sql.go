@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+const consumeInviteUse = `-- name: ConsumeInviteUse :execresult
+UPDATE calendar_invites SET use_count = use_count + 1
+WHERE id = ? AND (max_uses IS NULL OR use_count < max_uses)
+`
+
+func (q *Queries) ConsumeInviteUse(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, consumeInviteUse, id)
+}
+
 const createInvite = `-- name: CreateInvite :execresult
 INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by)
 VALUES (?, ?, ?, ?, ?, ?)

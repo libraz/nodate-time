@@ -5,8 +5,15 @@ import { MONTH_NAMES_EN } from '@/i18n';
 const WEEKDAY_LABELS_JA = ['日', '月', '火', '水', '木', '金', '土'] as const;
 const WEEKDAY_LABELS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
-export function getMonthDays(year: number, month: number): DateTime[] {
-  const first = DateTime.local(year, month + 1, 1);
+/** Builds a day at midnight in `zone` (or the local zone when `zone` is empty). */
+function dayInZone(year: number, month: number, day: number, zone?: string): DateTime {
+  return zone && zone.length > 0
+    ? DateTime.fromObject({ year, month, day }, { zone })
+    : DateTime.local(year, month, day);
+}
+
+export function getMonthDays(year: number, month: number, zone?: string): DateTime[] {
+  const first = dayInZone(year, month + 1, 1, zone);
   const last = first.endOf('month');
   const startDay = first.weekday % 7;
   const days: DateTime[] = [];
@@ -16,7 +23,7 @@ export function getMonthDays(year: number, month: number): DateTime[] {
   }
 
   for (let d = 1; d <= last.day; d++) {
-    days.push(DateTime.local(year, month + 1, d));
+    days.push(dayInZone(year, month + 1, d, zone));
   }
 
   // Use 5 weeks (35 cells) when possible, 6 weeks (42) only when needed
@@ -29,9 +36,10 @@ export function getMonthDays(year: number, month: number): DateTime[] {
   return days;
 }
 
-export function getWeekDays(date: DateTime): DateTime[] {
-  const dayOfWeek = date.weekday % 7;
-  const start = date.minus({ days: dayOfWeek });
+export function getWeekDays(date: DateTime, zone?: string): DateTime[] {
+  const anchored = zone && zone.length > 0 ? date.setZone(zone, { keepLocalTime: true }) : date;
+  const dayOfWeek = anchored.weekday % 7;
+  const start = anchored.minus({ days: dayOfWeek }).startOf('day');
   const days: DateTime[] = [];
   for (let i = 0; i < 7; i++) {
     days.push(start.plus({ days: i }));

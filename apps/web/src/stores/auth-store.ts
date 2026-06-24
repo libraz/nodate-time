@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { getT } from '@/i18n';
 import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
 import { resizeImageForAvatar } from '@/lib/image-resize';
+import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
 
 interface User {
@@ -88,19 +89,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
+    // Drop the auth token and per-session calendar state, but keep user
+    // preferences (theme, locale, timezone) that are not tied to the account.
     clearToken();
+    localStorage.removeItem('tt_activeCalendarIds');
     set({ user: null, isAuthenticated: false, error: null });
-    // Clear all local data
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('tt_')) {
-        localStorage.removeItem(key);
-      }
-    }
-    // Reset calendar store in-memory state
+    // Reset calendar store in-memory state, including per-calendar data.
     useCalendarStore.setState({
       calendars: [],
       events: [],
       memos: [],
+      membersMap: {},
+      labels: [],
       activeCalendarIds: [],
     });
   },
@@ -126,16 +126,17 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   uploadAvatar: async (file: File) => {
     const resized = await resizeImageForAvatar(file);
-    const presign = await api.post<{ avatarId: string; uploadUrl: string }>(
-      '/user/avatar/presign',
-      { contentType: resized.contentType, byteSize: resized.bytes.byteLength },
-    );
-    const putRes = await fetch(presign.uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': resized.contentType },
+    const presign = await uploadViaPresign<{ avatarId: string; uploadUrl: string }>({
+      kind: 'avatar',
+      presignPath: '/user/avatar/presign',
+      presignBody: {
+        contentType: resized.contentType,
+        byteSize: resized.bytes.byteLength,
+      },
+      contentType: resized.contentType,
       body: resized.bytes,
+      byteSize: resized.bytes.byteLength,
     });
-    if (!putRes.ok) throw new ApiError(putRes.status, 'avatar upload failed');
     const user = await api.put<User>('/user/avatar', { avatarId: presign.avatarId });
     set({ user });
   },

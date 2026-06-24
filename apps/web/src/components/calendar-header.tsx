@@ -280,10 +280,10 @@ export function CalendarHeader() {
               }}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-bold text-[var(--color-text-primary)]">
+              <p className="truncate text-default font-bold text-[var(--color-text-primary)]">
                 {user.name}
               </p>
-              <p className="truncate text-[12px] text-[var(--color-text-secondary)]">
+              <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                 {user.email}
               </p>
               {user.avatarUrl && (
@@ -291,7 +291,7 @@ export function CalendarHeader() {
                   type="button"
                   onClick={handleAvatarRemove}
                   disabled={avatarBusy}
-                  className="mt-0.5 text-[11px] text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                  className="mt-0.5 text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
                 >
                   {t('profile.removeAvatar')}
                 </button>
@@ -303,19 +303,19 @@ export function CalendarHeader() {
       {isEditing ? (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="mb-3">
-            <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
               {t('profile.name')}
             </span>
             <input
               type="text"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              className="input-modern w-full text-[13px]"
+              className="input-modern w-full text-body"
               aria-label={t('profile.name')}
             />
           </div>
           <div className="mb-3">
-            <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
               {t('profile.icon')}
             </span>
             <div className="flex flex-wrap gap-1.5">
@@ -324,7 +324,7 @@ export function CalendarHeader() {
                   key={icon}
                   type="button"
                   onClick={() => setEditIcon(icon)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-[18px] transition-colors"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl text-title transition-colors"
                   style={{
                     backgroundColor:
                       editIcon === icon ? 'var(--color-accent-subtle)' : 'transparent',
@@ -340,7 +340,7 @@ export function CalendarHeader() {
             </div>
           </div>
           <div className="mb-3">
-            <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
               {t('profile.color')}
             </span>
             <div className="flex flex-wrap gap-1.5">
@@ -365,7 +365,7 @@ export function CalendarHeader() {
             <button
               type="button"
               onClick={() => setIsEditing(false)}
-              className="btn-secondary h-9 flex-1 px-4 text-[13px]"
+              className="btn-secondary h-9 flex-1 px-4 text-body"
             >
               {t('common.cancel')}
             </button>
@@ -373,7 +373,7 @@ export function CalendarHeader() {
               type="button"
               onClick={handleSaveProfile}
               disabled={saving || !editName.trim()}
-              className="btn-primary h-9 flex-1 px-4 text-[13px] disabled:opacity-50"
+              className="btn-primary h-9 flex-1 px-4 text-body disabled:opacity-50"
             >
               {saving ? t('profile.saving') : t('common.save')}
             </button>
@@ -383,7 +383,7 @@ export function CalendarHeader() {
         <div className="px-4 py-3">
           {passwordSuccess ? (
             <div
-              className="py-4 text-center text-[13px] font-medium"
+              className="py-4 text-center text-body font-medium"
               style={{ color: 'var(--color-accent)' }}
             >
               {t('profile.passwordChanged')}
@@ -391,49 +391,49 @@ export function CalendarHeader() {
           ) : (
             <>
               <div className="mb-3">
-                <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
                   {t('profile.currentPassword')}
                 </span>
                 <input
                   type="password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="input-modern w-full text-[13px]"
+                  className="input-modern w-full text-body"
                   aria-label={t('profile.currentPassword')}
                 />
               </div>
               <div className="mb-3">
-                <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
                   {t('profile.newPassword')}
                 </span>
                 <input
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="input-modern w-full text-[13px]"
+                  className="input-modern w-full text-body"
                   aria-label={t('profile.newPassword')}
                 />
               </div>
               <div className="mb-3">
-                <span className="mb-1 block text-[12px] text-[var(--color-text-secondary)]">
+                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
                   {t('profile.confirmPassword')}
                 </span>
                 <input
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="input-modern w-full text-[13px]"
+                  className="input-modern w-full text-body"
                   aria-label={t('profile.confirmPassword')}
                 />
               </div>
               {passwordError && (
-                <p className="mb-3 text-[12px] text-[var(--color-danger)]">{passwordError}</p>
+                <p className="mb-3 text-footnote text-[var(--color-danger)]">{passwordError}</p>
               )}
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setIsChangingPassword(false)}
-                  className="btn-secondary h-9 flex-1 px-4 text-[13px]"
+                  className="btn-secondary h-9 flex-1 px-4 text-body"
                 >
                   {t('common.cancel')}
                 </button>
@@ -441,7 +441,7 @@ export function CalendarHeader() {
                   type="button"
                   onClick={handleChangePassword}
                   disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
-                  className="btn-primary h-9 flex-1 px-4 text-[13px] disabled:opacity-50"
+                  className="btn-primary h-9 flex-1 px-4 text-body disabled:opacity-50"
                 >
                   {savingPassword ? t('profile.changing') : t('profile.changePassword')}
                 </button>
@@ -454,7 +454,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={startEditing}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           >
             <svg
               width="18"
@@ -473,7 +473,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={startChangingPassword}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           >
             <svg
               width="18"
@@ -496,7 +496,7 @@ export function CalendarHeader() {
               setShowProfileMenu(false);
               navigate({ to: '/settings' });
             }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           >
             <svg
               width="18"
@@ -519,7 +519,7 @@ export function CalendarHeader() {
               setShowProfileMenu(false);
               logout();
             }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           >
             <svg
               width="18"
@@ -548,7 +548,7 @@ export function CalendarHeader() {
       <div className="flex h-[48px] items-center px-3 sm:hidden">
         {/* Left: month label (follows infinite scroll position) */}
         <div className="flex items-center">
-          <span className="text-[18px] font-bold tabular-nums text-[var(--color-text-primary)]">
+          <span className="text-title font-bold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
         </div>
@@ -561,7 +561,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={handleGoToToday}
-            className="flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-[12px] font-medium text-[var(--color-accent)]"
+            className="flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent)]"
           >
             <span className="leading-none">{t('calendar.today')}</span>
           </button>
@@ -602,7 +602,7 @@ export function CalendarHeader() {
       <div className="hidden h-[56px] items-center px-3 sm:flex">
         {/* Left: month label + nav arrows + today */}
         <div className="flex items-center gap-1">
-          <span className="mr-1 text-[16px] font-semibold tabular-nums text-[var(--color-text-primary)]">
+          <span className="mr-1 text-subhead font-semibold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
 
@@ -681,7 +681,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => openEventModal()}
-            className="flex h-9 items-center gap-1.5 px-3 font-medium text-[14px] hover:opacity-85 active:scale-[0.97] transition-all"
+            className="flex h-9 items-center gap-1.5 px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
             style={{
               borderRadius: 'var(--radius-sm)',
               background: 'var(--color-accent)',

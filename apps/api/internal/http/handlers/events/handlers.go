@@ -168,7 +168,7 @@ func parseCompositeID(eventID string) (parentUUID string, dateStr string) {
 	return "", ""
 }
 
-func prepareRecurrence(ruleData *json.RawMessage, startAt time.Time) (*json.RawMessage, sql.NullTime) {
+func prepareRecurrence(ruleData *json.RawMessage, startAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
 	if ruleData == nil || string(*ruleData) == "null" {
 		return nil, sql.NullTime{}
 	}
@@ -176,8 +176,110 @@ func prepareRecurrence(ruleData *json.RawMessage, startAt time.Time) (*json.RawM
 	if rule == nil {
 		return nil, sql.NullTime{}
 	}
-	end := recurrence.ComputeEnd(rule, startAt)
+	// Anchor the recurrence end in the event's timezone so DST does not shift
+	// the boundary used by SQL range queries.
+	end := recurrence.ComputeEndInZone(rule, startAt, tz)
 	return ruleData, sql.NullTime{Time: end, Valid: true}
+}
+
+var validWeekdays = map[string]bool{
+	"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true,
+}
+
+// validateRecurrenceRule rejects malformed recurrence rules so a typo cannot
+// silently produce an event that never appears (unknown freq) or recurs forever
+// (unparseable until). Returns nil when there is no rule.
+func validateRecurrenceRule(data *json.RawMessage) *apierrors.Spec {
+	if data == nil || len(*data) == 0 || string(*data) == "null" {
+		return nil
+	}
+	rule := recurrence.ParseRule(*data)
+	if rule == nil {
+		return apierrors.BadRequest
+	}
+	switch rule.Freq {
+	case "daily", "weekly", "monthly", "yearly":
+	default:
+		return apierrors.BadRequest
+	}
+	if rule.Interval < 1 || rule.Interval > 999 {
+		return apierrors.BadRequest
+	}
+	if rule.Count < 0 || rule.Count > 1000 {
+		return apierrors.BadRequest
+	}
+	if rule.ByMonthDay < 0 || rule.ByMonthDay > 31 {
+		return apierrors.BadRequest
+	}
+	if rule.BySetPos < 0 || rule.BySetPos > 5 {
+		return apierrors.BadRequest
+	}
+	for _, d := range rule.ByDay {
+		if !validWeekdays[d] {
+			return apierrors.BadRequest
+		}
+	}
+	if rule.Until != nil {
+		if _, e1 := time.Parse(time.RFC3339, *rule.Until); e1 != nil {
+			if _, e2 := time.Parse("2006-01-02", *rule.Until); e2 != nil {
+				return apierrors.BadRequest
+			}
+		}
+	}
+	// A monthly rule with byDay but no bySetPos is ambiguous and would be
+	// silently ignored by the expander, so reject it rather than mislead.
+	if rule.Freq == "monthly" && len(rule.ByDay) > 0 && rule.BySetPos == 0 {
+		return apierrors.BadRequest
+	}
+	return nil
+}
+
+// resolveAssignee maps an assignee's public user ID to the member's internal ID,
+// requiring that the user is actually a member of the calendar so a foreign user
+// cannot be attached (cross-tenant leak). A nil/empty assignee clears it.
+func resolveAssignee(ctx context.Context, deps Deps, calID uint32, assignedTo *string) (sql.NullInt32, *apierrors.Spec) {
+	if assignedTo == nil || *assignedTo == "" {
+		return sql.NullInt32{}, nil
+	}
+	pub, err := parseUUID(*assignedTo)
+	if err != nil {
+		return sql.NullInt32{}, apierrors.BadRequest
+	}
+	u, err := deps.Queries.GetUserByPublicID(ctx, pub)
+	if err != nil {
+		return sql.NullInt32{}, apierrors.BadRequest
+	}
+	if _, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+		CalendarID: calID,
+		UserID:     u.ID,
+	}); err != nil {
+		return sql.NullInt32{}, apierrors.BadRequest
+	}
+	return sql.NullInt32{Int32: int32(u.ID), Valid: true}, nil
+}
+
+// assigneePublicID resolves an internal assigned_to id back to a public user ID
+// for responses, returning nil when unset or unresolvable.
+func assigneePublicID(ctx context.Context, deps Deps, id sql.NullInt32) *string {
+	if !id.Valid {
+		return nil
+	}
+	u, err := deps.Queries.GetUserByID(ctx, uint32(id.Int32))
+	if err != nil {
+		return nil
+	}
+	s := pubIDToHex(u.PublicID)
+	return &s
+}
+
+// isMember reports whether userID belongs to the calendar — used to keep event
+// participants scoped to calendar members.
+func isMember(ctx context.Context, deps Deps, calID, userID uint32) bool {
+	_, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+		CalendarID: calID,
+		UserID:     userID,
+	})
+	return err == nil
 }
 
 func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsOutput, error) {
@@ -193,8 +295,14 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 
 		var startTime, endTime time.Time
 		if in.StartDate != "" && in.EndDate != "" {
-			startTime, _ = time.Parse("2006-01-02", in.StartDate)
-			endTime, _ = time.Parse("2006-01-02", in.EndDate)
+			startTime, err = time.Parse("2006-01-02", in.StartDate)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			endTime, err = time.Parse("2006-01-02", in.EndDate)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
 			endTime = endTime.AddDate(0, 0, 1) // inclusive end
 		} else {
 			startTime = time.Now().AddDate(0, 0, -7)
@@ -213,7 +321,9 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 
 		var results []EventResponse
 		for _, e := range rows {
-			results = append(results, mapEvent(e, cal.PublicID))
+			ev := mapEvent(e, cal.PublicID)
+			ev.AssignedTo = assigneePublicID(ctx, deps, e.AssignedTo)
+			results = append(results, ev)
 		}
 
 		// Fetch and expand recurring events
@@ -234,9 +344,12 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			if rule == nil {
 				continue
 			}
-			occurrences := recurrence.Expand(rule, e.StartAt, e.EndAt, startTime, endTime)
+			assignee := assigneePublicID(ctx, deps, e.AssignedTo)
+			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, startTime, endTime, e.Timezone)
 			for _, occ := range occurrences {
-				results = append(results, mapRecurringInstance(e, cal.PublicID, occ))
+				inst := mapRecurringInstance(e, cal.PublicID, occ)
+				inst.AssignedTo = assignee
+				results = append(results, inst)
 			}
 		}
 
@@ -288,13 +401,24 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 
-			duration := evt.EndAt.Sub(evt.StartAt)
-			instanceStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(),
-				evt.StartAt.Hour(), evt.StartAt.Minute(), evt.StartAt.Second(), 0, evt.StartAt.Location())
-			instanceEnd := instanceStart.Add(duration)
+			// Confirm the requested date is an actual occurrence of the rule
+			// rather than an arbitrary date crafted into the composite ID.
+			dayStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(), 0, 0, 0, 0, time.UTC)
+			dayEnd := dayStart.AddDate(0, 0, 1)
+			var matched *recurrence.Occurrence
+			for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt, evt.EndAt, dayStart, dayEnd, evt.Timezone) {
+				if occ.StartAt.UTC().Format("20060102") == dateStr {
+					o := occ
+					matched = &o
+					break
+				}
+			}
+			if matched == nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
 
-			occ := recurrence.Occurrence{StartAt: instanceStart, EndAt: instanceEnd}
-			resp := mapRecurringInstance(evt, cal.PublicID, occ)
+			resp := mapRecurringInstance(evt, cal.PublicID, *matched)
+			resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
 			return &GetEventOutput{Body: resp}, nil
 		}
 
@@ -311,6 +435,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		}
 
 		resp := mapEvent(evt, cal.PublicID)
+		resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
 		participants, _ := deps.Queries.ListEventParticipants(ctx, evt.ID)
 		if len(participants) > 0 {
 			pids := make([]string, 0, len(participants))
@@ -342,6 +467,12 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
+		if endAt.Before(startAt) {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
 		pubID, _ := uuid.NewV7()
 		color := in.Body.Color
@@ -349,11 +480,16 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			color = "#47B2F7"
 		}
 
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt)
-
 		tz := in.Body.Timezone
 		if tz == "" {
 			tz = "UTC"
+		}
+
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
+
+		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
+		if spec != nil {
+			return nil, apierrors.ToHuma(spec)
 		}
 
 		result, err := deps.Queries.CreateEvent(ctx, generated.CreateEventParams{
@@ -369,7 +505,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			Memo:               in.Body.Memo,
 			Url:                in.Body.URL,
 			CreatedBy:          userID,
-			AssignedTo:         sql.NullInt32{},
+			AssignedTo:         assignedTo,
 			NotificationOffset: ptrIntToNullInt32(in.Body.NotificationOffset),
 			RecurrenceRule:     ruleData,
 			RecurrenceEnd:      recEnd,
@@ -389,6 +525,11 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				}
 				u, err := deps.Queries.GetUserByPublicID(ctx, pPub)
 				if err != nil {
+					continue
+				}
+				// Only calendar members may be added as participants, so a
+				// foreign user's name/avatar cannot be attached and leaked.
+				if !isMember(ctx, deps, cal.ID, u.ID) {
 					continue
 				}
 				_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
@@ -413,6 +554,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			URL:                in.Body.URL,
 			NotificationOffset: in.Body.NotificationOffset,
 			Participants:       participants,
+			AssignedTo:         assigneePublicID(ctx, deps, assignedTo),
 			RecurrenceRule:     mapRecurrenceRule(ruleData),
 			CreatedAt:          time.Now(),
 			UpdatedAt:          time.Now(),
@@ -447,10 +589,20 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 
-		startAt, _ := time.Parse(time.RFC3339, in.Body.StartAt)
-		endAt, _ := time.Parse(time.RFC3339, in.Body.EndAt)
-
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt)
+		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		endAt, err := time.Parse(time.RFC3339, in.Body.EndAt)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		if endAt.Before(startAt) {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
 		tz := in.Body.Timezone
 		if tz == "" {
@@ -458,6 +610,13 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			if tz == "" {
 				tz = "UTC"
 			}
+		}
+
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
+
+		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
+		if spec != nil {
+			return nil, apierrors.ToHuma(spec)
 		}
 
 		err = deps.Queries.UpdateEvent(ctx, generated.UpdateEventParams{
@@ -470,7 +629,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			Location:           in.Body.Location,
 			Memo:               in.Body.Memo,
 			Url:                in.Body.URL,
-			AssignedTo:         sql.NullInt32{},
+			AssignedTo:         assignedTo,
 			NotificationOffset: ptrIntToNullInt32(in.Body.NotificationOffset),
 			RecurrenceRule:     ruleData,
 			RecurrenceEnd:      recEnd,
@@ -492,6 +651,10 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			if err != nil {
 				continue
 			}
+			// Only calendar members may be added as participants.
+			if !isMember(ctx, deps, cal.ID, u.ID) {
+				continue
+			}
 			_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
 				EventID: evt.ID,
 				UserID:  u.ID,
@@ -502,6 +665,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		updated, _ := deps.Queries.GetEventByPublicID(ctx, evtPub)
 		resp := mapEvent(updated, cal.PublicID)
 		resp.Participants = participants
+		resp.AssignedTo = assigneePublicID(ctx, deps, updated.AssignedTo)
 		return &UpdateEventOutput{Body: resp}, nil
 	}
 }

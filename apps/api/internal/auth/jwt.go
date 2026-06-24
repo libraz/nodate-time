@@ -25,8 +25,13 @@ func GenerateToken(userID uint32, secret string) (string, error) {
 
 func ValidateToken(tokenStr string, secret string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
+		// Pin the signing method to HMAC to defend against algorithm-confusion
+		// attacks (e.g. a token forged with alg=none or an RS256/HS256 swap).
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
 	}

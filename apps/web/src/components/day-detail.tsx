@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -13,11 +15,20 @@ export function DayDetail() {
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const membersMap = useCalendarStore((s) => s.membersMap);
+  const me = useAuthStore((s) => s.user);
+
+  // Allow adding when the user can edit at least one active calendar.
+  const canAdd = activeCalendarIds.some((id) =>
+    canEdit(roleForCalendar(membersMap[id], me?.email)),
+  );
 
   const timezone = useUiStore((s) => s.timezone);
   const dayEvents = useMemo(() => {
-    const dayStartMs = selectedDate.startOf('day').toMillis();
-    const dayEndMs = selectedDate.endOf('day').toMillis() + 1;
+    // Anchor the day boundary to the selected timezone so it matches event bucketing.
+    const dayInZone = selectedDate.setZone(timezone, { keepLocalTime: true });
+    const dayStartMs = dayInZone.startOf('day').toMillis();
+    const dayEndMs = dayInZone.endOf('day').toMillis() + 1;
     return events.filter((e) => {
       if (!activeCalendarIds.includes(e.calendarId)) return false;
       const s = fromISOInZone(e.startAt, timezone).toMillis();
@@ -44,7 +55,7 @@ export function DayDetail() {
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-50 bg-[var(--color-overlay)]"
+        className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
         onClick={closeDayDetail}
       />
 
@@ -55,19 +66,21 @@ export function DayDetail() {
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3">
-          <h2 className="text-[20px] font-semibold text-[var(--color-text-primary)]">
+          <h2 className="text-heading font-semibold text-[var(--color-text-primary)]">
             {headerDate}
           </h2>
-          <button
-            type="button"
-            onClick={() => {
-              closeDayDetail();
-              openEventModal();
-            }}
-            className="text-[15px] font-medium text-[var(--color-accent)]"
-          >
-            {t('event.createEvent')}
-          </button>
+          {canAdd && (
+            <button
+              type="button"
+              onClick={() => {
+                closeDayDetail();
+                openEventModal();
+              }}
+              className="text-callout font-medium text-[var(--color-accent)]"
+            >
+              {t('event.createEvent')}
+            </button>
+          )}
         </div>
 
         {/* Event list */}
@@ -86,7 +99,7 @@ export function DayDetail() {
                 <rect x="3" y="4" width="18" height="17" rx="2" />
                 <path d="M3 9h18M8 2v4M16 2v4" />
               </svg>
-              <p className="mt-3 text-[15px] text-[var(--color-text-tertiary)]">
+              <p className="mt-3 text-callout text-[var(--color-text-tertiary)]">
                 {t('calendar.noEvents')}
               </p>
             </div>
@@ -105,16 +118,16 @@ export function DayDetail() {
                     className="card-section w-full bg-[var(--color-surface-secondary)] p-4 text-left transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
                     style={{ borderLeft: `3px solid ${evt.color}` }}
                   >
-                    <p className="text-[16px] font-medium text-[var(--color-text-primary)]">
+                    <p className="text-subhead font-medium text-[var(--color-text-primary)]">
                       {evt.title}
                     </p>
-                    <p className="mt-1 text-[14px] text-[var(--color-text-secondary)]">
+                    <p className="mt-1 text-default text-[var(--color-text-secondary)]">
                       {evt.allDay
                         ? t('calendar.allDay')
                         : `${fromISOInZone(evt.startAt, timezone).toFormat('HH:mm')} - ${fromISOInZone(evt.endAt, timezone).toFormat('HH:mm')}`}
                     </p>
                     {evt.location && (
-                      <p className="mt-0.5 text-[13px] text-[var(--color-text-tertiary)]">
+                      <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
                         {evt.location}
                       </p>
                     )}
