@@ -168,3 +168,13 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 
 - テーブル定義は `sql/tables/NNN_*.sql`。`sql/build-schema.sh` がそれらを結合して `sql/schema.sql` を生成し、`make db-apply` が適用する。
 - クエリは `sql/queries/*.sql` に書き、`make sqlc` で `apps/api/internal/db/generated/` に Go コードを生成する。
+
+## ライセンス
+
+[AGPL-3.0](./LICENSE) — 自己ホスト・改変・再配布は自由。ネットワーク経由で提供する場合はソースの公開が必要。
+
+## 免責事項・商標について
+
+本プロジェクトは独立した独自プロジェクトです。TimeTree の共有カレンダー体験に**着想を得て**いますが、コード・UI・UX はすべて独自実装であり、第三者のソース・素材・デザインを流用していません。
+
+"TimeTree"、"Google Calendar" その他の製品名は各社の商標であり、本ドキュメントでは説明のための参照としてのみ使用しています。本プロジェクトはこれらの企業と**提携・公認・後援の関係には一切ありません**。

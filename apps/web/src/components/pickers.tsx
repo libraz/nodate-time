@@ -22,10 +22,13 @@ function useFloating(open: boolean, floatingWidth = 280) {
     const floatingHeight = floatingRef.current?.offsetHeight ?? 340;
     const spaceBelow = window.innerHeight - rect.bottom;
     const goAbove = spaceBelow < floatingHeight + 8 && rect.top > spaceBelow;
+    // Clamp using the floating element's real width once mounted; a long-label
+    // dropdown can be far wider than floatingWidth and would clip off-screen.
+    const fw = floatingRef.current?.offsetWidth ?? floatingWidth;
 
     setPos({
       top: goAbove ? Math.max(8, rect.top - floatingHeight - 4) : rect.bottom + 4,
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - floatingWidth - 8)),
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - fw - 8)),
       width: rect.width,
     });
   }, [open, floatingWidth]);
@@ -389,6 +392,7 @@ export function CustomSelect({
               top: pos.top,
               left: pos.left,
               minWidth: Math.max(pos.width, 160),
+              maxWidth: 'calc(100vw - 16px)',
               boxShadow: 'var(--shadow-elevated)',
               backdropFilter: 'blur(20px)',
             }}

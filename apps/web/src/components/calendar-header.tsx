@@ -10,11 +10,13 @@ export function CalendarHeader() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
+  const selectedDate = useUiStore((s) => s.selectedDate);
   const navigateMonth = useUiStore((s) => s.navigateMonth);
   const calendarView = useUiStore((s) => s.calendarView);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
+  const setShowMobileMenu = useUiStore((s) => s.setShowMobileMenu);
   const triggerScrollToToday = useUiStore((s) => s.triggerScrollToToday);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
@@ -70,6 +72,22 @@ export function CalendarHeader() {
     // Mobile month view is an infinite scroll; signal it to scroll back to today.
     triggerScrollToToday();
   };
+
+  // Prev/next navigation steps by the unit the active view shows: a week for the
+  // weekly timeline, a year for the year grid, otherwise a month.
+  const navigateByView = (dir: number) => {
+    if (calendarView === 'week') {
+      const next = selectedDate.plus({ weeks: dir });
+      setSelectedDate(next);
+      setCurrentMonth(next.startOf('month'));
+    } else if (calendarView === 'year') {
+      setCurrentMonth(currentMonth.plus({ years: dir }));
+    } else {
+      navigateMonth(dir);
+    }
+  };
+  // The list view is a flat agenda with no date window, so it has no paging.
+  const showDateNav = calendarView !== 'list';
 
   const ChevronLeft = () => (
     <svg
@@ -285,10 +303,30 @@ export function CalendarHeader() {
   return (
     <div className="glass-surface-heavy sticky top-0 z-30">
       {/* Mobile header (< sm) */}
-      <div className="flex h-[48px] items-center px-3 sm:hidden">
-        {/* Left: month label (follows infinite scroll position) + view switcher */}
-        <div className="flex items-center gap-1">
-          <span className="text-title font-bold tabular-nums text-[var(--color-text-primary)]">
+      <div className="flex h-[48px] items-center gap-1 px-3 sm:hidden">
+        {/* Left: drawer toggle + month label (follows scroll) + view switcher */}
+        <button
+          type="button"
+          onClick={() => setShowMobileMenu(true)}
+          aria-label={t('calendar.calendarList')}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-primary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="truncate text-title font-bold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
 
@@ -323,6 +361,28 @@ export function CalendarHeader() {
             )}
           </div>
         </div>
+
+        {/* Week/year paging (month uses infinite scroll; list is a flat agenda) */}
+        {showDateNav && calendarView !== 'month' && (
+          <div className="flex shrink-0 items-center">
+            <button
+              type="button"
+              onClick={() => navigateByView(-1)}
+              className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              aria-label={t('calendar.prevMonth')}
+            >
+              <ChevronLeft />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigateByView(1)}
+              className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              aria-label={t('calendar.nextMonth')}
+            >
+              <ChevronRight />
+            </button>
+          </div>
+        )}
 
         {/* Center: spacer */}
         <div className="flex-1" />
@@ -379,7 +439,7 @@ export function CalendarHeader() {
 
           <button
             type="button"
-            onClick={() => navigateMonth(-1)}
+            onClick={() => navigateByView(-1)}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
             aria-label={t('calendar.prevMonth')}
           >
@@ -388,7 +448,7 @@ export function CalendarHeader() {
 
           <button
             type="button"
-            onClick={() => navigateMonth(1)}
+            onClick={() => navigateByView(1)}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
             aria-label={t('calendar.nextMonth')}
           >

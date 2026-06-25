@@ -24,6 +24,10 @@ interface UiState {
   searchQuery: string;
   mobileTab: MobileTab;
   showSettings: boolean;
+  /** Mobile-only slide-in drawer holding the calendar list and panel triggers. */
+  showMobileMenu: boolean;
+  /** Activity (history) feed overlay; reachable from both desktop and mobile. */
+  showActivity: boolean;
   scrollToTodaySignal: number;
 
   theme: ThemeStyle;
@@ -46,6 +50,8 @@ interface UiState {
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
   toggleSettings: () => void;
+  setShowMobileMenu: (show: boolean) => void;
+  setShowActivity: (show: boolean) => void;
   triggerScrollToToday: () => void;
   setTheme: (theme: ThemeStyle) => void;
   setColorMode: (mode: ColorMode) => void;
@@ -68,6 +74,8 @@ export const useUiStore = create<UiState>((set) => ({
   searchQuery: '',
   mobileTab: 'calendar' as MobileTab,
   showSettings: false,
+  showMobileMenu: false,
+  showActivity: false,
   scrollToTodaySignal: 0,
 
   theme: loadJson<ThemeStyle>('theme', 'glass'),
@@ -110,6 +118,8 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   setMobileTab: (tab) => set({ mobileTab: tab }),
   toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
+  setShowMobileMenu: (show) => set({ showMobileMenu: show }),
+  setShowActivity: (show) => set({ showActivity: show }),
   triggerScrollToToday: () => set((s) => ({ scrollToTodaySignal: s.scrollToTodaySignal + 1 })),
 
   setTheme: (theme) => {

@@ -196,3 +196,13 @@ CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
 
 [AGPL-3.0](./LICENSE) — self-host, modify, and redistribute freely. Network use
 requires source availability.
+
+## Disclaimer & trademarks
+
+This is an independent, original project. It is **inspired by** the shared-calendar
+experience of TimeTree, but the code, UI, and UX are its own — no source, assets, or
+designs are copied from any third party.
+
+"TimeTree", "Google Calendar", and other product names are trademarks of their
+respective owners and are used here only for descriptive reference. This project is
+**not affiliated with, endorsed by, or sponsored by** any of them.
