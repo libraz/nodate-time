@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
@@ -304,10 +304,14 @@ function ProfileSection() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
+  const uploadAvatar = useAuthStore((s) => s.uploadAvatar);
+  const removeAvatar = useAuthStore((s) => s.removeAvatar);
   const [name, setName] = useState(user?.name ?? '');
   const [icon, setIcon] = useState(user?.icon ?? '');
   const [color, setColor] = useState(user?.color ?? '#42A5F5');
   const [saving, setSaving] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -322,6 +326,32 @@ function ProfileSection() {
   }, [user]);
 
   const dirty = !!user && (name !== user.name || icon !== user.icon || color !== user.color);
+
+  const handleAvatarFile = useCallback(
+    async (file: File) => {
+      setAvatarBusy(true);
+      try {
+        await uploadAvatar(file);
+        toast.success(t('panel.updated'));
+      } catch (e) {
+        toast.error(e instanceof ApiError ? e.detail : 'Error');
+      } finally {
+        setAvatarBusy(false);
+      }
+    },
+    [uploadAvatar, t],
+  );
+
+  const handleAvatarRemove = useCallback(async () => {
+    setAvatarBusy(true);
+    try {
+      await removeAvatar();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.detail : 'Error');
+    } finally {
+      setAvatarBusy(false);
+    }
+  }, [removeAvatar]);
 
   const save = async () => {
     setSaving(true);
@@ -357,18 +387,56 @@ function ProfileSection() {
     <>
       <Section title={t('settings.profile')} description={t('profile.edit')}>
         <div className="mb-6 flex items-center gap-4">
-          <div
-            aria-hidden
-            className="flex h-16 w-16 items-center justify-center rounded-2xl text-hero font-bold text-white shadow-sm"
+          <button
+            type="button"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={avatarBusy}
+            className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-hero font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: color }}
+            aria-label={t('profile.avatar')}
           >
-            {icon || (name ? name.slice(0, 1) : '👤')}
-          </div>
-          <div>
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span>{icon || (name ? name.slice(0, 1) : '👤')}</span>
+            )}
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleAvatarFile(f);
+              if (e.target) e.target.value = '';
+            }}
+          />
+          <div className="min-w-0">
             <p className="text-subhead font-semibold text-[var(--color-text-primary)]">
               {name || '—'}
             </p>
             <p className="text-body text-[var(--color-text-secondary)]">{user?.email}</p>
+            <div className="mt-1 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarBusy}
+                className="text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+              >
+                {t('profile.avatar')}
+              </button>
+              {user?.avatarUrl && (
+                <button
+                  type="button"
+                  onClick={handleAvatarRemove}
+                  disabled={avatarBusy}
+                  className="text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                >
+                  {t('profile.removeAvatar')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -381,7 +449,8 @@ function ProfileSection() {
               onChange={(e) => setIcon(e.target.value)}
               aria-label={t('profile.icon')}
               placeholder="🙂"
-              className="input-modern w-11 shrink-0 px-0 text-center text-title"
+              className="input-modern shrink-0 text-center text-title"
+              style={{ width: '3rem', paddingLeft: 0, paddingRight: 0 }}
             />
             <input
               type="text"
@@ -782,8 +851,7 @@ function CalendarsSection() {
     try {
       const inv = await api.post<InviteData>(`/calendars/${selectedId}/invites`, {
         role: DEFAULT_INVITE_ROLE,
-        maxUses: null,
-        expiresAt: null,
+        maxUses: 1,
       });
       setInvites((cur) => [inv, ...cur]);
       toast.success(t('invites.create'));
@@ -903,6 +971,9 @@ function CalendarsSection() {
       </Section>
 
       <Section title={t('settings.invites')}>
+        <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
+          {t('share.inviteSingleUseNote')}
+        </p>
         <button
           type="button"
           onClick={handleCreateInvite}

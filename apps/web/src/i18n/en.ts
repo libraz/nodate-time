@@ -121,6 +121,9 @@ export const en: Record<TranslationKey, string> = {
   'panel.enterToPost': 'Press Enter to post',
   'panel.updated': 'Updated',
   'panel.memoPlaceholder': 'Write a memo...',
+  'panel.memoShared': 'Shared memo',
+  'panel.memoSharedHint': 'Visible to everyone in {name}',
+  'panel.postTo': 'Post to',
 
   'share.createLink': 'Create share link',
   'share.creating': 'Creating...',
@@ -136,6 +139,18 @@ export const en: Record<TranslationKey, string> = {
   'share.joinFailed': 'Failed to join',
   'share.calendarNotFound': 'Calendar not found',
   'share.poweredBy': 'Powered by Nodate Time',
+  'share.targetCalendar': 'Target calendar',
+  'share.inviteSection': 'Invite link',
+  'share.inviteSingleUseNote': 'This link stops working once one person joins (single-use)',
+  'share.createInvite': 'Create invite link',
+  'share.inviteUsed': 'Used',
+  'share.inviteUnused': 'Not used yet',
+  'share.publicSection': 'Public & embed',
+  'share.publicNote': 'Anyone with this link can view (no sign-up, read-only)',
+  'share.createPublic': 'Create public link',
+  'share.embedCode': 'Embed code (iframe)',
+  'share.copyUrl': 'Copy URL',
+  'share.copyEmbed': 'Copy embed code',
 
   'auth.login': 'Log in',
   'auth.register': 'Sign up',
@@ -330,6 +345,10 @@ export const en: Record<TranslationKey, string> = {
   // Assignee
   'event.assignee': 'Assignee',
   'event.assigneeNone': 'Unassigned',
+  'event.createdBy': 'Created by',
+  'event.calendar': 'Calendar',
+  'event.color': 'Color',
+  'event.moreOptions': 'More options',
 
   // Album
   'album.caption': 'Caption',
