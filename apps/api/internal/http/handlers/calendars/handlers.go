@@ -95,9 +95,19 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		// Mark calendars that currently expose an active public link.
+		publicSet := map[uint32]bool{}
+		if ids, err := deps.Queries.ListPublicSharedCalendarIDs(ctx, userID); err == nil {
+			for _, id := range ids {
+				publicSet[id] = true
+			}
+		}
+
 		out := &ListCalendarsOutput{Body: make([]CalendarResponse, 0, len(rows))}
 		for _, c := range rows {
-			out.Body = append(out.Body, mapCalendar(c))
+			resp := mapCalendar(c)
+			resp.PublicShared = publicSet[c.ID]
+			out.Body = append(out.Body, resp)
 		}
 		return out, nil
 	}
@@ -113,7 +123,11 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &GetCalendarOutput{Body: mapCalendar(cal)}, nil
+		resp := mapCalendar(cal)
+		if cnt, err := deps.Queries.CountActivePublicInvites(ctx, cal.ID); err == nil {
+			resp.PublicShared = cnt > 0
+		}
+		return &GetCalendarOutput{Body: resp}, nil
 	}
 }
 

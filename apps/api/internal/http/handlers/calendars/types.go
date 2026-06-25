@@ -8,6 +8,9 @@ type CalendarResponse struct {
 	Color     string    `json:"color"`
 	CoverURL  string    `json:"coverUrl"`
 	CreatedAt time.Time `json:"createdAt"`
+	// PublicShared is true when an active public (read-only embed) link exists,
+	// so the UI can flag the calendar as externally exposed.
+	PublicShared bool `json:"publicShared"`
 }
 
 type MemberResponse struct {

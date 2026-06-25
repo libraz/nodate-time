@@ -146,16 +146,23 @@ export const ja = {
   'share.poweredBy': 'Powered by Nodate Time',
   'share.targetCalendar': '対象カレンダー',
   'share.inviteSection': '招待リンク',
-  'share.inviteSingleUseNote': 'このリンクは1人が参加すると無効になります（1回限り）',
+  'share.inviteSingleUseNote':
+    '各リンクは1人が参加すると無効になります（1回限り）。複数発行できます',
   'share.createInvite': '招待リンクを作成',
+  'share.createAnotherInvite': '別の招待リンクを作成',
   'share.inviteUsed': '使用済み',
   'share.inviteUnused': '未使用',
   'share.publicSection': '公開・埋め込み',
   'share.publicNote': 'リンクを知っている人は誰でも閲覧できます（サインアップ不要・参照専用）',
   'share.createPublic': '公開リンクを作成',
+  'share.publicActiveWarning':
+    '外部公開中：リンクを知っている人は誰でもこのカレンダーを閲覧できます',
+  'share.publicConfirm':
+    'このカレンダーを外部公開します。リンクを知っている人は誰でも予定を閲覧できます。よろしいですか？',
   'share.embedCode': '埋め込みコード（iframe）',
   'share.copyUrl': 'URLをコピー',
   'share.copyEmbed': '埋め込みコードをコピー',
+  'calendar.publicShared': '外部公開中',
 
   // Auth
   'auth.login': 'ログイン',

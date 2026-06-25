@@ -25,6 +25,20 @@ ORDER BY created_at DESC;
 -- name: DeleteInviteByIDAndCalendar :exec
 DELETE FROM calendar_invites WHERE id = ? AND calendar_id = ?;
 
+-- name: ListPublicSharedCalendarIDs :many
+SELECT DISTINCT ci.calendar_id
+FROM calendar_invites ci
+INNER JOIN calendar_members cm ON cm.calendar_id = ci.calendar_id
+WHERE cm.user_id = ?
+  AND ci.is_public = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW());
+
+-- name: CountActivePublicInvites :one
+SELECT COUNT(*) FROM calendar_invites
+WHERE calendar_id = ?
+  AND is_public = TRUE
+  AND (expires_at IS NULL OR expires_at > NOW());
+
 -- name: GetInviteByTokenPublic :one
 SELECT ci.*, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
 FROM calendar_invites ci

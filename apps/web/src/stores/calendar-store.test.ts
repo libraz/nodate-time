@@ -73,8 +73,8 @@ describe('fetchEvents', () => {
   it('aggregates events from every calendar and stamps the calendarId', async () => {
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '' },
-        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '' },
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
       ],
     });
     mockApi.get.mockImplementation(async (url: string) => {
@@ -96,8 +96,8 @@ describe('deleteCalendar', () => {
     mockApi.delete.mockResolvedValue(undefined as never);
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '' },
-        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '' },
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
       ],
       events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
       memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
