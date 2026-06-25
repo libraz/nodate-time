@@ -1658,6 +1658,66 @@ textarea,
   .side-panel {
     animation: side-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
+  .drawer-panel {
+    animation: drawer-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  /* Event modal: a soft spring on open, a quick pop on close. */
+  .modal-panel.modal-enter {
+    animation: modal-spring-in 0.4s cubic-bezier(0.34, 1.45, 0.5, 1) both;
+  }
+  .modal-panel.modal-exit {
+    animation: modal-pop-out 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  .backdrop-out {
+    animation: backdrop-fade-out 0.22s ease both;
+  }
+}
+
+@keyframes modal-spring-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes modal-pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+@keyframes backdrop-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* The mobile event sheet is driven by inline transform (swipe + spring), so the
+   shared bottom-sheet keyframe is suppressed to avoid fighting the inline value. */
+.bottom-sheet.event-sheet {
+  animation: none;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 @keyframes sheet-up {

@@ -768,6 +768,77 @@ export function EventModal() {
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
 
+  // Animated dismissal: play the exit transition, then unmount via the store.
+  const EXIT_MS = 260;
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+  const requestClose = useCallback(() => {
+    if (closeTimer.current) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setClosing(false);
+      closeEventModal();
+    }, EXIT_MS);
+  }, [closeEventModal]);
+  useEffect(
+    () => () => {
+      if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    },
+    [],
+  );
+
+  // Swipe-down-to-dismiss for the mobile bottom sheet, driven from its top handle.
+  // The sheet tracks the finger 1:1 while held, then resolves on release. Window
+  // listeners (not pointer capture) guarantee the release is caught even when the
+  // finger drifts off the handle, so the sheet never rests at a partial offset.
+  const [sheetDragY, setSheetDragY] = useState(0);
+  const onSheetDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const start = { startY: e.clientY, lastY: e.clientY, lastT: e.timeStamp, vy: 0 };
+    const ctrl = new AbortController();
+    const move = (ev: globalThis.PointerEvent) => {
+      const dt = ev.timeStamp - start.lastT;
+      if (dt > 0) start.vy = (ev.clientY - start.lastY) / dt;
+      start.lastY = ev.clientY;
+      start.lastT = ev.timeStamp;
+      const dy = ev.clientY - start.startY;
+      setSheetDragY(dy > 0 ? dy : 0);
+    };
+    const end = () => {
+      ctrl.abort();
+      const dy = start.lastY - start.startY;
+      // Dismiss on a long pull or a quick downward flick; otherwise snap back.
+      if (dy > 160 || (dy > 48 && start.vy > 0.55)) requestClose();
+      setSheetDragY(0);
+    };
+    window.addEventListener('pointermove', move, { signal: ctrl.signal });
+    window.addEventListener('pointerup', end, { signal: ctrl.signal });
+    window.addEventListener('pointercancel', end, { signal: ctrl.signal });
+  };
+
+  // Drive the sheet's spring entrance: mount off-screen, then settle on next frame.
+  const [sheetIn, setSheetIn] = useState(false);
+  useEffect(() => {
+    if (!showEventModal) {
+      setSheetIn(false);
+      return;
+    }
+    // Opening (or re-opening mid-dismiss) must cancel any pending close, otherwise
+    // the scheduled closeEventModal() would immediately shut the reopened modal.
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setClosing(false);
+    setSheetIn(false);
+    const id = requestAnimationFrame(() => setSheetIn(true));
+    return () => cancelAnimationFrame(id);
+  }, [showEventModal]);
+  const reduceMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+
   const [form, setForm] = useState<FormState>({
     title: '',
     allDay: true,
@@ -928,7 +999,7 @@ export function EventModal() {
           await addEvent(form.calendarId, data);
         }
         setScopePrompt(null);
-        closeEventModal();
+        requestClose();
       } catch (e) {
         toast.error(errorMessage(e, t('error.saveFailed')));
       } finally {
@@ -941,7 +1012,7 @@ export function EventModal() {
       isRecurringInstance,
       addEvent,
       updateEvent,
-      closeEventModal,
+      requestClose,
       saving,
       editable,
       timezone,
@@ -960,17 +1031,17 @@ export function EventModal() {
       try {
         await deleteEvent(editingEvent.calendarId, editingEvent.id, scope);
         setScopePrompt(null);
-        closeEventModal();
+        requestClose();
       } catch (e) {
         toast.error(errorMessage(e, t('error.deleteFailed')));
       } finally {
         setSaving(false);
       }
     },
-    [editingEvent, isRecurringInstance, deleteEvent, closeEventModal, saving, editable, t],
+    [editingEvent, isRecurringInstance, deleteEvent, requestClose, saving, editable, t],
   );
 
-  if (!showEventModal) return null;
+  if (!showEventModal && !closing) return null;
 
   // Shared form content used by both mobile and desktop layouts
   const formContent = (
@@ -979,7 +1050,7 @@ export function EventModal() {
       <div className="flex items-center justify-between px-6 py-3">
         <button
           type="button"
-          onClick={closeEventModal}
+          onClick={requestClose}
           className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
         >
@@ -1880,17 +1951,48 @@ export function EventModal() {
         <button
           type="button"
           aria-label={t('common.close')}
-          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
-          onClick={closeEventModal}
+          className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
+            closing ? 'backdrop-out' : ''
+          }`}
+          onClick={requestClose}
         />
-        <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
-          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+        <div
+          className="glass-surface-heavy bottom-sheet event-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden"
+          style={{
+            // At rest, drop the transform entirely: a lingering transform makes
+            // this a containing block and mis-positions native <select> popups.
+            transform: closing
+              ? 'translateY(100%)'
+              : sheetDragY
+                ? `translateY(${sheetDragY}px)`
+                : sheetIn
+                  ? 'none'
+                  : 'translateY(100%)',
+            transition: sheetDragY
+              ? 'none'
+              : reduceMotion
+                ? 'none'
+                : closing
+                  ? 'transform 0.24s cubic-bezier(0.4, 0, 1, 1)'
+                  : 'transform 0.42s cubic-bezier(0.34, 1.5, 0.5, 1)',
+          }}
+        >
+          {/* Grab zone: drag down to hold/dismiss. Generous height for easy grab. */}
+          <div
+            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing"
+            onPointerDown={onSheetDown}
+          >
+            <div className="drag-handle mx-auto h-1.5 w-11 rounded-full bg-[var(--color-text-tertiary)] opacity-40" />
+          </div>
           <div className="flex-1 overflow-y-auto">{formContent}</div>
-          {/* Sticky action bar */}
-          <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
+          {/* Sticky action bar (clears the home-indicator safe area) */}
+          <div
+            className="flex gap-3 border-t border-[var(--color-border)] px-6 pt-4"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)' }}
+          >
             <button
               type="button"
-              onClick={closeEventModal}
+              onClick={requestClose}
               className="btn-secondary flex-1 py-3 text-default font-medium"
             >
               {editable ? t('common.cancel') : t('common.close')}
@@ -1914,17 +2016,23 @@ export function EventModal() {
         <button
           type="button"
           aria-label={t('common.close')}
-          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
-          onClick={closeEventModal}
+          className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
+            closing ? 'backdrop-out' : ''
+          }`}
+          onClick={requestClose}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div className="glass-surface-heavy modal-panel pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
+          <div
+            className={`glass-surface-heavy modal-panel ${
+              closing ? 'modal-exit' : 'modal-enter'
+            } pointer-events-auto flex w-full max-w-[480px] max-h-[90dvh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]`}
+          >
             <div className="flex-1 overflow-y-auto">{formContent}</div>
             {/* Action bar */}
             <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
               <button
                 type="button"
-                onClick={closeEventModal}
+                onClick={requestClose}
                 className="btn-secondary flex-1 py-3 text-default font-medium"
               >
                 {editable ? t('common.cancel') : t('common.close')}

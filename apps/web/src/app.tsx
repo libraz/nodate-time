@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityPanel } from '@/components/activity-panel';
 import { AlbumPanel } from '@/components/album-panel';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
@@ -8,6 +9,7 @@ import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { ListView } from '@/components/list-view';
 import { MembersPanel } from '@/components/members-panel';
+import { MobileMenu } from '@/components/mobile-menu';
 import { MonthScroll } from '@/components/month-scroll';
 import { NotificationsPanel } from '@/components/notifications-panel';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
@@ -298,6 +300,8 @@ export function App() {
   const currentMonth = useUiStore((s) => s.currentMonth);
   const mobileTab = useUiStore((s) => s.mobileTab);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
+  const showActivity = useUiStore((s) => s.showActivity);
+  const setShowActivity = useUiStore((s) => s.setShowActivity);
   const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const fetchMemos = useCalendarStore((s) => s.fetchMemos);
@@ -328,7 +332,6 @@ export function App() {
       {calendarView === 'week' && <WeeklyTimeline />}
       {calendarView === 'list' && <ListView />}
       {calendarView === 'year' && <YearView />}
-      <EventModal />
     </div>
   );
 
@@ -344,7 +347,6 @@ export function App() {
       ) : (
         <YearView />
       )}
-      <EventModal />
     </div>
   );
 
@@ -413,6 +415,15 @@ export function App() {
 
       {/* Share overlay */}
       <SharePanel />
+
+      {/* Event create/edit modal — top-level so its z-50 beats the bottom nav */}
+      <EventModal />
+
+      {/* Activity feed overlay (desktop + mobile) */}
+      {showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
+
+      {/* Mobile slide-in menu: calendar list + shared-calendar panels */}
+      <MobileMenu />
     </div>
   );
 }
