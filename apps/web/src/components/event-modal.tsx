@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HistoryTimeline } from '@/components/history-timeline';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
@@ -1823,6 +1824,33 @@ export function EventModal() {
       {/* Comments (edit mode only) */}
       {editingEvent && (
         <CommentsSection calendarId={editingEvent.calendarId} eventId={editingEvent.id} />
+      )}
+
+      {/* History (edit mode only) */}
+      {editingEvent && (
+        <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-text-secondary)"
+              strokeWidth="2"
+            >
+              <path d="M12 8v4l3 3" />
+              <circle cx="12" cy="12" r="9" />
+            </svg>
+            <span className="text-default font-semibold text-[var(--color-text-primary)]">
+              {t('history.title')}
+            </span>
+          </div>
+          <HistoryTimeline
+            kind="event"
+            calendarId={editingEvent.calendarId}
+            entityId={editingEvent.id.split('_')[0] ?? editingEvent.id}
+          />
+        </div>
       )}
 
       {/* Delete (edit mode, editors only) */}

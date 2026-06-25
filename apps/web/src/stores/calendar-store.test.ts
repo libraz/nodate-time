@@ -48,6 +48,7 @@ function memo(id: string, calendarId: string): Memo {
     id,
     calendarId,
     title: `Memo ${id}`,
+    body: '',
     done: false,
     sortOrder: 0,
     createdAt: '',
@@ -137,10 +138,11 @@ describe('addMemo', () => {
     useCalendarStore.setState({ memos: [memo('m1', 'cal-1'), memo('m2', 'cal-1')] });
     mockApi.post.mockResolvedValue(memo('m3', 'cal-1') as never);
 
-    await useCalendarStore.getState().addMemo('cal-1', { title: 'third' });
+    await useCalendarStore.getState().addMemo('cal-1', { title: 'third', body: '' });
 
     expect(mockApi.post).toHaveBeenCalledWith('/calendars/cal-1/memos', {
       title: 'third',
+      body: '',
       sortOrder: 2,
     });
     expect(useCalendarStore.getState().memos.map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);

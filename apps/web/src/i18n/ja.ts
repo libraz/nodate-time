@@ -218,6 +218,8 @@ export const ja = {
   'settings.appearance': '外観',
   'settings.theme': 'テーマ',
   'settings.themeGlass': 'Glass',
+  'settings.themeModern': 'Modern',
+  'settings.themeWashi': '和',
   'settings.themeClassic': 'Classic',
   'settings.themeNothing': 'Nothing',
   'settings.colorMode': 'カラーモード',
@@ -386,6 +388,32 @@ export const ja = {
   'settings.calendarCover': 'カバー画像',
   'settings.calendarCoverUpload': 'カバー画像をアップロード',
   'settings.calendarDetails': 'カレンダー設定',
+
+  // Memo dialog
+  'memo.add': 'メモを追加',
+  'memo.edit': 'メモを編集',
+  'memo.title': 'タイトル',
+  'memo.body': '内容',
+  'memo.bodyPlaceholder': '内容を入力...',
+  'memo.done': '完了',
+  'memo.markDone': '完了にする',
+  'memo.markUndone': '未完了に戻す',
+
+  // History timeline
+  'history.title': '履歴',
+  'history.created': '作成',
+  'history.updated': '編集',
+  'history.deleted': '削除',
+  'history.deletedUser': '削除されたユーザー',
+  'history.empty': '履歴はありません',
+  'history.loading': '読み込み中...',
+
+  // Activity feed
+  'activity.title': 'アクティビティ',
+  'activity.empty': 'アクティビティはありません',
+  'activity.targetCalendar': '対象カレンダー',
+  'activity.entityEvent': '予定',
+  'activity.entityMemo': 'メモ',
 } as const;
 
 export type TranslationKey = keyof typeof ja;

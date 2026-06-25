@@ -209,6 +209,8 @@ export const en: Record<TranslationKey, string> = {
   'settings.appearance': 'Appearance',
   'settings.theme': 'Theme',
   'settings.themeGlass': 'Glass',
+  'settings.themeModern': 'Modern',
+  'settings.themeWashi': 'Washi',
   'settings.themeClassic': 'Classic',
   'settings.themeNothing': 'Nothing',
   'settings.colorMode': 'Color mode',
@@ -367,4 +369,30 @@ export const en: Record<TranslationKey, string> = {
   'settings.calendarCover': 'Cover image',
   'settings.calendarCoverUpload': 'Upload cover image',
   'settings.calendarDetails': 'Calendar settings',
+
+  // Memo dialog
+  'memo.add': 'Add memo',
+  'memo.edit': 'Edit memo',
+  'memo.title': 'Title',
+  'memo.body': 'Body',
+  'memo.bodyPlaceholder': 'Add details...',
+  'memo.done': 'Done',
+  'memo.markDone': 'Mark as done',
+  'memo.markUndone': 'Mark as not done',
+
+  // History timeline
+  'history.title': 'History',
+  'history.created': 'Created',
+  'history.updated': 'Edited',
+  'history.deleted': 'Deleted',
+  'history.deletedUser': 'Deleted user',
+  'history.empty': 'No history yet',
+  'history.loading': 'Loading...',
+
+  // Activity feed
+  'activity.title': 'Activity',
+  'activity.empty': 'No activity yet',
+  'activity.targetCalendar': 'Calendar',
+  'activity.entityEvent': 'Event',
+  'activity.entityMemo': 'Memo',
 };

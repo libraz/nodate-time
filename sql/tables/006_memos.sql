@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS memos (
   public_id   BINARY(16)   NOT NULL,
   calendar_id INT UNSIGNED NOT NULL,
   title       VARCHAR(500) NOT NULL,
+  body        TEXT         NOT NULL,
   done        TINYINT(1)   NOT NULL DEFAULT 0,
   sort_order  INT          NOT NULL DEFAULT 0,
   created_by  INT UNSIGNED NOT NULL,

@@ -11,14 +11,15 @@ import (
 )
 
 const createMemo = `-- name: CreateMemo :execresult
-INSERT INTO memos (public_id, calendar_id, title, sort_order, created_by)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO memos (public_id, calendar_id, title, body, sort_order, created_by)
+VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateMemoParams struct {
 	PublicID   []byte `json:"publicId"`
 	CalendarID uint32 `json:"calendarId"`
 	Title      string `json:"title"`
+	Body       string `json:"body"`
 	SortOrder  int32  `json:"sortOrder"`
 	CreatedBy  uint32 `json:"createdBy"`
 }
@@ -28,6 +29,7 @@ func (q *Queries) CreateMemo(ctx context.Context, arg CreateMemoParams) (sql.Res
 		arg.PublicID,
 		arg.CalendarID,
 		arg.Title,
+		arg.Body,
 		arg.SortOrder,
 		arg.CreatedBy,
 	)
@@ -43,7 +45,7 @@ func (q *Queries) DeleteMemo(ctx context.Context, id uint32) error {
 }
 
 const getMemoByPublicID = `-- name: GetMemoByPublicID :one
-SELECT id, public_id, calendar_id, title, done, sort_order, created_by, created_at, updated_at FROM memos WHERE public_id = ? AND calendar_id = ?
+SELECT id, public_id, calendar_id, title, body, done, sort_order, created_by, created_at, updated_at FROM memos WHERE public_id = ? AND calendar_id = ?
 `
 
 type GetMemoByPublicIDParams struct {
@@ -59,6 +61,7 @@ func (q *Queries) GetMemoByPublicID(ctx context.Context, arg GetMemoByPublicIDPa
 		&i.PublicID,
 		&i.CalendarID,
 		&i.Title,
+		&i.Body,
 		&i.Done,
 		&i.SortOrder,
 		&i.CreatedBy,
@@ -69,7 +72,7 @@ func (q *Queries) GetMemoByPublicID(ctx context.Context, arg GetMemoByPublicIDPa
 }
 
 const listMemosByCalendar = `-- name: ListMemosByCalendar :many
-SELECT id, public_id, calendar_id, title, done, sort_order, created_by, created_at, updated_at FROM memos WHERE calendar_id = ? ORDER BY sort_order, created_at
+SELECT id, public_id, calendar_id, title, body, done, sort_order, created_by, created_at, updated_at FROM memos WHERE calendar_id = ? ORDER BY sort_order, created_at
 `
 
 func (q *Queries) ListMemosByCalendar(ctx context.Context, calendarID uint32) ([]Memo, error) {
@@ -86,6 +89,7 @@ func (q *Queries) ListMemosByCalendar(ctx context.Context, calendarID uint32) ([
 			&i.PublicID,
 			&i.CalendarID,
 			&i.Title,
+			&i.Body,
 			&i.Done,
 			&i.SortOrder,
 			&i.CreatedBy,
@@ -106,11 +110,12 @@ func (q *Queries) ListMemosByCalendar(ctx context.Context, calendarID uint32) ([
 }
 
 const updateMemo = `-- name: UpdateMemo :exec
-UPDATE memos SET title = ?, done = ?, sort_order = ? WHERE id = ?
+UPDATE memos SET title = ?, body = ?, done = ?, sort_order = ? WHERE id = ?
 `
 
 type UpdateMemoParams struct {
 	Title     string `json:"title"`
+	Body      string `json:"body"`
 	Done      bool   `json:"done"`
 	SortOrder int32  `json:"sortOrder"`
 	ID        uint32 `json:"id"`
@@ -119,6 +124,7 @@ type UpdateMemoParams struct {
 func (q *Queries) UpdateMemo(ctx context.Context, arg UpdateMemoParams) error {
 	_, err := q.db.ExecContext(ctx, updateMemo,
 		arg.Title,
+		arg.Body,
 		arg.Done,
 		arg.SortOrder,
 		arg.ID,

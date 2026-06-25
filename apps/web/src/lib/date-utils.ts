@@ -59,6 +59,22 @@ export function formatTime(iso: string): string {
   return DateTime.fromISO(iso).toFormat('HH:mm');
 }
 
+/** Formats an ISO timestamp as a short relative time string (e.g. "5m ago" / "5分前"). */
+export function formatRelativeTime(iso: string, locale: Locale = 'ja'): string {
+  const dt = DateTime.fromISO(iso);
+  const diff = DateTime.now().diff(dt, ['days', 'hours', 'minutes']);
+  if (locale === 'en') {
+    if (diff.days >= 1) return `${Math.floor(diff.days)}d ago`;
+    if (diff.hours >= 1) return `${Math.floor(diff.hours)}h ago`;
+    if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}m ago`;
+    return 'just now';
+  }
+  if (diff.days >= 1) return `${Math.floor(diff.days)}日前`;
+  if (diff.hours >= 1) return `${Math.floor(diff.hours)}時間前`;
+  if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}分前`;
+  return 'たった今';
+}
+
 /**
  * Parse an ISO timestamp into the user's selected timezone.
  * Falls back to local time if `zone` is empty.

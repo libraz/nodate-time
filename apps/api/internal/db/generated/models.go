@@ -201,6 +201,24 @@ type AlbumPhoto struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type AuditLog struct {
+	ID         uint64 `json:"id"`
+	CalendarID uint32 `json:"calendarId"`
+	// event | memo
+	EntityType string `json:"entityType"`
+	// internal id of the target row (may no longer exist)
+	EntityID uint32 `json:"entityId"`
+	// public id of the target, stable across deletion
+	EntityPublicID []byte `json:"entityPublicId"`
+	// create | update | delete
+	Action string `json:"action"`
+	// user who performed the action
+	ActorID sql.NullInt32 `json:"actorId"`
+	// snapshot of the target title at action time
+	Summary   string    `json:"summary"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Calendar struct {
 	ID        uint32    `json:"id"`
 	PublicID  []byte    `json:"publicId"`
@@ -321,6 +339,7 @@ type Memo struct {
 	PublicID   []byte    `json:"publicId"`
 	CalendarID uint32    `json:"calendarId"`
 	Title      string    `json:"title"`
+	Body       string    `json:"body"`
 	Done       bool      `json:"done"`
 	SortOrder  int32     `json:"sortOrder"`
 	CreatedBy  uint32    `json:"createdBy"`

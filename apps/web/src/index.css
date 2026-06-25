@@ -33,10 +33,13 @@
   --text-default: 14px; /* default body / controls */
   --text-callout: 15px; /* emphasized body */
   --text-subhead: 16px; /* subheadings, CTAs */
+  /* Headline range — opened up for clearer hierarchy (~1.16 ratio). The
+     dense 10–16 range above is left untouched so calendar/controls don't
+     reflow; only the sparse, large display sizes grow. */
   --text-title: 18px; /* section / dialog titles */
-  --text-heading: 20px; /* view headings */
-  --text-display: 24px; /* large display figures */
-  --text-hero: 28px; /* hero / brand numerals */
+  --text-heading: 21px; /* view headings */
+  --text-display: 25px; /* large display figures */
+  --text-hero: 31px; /* hero / brand numerals */
 }
 
 /* ============================================
@@ -101,28 +104,28 @@
   --color-sunday: #ff3b30;
   --color-saturday: #007aff;
 
-  /* Background — vivid gradient mesh visible through glass */
+  /* Background — soft cohesive gradient mesh visible through glass */
   --app-bg: linear-gradient(
     160deg,
-    #c3dafe 0%,
-    #e0d4f7 25%,
-    #fce7f3 50%,
-    #dbeafe 75%,
-    #c7f9e6 100%
+    #d3e0fb 0%,
+    #e4dcf6 28%,
+    #f6e8f1 52%,
+    #dde9fb 76%,
+    #d4efe7 100%
   );
   --glass-blob-1: radial-gradient(
     ellipse 700px 500px at 10% 15%,
-    rgba(99, 102, 241, 0.18),
+    rgba(99, 102, 241, 0.15),
     transparent
   );
   --glass-blob-2: radial-gradient(
     ellipse 600px 500px at 85% 25%,
-    rgba(236, 72, 153, 0.12),
+    rgba(236, 72, 153, 0.1),
     transparent
   );
   --glass-blob-3: radial-gradient(
     ellipse 500px 400px at 50% 85%,
-    rgba(34, 197, 94, 0.1),
+    rgba(34, 197, 94, 0.08),
     transparent
   );
 
@@ -210,8 +213,8 @@
   --color-surface-app: #ffffff;
 
   --color-text-primary: #212121;
-  --color-text-secondary: #8f8f8f;
-  --color-text-tertiary: #b0b0b0;
+  --color-text-secondary: #6e6e6e;
+  --color-text-tertiary: #8c8c8c;
 
   --color-border: #ededed;
   --color-border-strong: #e0e0e0;
@@ -322,7 +325,7 @@
 
   --color-text-primary: #000000;
   --color-text-secondary: #555555;
-  --color-text-tertiary: #999999;
+  --color-text-tertiary: #858585;
   --color-text-on-accent: #ffffff;
 
   --color-border: #d8d8d8;
@@ -380,8 +383,8 @@
   --color-surface-app: #000000;
 
   --color-text-primary: #e8e8e8;
-  --color-text-secondary: #707070;
-  --color-text-tertiary: #404040;
+  --color-text-secondary: #7a7a7a;
+  --color-text-tertiary: #5e5e5e;
 
   --color-border: #1e1e1e;
   --color-border-strong: #2a2a2a;
@@ -419,6 +422,518 @@
   --glass-blob-3: none;
 
   color-scheme: dark;
+}
+
+/* ============================================
+   Modern Light — refined productivity app
+   Cool neutrals, iris accent, crisp solid
+   surfaces, layered micro-shadows
+   ============================================ */
+:root[data-theme="modern"] {
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f7f8fa;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #f1f3f6;
+  --color-surface-app: #f4f5f8;
+
+  --color-text-primary: #14161c;
+  --color-text-secondary: #5c6370;
+  --color-text-tertiary: #868d9b;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #e7e9ee;
+  --color-border-strong: #d3d7df;
+  --color-separator: #eceef2;
+
+  --color-accent: #5b57d8;
+  --color-accent-hover: #4b47c4;
+  --color-accent-bg: rgba(91, 87, 216, 0.08);
+  --color-accent-subtle: rgba(91, 87, 216, 0.14);
+
+  --color-danger: #e5484d;
+  --color-danger-bg: rgba(229, 72, 77, 0.08);
+  --color-success: #147a4a;
+
+  --color-hover: #f1f3f6;
+  --color-active: #e9ecf1;
+  --color-overlay: rgba(20, 22, 28, 0.3);
+
+  /* Modern: solid surfaces, no blur */
+  --surface-glass: #ffffff;
+  --surface-glass-heavy: #ffffff;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  /* Layered, soft micro-shadows */
+  --shadow-sm: 0 1px 2px rgba(20, 22, 28, 0.04);
+  --shadow-md: 0 2px 4px rgba(20, 22, 28, 0.04), 0 4px 12px rgba(20, 22, 28, 0.05);
+  --shadow-lg: 0 4px 8px rgba(20, 22, 28, 0.05), 0 12px 28px rgba(20, 22, 28, 0.08);
+  --shadow-elevated: 0 8px 16px rgba(20, 22, 28, 0.06), 0 24px 48px rgba(20, 22, 28, 0.12);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --color-sunday: #d23439;
+  --color-saturday: #4666d6;
+
+  /* Subtle cool top glow, otherwise clean */
+  --app-bg: radial-gradient(120% 80% at 50% -10%, #eef0ff 0%, #f4f5f8 55%);
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Modern Dark — deep slate, luminous iris
+   ============================================ */
+:root[data-theme="modern"][data-mode="dark"] {
+  --color-surface: #1a1c22;
+  --color-surface-secondary: #1f2128;
+  --color-surface-elevated: #23262e;
+  --color-surface-inset: #16181d;
+  --color-surface-app: #101116;
+
+  --color-text-primary: #f2f3f5;
+  --color-text-secondary: #9ba1ad;
+  --color-text-tertiary: #6b7280;
+
+  --color-border: #2a2d36;
+  --color-border-strong: #383c47;
+  --color-separator: #23262e;
+
+  --color-accent: #7c79ff;
+  --color-accent-hover: #908dff;
+  --color-accent-bg: rgba(124, 121, 255, 0.16);
+  --color-accent-subtle: rgba(124, 121, 255, 0.24);
+  /* The iris accent is light; dark text on accent fills clears AA (white fails) */
+  --color-text-on-accent: #14161c;
+
+  --color-danger: #ff6369;
+  --color-danger-bg: rgba(255, 99, 105, 0.16);
+  --color-success: #3dd68c;
+
+  --color-hover: #23262e;
+  --color-active: #2a2d36;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  --surface-glass: #1a1c22;
+  --surface-glass-heavy: #23262e;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.45), 0 12px 28px rgba(0, 0, 0, 0.55);
+  --shadow-elevated: 0 8px 16px rgba(0, 0, 0, 0.5), 0 24px 48px rgba(0, 0, 0, 0.6);
+
+  --color-sunday: #ff6369;
+  --color-saturday: #7e9bff;
+
+  --app-bg: radial-gradient(120% 80% at 50% -10%, #1a1b2e 0%, #101116 55%);
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Washi Light — 和: warm paper, sumi ink,
+   vermilion (朱) accent, Mincho typography
+   ============================================ */
+:root[data-theme="washi"] {
+  --color-surface: #fbf7ef;
+  --color-surface-secondary: #f4eee2;
+  --color-surface-elevated: #fffdf8;
+  --color-surface-inset: #efe8d9;
+  --color-surface-app: #f3ecdd;
+
+  --color-text-primary: #1c1a17;
+  --color-text-secondary: #6b6258;
+  --color-text-tertiary: #8f8675;
+  --color-text-on-accent: #fdf6ec;
+
+  --color-border: #e3d9c6;
+  --color-border-strong: #cdbfa6;
+  --color-separator: #e8ddc8;
+
+  /* 朱 — traditional vermilion */
+  --color-accent: #b8332c;
+  --color-accent-hover: #9c2820;
+  --color-accent-bg: rgba(184, 51, 44, 0.07);
+  --color-accent-subtle: rgba(184, 51, 44, 0.13);
+
+  --color-danger: #a82b22;
+  --color-danger-bg: rgba(168, 43, 34, 0.09);
+  --color-success: #1e7a52;
+
+  --color-hover: #f0e9da;
+  --color-active: #e9e0cd;
+  --color-overlay: rgba(40, 33, 23, 0.32);
+
+  /* Washi: solid paper surfaces, no blur */
+  --surface-glass: #fbf7ef;
+  --surface-glass-heavy: #fffdf8;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  /* Soft, warm-toned shadows */
+  --shadow-sm: 0 1px 2px rgba(60, 50, 35, 0.05);
+  --shadow-md: 0 2px 8px rgba(60, 50, 35, 0.07);
+  --shadow-lg: 0 6px 20px rgba(60, 50, 35, 0.09);
+  --shadow-elevated: 0 12px 32px rgba(60, 50, 35, 0.13);
+
+  /* Restrained, near-square radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Optical correction — Mincho reads finer/smaller than the sans themes, so
+     nudge the reading & headline sizes up a step. The dense 10–14 calendar
+     range is deliberately left on the base scale to avoid cell overflow. */
+  --text-callout: 16px;
+  --text-subhead: 17px;
+  --text-title: 19px;
+  --text-heading: 22px;
+  --text-display: 26px;
+  --text-hero: 32px;
+
+  --color-sunday: #c4302b;
+  --color-saturday: #2a4b8d;
+
+  --app-bg: #f3ecdd;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Washi Dark — 墨: sumi night, gofun off-white,
+   glowing vermilion
+   ============================================ */
+:root[data-theme="washi"][data-mode="dark"] {
+  --color-surface: #211f1c;
+  --color-surface-secondary: #1a1815;
+  --color-surface-elevated: #2a2723;
+  --color-surface-inset: #181613;
+  --color-surface-app: #141210;
+
+  --color-text-primary: #ece4d6;
+  --color-text-secondary: #a89e8c;
+  --color-text-tertiary: #7a7060;
+
+  --color-border: #38332b;
+  --color-border-strong: #4a4339;
+  --color-separator: #2a2620;
+
+  /* Deepened vermilion so off-white button labels clear AA while the accent
+     still reads against the sumi surface */
+  --color-accent: #c93f33;
+  --color-accent-hover: #e0584c;
+  --color-accent-bg: rgba(201, 63, 51, 0.15);
+  --color-accent-subtle: rgba(201, 63, 51, 0.22);
+
+  --color-danger: #e0584c;
+  --color-danger-bg: rgba(224, 88, 76, 0.15);
+  --color-success: #5cc08a;
+
+  --color-hover: #2a2723;
+  --color-active: #322e29;
+  --color-overlay: rgba(0, 0, 0, 0.62);
+
+  --surface-glass: #211f1c;
+  --surface-glass-heavy: #2a2723;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  --color-sunday: #e8645a;
+  --color-saturday: #7b9cd8;
+
+  --app-bg: #141210;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Modern — refined typography
+   ============================================ */
+:root[data-theme="modern"] {
+  --font-sans:
+    "Hanken Grotesk", "Noto Sans JP", -apple-system, "system-ui", "Helvetica Neue", Helvetica,
+    Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* Crisper, slightly tighter active segment to suit the flat surfaces */
+:root[data-theme="modern"] .segmented-control {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-separator);
+}
+
+:root[data-theme="modern"] .segmented-control button[data-active="true"] {
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Elevated surfaces: crisp hairline + faint top highlight for a crafted feel */
+:root[data-theme="modern"] .glass-surface,
+:root[data-theme="modern"] .glass-surface-heavy {
+  border: 1px solid var(--color-border);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="modern"][data-mode="dark"] .glass-surface,
+:root[data-theme="modern"][data-mode="dark"] .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Primary button: subtle vertical sheen + tinted accent shadow */
+:root[data-theme="modern"] .btn-primary {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 90%, white),
+    var(--color-accent)
+  );
+  box-shadow:
+    0 1px 2px rgba(20, 22, 28, 0.12),
+    0 6px 16px -6px color-mix(in srgb, var(--color-accent) 55%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Accent lift for today, the now indicator, and the FAB — cool, not glowy */
+:root[data-theme="modern"] .today-badge {
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+:root[data-theme="modern"] .now-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+:root[data-theme="modern"] .fab-button {
+  box-shadow:
+    var(--shadow-elevated),
+    0 8px 24px -8px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+/* --- Modern forms: crisp inset fields, hairline cards, neutral secondary --- */
+
+/* Text fields: solid surface with a faint inset, cool accent focus ring */
+:root[data-theme="modern"] .input-modern {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: inset 0 1px 2px rgba(20, 22, 28, 0.03);
+}
+:root[data-theme="modern"][data-mode="dark"] .input-modern {
+  background: var(--color-surface-inset);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+:root[data-theme="modern"] .input-modern:focus {
+  border-color: var(--color-accent);
+  box-shadow:
+    inset 0 1px 2px rgba(20, 22, 28, 0.03),
+    0 0 0 3px var(--color-accent-bg);
+}
+
+/* Grouped form sections read as subtly elevated cards */
+:root[data-theme="modern"] .card-section {
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Secondary actions go neutral; date/time pills get a hairline */
+:root[data-theme="modern"] .btn-secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+:root[data-theme="modern"] .pill-button {
+  border: 1px solid var(--color-border-strong);
+}
+
+/* Dark precedence — out-specify the generic [data-mode="dark"] form rules */
+:root[data-theme="modern"][data-mode="dark"] .btn-secondary {
+  background: var(--color-surface);
+}
+:root[data-theme="modern"][data-mode="dark"] .segmented-control {
+  background: var(--color-surface-inset);
+}
+:root[data-theme="modern"][data-mode="dark"] .segmented-control button[data-active="true"] {
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Toggle knob: tighter, crisper shadow */
+:root[data-theme="modern"] .toggle-knob {
+  box-shadow: 0 1px 2px rgba(20, 22, 28, 0.22);
+}
+
+/* ============================================
+   Washi — 明朝体 (Mincho) global overrides
+   ============================================ */
+
+/* All text → Mincho serif. Uses pre-installed system Mincho on Apple /
+   Windows; falls back to Noto Serif JP, then a generic serif. */
+:root[data-theme="washi"] {
+  --font-sans:
+    "Hiragino Mincho ProN", "Hiragino Mincho Pro", "YuMincho", "Yu Mincho", "Noto Serif JP",
+    "Songti SC", "Source Han Serif", serif;
+  letter-spacing: 0.01em;
+  text-rendering: optimizeLegibility;
+}
+
+/* Weight calibration — system Mincho ships only two real weights (≈W3 / W6).
+   Requesting 500/700 synthesises an ugly faux-bold, so collapse the utility
+   weights onto the two genuine ones: emphasis → 600 (W6), the rest → 400 (W3).
+   Hierarchy then comes from size, which is exactly the Mincho way. */
+:root[data-theme="washi"] :is(.font-medium, .font-semibold, .font-bold) {
+  font-weight: 600;
+}
+:root[data-theme="washi"] .font-light {
+  font-weight: 400;
+}
+
+/* Warm paper depth — a soft top light and a faint floor shade */
+:root[data-theme="washi"] .app-bg::before {
+  background:
+    radial-gradient(120% 90% at 50% -5%, rgba(255, 251, 240, 0.7), transparent 55%),
+    radial-gradient(110% 80% at 50% 105%, rgba(120, 90, 50, 0.06), transparent 55%);
+}
+:root[data-theme="washi"][data-mode="dark"] .app-bg::before {
+  background:
+    radial-gradient(120% 90% at 50% -5%, rgba(60, 52, 42, 0.5), transparent 55%),
+    radial-gradient(110% 80% at 50% 105%, rgba(0, 0, 0, 0.35), transparent 55%);
+}
+
+/* Manuscript-paper (原稿用紙) column rules + a whisper of paper grain */
+:root[data-theme="washi"] .app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(120, 90, 50, 0.045) 0,
+      rgba(120, 90, 50, 0.045) 1px,
+      transparent 1px,
+      transparent 120px
+    ),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:
+    auto,
+    160px 160px;
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="washi"][data-mode="dark"] .app-bg::after {
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(220, 200, 170, 0.035) 0,
+    rgba(220, 200, 170, 0.035) 1px,
+    transparent 1px,
+    transparent 120px
+  );
+  opacity: 1;
+  mix-blend-mode: screen;
+}
+
+/* Today: a soft sumi-warm shadow under the vermilion badge */
+:root[data-theme="washi"] .today-badge {
+  box-shadow: 0 2px 6px -1px rgba(120, 40, 30, 0.3);
+}
+
+/* Headings & primary actions: refined Mincho with generous tracking */
+:root[data-theme="washi"] .btn-primary,
+:root[data-theme="washi"] .btn-secondary {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* Inputs keep Mincho for a consistent editorial voice */
+:root[data-theme="washi"] .input-modern {
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+}
+:root[data-theme="washi"] .input-modern:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+/* Form sections read as sheets of washi — warm rule + faint top light */
+:root[data-theme="washi"] .card-section {
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 252, 244, 0.6),
+    var(--shadow-sm);
+}
+:root[data-theme="washi"][data-mode="dark"] .card-section {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 235, 0.04),
+    var(--shadow-sm);
+}
+
+/* Secondary actions sit on warm paper, not neutral grey */
+:root[data-theme="washi"] .btn-secondary {
+  background: var(--color-surface-inset);
+  color: var(--color-text-primary);
+}
+:root[data-theme="washi"][data-mode="dark"] .btn-secondary {
+  background: var(--color-surface-inset);
+}
+
+/* Date/time pills: vermilion-inked Mincho with a faint seal border */
+:root[data-theme="washi"] .pill-button {
+  font-family: var(--font-sans);
+  letter-spacing: 0.03em;
+  border: 1px solid var(--color-accent-subtle);
+}
+
+/* Toggle reads like a seal stone — gently squared track & knob */
+:root[data-theme="washi"] .toggle-track {
+  border-radius: 4px;
+}
+:root[data-theme="washi"] .toggle-knob {
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(60, 40, 25, 0.28);
+}
+
+/* Vermilion hairline atop sheets & dropdowns, like a tate-gaki rule */
+:root[data-theme="washi"] .bottom-sheet {
+  border-top: 1.5px solid var(--color-accent);
+}
+
+:root[data-theme="washi"] .dropdown-panel {
+  border: 1px solid var(--color-border-strong);
+  border-top: 1.5px solid var(--color-accent);
+}
+
+/* Thin seal-line scrollbar */
+:root[data-theme="washi"] ::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+:root[data-theme="washi"] ::-webkit-scrollbar-thumb {
+  background: var(--color-accent-subtle);
 }
 
 /* ============================================
@@ -634,6 +1149,81 @@ select {
   font-size: 16px;
 }
 
+/* Accent-tinted text selection — applies across themes via tokens */
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
+}
+
+/* Keyboard focus rings on interactive controls. :where() keeps specificity
+   at zero so component styles still win; only the outline is contributed. */
+:where(button, [role="button"], a[href], summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Checkbox shape follows the theme's corner language
+   ============================================ */
+
+/* The inline checkbox SVGs default to rx="3" (Glass/Classic). Each theme that
+   carries a distinct corner identity restyles the box via the CSS rx property:
+   Modern softens, Washi and Nothing square off to read as a carved stamp / chip. */
+:root[data-theme="modern"] .checkbox-box {
+  rx: 5px;
+}
+
+:root[data-theme="washi"] .checkbox-box {
+  rx: 1px;
+}
+
+:root[data-theme="nothing"] .checkbox-box {
+  rx: 0;
+}
+
+/* ============================================
+   Optical tracking — letter-spacing follows size
+   ============================================ */
+
+/* Sans themes: tighten large display text so headlines read as one shape
+   rather than spaced-out letters. Small/body text keeps the global -0.01em. */
+:root:not([data-theme="washi"]) :is(.text-display, .text-hero) {
+  letter-spacing: -0.022em;
+}
+:root:not([data-theme="washi"]) :is(.text-title, .text-heading) {
+  letter-spacing: -0.012em;
+}
+
+/* Washi (Mincho): fullwidth Japanese glyphs crowd under negative tracking, so
+   give headlines a touch of air and enable proportional kana/punctuation
+   kerning (palt) for a refined editorial rhythm. */
+:root[data-theme="washi"],
+:root[data-theme="washi"] body {
+  font-feature-settings: "palt" 1;
+}
+:root[data-theme="washi"] :is(.text-title, .text-heading, .text-display, .text-hero) {
+  letter-spacing: 0.02em;
+}
+
+/* ============================================
+   Multi-line leading — comfortable vertical rhythm
+   ============================================ */
+
+/* Scoped to inherently multi-line elements (editors and wrapped text) so
+   single-line rows, cells, and labels keep their tight leading. */
+textarea,
+.whitespace-pre-wrap,
+.whitespace-pre-line {
+  line-height: 1.55;
+}
+
+/* Washi (Mincho) reads best with more open leading */
+:root[data-theme="washi"] textarea,
+:root[data-theme="washi"] .whitespace-pre-wrap,
+:root[data-theme="washi"] .whitespace-pre-line {
+  line-height: 1.75;
+}
+
 .calendar-transition {
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -691,7 +1281,7 @@ select {
   border-radius: 10px;
   border: 1px solid var(--color-border-strong);
   padding: 0 16px;
-  font-size: 17px;
+  font-size: 16px;
   color: var(--color-text-primary);
   background: var(--color-surface-inset);
   outline: none;
@@ -727,7 +1317,7 @@ select {
   border-radius: 12px;
   background: var(--color-accent);
   color: var(--color-text-on-accent);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   transition:
     opacity 0.15s ease,
@@ -753,7 +1343,7 @@ select {
   border-radius: 12px;
   background: rgba(118, 118, 128, 0.12);
   color: var(--color-accent);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   transition:
     opacity 0.15s ease,
@@ -902,7 +1492,7 @@ select {
 }
 
 /* Glass: dropdown panels get subtle frost */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .dropdown-panel {
+:root:not([data-theme]) .dropdown-panel {
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
@@ -929,23 +1519,22 @@ select {
    ============================================ */
 
 /* Frosted material: a faint light edge catches the top of glass surfaces */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface {
+:root:not([data-theme]) .glass-surface {
   box-shadow:
     var(--shadow-lg),
     inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface-heavy {
+:root:not([data-theme]) .glass-surface-heavy {
   box-shadow:
     var(--shadow-elevated),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
-:root[data-mode="dark"]:not([data-theme="classic"]):not([data-theme="nothing"]) .glass-surface {
+:root[data-mode="dark"]:not([data-theme]) .glass-surface {
   box-shadow:
     var(--shadow-lg),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
-:root[data-mode="dark"]:not([data-theme="classic"]):not([data-theme="nothing"])
-  .glass-surface-heavy {
+:root[data-mode="dark"]:not([data-theme]) .glass-surface-heavy {
   box-shadow:
     var(--shadow-elevated),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -953,7 +1542,7 @@ select {
 
 /* Ambient gradient drift — slow, GPU-cheap, only when motion is welcome */
 @media (prefers-reduced-motion: no-preference) {
-  :root:not([data-theme="classic"]):not([data-theme="nothing"]) .app-bg::before {
+  :root:not([data-theme]) .app-bg::before {
     animation: glass-drift 26s ease-in-out infinite alternate;
     will-change: transform;
   }
@@ -968,12 +1557,12 @@ select {
 }
 
 /* Today badge — soft accent glow lifts it off the grid (glass only) */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .today-badge {
+:root:not([data-theme]) .today-badge {
   box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 /* Weekly timeline — glowing "now" indicator dot (glass only) */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .now-dot {
+:root:not([data-theme]) .now-dot {
   box-shadow: 0 0 8px 1px color-mix(in srgb, var(--color-accent) 60%, transparent);
 }
 
@@ -987,12 +1576,23 @@ select {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--color-accent);
 }
+/* Washi — a faint vermilion wash inside a hanko-like seal ring */
+:root[data-theme="washi"] .day-selected {
+  background: var(--color-accent-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
 
-/* Multi-day bars — glassy sheen lifts them off the frosted grid */
+/* Multi-day bars — glassy sheen on glass, clean flat fill elsewhere */
 .event-bar {
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+:root[data-theme] .event-bar {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+:root[data-theme="nothing"] .event-bar {
+  box-shadow: none;
 }
 
 /* Calendar entrance — gentle settle when the month changes */
@@ -1016,7 +1616,7 @@ select {
 .fab-button {
   box-shadow: var(--shadow-elevated);
 }
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .fab-button {
+:root:not([data-theme]) .fab-button {
   box-shadow:
     var(--shadow-elevated),
     0 8px 24px -6px color-mix(in srgb, var(--color-accent) 50%, transparent);
@@ -1030,7 +1630,7 @@ select {
 .modal-backdrop {
   animation: backdrop-in 0.24s ease both;
 }
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .modal-backdrop {
+:root:not([data-theme]) .modal-backdrop {
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
@@ -1098,6 +1698,83 @@ select {
 }
 
 /* ============================================
+   Per-theme motion character
+   Themes differ in *feel*, not only color: Modern is crisp and quick,
+   Washi is calm and ink-like, Nothing is mechanical and instant. Only the
+   timing of the existing entrances is retuned, all inside the reduced-motion
+   guard so users who opt out are unaffected.
+   ============================================ */
+@media (prefers-reduced-motion: no-preference) {
+  /* Modern — snappy & precise: shorter, with a quick decelerating ease */
+  :root[data-theme="modern"] .modal-panel {
+    animation-duration: 0.2s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .bottom-sheet {
+    animation-duration: 0.28s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .dropdown-panel {
+    animation-duration: 0.12s;
+  }
+  :root[data-theme="modern"] .side-panel {
+    animation-duration: 0.26s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .calendar-enter {
+    animation-duration: 0.24s;
+  }
+  :root[data-theme="modern"] .btn-primary:active,
+  :root[data-theme="modern"] .btn-secondary:active {
+    transform: scale(0.97);
+  }
+
+  /* Washi — calm, like ink settling on paper: slower, soft symmetric ease,
+     and a press that sinks by opacity rather than scale */
+  :root[data-theme="washi"] .modal-panel {
+    animation-duration: 0.44s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .bottom-sheet {
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .dropdown-panel {
+    animation-duration: 0.22s;
+    animation-timing-function: ease-out;
+  }
+  :root[data-theme="washi"] .side-panel {
+    animation-duration: 0.46s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .calendar-enter {
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .modal-backdrop {
+    animation-duration: 0.4s;
+  }
+  :root[data-theme="washi"] .btn-primary:active,
+  :root[data-theme="washi"] .btn-secondary:active {
+    transform: none;
+    opacity: 0.78;
+  }
+
+  /* Nothing — mechanical & instant: minimal, near-linear motion */
+  :root[data-theme="nothing"] .modal-panel {
+    animation-duration: 0.14s;
+    animation-timing-function: cubic-bezier(0.3, 0, 0, 1);
+  }
+  :root[data-theme="nothing"] .dropdown-panel {
+    animation-duration: 0.08s;
+    animation-timing-function: linear;
+  }
+  :root[data-theme="nothing"] .calendar-enter {
+    animation-duration: 0.18s;
+  }
+}
+
+/* ============================================
    Auth & year — branded staggered entrance
    ============================================ */
 @media (prefers-reduced-motion: no-preference) {
@@ -1126,7 +1803,7 @@ select {
 }
 
 /* Auth brand mark — accent glow on glass */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-brand-mark {
+:root:not([data-theme]) .auth-brand-mark {
   box-shadow: 0 10px 30px -6px color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
@@ -1135,8 +1812,8 @@ select {
    ============================================ */
 
 /* Full-viewport decorative layer behind the card. Orbs and grain only
-   render on glass themes; Classic (flat) and Nothing (dot-grid) keep their
-   own deliberately clean backdrops. */
+   render on the default glass theme; every other theme (selected via a
+   data-theme attribute) keeps its own deliberately clean backdrop. */
 .auth-atmosphere {
   position: fixed;
   inset: 0;
@@ -1150,7 +1827,7 @@ select {
   display: none;
 }
 
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-orb {
+:root:not([data-theme]) .auth-orb {
   display: block;
   position: absolute;
   border-radius: 50%;
@@ -1158,7 +1835,7 @@ select {
   opacity: 0.5;
 }
 
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-orb-1 {
+:root:not([data-theme]) .auth-orb-1 {
   width: 380px;
   height: 380px;
   left: -90px;
@@ -1171,7 +1848,7 @@ select {
   animation: auth-float-a 19s ease-in-out infinite alternate;
 }
 
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-orb-2 {
+:root:not([data-theme]) .auth-orb-2 {
   width: 320px;
   height: 320px;
   right: -90px;
@@ -1180,7 +1857,7 @@ select {
   animation: auth-float-b 23s ease-in-out infinite alternate;
 }
 
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-orb-3 {
+:root:not([data-theme]) .auth-orb-3 {
   width: 440px;
   height: 440px;
   left: 28%;
@@ -1190,7 +1867,7 @@ select {
 }
 
 /* Fine film grain for tactile, non-digital depth */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-grain {
+:root:not([data-theme]) .auth-grain {
   display: block;
   position: absolute;
   inset: -50%;
@@ -1234,7 +1911,7 @@ select {
 .auth-halo {
   display: none;
 }
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-halo {
+:root:not([data-theme]) .auth-halo {
   display: block;
   position: absolute;
   inset: -9px;
@@ -1248,7 +1925,7 @@ select {
   z-index: -1;
 }
 @media (prefers-reduced-motion: no-preference) {
-  :root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-halo {
+  :root:not([data-theme]) .auth-halo {
     animation: auth-halo-pulse 3.6s ease-in-out infinite;
   }
 }
@@ -1265,7 +1942,7 @@ select {
 }
 
 /* Brand wordmark — subtle gradient ink toward the accent (glass only) */
-:root:not([data-theme="classic"]):not([data-theme="nothing"]) .auth-title {
+:root:not([data-theme]) .auth-title {
   background: linear-gradient(
     118deg,
     var(--color-text-primary),

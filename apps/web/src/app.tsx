@@ -18,6 +18,7 @@ import { WeeklyTimeline } from '@/components/weekly-timeline';
 import { YearView } from '@/components/year-view';
 import { useT } from '@/i18n';
 import { fromISOInZone } from '@/lib/date-utils';
+import { THEME_OPTIONS } from '@/lib/theme';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -165,19 +166,15 @@ function MobileSettingsView() {
           {t('settings.theme')}
         </span>
         <div className="segmented-control w-full">
-          {(['glass', 'classic', 'nothing'] as const).map((v) => (
+          {THEME_OPTIONS.map((o) => (
             <button
-              key={v}
+              key={o.value}
               type="button"
-              data-active={theme === v}
-              onClick={() => setTheme(v)}
+              data-active={theme === o.value}
+              onClick={() => setTheme(o.value)}
               className="flex-1"
             >
-              {v === 'glass'
-                ? t('settings.themeGlass')
-                : v === 'classic'
-                  ? t('settings.themeClassic')
-                  : t('settings.themeNothing')}
+              {t(o.labelKey)}
             </button>
           ))}
         </div>

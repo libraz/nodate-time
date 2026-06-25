@@ -60,7 +60,12 @@ interface CalendarState {
   ) => Promise<void>;
   deleteEvent: (calendarId: string, eventId: string, scope?: 'this' | 'all') => Promise<void>;
 
-  addMemo: (calendarId: string, memo: { title: string }) => Promise<void>;
+  addMemo: (calendarId: string, memo: { title: string; body: string }) => Promise<void>;
+  updateMemo: (
+    calendarId: string,
+    memoId: string,
+    patch: { title: string; body: string; done: boolean },
+  ) => Promise<void>;
   toggleMemo: (calendarId: string, memoId: string, done: boolean, title: string) => Promise<void>;
   deleteMemo: (calendarId: string, memoId: string) => Promise<void>;
 
@@ -232,6 +237,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const existing = get().memos.filter((m) => m.calendarId === calendarId);
     const newMemo = await api.post<Memo>(`/calendars/${calendarId}/memos`, {
       title: memo.title,
+      body: memo.body,
       sortOrder: existing.length,
     });
     set((s) => ({
@@ -239,10 +245,24 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
+  async updateMemo(calendarId, memoId, patch) {
+    const memo = get().memos.find((m) => m.id === memoId);
+    const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
+      title: patch.title,
+      body: patch.body,
+      done: patch.done,
+      sortOrder: memo?.sortOrder ?? 0,
+    });
+    set((s) => ({
+      memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
+    }));
+  },
+
   async toggleMemo(calendarId, memoId, done, title) {
     const memo = get().memos.find((m) => m.id === memoId);
     const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
       title,
+      body: memo?.body ?? '',
       done,
       sortOrder: memo?.sortOrder ?? 0,
     });

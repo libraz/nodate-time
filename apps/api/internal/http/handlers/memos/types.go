@@ -5,6 +5,7 @@ import "time"
 type MemoResponse struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
+	Body      string    `json:"body"`
 	Done      bool      `json:"done"`
 	SortOrder int32     `json:"sortOrder"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -22,6 +23,7 @@ type CreateMemoInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
 		Title     string `json:"title" minLength:"1" maxLength:"500"`
+		Body      string `json:"body" maxLength:"20000" required:"false"`
 		SortOrder int32  `json:"sortOrder"`
 	}
 }
@@ -34,6 +36,7 @@ type UpdateMemoInput struct {
 	MemoID     string `path:"memoId"`
 	Body       struct {
 		Title     string `json:"title" minLength:"1" maxLength:"500"`
+		Body      string `json:"body" maxLength:"20000" required:"false"`
 		Done      bool   `json:"done"`
 		SortOrder int32  `json:"sortOrder"`
 	}
