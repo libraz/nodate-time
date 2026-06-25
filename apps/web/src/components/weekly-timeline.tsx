@@ -48,6 +48,11 @@ export function WeeklyTimeline() {
   // Live end-minute preview while resizing, so the block follows the cursor.
   const [resizePreview, setResizePreview] = useState<{ id: string; endMin: number } | null>(null);
   const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; startMin: number } | null>(null);
+  // A resize ends with a pointerup inside the block, which the browser turns into
+  // a click on the parent button. Suppress that click so it doesn't open the modal.
+  const suppressClick = useRef(false);
+  // Size of the block being dragged, so the move ghost mirrors it exactly.
+  const dragGeom = useRef<{ width: number; height: number }>({ width: 160, height: 40 });
 
   const canMove = useCallback(
     (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
@@ -92,12 +97,14 @@ export function WeeklyTimeline() {
       resizeRef.current = { evt, colTop, startMin };
 
       const ctrl = new AbortController();
+      let moved = false;
       const computeEnd = (clientY: number) => {
         const rawMin = ((clientY - colTop) / HOUR_HEIGHT) * 60;
         const snapped = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
         return Math.min(Math.max(snapped, startMin + MIN_DURATION_MIN), 24 * 60);
       };
       const onMove = (ev: globalThis.PointerEvent) => {
+        moved = true;
         setResizePreview({ id: evt.id, endMin: computeEnd(ev.clientY) });
       };
       const onUp = (ev: globalThis.PointerEvent) => {
@@ -105,7 +112,13 @@ export function WeeklyTimeline() {
         const r = resizeRef.current;
         resizeRef.current = null;
         setResizePreview(null);
-        if (!r) return;
+        // A plain tap on the handle (no drag) should fall through to the click,
+        // which opens the event modal. Only a real resize commits and is guarded.
+        if (!r || !moved) return;
+        suppressClick.current = true;
+        window.setTimeout(() => {
+          suppressClick.current = false;
+        }, 0);
         const endMin = computeEnd(ev.clientY);
         const dayStart = fromISOInZone(evt.startAt, timezone).startOf('day');
         requestUpdate(evt, buildResizedEvent(evt, dayStart.plus({ minutes: endMin })));
@@ -332,20 +345,26 @@ export function WeeklyTimeline() {
                       key={evt.id}
                       type="button"
                       onPointerDown={(e) => {
-                        if (movable) startDrag(evt, e, e.nativeEvent.offsetY);
+                        if (!movable) return;
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        dragGeom.current = { width: rect.width, height: rect.height };
+                        startDrag(evt, e, e.nativeEvent.offsetY);
                       }}
                       onClick={() => {
-                        if (consumeClick()) return;
+                        if (consumeClick() || suppressClick.current) {
+                          suppressClick.current = false;
+                          return;
+                        }
                         openEventModal(evt.id);
                       }}
-                      className={`absolute left-0.5 right-0.5 z-[5] overflow-hidden rounded-xl px-1.5 pt-1 text-left ${
+                      className={`absolute left-0.5 right-0.5 z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                       style={{
                         top,
                         height,
                         backgroundColor: `${evt.color}15`,
-                        borderLeft: `4px solid ${evt.color}`,
+                        border: `1px solid ${evt.color}40`,
                       }}
                     >
                       <p className="truncate text-body font-semibold text-[var(--color-text-primary)]">
@@ -370,17 +389,29 @@ export function WeeklyTimeline() {
         </div>
       </div>
 
-      {/* Drag ghost following the cursor */}
+      {/* Drag ghost: a lifted copy of the event block, same frame and contents. */}
       {drag && (
         <div
-          className="pointer-events-none fixed z-50 max-w-[180px] truncate rounded-lg px-2 py-0.5 text-caption font-semibold text-white shadow-lg"
+          className="pointer-events-none fixed z-50 overflow-hidden rounded-md px-1.5 pt-1 text-left opacity-90 shadow-lg"
           style={{
-            left: drag.x + 12,
-            top: drag.y + 12,
-            backgroundColor: drag.event.color,
+            left: drag.x - 8,
+            top: drag.y - 8,
+            width: dragGeom.current.width,
+            height: dragGeom.current.height,
+            // Surface base + color tint reproduces the on-grid block appearance,
+            // since the live block sits over the (surface-colored) day column.
+            backgroundColor: 'var(--color-surface)',
+            backgroundImage: `linear-gradient(${drag.event.color}15, ${drag.event.color}15)`,
+            border: `1px solid ${drag.event.color}40`,
           }}
         >
-          {drag.event.title}
+          <p className="truncate text-body font-semibold text-[var(--color-text-primary)]">
+            {drag.event.title}
+          </p>
+          <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
+            {fromISOInZone(drag.event.startAt, timezone).toFormat('H:mm')} -{' '}
+            {fromISOInZone(drag.event.endAt, timezone).toFormat('H:mm')}
+          </p>
         </div>
       )}
 

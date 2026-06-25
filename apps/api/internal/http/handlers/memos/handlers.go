@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -75,6 +76,7 @@ func mapMemo(m generated.Memo) MemoResponse {
 	return MemoResponse{
 		ID:        pubIDToHex(m.PublicID),
 		Title:     m.Title,
+		Body:      m.Body,
 		Done:      m.Done,
 		SortOrder: m.SortOrder,
 		CreatedAt: m.CreatedAt,
@@ -118,10 +120,11 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 		}
 
 		pubID, _ := uuid.NewV7()
-		_, err = deps.Queries.CreateMemo(ctx, generated.CreateMemoParams{
+		result, err := deps.Queries.CreateMemo(ctx, generated.CreateMemoParams{
 			PublicID:   pubID[:],
 			CalendarID: cal.ID,
 			Title:      in.Body.Title,
+			Body:       in.Body.Body,
 			SortOrder:  in.Body.SortOrder,
 			CreatedBy:  userID,
 		})
@@ -129,10 +132,14 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		memoID64, _ := result.LastInsertId()
+		audit.Record(ctx, deps.Queries, cal.ID, uint32(memoID64), pubID[:], audit.EntityMemo, audit.ActionCreate, userID, in.Body.Title)
+
 		out := &CreateMemoOutput{}
 		out.Body = MemoResponse{
 			ID:        pubID.String(),
 			Title:     in.Body.Title,
+			Body:      in.Body.Body,
 			SortOrder: in.Body.SortOrder,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
@@ -170,6 +177,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 
 		err = deps.Queries.UpdateMemo(ctx, generated.UpdateMemoParams{
 			Title:     in.Body.Title,
+			Body:      in.Body.Body,
 			Done:      in.Body.Done,
 			SortOrder: in.Body.SortOrder,
 			ID:        memo.ID,
@@ -185,6 +193,8 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+
+		audit.Record(ctx, deps.Queries, cal.ID, memo.ID, memo.PublicID, audit.EntityMemo, audit.ActionUpdate, userID, in.Body.Title)
 
 		return &UpdateMemoOutput{Body: mapMemo(updated)}, nil
 	}
@@ -221,6 +231,8 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+
+		audit.Record(ctx, deps.Queries, cal.ID, memo.ID, memo.PublicID, audit.EntityMemo, audit.ActionDelete, userID, memo.Title)
 
 		return &DeleteMemoOutput{}, nil
 	}

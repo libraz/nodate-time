@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { ActivityPanel } from '@/components/activity-panel';
 import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -16,6 +17,7 @@ export function LeftSidebar() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [memoExpanded, setMemoExpanded] = useState(true);
+  const [showActivity, setShowActivity] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const allActive = calendars.every((c) => activeCalendarIds.includes(c.id));
@@ -59,6 +61,7 @@ export function LeftSidebar() {
             {allActive ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <rect
+                  className="checkbox-box"
                   x="3"
                   y="3"
                   width="18"
@@ -70,7 +73,7 @@ export function LeftSidebar() {
                 />
                 <path
                   d="M8 12l3 3 5-5"
-                  stroke="white"
+                  stroke="var(--color-text-on-accent)"
                   strokeWidth="2.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -79,6 +82,7 @@ export function LeftSidebar() {
             ) : (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <rect
+                  className="checkbox-box"
                   x="3"
                   y="3"
                   width="18"
@@ -246,8 +250,28 @@ export function LeftSidebar() {
         </div>
       )}
 
-      {/* Settings button at bottom */}
+      {/* Activity + Settings buttons at bottom */}
       <div className="border-t border-[var(--color-border)] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setShowActivity(true)}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 8v4l3 3" />
+            <circle cx="12" cy="12" r="9" />
+          </svg>
+          <span className="text-body">{t('activity.title')}</span>
+        </button>
         <button
           type="button"
           onClick={() => navigate({ to: '/settings' })}
@@ -269,6 +293,8 @@ export function LeftSidebar() {
           <span className="text-body">{t('tabs.settings')}</span>
         </button>
       </div>
+
+      {showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
     </div>
   );
 }

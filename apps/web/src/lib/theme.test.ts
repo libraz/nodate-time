@@ -44,6 +44,10 @@ describe('applyTheme', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('classic');
     applyTheme('nothing');
     expect(document.documentElement.getAttribute('data-theme')).toBe('nothing');
+    applyTheme('modern');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('modern');
+    applyTheme('washi');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('washi');
   });
 });
 

@@ -11,6 +11,7 @@ import {
   ROLE_OPTIONS,
   roleLabelKey,
 } from '@/lib/permissions';
+import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -597,11 +598,7 @@ function AppearanceSection() {
             ariaLabel={t('settings.theme')}
             value={theme}
             onChange={setTheme}
-            options={[
-              { value: 'glass', label: t('settings.themeGlass') },
-              { value: 'classic', label: t('settings.themeClassic') },
-              { value: 'nothing', label: t('settings.themeNothing') },
-            ]}
+            options={THEME_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
           />
         </FieldRow>
         <FieldRow label={t('settings.colorMode')}>

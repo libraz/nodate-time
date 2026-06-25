@@ -107,6 +107,7 @@ export interface Memo {
   id: string;
   calendarId: string;
   title: string;
+  body: string;
   done: boolean;
   sortOrder: number;
   createdAt: string;

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -728,6 +729,10 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			UpdatedAt:          time.Now(),
 		}
 		setCreator(ctx, deps, &resp, userID, nil)
+
+		newID64, _ := result.LastInsertId()
+		audit.Record(ctx, deps.Queries, cal.ID, uint32(newID64), pubID[:], audit.EntityEvent, audit.ActionCreate, userID, in.Body.Title)
+
 		return &CreateEventOutput{Body: resp}, nil
 	}
 }
@@ -835,6 +840,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			resp := mapExceptionInstance(evt, child, cal.PublicID, originalStart)
 			resp.AssignedTo = assigneePublicID(ctx, deps, child.AssignedTo)
 			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
+
+			audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionUpdate, userID, in.Body.Title+" (occurrence)")
+
 			return &UpdateEventOutput{Body: resp}, nil
 		}
 
@@ -886,6 +894,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		resp.Participants = participants
 		resp.AssignedTo = assigneePublicID(ctx, deps, updated.AssignedTo)
 		setCreator(ctx, deps, &resp, updated.CreatedBy, nil)
+
+		audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionUpdate, userID, in.Body.Title)
+
 		return &UpdateEventOutput{Body: resp}, nil
 	}
 }
@@ -949,6 +960,9 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			}); err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
+
+			audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionDelete, userID, evt.Title+" (occurrence)")
+
 			return &DeleteEventOutput{}, nil
 		}
 
@@ -957,6 +971,9 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+
+		audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionDelete, userID, evt.Title)
+
 		return &DeleteEventOutput{}, nil
 	}
 }

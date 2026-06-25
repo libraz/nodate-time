@@ -11,6 +11,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/albums"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/calendars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/invites"
@@ -190,6 +191,7 @@ func Build(deps Deps) http.Handler {
 		memoDeps := memos.Deps{Queries: deps.Queries}
 		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
 		albumDeps := albums.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
+		auditDeps := audit.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 
 		// User
 		huma.Register(api, huma.Operation{
@@ -374,6 +376,31 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Delete an event",
 			Tags:        []string{"Event"},
 		}, events.DeleteEvent(evtDeps))
+
+		// Audit history / activity feed
+		huma.Register(api, huma.Operation{
+			OperationID: "get-event-history",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/events/{eventId}/history",
+			Summary:     "Get an event's audit history",
+			Tags:        []string{"Audit"},
+		}, audit.EventHistory(auditDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "get-memo-history",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/memos/{memoId}/history",
+			Summary:     "Get a memo's audit history",
+			Tags:        []string{"Audit"},
+		}, audit.MemoHistory(auditDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "get-calendar-activity",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/activity",
+			Summary:     "Get the calendar activity feed",
+			Tags:        []string{"Audit"},
+		}, audit.Activity(auditDeps))
 
 		// Comments (activities)
 		huma.Register(api, huma.Operation{

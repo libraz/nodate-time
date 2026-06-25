@@ -23,6 +23,16 @@ export function CalendarHeader() {
   const logout = useAuthStore((s) => s.logout);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const [showViewMenu, setShowViewMenu] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  const VIEWS = [
+    { value: 'month', label: t('calendar.monthly') },
+    { value: 'week', label: t('calendar.weekly') },
+    { value: 'list', label: t('calendar.list') },
+    { value: 'year', label: t('calendar.year') },
+  ] as const;
+  const currentViewLabel = VIEWS.find((v) => v.value === calendarView)?.label ?? '';
 
   const goToProfile = () => {
     setShowProfileMenu(false);
@@ -40,6 +50,18 @@ export function CalendarHeader() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showProfileMenu]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) {
+        setShowViewMenu(false);
+      }
+    };
+    if (showViewMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showViewMenu]);
 
   const handleGoToToday = () => {
     const today = DateTime.now();
@@ -76,6 +98,36 @@ export function CalendarHeader() {
       strokeLinejoin="round"
     >
       <path d="M9 18l6-6-6-6" />
+    </svg>
+  );
+
+  const ChevronDown = () => (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+
+  const CheckIcon = () => (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-accent)"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 6L9 17l-5-5" />
     </svg>
   );
 
@@ -234,11 +286,42 @@ export function CalendarHeader() {
     <div className="glass-surface-heavy sticky top-0 z-30">
       {/* Mobile header (< sm) */}
       <div className="flex h-[48px] items-center px-3 sm:hidden">
-        {/* Left: month label (follows infinite scroll position) */}
-        <div className="flex items-center">
+        {/* Left: month label (follows infinite scroll position) + view switcher */}
+        <div className="flex items-center gap-1">
           <span className="text-title font-bold tabular-nums text-[var(--color-text-primary)]">
             {formatMonthYear(currentMonth, locale)}
           </span>
+
+          <div className="relative" ref={viewMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowViewMenu((s) => !s)}
+              className="flex h-7 items-center gap-0.5 rounded-full px-2 text-footnote font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              aria-haspopup="menu"
+              aria-expanded={showViewMenu}
+            >
+              {currentViewLabel}
+              <ChevronDown />
+            </button>
+            {showViewMenu && (
+              <div className="glass-surface-heavy absolute left-0 top-full z-50 mt-1 w-40 rounded-2xl py-1.5 ring-1 ring-[var(--color-border)]">
+                {VIEWS.map((v) => (
+                  <button
+                    key={v.value}
+                    type="button"
+                    onClick={() => {
+                      setCalendarView(v.value);
+                      setShowViewMenu(false);
+                    }}
+                    className="flex w-full items-center justify-between px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                  >
+                    {v.label}
+                    {calendarView === v.value && <CheckIcon />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Center: spacer */}
