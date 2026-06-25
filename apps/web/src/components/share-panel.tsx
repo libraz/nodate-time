@@ -18,8 +18,6 @@ interface InviteData {
   createdAt: string;
 }
 
-/** A single-use join invite grants membership and is consumed after one signup. */
-const isInviteLink = (i: InviteData) => !i.isPublic && i.maxUses === 1;
 /** A public/embed link is a non-consuming, read-only viewer link. */
 const isPublicLink = (i: InviteData) => i.isPublic;
 
@@ -50,11 +48,11 @@ export function SharePanel() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
 
-  const inviteLink = invites.find(isInviteLink) ?? null;
+  // Several single-use invite links may coexist; the public link is at most one.
+  const joinInvites = invites.filter((i) => !i.isPublic);
   const publicLink = invites.find(isPublicLink) ?? null;
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  const inviteUrl = inviteLink ? `${origin}/share/${inviteLink.token}` : '';
   const publicUrl = publicLink ? `${origin}/embed/${publicLink.token}` : '';
   const embedSnippet = publicLink
     ? `<iframe src="${publicUrl}" width="100%" height="640" style="border:1px solid #e5e7eb;border-radius:12px" loading="lazy"></iframe>`
@@ -89,7 +87,7 @@ export function SharePanel() {
         role: DEFAULT_INVITE_ROLE,
         maxUses: 1,
       });
-      setInvites((cur) => [data, ...cur.filter((i) => !isInviteLink(i))]);
+      setInvites((cur) => [data, ...cur]);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -99,6 +97,8 @@ export function SharePanel() {
 
   const createPublic = useCallback(async () => {
     if (!calendarId) return;
+    // Guard against accidental external exposure.
+    if (!window.confirm(t('share.publicConfirm'))) return;
     setBusy('public');
     try {
       const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
@@ -111,7 +111,7 @@ export function SharePanel() {
     } finally {
       setBusy(null);
     }
-  }, [calendarId]);
+  }, [calendarId, t]);
 
   const revoke = useCallback(
     async (id: number) => {
@@ -202,7 +202,7 @@ export function SharePanel() {
                 )}
               </div>
 
-              {/* Invite link (single-use) */}
+              {/* Invite links (single-use) — multiple may coexist */}
               <section className="space-y-2">
                 <h3 className="text-footnote font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
                   {t('share.inviteSection')}
@@ -210,48 +210,57 @@ export function SharePanel() {
                 <p className="text-caption text-[var(--color-text-secondary)]">
                   {t('share.inviteSingleUseNote')}
                 </p>
-                {!inviteLink ? (
-                  <button
-                    type="button"
-                    onClick={createInvite}
-                    disabled={busy === 'invite'}
-                    className="btn-primary w-full text-body disabled:opacity-50"
-                  >
-                    {busy === 'invite' ? t('share.creating') : t('share.createInvite')}
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    <UrlRow
-                      value={inviteUrl}
-                      copied={copiedKey === 'invite'}
-                      onCopy={() => copy('invite', inviteUrl)}
-                      copyLabel={t('common.copy')}
-                      copiedLabel={t('common.copied')}
-                    />
-                    <div className="flex items-center justify-between">
-                      <span
-                        className="rounded-full px-2 py-0.5 text-caption font-medium"
-                        style={{
-                          backgroundColor: inviteLink.useCount
-                            ? 'var(--color-danger-bg)'
-                            : 'var(--color-accent-bg)',
-                          color: inviteLink.useCount
-                            ? 'var(--color-danger)'
-                            : 'var(--color-accent)',
-                        }}
-                      >
-                        {inviteLink.useCount ? t('share.inviteUsed') : t('share.inviteUnused')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => revoke(inviteLink.id)}
-                        className="text-footnote text-[var(--color-danger)] hover:underline"
-                      >
-                        {t('share.revokeLink')}
-                      </button>
-                    </div>
+                {joinInvites.length > 0 && (
+                  <div className="space-y-3">
+                    {joinInvites.map((inv) => {
+                      const url = `${origin}/share/${inv.token}`;
+                      const key = `invite-${inv.id}`;
+                      return (
+                        <div key={inv.id} className="space-y-2">
+                          <UrlRow
+                            value={url}
+                            copied={copiedKey === key}
+                            onCopy={() => copy(key, url)}
+                            copyLabel={t('common.copy')}
+                            copiedLabel={t('common.copied')}
+                          />
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="rounded-full px-2 py-0.5 text-caption font-medium"
+                              style={{
+                                backgroundColor: inv.useCount
+                                  ? 'var(--color-danger-bg)'
+                                  : 'var(--color-accent-bg)',
+                                color: inv.useCount ? 'var(--color-danger)' : 'var(--color-accent)',
+                              }}
+                            >
+                              {inv.useCount ? t('share.inviteUsed') : t('share.inviteUnused')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => revoke(inv.id)}
+                              className="text-footnote text-[var(--color-danger)] hover:underline"
+                            >
+                              {t('share.revokeLink')}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
+                <button
+                  type="button"
+                  onClick={createInvite}
+                  disabled={busy === 'invite'}
+                  className={`${joinInvites.length > 0 ? 'btn-secondary' : 'btn-primary'} w-full text-body disabled:opacity-50`}
+                >
+                  {busy === 'invite'
+                    ? t('share.creating')
+                    : joinInvites.length > 0
+                      ? t('share.createAnotherInvite')
+                      : t('share.createInvite')}
+                </button>
               </section>
 
               <div className="border-t border-[var(--color-border)] opacity-60" />
@@ -264,6 +273,33 @@ export function SharePanel() {
                 <p className="text-caption text-[var(--color-text-secondary)]">
                   {t('share.publicNote')}
                 </p>
+                {publicLink && (
+                  <div
+                    className="flex items-start gap-2 rounded-[var(--radius-md)] border px-3 py-2"
+                    style={{
+                      borderColor: 'var(--color-danger)',
+                      backgroundColor: 'var(--color-danger-bg)',
+                      color: 'var(--color-danger)',
+                    }}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="mt-0.5 shrink-0"
+                    >
+                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <span className="text-caption font-medium">
+                      {t('share.publicActiveWarning')}
+                    </span>
+                  </div>
+                )}
                 {!publicLink ? (
                   <button
                     type="button"

@@ -96,7 +96,9 @@ describe('logout', () => {
     localStorage.setItem('tt_activeCalendarIds', '["cal-1"]');
     localStorage.setItem('unrelated', 'keep');
     useCalendarStore.setState({
-      calendars: [{ id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '' }],
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+      ],
       events: [],
       memos: [],
       activeCalendarIds: ['cal-1'],

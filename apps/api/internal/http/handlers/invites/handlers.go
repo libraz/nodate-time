@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,10 +38,35 @@ func pubIDToHex(b []byte) string {
 	return u.String()
 }
 
+// tokenAlphabet is base62 (0-9, A-Z, a-z): URL-safe, fully alphanumeric, and
+// dense enough to keep share links short while avoiding padding or symbols.
+const tokenAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// tokenLength yields ~131 bits of entropy (22 * log2(62)), comfortably above
+// the 128-bit bar for an unguessable capability token.
+const tokenLength = 22
+
+// generateToken returns a random base62 invite token. crypto/rand drives the
+// choice, and rejecting byte values >= 248 (the largest multiple of 62 below
+// 256) removes the modulo bias a plain b%62 would introduce.
 func generateToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	out := make([]byte, tokenLength)
+	buf := make([]byte, tokenLength*2)
+	bi := len(buf)
+	for i := 0; i < tokenLength; {
+		if bi >= len(buf) {
+			rand.Read(buf)
+			bi = 0
+		}
+		b := buf[bi]
+		bi++
+		if b >= 248 {
+			continue
+		}
+		out[i] = tokenAlphabet[b%62]
+		i++
+	}
+	return string(out)
 }
 
 // resolveCalendarAdmin resolves a calendar by public ID and verifies admin role.

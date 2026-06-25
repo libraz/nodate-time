@@ -141,16 +141,22 @@ export const en: Record<TranslationKey, string> = {
   'share.poweredBy': 'Powered by Nodate Time',
   'share.targetCalendar': 'Target calendar',
   'share.inviteSection': 'Invite link',
-  'share.inviteSingleUseNote': 'This link stops working once one person joins (single-use)',
+  'share.inviteSingleUseNote':
+    'Each link stops working once one person joins (single-use). You can issue several',
   'share.createInvite': 'Create invite link',
+  'share.createAnotherInvite': 'Create another invite link',
   'share.inviteUsed': 'Used',
   'share.inviteUnused': 'Not used yet',
   'share.publicSection': 'Public & embed',
   'share.publicNote': 'Anyone with this link can view (no sign-up, read-only)',
   'share.createPublic': 'Create public link',
+  'share.publicActiveWarning': 'Publicly exposed: anyone with the link can view this calendar',
+  'share.publicConfirm':
+    'This will expose the calendar publicly. Anyone with the link can view its events. Continue?',
   'share.embedCode': 'Embed code (iframe)',
   'share.copyUrl': 'Copy URL',
   'share.copyEmbed': 'Copy embed code',
+  'calendar.publicShared': 'Publicly shared',
 
   'auth.login': 'Log in',
   'auth.register': 'Sign up',

@@ -4,6 +4,8 @@ export interface Calendar {
   color: string;
   coverUrl: string;
   createdAt: string;
+  /** True when an active public (read-only embed) link exposes this calendar externally. */
+  publicShared: boolean;
 }
 
 export interface Member {

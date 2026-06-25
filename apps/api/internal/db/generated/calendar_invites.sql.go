@@ -20,6 +20,20 @@ func (q *Queries) ConsumeInviteUse(ctx context.Context, id uint32) (sql.Result, 
 	return q.db.ExecContext(ctx, consumeInviteUse, id)
 }
 
+const countActivePublicInvites = `-- name: CountActivePublicInvites :one
+SELECT COUNT(*) FROM calendar_invites
+WHERE calendar_id = ?
+  AND is_public = TRUE
+  AND (expires_at IS NULL OR expires_at > NOW())
+`
+
+func (q *Queries) CountActivePublicInvites(ctx context.Context, calendarID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActivePublicInvites, calendarID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createInvite = `-- name: CreateInvite :execresult
 INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by, is_public)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -238,6 +252,38 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublicSharedCalendarIDs = `-- name: ListPublicSharedCalendarIDs :many
+SELECT DISTINCT ci.calendar_id
+FROM calendar_invites ci
+INNER JOIN calendar_members cm ON cm.calendar_id = ci.calendar_id
+WHERE cm.user_id = ?
+  AND ci.is_public = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
+`
+
+func (q *Queries) ListPublicSharedCalendarIDs(ctx context.Context, userID uint32) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listPublicSharedCalendarIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var calendar_id uint32
+		if err := rows.Scan(&calendar_id); err != nil {
+			return nil, err
+		}
+		items = append(items, calendar_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
