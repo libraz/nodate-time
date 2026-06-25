@@ -4,7 +4,8 @@
 !.env.example
 *.key
 *.pem
-secrets/
+# Root-level credential drop only; do not swallow the Go `internal/secrets` package.
+/secrets/
 
 # ---- Node / TypeScript ----
 node_modules/
