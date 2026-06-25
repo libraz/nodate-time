@@ -93,6 +93,10 @@ export interface CalendarEvent {
   recurrenceRule: RecurrenceRule | null;
   isRecurrence: boolean;
   recurrenceDate: string | null;
+  createdBy?: string;
+  creatorName?: string;
+  creatorIcon?: string;
+  creatorAvatarUrl?: string;
   createdAt: string;
   updatedAt: string;
 }

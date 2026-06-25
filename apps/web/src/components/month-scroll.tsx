@@ -1,5 +1,12 @@
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import {
   formatMonthYear,
   fromISOInZone,
@@ -7,13 +14,19 @@ import {
   isToday,
   jsDayOfWeek,
 } from '@/lib/date-utils';
+import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { useEventDrag } from '@/lib/use-event-drag';
+import { useScopedUpdate } from '@/lib/use-scoped-update';
 import {
+  eventEndDay,
   isMultiDay,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
   type PositionedEvent,
 } from '@/lib/week-layout';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -69,6 +82,13 @@ function buildItems(anchor: DateTime): { items: ScrollItem[]; todayKey: string }
   return { items, todayKey };
 }
 
+/** Landing range of the event currently being dragged. */
+interface DragLanding {
+  event: CalendarEvent;
+  start: DateTime;
+  end: DateTime;
+}
+
 interface WeekRowProps {
   weekStart: DateTime;
   events: CalendarEvent[];
@@ -77,6 +97,9 @@ interface WeekRowProps {
   selectedDate: DateTime;
   onDayClick: (date: DateTime) => void;
   onEventClick: (eventId: string) => void;
+  onEventPointerDown: (evt: CalendarEvent, e: ReactPointerEvent) => void;
+  canMoveEvent: (evt: CalendarEvent) => boolean;
+  dragLanding: DragLanding | null;
 }
 
 function WeekRow({
@@ -87,6 +110,9 @@ function WeekRow({
   selectedDate,
   onDayClick,
   onEventClick,
+  onEventPointerDown,
+  canMoveEvent,
+  dragLanding,
 }: WeekRowProps) {
   const week = useMemo(
     () => Array.from({ length: 7 }, (_, i) => weekStart.plus({ days: i })),
@@ -132,6 +158,20 @@ function WeekRow({
 
   const bodyHeight = MAX_VISIBLE_TRACKS * SLOT_H;
 
+  // Segment of the drag ghost that falls inside this week (grid-aligned, spans
+  // the event's real length and wraps across weeks).
+  const previewSeg = useMemo(() => {
+    if (!dragLanding) return null;
+    const weekEnd = weekStart.plus({ days: 6 });
+    if (dragLanding.end < weekStart || dragLanding.start > weekEnd) return null;
+    const segStart = dragLanding.start < weekStart ? weekStart : dragLanding.start;
+    const segEnd = dragLanding.end > weekEnd ? weekEnd : dragLanding.end;
+    return {
+      startCol: jsDayOfWeek(segStart),
+      span: Math.round(segEnd.diff(segStart, 'days').days) + 1,
+    };
+  }, [dragLanding, weekStart]);
+
   return (
     <div className="relative grid grid-cols-7" data-week={weekStart.toFormat('yyyy-MM-dd')}>
       {week.map((dt, dIdx) => {
@@ -158,15 +198,17 @@ function WeekRow({
         return (
           <div
             key={isoDate}
+            data-day={isoDate}
             className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1 pb-1 ${
               isSelected ? 'day-selected' : ''
             }`}
           >
-            {/* Background target: tapping empty space opens the day detail. */}
+            {/* Background target: tap opens the day detail, double-tap starts a
+                new event on this day. */}
             <button
               type="button"
               onClick={() => onDayClick(dt)}
-              className="absolute inset-0 z-0 transition-colors active:bg-[var(--color-active)]"
+              className="absolute inset-0 z-0 touch-manipulation transition-colors active:bg-[var(--color-active)]"
               aria-label={`${isoDate}${holiday ? ` (${holiday.name})` : ''}`}
             />
 
@@ -200,12 +242,16 @@ function WeekRow({
                       <button
                         key={evt.id}
                         type="button"
+                        onPointerDown={(e) => onEventPointerDown(evt, e)}
                         onClick={() => onEventClick(evt.id)}
-                        className="pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[4px] px-1 text-left text-micro font-semibold tabular-nums"
+                        className={`pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[4px] px-1 text-left text-micro font-semibold tabular-nums ${
+                          canMoveEvent(evt) ? 'active:cursor-grabbing' : ''
+                        }`}
                         style={{
                           height: SLOT_H,
                           backgroundColor: `${evt.color}1f`,
                           color: evt.color,
+                          opacity: dragLanding?.event.id === evt.id ? 0.4 : undefined,
                         }}
                       >
                         <span
@@ -256,8 +302,11 @@ function WeekRow({
             <button
               key={`${p.event.id}-${p.startCol}`}
               type="button"
+              onPointerDown={(e) => onEventPointerDown(p.event, e)}
               onClick={() => onEventClick(p.event.id)}
-              className="event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-micro font-semibold tabular-nums text-white"
+              className={`event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-micro font-semibold tabular-nums text-white ${
+                canMoveEvent(p.event) ? 'active:cursor-grabbing' : ''
+              }`}
               style={{
                 left,
                 width,
@@ -266,6 +315,7 @@ function WeekRow({
                 lineHeight: `${SLOT_H}px`,
                 backgroundColor: p.event.color,
                 borderRadius: radius,
+                opacity: dragLanding?.event.id === p.event.id ? 0.4 : undefined,
               }}
               title={p.event.title}
             >
@@ -289,6 +339,25 @@ function WeekRow({
           );
         })}
       </div>
+
+      {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
+      {previewSeg && dragLanding && (
+        <div
+          className="pointer-events-none absolute z-20 flex items-center truncate px-2 text-micro font-semibold text-white shadow-lg"
+          style={{
+            top: DATE_ROW_H,
+            left: `calc(${(previewSeg.startCol * 100) / 7}% + 2px)`,
+            width: `calc(${(previewSeg.span * 100) / 7}% - 4px)`,
+            height: SLOT_H,
+            lineHeight: `${SLOT_H}px`,
+            backgroundColor: dragLanding.event.color,
+            borderRadius: '5px',
+            opacity: 0.85,
+          }}
+        >
+          {dragLanding.event.title}
+        </div>
+      )}
     </div>
   );
 }
@@ -305,10 +374,18 @@ export function MonthScroll() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const membersMap = useCalendarStore((s) => s.membersMap);
+  const me = useAuthStore((s) => s.user);
+  const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const activeMonthRef = useRef('');
+  const lastTapRef = useRef({ key: '', time: 0 });
+  const tapTimerRef = useRef(0);
+
+  /** Window for treating a second tap on the same day as a double-tap (ms). */
+  const DOUBLE_TAP_MS = 260;
 
   // Build the week range once (anchored on mount); today never moves within a session.
   const { items, todayKey } = useMemo(() => buildItems(DateTime.now()), []);
@@ -318,12 +395,95 @@ export function MonthScroll() {
     [events, activeCalendarIds],
   );
 
+  // Single tap opens the day detail; a quick second tap on the same day starts a
+  // new event instead. The single-tap action is deferred briefly so a double-tap
+  // can cancel it.
   const handleDayClick = useCallback(
     (date: DateTime) => {
-      setSelectedDate(date);
-      openDayDetail(date);
+      const key = date.toFormat('yyyy-MM-dd');
+      const now = Date.now();
+      const prev = lastTapRef.current;
+      if (prev.key === key && now - prev.time < DOUBLE_TAP_MS) {
+        if (tapTimerRef.current) {
+          clearTimeout(tapTimerRef.current);
+          tapTimerRef.current = 0;
+        }
+        lastTapRef.current = { key: '', time: 0 };
+        setSelectedDate(date);
+        openEventModal();
+        return;
+      }
+      lastTapRef.current = { key, time: now };
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = window.setTimeout(() => {
+        tapTimerRef.current = 0;
+        setSelectedDate(date);
+        openDayDetail(date);
+      }, DOUBLE_TAP_MS);
     },
-    [setSelectedDate, openDayDetail],
+    [setSelectedDate, openDayDetail, openEventModal],
+  );
+
+  const canMove = useCallback(
+    (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
+    [membersMap, me],
+  );
+
+  // Multi-day bars live in an overlay outside the day cells, so the topmost
+  // element under the cursor may not be inside a [data-day] cell. Walk every
+  // element at the point and use the first one that resolves to a date cell.
+  const resolveDayKey = useCallback((x: number, y: number): string | null => {
+    for (const el of document.elementsFromPoint(x, y)) {
+      const day = el.closest('[data-day]')?.getAttribute('data-day');
+      if (day) return day;
+    }
+    return null;
+  }, []);
+
+  // Month drag preserves time of day: shift the start by the whole-day delta
+  // between the grabbed cell and the drop cell.
+  const handleMoveDrop = useCallback(
+    (evt: CalendarEvent, x: number, y: number, ctx: { originKey: string | null }) => {
+      const targetKey = resolveDayKey(x, y);
+      if (!targetKey || !ctx.originKey) return;
+      const target = DateTime.fromFormat(targetKey, 'yyyy-MM-dd', { zone: timezone });
+      const origin = DateTime.fromFormat(ctx.originKey, 'yyyy-MM-dd', { zone: timezone });
+      const deltaDays = Math.round(target.diff(origin, 'days').days);
+      if (deltaDays === 0) return;
+      const newStart = fromISOInZone(evt.startAt, timezone).plus({ days: deltaDays });
+      requestUpdate(evt, buildMovedEvent(evt, newStart));
+    },
+    [resolveDayKey, timezone, requestUpdate],
+  );
+
+  const {
+    drag,
+    start: startDrag,
+    consumeClick,
+  } = useEventDrag({ onDrop: handleMoveDrop, resolveKey: resolveDayKey });
+
+  // Where the dragged event would land after dropping. Drives both the span
+  // highlight and the grid-aligned ghost bar drawn per week.
+  const dragLanding = useMemo<DragLanding | null>(() => {
+    if (!drag?.hoverKey || !drag.originKey) return null;
+    const startDay = fromISOInZone(drag.event.startAt, timezone).startOf('day');
+    const endDay = eventEndDay(drag.event, timezone);
+    const hover = DateTime.fromFormat(drag.hoverKey, 'yyyy-MM-dd', { zone: timezone });
+    const origin = DateTime.fromFormat(drag.originKey, 'yyyy-MM-dd', { zone: timezone });
+    const delta = Math.round(hover.diff(origin, 'days').days);
+    const span = Math.max(1, Math.round(endDay.diff(startDay, 'days').days) + 1);
+    const start = startDay.plus({ days: delta });
+    const end = start.plus({ days: span - 1 });
+    return { event: drag.event, start, end };
+  }, [drag, timezone]);
+
+  // Centralize the drag-suppressed click so WeekRow stays presentational.
+  const handleEventClick = useCallback(
+    (eventId: string) => {
+      if (consumeClick()) return;
+      openEventModal(eventId);
+    },
+    [consumeClick, openEventModal],
   );
 
   const scrollToToday = useCallback(
@@ -387,6 +547,7 @@ export function MonthScroll() {
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
     };
   }, []);
 
@@ -425,11 +586,18 @@ export function MonthScroll() {
               holidaysCountry={holidaysCountry}
               selectedDate={selectedDate}
               onDayClick={handleDayClick}
-              onEventClick={openEventModal}
+              onEventClick={handleEventClick}
+              onEventPointerDown={(evt, e) => {
+                if (canMove(evt)) startDrag(evt, e);
+              }}
+              canMoveEvent={canMove}
+              dragLanding={dragLanding}
             />
           ),
         )}
       </div>
+
+      {scopeDialog}
     </div>
   );
 }

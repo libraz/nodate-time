@@ -272,6 +272,54 @@ func assigneePublicID(ctx context.Context, deps Deps, id sql.NullInt32) *string 
 	return &s
 }
 
+// creatorAvatarTTL is generous because event responses are cached client-side,
+// so the presigned avatar URL must outlive a typical browsing session.
+const creatorAvatarTTL = time.Hour
+
+// userBrief is the public identity of a user (creator/assignee) for responses.
+type userBrief struct {
+	publicID  string
+	name      string
+	icon      string
+	avatarURL string
+}
+
+// lookupUser resolves a user's public identity, memoizing in cache when provided
+// so a list request does not re-query the same creator repeatedly.
+func lookupUser(ctx context.Context, deps Deps, id uint32, cache map[uint32]userBrief) userBrief {
+	if cache != nil {
+		if b, ok := cache[id]; ok {
+			return b
+		}
+	}
+	var b userBrief
+	if u, err := deps.Queries.GetUserByID(ctx, id); err == nil {
+		b = userBrief{publicID: pubIDToHex(u.PublicID), name: u.Name, icon: u.Icon}
+		if deps.Storage != nil && u.AvatarStorageKey.Valid && u.AvatarStorageKey.String != "" {
+			if url, err := deps.Storage.PresignGet(ctx, u.AvatarStorageKey.String, creatorAvatarTTL); err == nil {
+				b.avatarURL = url
+			}
+		}
+	}
+	if cache != nil {
+		cache[id] = b
+	}
+	return b
+}
+
+// applyCreator copies an already-resolved brief onto resp.
+func applyCreator(resp *EventResponse, b userBrief) {
+	resp.CreatedBy = b.publicID
+	resp.CreatorName = b.name
+	resp.CreatorIcon = b.icon
+	resp.CreatorAvatarURL = b.avatarURL
+}
+
+// setCreator fills the creator identity fields on resp.
+func setCreator(ctx context.Context, deps Deps, resp *EventResponse, createdBy uint32, cache map[uint32]userBrief) {
+	applyCreator(resp, lookupUser(ctx, deps, createdBy, cache))
+}
+
 // isMember reports whether userID belongs to the calendar — used to keep event
 // participants scoped to calendar members.
 func isMember(ctx context.Context, deps Deps, calID, userID uint32) bool {
@@ -389,10 +437,12 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		creatorCache := map[uint32]userBrief{}
 		var results []EventResponse
 		for _, e := range rows {
 			ev := mapEvent(e, cal.PublicID)
 			ev.AssignedTo = assigneePublicID(ctx, deps, e.AssignedTo)
+			setCreator(ctx, deps, &ev, e.CreatedBy, creatorCache)
 			results = append(results, ev)
 		}
 
@@ -415,6 +465,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				continue
 			}
 			assignee := assigneePublicID(ctx, deps, e.AssignedTo)
+			creator := lookupUser(ctx, deps, e.CreatedBy, creatorCache)
 			exceptions := loadExceptions(ctx, deps, e.ID)
 			consumed := make(map[int64]bool, len(exceptions))
 			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, startTime, endTime, e.Timezone)
@@ -427,11 +478,13 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 					}
 					inst := mapExceptionInstance(e, ex.child, cal.PublicID, occ.StartAt)
 					inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
+					applyCreator(&inst, creator)
 					results = append(results, inst)
 					continue
 				}
 				inst := mapRecurringInstance(e, cal.PublicID, occ)
 				inst.AssignedTo = assignee
+				applyCreator(&inst, creator)
 				results = append(results, inst)
 			}
 			// Modified overrides whose original occurrence no longer exists (e.g.
@@ -446,6 +499,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				}
 				inst := mapExceptionInstance(e, ex.child, cal.PublicID, ex.child.RecurrenceOriginalStart.Time.UTC())
 				inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
+				applyCreator(&inst, creator)
 				results = append(results, inst)
 			}
 		}
@@ -525,11 +579,13 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				}
 				resp := mapExceptionInstance(evt, ex, cal.PublicID, matched.StartAt)
 				resp.AssignedTo = assigneePublicID(ctx, deps, ex.AssignedTo)
+				setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 				return &GetEventOutput{Body: resp}, nil
 			}
 
 			resp := mapRecurringInstance(evt, cal.PublicID, *matched)
 			resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
+			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 			return &GetEventOutput{Body: resp}, nil
 		}
 
@@ -547,6 +603,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 
 		resp := mapEvent(evt, cal.PublicID)
 		resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
+		setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 		participants, _ := deps.Queries.ListEventParticipants(ctx, evt.ID)
 		if len(participants) > 0 {
 			pids := make([]string, 0, len(participants))
@@ -670,6 +727,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			CreatedAt:          time.Now(),
 			UpdatedAt:          time.Now(),
 		}
+		setCreator(ctx, deps, &resp, userID, nil)
 		return &CreateEventOutput{Body: resp}, nil
 	}
 }
@@ -776,6 +834,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 			resp := mapExceptionInstance(evt, child, cal.PublicID, originalStart)
 			resp.AssignedTo = assigneePublicID(ctx, deps, child.AssignedTo)
+			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 			return &UpdateEventOutput{Body: resp}, nil
 		}
 
@@ -826,6 +885,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		resp := mapEvent(updated, cal.PublicID)
 		resp.Participants = participants
 		resp.AssignedTo = assigneePublicID(ctx, deps, updated.AssignedTo)
+		setCreator(ctx, deps, &resp, updated.CreatedBy, nil)
 		return &UpdateEventOutput{Body: resp}, nil
 	}
 }

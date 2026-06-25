@@ -1,12 +1,10 @@
 import { useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
 import { formatMonthYear } from '@/lib/date-utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { MEMBER_COLORS } from '@/types/calendar';
 
 export function CalendarHeader() {
   const t = useT();
@@ -23,125 +21,13 @@ export function CalendarHeader() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const updateProfile = useAuthStore((s) => s.updateProfile);
-  const uploadAvatar = useAuthStore((s) => s.uploadAvatar);
-  const removeAvatar = useAuthStore((s) => s.removeAvatar);
-  const [avatarBusy, setAvatarBusy] = useState(false);
-  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editIcon, setEditIcon] = useState('');
-  const [editColor, setEditColor] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordSuccess, setPasswordSuccess] = useState(false);
-  const [savingPassword, setSavingPassword] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
-  const ICON_OPTIONS = [
-    '\u{1F464}',
-    '\u{1F60A}',
-    '\u{1F60E}',
-    '\u{1F31F}',
-    '\u{1F680}',
-    '\u{1F3B5}',
-    '\u{1F4DA}',
-    '\u{2615}',
-    '\u{1F33F}',
-    '\u{1F525}',
-    '\u{1F496}',
-    '\u{1F308}',
-  ];
-
-  const startEditing = useCallback(() => {
-    if (user) {
-      setEditName(user.name);
-      setEditIcon(user.icon);
-      setEditColor(user.color);
-      setIsEditing(true);
-    }
-  }, [user]);
-
-  const handleAvatarFile = useCallback(
-    async (file: File) => {
-      setAvatarBusy(true);
-      try {
-        await uploadAvatar(file);
-      } catch {
-        // ignore
-      } finally {
-        setAvatarBusy(false);
-      }
-    },
-    [uploadAvatar],
-  );
-
-  const handleAvatarRemove = useCallback(async () => {
-    setAvatarBusy(true);
-    try {
-      await removeAvatar();
-    } catch {
-      // ignore
-    } finally {
-      setAvatarBusy(false);
-    }
-  }, [removeAvatar]);
-
-  const handleSaveProfile = useCallback(async () => {
-    if (!editName.trim()) return;
-    setSaving(true);
-    try {
-      await updateProfile({ name: editName.trim(), icon: editIcon, color: editColor });
-      setIsEditing(false);
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false);
-    }
-  }, [editName, editIcon, editColor, updateProfile]);
-
-  const startChangingPassword = useCallback(() => {
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setPasswordError('');
-    setPasswordSuccess(false);
-    setIsChangingPassword(true);
-  }, []);
-
-  const handleChangePassword = useCallback(async () => {
-    setPasswordError('');
-    if (newPassword.length < 8) {
-      setPasswordError(t('profile.passwordMinLength'));
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordError(t('profile.passwordMismatch'));
-      return;
-    }
-    setSavingPassword(true);
-    try {
-      await api.put('/user/password', { currentPassword, newPassword });
-      setPasswordSuccess(true);
-      setTimeout(() => {
-        setIsChangingPassword(false);
-        setPasswordSuccess(false);
-      }, 1500);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 400) {
-        setPasswordError(t('profile.wrongPassword'));
-      } else {
-        setPasswordError(t('profile.passwordChangeFailed'));
-      }
-    } finally {
-      setSavingPassword(false);
-    }
-  }, [currentPassword, newPassword, confirmPassword, t]);
+  const goToProfile = () => {
+    setShowProfileMenu(false);
+    navigate({ to: '/settings', search: { tab: 'profile' } });
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -251,34 +137,19 @@ export function CalendarHeader() {
 
   const profileDropdown = showProfileMenu && (
     <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-2xl py-2 ring-1 ring-[var(--color-border)]">
-      {user && !isEditing && (
+      {user && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => avatarInputRef.current?.click()}
-              disabled={avatarBusy}
-              className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-lg text-white disabled:opacity-50"
+            <div
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-lg text-white"
               style={{ backgroundColor: user.color }}
-              aria-label={t('profile.avatar')}
             >
               {user.avatarUrl ? (
                 <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
               ) : (
                 <span>{user.icon}</span>
               )}
-            </button>
-            <input
-              ref={avatarInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleAvatarFile(f);
-                if (e.target) e.target.value = '';
-              }}
-            />
+            </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-default font-bold text-[var(--color-text-primary)]">
                 {user.name}
@@ -286,259 +157,76 @@ export function CalendarHeader() {
               <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                 {user.email}
               </p>
-              {user.avatarUrl && (
-                <button
-                  type="button"
-                  onClick={handleAvatarRemove}
-                  disabled={avatarBusy}
-                  className="mt-0.5 text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
-                >
-                  {t('profile.removeAvatar')}
-                </button>
-              )}
             </div>
           </div>
         </div>
       )}
-      {isEditing ? (
-        <div className="border-b border-[var(--color-separator)] px-4 py-3">
-          <div className="mb-3">
-            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-              {t('profile.name')}
-            </span>
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className="input-modern w-full text-body"
-              aria-label={t('profile.name')}
-            />
-          </div>
-          <div className="mb-3">
-            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-              {t('profile.icon')}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {ICON_OPTIONS.map((icon) => (
-                <button
-                  key={icon}
-                  type="button"
-                  onClick={() => setEditIcon(icon)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-title transition-colors"
-                  style={{
-                    backgroundColor:
-                      editIcon === icon ? 'var(--color-accent-subtle)' : 'transparent',
-                    border:
-                      editIcon === icon
-                        ? '2px solid var(--color-accent)'
-                        : '1px solid var(--color-border)',
-                  }}
-                >
-                  {icon}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="mb-3">
-            <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-              {t('profile.color')}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {MEMBER_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setEditColor(color)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full transition-shadow"
-                  style={{
-                    backgroundColor: color,
-                    boxShadow:
-                      editColor === color
-                        ? '0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-accent)'
-                        : 'none',
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setIsEditing(false)}
-              className="btn-secondary h-9 flex-1 px-4 text-body"
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveProfile}
-              disabled={saving || !editName.trim()}
-              className="btn-primary h-9 flex-1 px-4 text-body disabled:opacity-50"
-            >
-              {saving ? t('profile.saving') : t('common.save')}
-            </button>
-          </div>
-        </div>
-      ) : isChangingPassword ? (
-        <div className="px-4 py-3">
-          {passwordSuccess ? (
-            <div
-              className="py-4 text-center text-body font-medium"
-              style={{ color: 'var(--color-accent)' }}
-            >
-              {t('profile.passwordChanged')}
-            </div>
-          ) : (
-            <>
-              <div className="mb-3">
-                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-                  {t('profile.currentPassword')}
-                </span>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="input-modern w-full text-body"
-                  aria-label={t('profile.currentPassword')}
-                />
-              </div>
-              <div className="mb-3">
-                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-                  {t('profile.newPassword')}
-                </span>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="input-modern w-full text-body"
-                  aria-label={t('profile.newPassword')}
-                />
-              </div>
-              <div className="mb-3">
-                <span className="mb-1 block text-footnote text-[var(--color-text-secondary)]">
-                  {t('profile.confirmPassword')}
-                </span>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="input-modern w-full text-body"
-                  aria-label={t('profile.confirmPassword')}
-                />
-              </div>
-              {passwordError && (
-                <p className="mb-3 text-footnote text-[var(--color-danger)]">{passwordError}</p>
-              )}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsChangingPassword(false)}
-                  className="btn-secondary h-9 flex-1 px-4 text-body"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleChangePassword}
-                  disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
-                  className="btn-primary h-9 flex-1 px-4 text-body disabled:opacity-50"
-                >
-                  {savingPassword ? t('profile.changing') : t('profile.changePassword')}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={startEditing}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-secondary)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-            </svg>
-            {t('profile.edit')}
-          </button>
-          <button
-            type="button"
-            onClick={startChangingPassword}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-secondary)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-            {t('profile.changePassword')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowProfileMenu(false);
-              navigate({ to: '/settings' });
-            }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-secondary)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            {t('tabs.settings')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowProfileMenu(false);
-              logout();
-            }}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-secondary)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            {t('auth.logout')}
-          </button>
-        </>
-      )}
+      <button
+        type="button"
+        onClick={goToProfile}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-secondary)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+        </svg>
+        {t('profile.edit')}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setShowProfileMenu(false);
+          navigate({ to: '/settings' });
+        }}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-secondary)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+        {t('tabs.settings')}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setShowProfileMenu(false);
+          logout();
+        }}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-secondary)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+        {t('auth.logout')}
+      </button>
     </div>
   );
 

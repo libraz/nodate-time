@@ -15,6 +15,8 @@ interface UiState {
   currentMonth: DateTime;
   showEventModal: boolean;
   editingEventId: string | null;
+  /** Preselected start for a new timed event (e.g. a clicked weekly slot). */
+  eventDraftStart: DateTime | null;
   showDayDetail: boolean;
   rightPanel: RightPanelId;
   leftSidebarExpanded: boolean;
@@ -33,7 +35,7 @@ interface UiState {
   setCalendarView: (view: CalendarView) => void;
   setSelectedDate: (date: DateTime) => void;
   setCurrentMonth: (date: DateTime) => void;
-  openEventModal: (eventId?: string) => void;
+  openEventModal: (eventId?: string, draftStart?: DateTime) => void;
   closeEventModal: () => void;
   openDayDetail: (date: DateTime) => void;
   closeDayDetail: () => void;
@@ -58,6 +60,7 @@ export const useUiStore = create<UiState>((set) => ({
   currentMonth: DateTime.now().startOf('month'),
   showEventModal: false,
   editingEventId: null,
+  eventDraftStart: null,
   showDayDetail: false,
   rightPanel: null,
   leftSidebarExpanded: false,
@@ -77,9 +80,15 @@ export const useUiStore = create<UiState>((set) => ({
   setSelectedDate: (date) => set({ selectedDate: date }),
   setCurrentMonth: (date) => set({ currentMonth: date }),
 
-  openEventModal: (eventId) => set({ showEventModal: true, editingEventId: eventId ?? null }),
+  openEventModal: (eventId, draftStart) =>
+    set({
+      showEventModal: true,
+      editingEventId: eventId ?? null,
+      eventDraftStart: draftStart ?? null,
+    }),
 
-  closeEventModal: () => set({ showEventModal: false, editingEventId: null }),
+  closeEventModal: () =>
+    set({ showEventModal: false, editingEventId: null, eventDraftStart: null }),
 
   openDayDetail: (date) => set({ selectedDate: date, showDayDetail: true }),
 

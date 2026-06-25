@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login';
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as ShareTokenRouteImport } from './routes/share/$token';
+import { Route as EmbedTokenRouteImport } from './routes/embed/$token';
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -52,6 +53,11 @@ const ShareTokenRoute = ShareTokenRouteImport.update({
   path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any);
+const EmbedTokenRoute = EmbedTokenRouteImport.update({
+  id: '/embed/$token',
+  path: '/embed/$token',
+  getParentRoute: () => rootRouteImport,
+} as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/embed/$token'
     | '/share/$token';
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/embed/$token'
     | '/share/$token';
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/embed/$token'
     | '/share/$token';
   fileRoutesById: FileRoutesById;
 }
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   OauthCompleteRoute: typeof OauthCompleteRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
   SettingsRoute: typeof SettingsRoute;
+  EmbedTokenRoute: typeof EmbedTokenRoute;
   ShareTokenRoute: typeof ShareTokenRoute;
 }
 
@@ -172,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShareTokenRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/embed/$token': {
+      id: '/embed/$token';
+      path: '/embed/$token';
+      fullPath: '/embed/$token';
+      preLoaderRoute: typeof EmbedTokenRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   OauthCompleteRoute: OauthCompleteRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  EmbedTokenRoute: EmbedTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
 };
 export const routeTree = rootRouteImport

@@ -1,5 +1,11 @@
 import { DateTime } from 'luxon';
-import { useMemo, useRef } from 'react';
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useT } from '@/i18n';
 import {
   fromISOInZone,
@@ -8,6 +14,11 @@ import {
   isToday,
   jsDayOfWeek,
 } from '@/lib/date-utils';
+import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { useEventDrag } from '@/lib/use-event-drag';
+import { useScopedUpdate } from '@/lib/use-scoped-update';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -21,9 +32,101 @@ export function WeeklyTimeline() {
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
+  const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const membersMap = useCalendarStore((s) => s.membersMap);
+  const me = useAuthStore((s) => s.user);
+  const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  /** Minutes a clicked slot snaps to. */
+  const SNAP_MINUTES = 30;
+  /** Shortest event a resize may produce. */
+  const MIN_DURATION_MIN = 30;
+
+  // Live end-minute preview while resizing, so the block follows the cursor.
+  const [resizePreview, setResizePreview] = useState<{ id: string; endMin: number } | null>(null);
+  const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; startMin: number } | null>(null);
+
+  const canMove = useCallback(
+    (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
+    [membersMap, me],
+  );
+
+  // Weekly drag changes both the day (column under cursor) and the time (cursor Y,
+  // minus the in-block grab offset, snapped); duration is preserved.
+  const handleMoveDrop = useCallback(
+    (evt: CalendarEvent, x: number, y: number, ctx: { meta: unknown }) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const col = el?.closest('[data-daycol]') as HTMLElement | null;
+      if (!col) return;
+      const dayStr = col.getAttribute('data-daycol');
+      if (!dayStr) return;
+      const grabOffsetY = typeof ctx.meta === 'number' ? ctx.meta : 0;
+      const offsetY = y - col.getBoundingClientRect().top - grabOffsetY;
+      const rawMinutes = (offsetY / HOUR_HEIGHT) * 60;
+      const snapped = Math.round(rawMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+      const clamped = Math.min(Math.max(snapped, 0), 23 * 60 + 30);
+      const newStart = DateTime.fromFormat(dayStr, 'yyyy-MM-dd', { zone: timezone })
+        .startOf('day')
+        .plus({ minutes: clamped });
+      requestUpdate(evt, buildMovedEvent(evt, newStart));
+    },
+    [timezone, requestUpdate],
+  );
+
+  const { drag, start: startDrag, consumeClick } = useEventDrag({ onDrop: handleMoveDrop });
+
+  // Resize: drag the bottom edge of a timed block to change its end time. The
+  // start and day stay fixed; the end snaps and keeps a minimum duration.
+  const startResize = useCallback(
+    (evt: CalendarEvent, blockTop: number, e: ReactPointerEvent) => {
+      e.stopPropagation();
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (!canMove(evt)) return;
+      const col = (e.currentTarget as HTMLElement).closest('[data-daycol]') as HTMLElement | null;
+      if (!col) return;
+      const colTop = col.getBoundingClientRect().top;
+      const startMin = Math.round((blockTop / HOUR_HEIGHT) * 60);
+      resizeRef.current = { evt, colTop, startMin };
+
+      const ctrl = new AbortController();
+      const computeEnd = (clientY: number) => {
+        const rawMin = ((clientY - colTop) / HOUR_HEIGHT) * 60;
+        const snapped = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
+        return Math.min(Math.max(snapped, startMin + MIN_DURATION_MIN), 24 * 60);
+      };
+      const onMove = (ev: globalThis.PointerEvent) => {
+        setResizePreview({ id: evt.id, endMin: computeEnd(ev.clientY) });
+      };
+      const onUp = (ev: globalThis.PointerEvent) => {
+        ctrl.abort();
+        const r = resizeRef.current;
+        resizeRef.current = null;
+        setResizePreview(null);
+        if (!r) return;
+        const endMin = computeEnd(ev.clientY);
+        const dayStart = fromISOInZone(evt.startAt, timezone).startOf('day');
+        requestUpdate(evt, buildResizedEvent(evt, dayStart.plus({ minutes: endMin })));
+      };
+      window.addEventListener('pointermove', onMove, { signal: ctrl.signal });
+      window.addEventListener('pointerup', onUp, { signal: ctrl.signal });
+      window.addEventListener('pointercancel', onUp, { signal: ctrl.signal });
+    },
+    [canMove, timezone, requestUpdate],
+  );
+
+  /** Open the new-event modal at the clicked time within a day column. */
+  const handleSlotClick = (day: DateTime, e: React.MouseEvent<HTMLButtonElement>) => {
+    const y = e.nativeEvent.offsetY;
+    const rawMinutes = (y / HOUR_HEIGHT) * 60;
+    const snapped = Math.round(rawMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+    const clamped = Math.min(Math.max(snapped, 0), 23 * 60 + 30);
+    const start = day.startOf('day').plus({ minutes: clamped });
+    setSelectedDate(start);
+    openEventModal(undefined, start);
+  };
 
   // Anchor week days to the user's timezone so cell boundaries match event bucketing.
   const days = useMemo(
@@ -164,19 +267,35 @@ export function WeeklyTimeline() {
             const today = isToday(day);
 
             return (
-              <div key={key} className="relative flex-1 border-l border-[var(--color-separator)]">
+              <div
+                key={key}
+                data-daycol={key}
+                className="relative flex-1 border-l border-[var(--color-separator)]"
+              >
+                {/* Background target: click an empty slot to create an event at
+                    that time. Sits below event blocks and the time indicator. */}
+                <button
+                  type="button"
+                  onClick={(e) => handleSlotClick(day, e)}
+                  className="absolute inset-0 z-0 touch-manipulation"
+                  aria-label={`${key} ${t('event.createEvent')}`}
+                />
+
                 {/* Hour grid lines */}
                 {HOURS.map((h) => (
                   <div
                     key={h}
-                    className="absolute left-0 right-0 border-t border-[var(--color-separator)]"
+                    className="pointer-events-none absolute left-0 right-0 border-t border-[var(--color-separator)]"
                     style={{ top: h * HOUR_HEIGHT }}
                   />
                 ))}
 
                 {/* Current time indicator */}
                 {today && (
-                  <div className="absolute left-0 right-0 z-10" style={{ top: currentTimeY }}>
+                  <div
+                    className="pointer-events-none absolute left-0 right-0 z-10"
+                    style={{ top: currentTimeY }}
+                  >
                     <div className="flex items-start">
                       <div className="now-dot -ml-1 -mt-[3px] h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
                       <div className="h-[2px] w-full bg-[var(--color-accent)]" />
@@ -194,16 +313,34 @@ export function WeeklyTimeline() {
                     DateTime.fromMillis(Math.min(evtEndMs, dayStartMs + 86400000)).toISO() ??
                     evt.endAt;
                   const top = timeToY(clampedStart, dayStartMs);
-                  const height = Math.max(timeToY(clampedEnd, dayStartMs) - top, 20);
+                  const baseHeight = Math.max(timeToY(clampedEnd, dayStartMs) - top, 20);
                   const startDt = fromISOInZone(evt.startAt, timezone);
                   const endDt = fromISOInZone(evt.endAt, timezone);
+                  const resizing = resizePreview?.id === evt.id;
+                  const height = resizing
+                    ? Math.max((resizePreview.endMin * HOUR_HEIGHT) / 60 - top, 20)
+                    : baseHeight;
+                  const endLabel = resizing
+                    ? DateTime.fromMillis(dayStartMs, { zone: timezone })
+                        .plus({ minutes: resizePreview.endMin })
+                        .toFormat('H:mm')
+                    : endDt.toFormat('H:mm');
+                  const movable = canMove(evt);
 
                   return (
                     <button
                       key={evt.id}
                       type="button"
-                      onClick={() => openEventModal(evt.id)}
-                      className="absolute left-0.5 right-0.5 z-[5] overflow-hidden rounded-xl px-1.5 pt-1 text-left"
+                      onPointerDown={(e) => {
+                        if (movable) startDrag(evt, e, e.nativeEvent.offsetY);
+                      }}
+                      onClick={() => {
+                        if (consumeClick()) return;
+                        openEventModal(evt.id);
+                      }}
+                      className={`absolute left-0.5 right-0.5 z-[5] overflow-hidden rounded-xl px-1.5 pt-1 text-left ${
+                        movable ? 'cursor-grab active:cursor-grabbing' : ''
+                      }`}
                       style={{
                         top,
                         height,
@@ -215,8 +352,15 @@ export function WeeklyTimeline() {
                         {evt.title}
                       </p>
                       <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
-                        {startDt.toFormat('H:mm')} - {endDt.toFormat('H:mm')}
+                        {startDt.toFormat('H:mm')} - {endLabel}
                       </p>
+                      {movable && (
+                        <div
+                          aria-hidden
+                          onPointerDown={(e) => startResize(evt, top, e)}
+                          className="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize touch-none"
+                        />
+                      )}
                     </button>
                   );
                 })}
@@ -225,6 +369,22 @@ export function WeeklyTimeline() {
           })}
         </div>
       </div>
+
+      {/* Drag ghost following the cursor */}
+      {drag && (
+        <div
+          className="pointer-events-none fixed z-50 max-w-[180px] truncate rounded-lg px-2 py-0.5 text-caption font-semibold text-white shadow-lg"
+          style={{
+            left: drag.x + 12,
+            top: drag.y + 12,
+            backgroundColor: drag.event.color,
+          }}
+        >
+          {drag.event.title}
+        </div>
+      )}
+
+      {scopeDialog}
     </div>
   );
 }

@@ -33,6 +33,10 @@ type EventResponse struct {
 	RecurrenceRule     *RecurrenceRuleResponse `json:"recurrenceRule"`
 	IsRecurrence       bool                    `json:"isRecurrence"`
 	RecurrenceDate     *string                 `json:"recurrenceDate,omitempty"`
+	CreatedBy          string                  `json:"createdBy" doc:"public user ID of the creator"`
+	CreatorName        string                  `json:"creatorName"`
+	CreatorIcon        string                  `json:"creatorIcon"`
+	CreatorAvatarURL   string                  `json:"creatorAvatarUrl,omitempty"`
 	CreatedAt          time.Time               `json:"createdAt"`
 	UpdatedAt          time.Time               `json:"updatedAt"`
 }

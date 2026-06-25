@@ -1,4 +1,4 @@
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { useCallback, useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
 import {
@@ -9,8 +9,13 @@ import {
   isToday,
   jsDayOfWeek,
 } from '@/lib/date-utils';
+import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
-import { isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from '@/lib/week-layout';
+import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { useEventDrag } from '@/lib/use-event-drag';
+import { useScopedUpdate } from '@/lib/use-scoped-update';
+import { eventEndDay, isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from '@/lib/week-layout';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -23,15 +28,73 @@ export function CalendarGrid() {
   const calendarView = useUiStore((s) => s.calendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const timezone = useUiStore((s) => s.timezone);
-  const openDayDetail = useUiStore((s) => s.openDayDetail);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const navigateMonth = useUiStore((s) => s.navigateMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const membersMap = useCalendarStore((s) => s.membersMap);
+  const me = useAuthStore((s) => s.user);
+  const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const touchStartRef = useRef({ x: 0, y: 0 });
+
+  const canMove = useCallback(
+    (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
+    [membersMap, me],
+  );
+
+  // Multi-day bars live in an overlay outside the day cells, so the topmost
+  // element under the cursor may not be inside a [data-day] cell. Walk every
+  // element at the point and use the first one that resolves to a date cell.
+  const resolveDayKey = useCallback((x: number, y: number): string | null => {
+    for (const el of document.elementsFromPoint(x, y)) {
+      const day = el.closest('[data-day]')?.getAttribute('data-day');
+      if (day) return day;
+    }
+    return null;
+  }, []);
+
+  // Month drag preserves time of day: shift start by the whole-day delta between
+  // the grabbed cell and the drop cell.
+  const handleMoveDrop = useCallback(
+    (evt: CalendarEvent, x: number, y: number, ctx: { originKey: string | null }) => {
+      const targetKey = resolveDayKey(x, y);
+      if (!targetKey || !ctx.originKey) return;
+      const target = DateTime.fromFormat(targetKey, 'yyyy-MM-dd', { zone: timezone });
+      const origin = DateTime.fromFormat(ctx.originKey, 'yyyy-MM-dd', { zone: timezone });
+      const deltaDays = Math.round(target.diff(origin, 'days').days);
+      if (deltaDays === 0) return;
+      const newStart = fromISOInZone(evt.startAt, timezone).plus({ days: deltaDays });
+      requestUpdate(evt, buildMovedEvent(evt, newStart));
+    },
+    [resolveDayKey, timezone, requestUpdate],
+  );
+
+  const {
+    drag,
+    start: startDrag,
+    consumeClick,
+  } = useEventDrag({
+    onDrop: handleMoveDrop,
+    resolveKey: resolveDayKey,
+  });
+
+  // Where the dragged event would land after dropping. Used both to highlight
+  // the full span of destination cells and to draw a real-width ghost bar.
+  const dragLanding = useMemo(() => {
+    if (!drag?.hoverKey || !drag.originKey) return null;
+    const startDay = fromISOInZone(drag.event.startAt, timezone).startOf('day');
+    const endDay = eventEndDay(drag.event, timezone);
+    const hover = DateTime.fromFormat(drag.hoverKey, 'yyyy-MM-dd', { zone: timezone });
+    const origin = DateTime.fromFormat(drag.originKey, 'yyyy-MM-dd', { zone: timezone });
+    const delta = Math.round(hover.diff(origin, 'days').days);
+    const span = Math.max(1, Math.round(endDay.diff(startDay, 'days').days) + 1);
+    const start = startDay.plus({ days: delta });
+    const end = start.plus({ days: span - 1 });
+    return { event: drag.event, start, end };
+  }, [drag, timezone]);
 
   const days = useMemo(() => {
     if (calendarView === 'week') {
@@ -148,6 +211,27 @@ export function CalendarGrid() {
             return reserved;
           });
 
+          // Segment of the drag ghost that falls inside this week (the ghost
+          // is grid-aligned and spans the event's real length, wrapping weeks).
+          let previewSeg: { startCol: number; span: number } | null = null;
+          if (dragLanding) {
+            const weekStart = week[0]?.startOf('day');
+            const weekEnd = week[6]?.startOf('day');
+            if (
+              weekStart &&
+              weekEnd &&
+              dragLanding.end >= weekStart &&
+              dragLanding.start <= weekEnd
+            ) {
+              const segStart = dragLanding.start < weekStart ? weekStart : dragLanding.start;
+              const segEnd = dragLanding.end > weekEnd ? weekEnd : dragLanding.end;
+              previewSeg = {
+                startCol: jsDayOfWeek(segStart),
+                span: Math.round(segEnd.diff(segStart, 'days').days) + 1,
+              };
+            }
+          }
+
           return (
             <div key={weekKey} className="relative grid grid-cols-7">
               {week.map((dt, dIdx) => {
@@ -176,17 +260,20 @@ export function CalendarGrid() {
                 return (
                   <div
                     key={isoDate}
+                    data-day={isoDate}
                     className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1.5 pb-1 ${
                       isSelected ? 'day-selected' : ''
                     }`}
                     style={!inMonth ? { opacity: 0.4 } : undefined}
                   >
-                    {/* Background target: tapping empty space selects the day. */}
+                    {/* Background target: click selects the day, double-click
+                        starts a new event on it. */}
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={() => setSelectedDate(dt)}
+                      onDoubleClick={() => {
                         setSelectedDate(dt);
-                        openDayDetail(dt);
+                        openEventModal();
                       }}
                       className="absolute inset-0 z-0 transition-colors hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)] focus-visible:outline-none"
                       aria-label={`${dt.toFormat('yyyy-MM-dd')}${holiday ? ` (${holiday.name})` : ''}`}
@@ -235,11 +322,22 @@ export function CalendarGrid() {
                               <button
                                 key={evt.id}
                                 type="button"
-                                onClick={() => openEventModal(evt.id)}
-                                className="pointer-events-auto mx-0.5 flex cursor-pointer items-center gap-1 rounded-[5px] px-1.5 text-left text-caption font-semibold leading-[20px] tabular-nums hover:brightness-95 max-sm:gap-0.5 max-sm:text-micro max-sm:leading-[15px]"
+                                onPointerDown={(e) => {
+                                  if (canMove(evt)) startDrag(evt, e);
+                                }}
+                                onClick={() => {
+                                  if (consumeClick()) return;
+                                  openEventModal(evt.id);
+                                }}
+                                className={`pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[5px] px-1.5 text-left text-caption font-semibold leading-[20px] tabular-nums hover:brightness-95 max-sm:gap-0.5 max-sm:text-micro max-sm:leading-[15px] ${
+                                  canMove(evt)
+                                    ? 'cursor-grab active:cursor-grabbing'
+                                    : 'cursor-pointer'
+                                }`}
                                 style={{
                                   backgroundColor: `${evt.color}1f`,
                                   color: evt.color,
+                                  opacity: drag?.event.id === evt.id ? 0.4 : undefined,
                                 }}
                               >
                                 <span
@@ -292,14 +390,23 @@ export function CalendarGrid() {
                     <button
                       key={`${p.event.id}-${p.startCol}`}
                       type="button"
-                      onClick={() => openEventModal(p.event.id)}
-                      className="event-bar pointer-events-auto absolute flex cursor-pointer items-center gap-1 truncate px-2 text-caption font-semibold leading-[20px] tabular-nums text-white hover:brightness-95 max-sm:text-micro max-sm:leading-[15px]"
+                      onPointerDown={(e) => {
+                        if (canMove(p.event)) startDrag(p.event, e);
+                      }}
+                      onClick={() => {
+                        if (consumeClick()) return;
+                        openEventModal(p.event.id);
+                      }}
+                      className={`event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-caption font-semibold leading-[20px] tabular-nums text-white hover:brightness-95 max-sm:text-micro max-sm:leading-[15px] ${
+                        canMove(p.event) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                      }`}
                       style={{
                         left,
                         width,
                         top,
                         backgroundColor: p.event.color,
                         borderRadius: radius,
+                        opacity: drag?.event.id === p.event.id ? 0.4 : undefined,
                       }}
                       title={p.event.title}
                     >
@@ -323,10 +430,28 @@ export function CalendarGrid() {
                   );
                 })}
               </div>
+
+              {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
+              {previewSeg && dragLanding && (
+                <div
+                  className="pointer-events-none absolute top-[34px] z-20 flex h-[20px] items-center truncate px-2 text-caption font-semibold text-white shadow-lg max-sm:top-[28px] max-sm:h-[15px] max-sm:text-micro"
+                  style={{
+                    left: `calc(${(previewSeg.startCol * 100) / 7}% + 2px)`,
+                    width: `calc(${(previewSeg.span * 100) / 7}% - 4px)`,
+                    backgroundColor: dragLanding.event.color,
+                    borderRadius: '5px',
+                    opacity: 0.85,
+                  }}
+                >
+                  {dragLanding.event.title}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+
+      {scopeDialog}
     </div>
   );
 }

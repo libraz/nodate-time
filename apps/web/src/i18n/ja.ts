@@ -125,6 +125,9 @@ export const ja = {
   'panel.enterToPost': 'Enterで投稿',
   'panel.updated': '更新しました',
   'panel.memoPlaceholder': 'メモを入力...',
+  'panel.memoShared': '共有メモ',
+  'panel.memoSharedHint': '{name} のメンバー全員に表示されます',
+  'panel.postTo': '投稿先',
 
   // Share
   'share.createLink': '共有リンクを作成',
@@ -141,6 +144,18 @@ export const ja = {
   'share.joinFailed': '参加に失敗しました',
   'share.calendarNotFound': 'カレンダーが見つかりません',
   'share.poweredBy': 'Powered by Nodate Time',
+  'share.targetCalendar': '対象カレンダー',
+  'share.inviteSection': '招待リンク',
+  'share.inviteSingleUseNote': 'このリンクは1人が参加すると無効になります（1回限り）',
+  'share.createInvite': '招待リンクを作成',
+  'share.inviteUsed': '使用済み',
+  'share.inviteUnused': '未使用',
+  'share.publicSection': '公開・埋め込み',
+  'share.publicNote': 'リンクを知っている人は誰でも閲覧できます（サインアップ不要・参照専用）',
+  'share.createPublic': '公開リンクを作成',
+  'share.embedCode': '埋め込みコード（iframe）',
+  'share.copyUrl': 'URLをコピー',
+  'share.copyEmbed': '埋め込みコードをコピー',
 
   // Auth
   'auth.login': 'ログイン',
@@ -348,6 +363,10 @@ export const ja = {
   // Assignee
   'event.assignee': '担当者',
   'event.assigneeNone': '担当者なし',
+  'event.createdBy': '作成者',
+  'event.calendar': 'カレンダー',
+  'event.color': 'カラー',
+  'event.moreOptions': '詳細オプション',
 
   // Album
   'album.caption': 'キャプション',

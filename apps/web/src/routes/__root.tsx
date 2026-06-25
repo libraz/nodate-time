@@ -11,6 +11,7 @@ export const Route = createRootRoute({
 const PUBLIC_PATHS = [
   '/login',
   '/share/',
+  '/embed/',
   '/forgot-password',
   '/reset-password',
   '/oauth-complete',

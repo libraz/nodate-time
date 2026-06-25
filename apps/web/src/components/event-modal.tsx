@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
@@ -751,8 +751,10 @@ export function EventModal() {
   const editingEventId = useUiStore((s) => s.editingEventId);
   const closeEventModal = useUiStore((s) => s.closeEventModal);
   const selectedDate = useUiStore((s) => s.selectedDate);
+  const eventDraftStart = useUiStore((s) => s.eventDraftStart);
 
   const calendars = useCalendarStore((s) => s.calendars);
+  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const events = useCalendarStore((s) => s.events);
   const addEvent = useCalendarStore((s) => s.addEvent);
   const updateEvent = useCalendarStore((s) => s.updateEvent);
@@ -782,11 +784,25 @@ export function EventModal() {
     recurrenceRule: null,
   });
   const [showCustomRecurrence, setShowCustomRecurrence] = useState(false);
+  // Optional fields (location/url/memo/people/reminder) collapse on create and
+  // auto-expand when an existing event already uses any of them.
+  const [showMore, setShowMore] = useState(false);
 
   // The current user's role for the event's calendar gates all mutating UI.
   const formCalendarId = form.calendarId || (editingEvent?.calendarId ?? '');
   const myRole = roleForCalendar(membersMap[formCalendarId], me?.email);
   const editable = canEdit(myRole);
+
+  // Calendars a new event can be created in: active in the sidebar and writable.
+  const postableCalendars = useMemo(
+    () =>
+      calendars.filter(
+        (c) =>
+          activeCalendarIds.includes(c.id) && canEdit(roleForCalendar(membersMap[c.id], me?.email)),
+      ),
+    [calendars, activeCalendarIds, membersMap, me?.email],
+  );
+  const defaultCalendarId = postableCalendars[0]?.id ?? calendars[0]?.id ?? '';
 
   useEffect(() => {
     if (!showEventModal) return;
@@ -810,18 +826,32 @@ export function EventModal() {
         recurrenceRule: rule,
         recurrencePreset: ruleToPreset(rule, startDt),
       });
+      setShowMore(
+        !!(
+          editingEvent.location ||
+          editingEvent.url ||
+          editingEvent.memo ||
+          (editingEvent.participants?.length ?? 0) > 0 ||
+          editingEvent.notificationOffset != null ||
+          editingEvent.assignedTo
+        ),
+      );
     } else {
-      // Interpret the selected day as a wall date in the user's timezone.
-      const base = selectedDate.setZone(timezone, { keepLocalTime: true });
-      const start = base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
-      const end = base.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+      // A draft start (e.g. a clicked weekly slot) creates a timed event at that
+      // hour; otherwise default to an all-day event on the selected day.
+      const timed = eventDraftStart != null;
+      const base = (eventDraftStart ?? selectedDate).setZone(timezone, { keepLocalTime: true });
+      const start = timed
+        ? base.set({ second: 0, millisecond: 0 })
+        : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+      const end = start.plus({ hours: 1 });
       setForm({
         title: '',
-        allDay: true,
+        allDay: !timed,
         startAt: start.toFormat("yyyy-MM-dd'T'HH:mm"),
         endAt: end.toFormat("yyyy-MM-dd'T'HH:mm"),
         color: FALLBACK_LABEL_COLOR,
-        calendarId: calendars[0]?.id ?? '',
+        calendarId: defaultCalendarId,
         location: '',
         memo: '',
         url: '',
@@ -831,8 +861,9 @@ export function EventModal() {
         recurrencePreset: 'none',
         recurrenceRule: null,
       });
+      setShowMore(false);
     }
-  }, [editingEvent, showEventModal, selectedDate, calendars, timezone]);
+  }, [editingEvent, showEventModal, selectedDate, eventDraftStart, defaultCalendarId, timezone]);
 
   useEffect(() => {
     if (showEventModal) {
@@ -978,6 +1009,130 @@ export function EventModal() {
           className="w-full resize-none border-b-2 border-transparent bg-transparent text-display font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
         />
       </div>
+
+      {/* Identity: which calendar + which color (event's visual identity) */}
+      <div className="px-6 pb-3">
+        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+          {(() => {
+            const current = calendars.find((c) => c.id === formCalendarId);
+            const calIcon = (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-text-tertiary)"
+                strokeWidth="2"
+                className="shrink-0"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M8 2v4M16 2v4M3 10h18" />
+              </svg>
+            );
+            if (!editingEvent && postableCalendars.length > 1) {
+              return (
+                <>
+                  <div className="flex items-center gap-3 py-1.5">
+                    {calIcon}
+                    <select
+                      value={formCalendarId}
+                      onChange={(e) => setForm((f) => ({ ...f, calendarId: e.target.value }))}
+                      className="input-modern h-8 flex-1 text-sm"
+                    >
+                      {postableCalendars.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                </>
+              );
+            }
+            if (current && calendars.length > 1) {
+              return (
+                <>
+                  <div className="flex items-center gap-3 py-1.5">
+                    {calIcon}
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: current.color }}
+                    />
+                    <span className="text-callout font-medium text-[var(--color-text-primary)]">
+                      {current.name}
+                    </span>
+                  </div>
+                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                </>
+              );
+            }
+            return null;
+          })()}
+
+          {/* Color */}
+          <div className="flex items-center gap-3 py-1.5">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-text-tertiary)"
+              strokeWidth="2"
+              className="shrink-0"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+              <circle cx="7" cy="7" r="1" />
+            </svg>
+            <div className="flex flex-wrap gap-2.5">
+              {labels.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, color: c.color }))}
+                  className="color-dot h-7 w-7"
+                  style={{
+                    backgroundColor: c.color,
+                    boxShadow:
+                      form.color === c.color
+                        ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${c.color}`
+                        : 'none',
+                  }}
+                  aria-label={t(c.nameKey as TranslationKey)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Creator (read-only metadata, shown only for existing events) */}
+      {editingEvent &&
+        (() => {
+          const member = (membersMap[editingEvent.calendarId] ?? []).find(
+            (m) => m.id === editingEvent.createdBy,
+          );
+          const name = editingEvent.creatorName || member?.name;
+          const icon = editingEvent.creatorIcon || member?.icon;
+          const avatarUrl = editingEvent.creatorAvatarUrl;
+          if (!name) return null;
+          return (
+            <div className="flex items-center gap-2 px-6 pb-3 text-caption text-[var(--color-text-secondary)]">
+              <span>{t('event.createdBy')}</span>
+              <span
+                className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden bg-[var(--color-surface-inset)] text-caption"
+                style={{ borderRadius: 'var(--radius-sm)' }}
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  (icon ?? name.slice(0, 1))
+                )}
+              </span>
+              <span className="font-medium text-[var(--color-text-primary)]">{name}</span>
+            </div>
+          );
+        })()}
 
       {/* Date & Time card */}
       <div className="px-6">
@@ -1435,233 +1590,225 @@ export function EventModal() {
         </div>
       </div>
 
-      {/* Details card (location + memo) - always visible */}
+      {/* Optional fields: collapsed by default on create, expanded when used */}
       <div className="mt-3 px-6">
-        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-          <div className="flex items-center gap-3 py-1">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
-              <circle cx="12" cy="10" r="3" />
-            </svg>
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-              placeholder={t('event.location')}
-              className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-            />
-          </div>
-          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-          <div className="flex items-center gap-3 py-1">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-            </svg>
-            <input
-              type="url"
-              value={form.url}
-              onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-              placeholder={t('event.urlPlaceholder')}
-              className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-            />
-          </div>
-          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-          <div className="flex items-start gap-3 py-1">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="mt-0.5 shrink-0"
-            >
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-              <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-            </svg>
-            <textarea
-              value={form.memo}
-              onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
-              placeholder={t('event.memo')}
-              rows={2}
-              className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-            />
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowMore((v) => !v)}
+          aria-expanded={showMore}
+          className="flex w-full items-center justify-between rounded-[var(--radius-md)] px-1 py-2 text-callout font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+        >
+          <span>{t('event.moreOptions')}</span>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="shrink-0 transition-transform duration-200"
+            style={{ transform: showMore ? 'rotate(180deg)' : 'none' }}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       </div>
 
-      {/* Participants & Notification card */}
-      <div className="mt-3 px-6">
-        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-          {/* Participants */}
-          <div className="flex items-center gap-3 py-1.5">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-            </svg>
-            <div className="flex flex-wrap gap-1.5">
-              {(membersMap[form.calendarId] ?? []).map((m) => {
-                const isSelected = form.participants.includes(m.id);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() =>
-                      setForm((f) => ({
-                        ...f,
-                        participants: isSelected
-                          ? f.participants.filter((id) => id !== m.id)
-                          : [...f.participants, m.id],
-                      }))
-                    }
-                    title={m.name}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-default transition-opacity"
-                    style={{
-                      backgroundColor: m.color,
-                      opacity: isSelected ? 1 : 0.3,
-                      outline: isSelected ? `2px solid ${m.color}` : 'none',
-                      outlineOffset: '2px',
-                    }}
-                  >
-                    {m.icon || m.name[0]}
-                  </button>
-                );
-              })}
-              {form.participants.length === 0 && (
-                <span className="text-default text-[var(--color-text-tertiary)]">
-                  {t('event.selectParticipants')}
-                </span>
-              )}
+      {showMore && (
+        <>
+          {/* Details card (location + memo) */}
+          <div className="mt-1 px-6">
+            <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+              <div className="flex items-center gap-3 py-1">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+                <input
+                  type="text"
+                  value={form.location}
+                  onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                  placeholder={t('event.location')}
+                  className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                />
+              </div>
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+              <div className="flex items-center gap-3 py-1">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                </svg>
+                <input
+                  type="url"
+                  value={form.url}
+                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                  placeholder={t('event.urlPlaceholder')}
+                  className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                />
+              </div>
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+              <div className="flex items-start gap-3 py-1">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="mt-0.5 shrink-0"
+                >
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+                </svg>
+                <textarea
+                  value={form.memo}
+                  onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
+                  placeholder={t('event.memo')}
+                  rows={2}
+                  className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+          {/* Participants & Notification card */}
+          <div className="mt-3 px-6">
+            <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+              {/* Participants */}
+              <div className="flex items-center gap-3 py-1.5">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+                </svg>
+                <div className="flex flex-wrap gap-1.5">
+                  {(membersMap[form.calendarId] ?? []).map((m) => {
+                    const isSelected = form.participants.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            participants: isSelected
+                              ? f.participants.filter((id) => id !== m.id)
+                              : [...f.participants, m.id],
+                          }))
+                        }
+                        title={m.name}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-default transition-opacity"
+                        style={{
+                          backgroundColor: m.color,
+                          opacity: isSelected ? 1 : 0.3,
+                          outline: isSelected ? `2px solid ${m.color}` : 'none',
+                          outlineOffset: '2px',
+                        }}
+                      >
+                        {m.icon || m.name[0]}
+                      </button>
+                    );
+                  })}
+                  {form.participants.length === 0 && (
+                    <span className="text-default text-[var(--color-text-tertiary)]">
+                      {t('event.selectParticipants')}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          {/* Notification */}
-          <div className="flex items-center gap-3 py-1.5">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 01-3.46 0" />
-            </svg>
-            <CustomSelect
-              value={String(form.notificationOffset ?? 'none')}
-              options={NOTIFICATION_OFFSETS.map(({ label, value }) => ({
-                value: String(value ?? 'none'),
-                label: t(`event.notification_${label}` as TranslationKey),
-              }))}
-              onChange={(v) => {
-                setForm((f) => ({
-                  ...f,
-                  notificationOffset: v === 'none' ? null : Number(v),
-                }));
-              }}
-              className="flex-1"
-            />
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+
+              {/* Notification */}
+              <div className="flex items-center gap-3 py-1.5">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 01-3.46 0" />
+                </svg>
+                <CustomSelect
+                  value={String(form.notificationOffset ?? 'none')}
+                  options={NOTIFICATION_OFFSETS.map(({ label, value }) => ({
+                    value: String(value ?? 'none'),
+                    label: t(`event.notification_${label}` as TranslationKey),
+                  }))}
+                  onChange={(v) => {
+                    setForm((f) => ({
+                      ...f,
+                      notificationOffset: v === 'none' ? null : Number(v),
+                    }));
+                  }}
+                  className="flex-1"
+                />
+              </div>
+
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+
+              {/* Assignee */}
+              <div className="flex items-center gap-3 py-1.5">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 11l-3 3-1.5-1.5" />
+                </svg>
+                <CustomSelect
+                  value={form.assignedTo ?? 'none'}
+                  options={[
+                    { value: 'none', label: t('event.assigneeNone') },
+                    ...(membersMap[form.calendarId] ?? []).map((m) => ({
+                      value: m.id,
+                      label: m.name,
+                    })),
+                  ]}
+                  onChange={(v) => {
+                    setForm((f) => ({ ...f, assignedTo: v === 'none' ? null : v }));
+                  }}
+                  className="flex-1"
+                />
+              </div>
+            </div>
           </div>
-
-          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-
-          {/* Assignee */}
-          <div className="flex items-center gap-3 py-1.5">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 11l-3 3-1.5-1.5" />
-            </svg>
-            <CustomSelect
-              value={form.assignedTo ?? 'none'}
-              options={[
-                { value: 'none', label: t('event.assigneeNone') },
-                ...(membersMap[form.calendarId] ?? []).map((m) => ({
-                  value: m.id,
-                  label: m.name,
-                })),
-              ]}
-              onChange={(v) => {
-                setForm((f) => ({ ...f, assignedTo: v === 'none' ? null : v }));
-              }}
-              className="flex-1"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Color selector */}
-      <div className="px-6 py-4">
-        <div className="flex items-center gap-3">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-text-tertiary)"
-            strokeWidth="2"
-            className="shrink-0"
-          >
-            <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-            <circle cx="7" cy="7" r="1" />
-          </svg>
-          <div className="flex flex-wrap gap-2.5">
-            {labels.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, color: c.color }))}
-                className="color-dot h-7 w-7"
-                style={{
-                  backgroundColor: c.color,
-                  boxShadow:
-                    form.color === c.color
-                      ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${c.color}`
-                      : 'none',
-                }}
-                aria-label={t(c.nameKey as TranslationKey)}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Checklist (edit mode only) */}
       {editingEvent && (
