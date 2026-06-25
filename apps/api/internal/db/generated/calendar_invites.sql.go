@@ -21,8 +21,8 @@ func (q *Queries) ConsumeInviteUse(ctx context.Context, id uint32) (sql.Result, 
 }
 
 const createInvite = `-- name: CreateInvite :execresult
-INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by, is_public)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateInviteParams struct {
@@ -32,6 +32,7 @@ type CreateInviteParams struct {
 	MaxUses    sql.NullInt32       `json:"maxUses"`
 	ExpiresAt  sql.NullTime        `json:"expiresAt"`
 	CreatedBy  uint32              `json:"createdBy"`
+	IsPublic   bool                `json:"isPublic"`
 }
 
 func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (sql.Result, error) {
@@ -42,6 +43,7 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (sql
 		arg.MaxUses,
 		arg.ExpiresAt,
 		arg.CreatedBy,
+		arg.IsPublic,
 	)
 }
 
@@ -69,7 +71,7 @@ func (q *Queries) DeleteInviteByIDAndCalendar(ctx context.Context, arg DeleteInv
 }
 
 const getInviteByToken = `-- name: GetInviteByToken :one
-SELECT id, calendar_id, token, role, max_uses, use_count, expires_at, created_by, created_at FROM calendar_invites
+SELECT id, calendar_id, token, role, max_uses, use_count, is_public, expires_at, created_by, created_at FROM calendar_invites
 WHERE token = ? AND (expires_at IS NULL OR expires_at > NOW())
   AND (max_uses IS NULL OR use_count < max_uses)
 `
@@ -84,6 +86,7 @@ func (q *Queries) GetInviteByToken(ctx context.Context, token string) (CalendarI
 		&i.Role,
 		&i.MaxUses,
 		&i.UseCount,
+		&i.IsPublic,
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -92,7 +95,7 @@ func (q *Queries) GetInviteByToken(ctx context.Context, token string) (CalendarI
 }
 
 const getInviteByTokenPublic = `-- name: GetInviteByTokenPublic :one
-SELECT ci.id, ci.calendar_id, ci.token, ci.role, ci.max_uses, ci.use_count, ci.expires_at, ci.created_by, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
+SELECT ci.id, ci.calendar_id, ci.token, ci.role, ci.max_uses, ci.use_count, ci.is_public, ci.expires_at, ci.created_by, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
 FROM calendar_invites ci
 INNER JOIN calendars c ON c.id = ci.calendar_id
 WHERE ci.token = ? AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
@@ -106,6 +109,7 @@ type GetInviteByTokenPublicRow struct {
 	Role             CalendarInvitesRole `json:"role"`
 	MaxUses          sql.NullInt32       `json:"maxUses"`
 	UseCount         uint32              `json:"useCount"`
+	IsPublic         bool                `json:"isPublic"`
 	ExpiresAt        sql.NullTime        `json:"expiresAt"`
 	CreatedBy        uint32              `json:"createdBy"`
 	CreatedAt        time.Time           `json:"createdAt"`
@@ -124,6 +128,7 @@ func (q *Queries) GetInviteByTokenPublic(ctx context.Context, token string) (Get
 		&i.Role,
 		&i.MaxUses,
 		&i.UseCount,
+		&i.IsPublic,
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -204,7 +209,7 @@ func (q *Queries) ListEventsByInviteCalendar(ctx context.Context, arg ListEvents
 }
 
 const listInvitesByCalendar = `-- name: ListInvitesByCalendar :many
-SELECT id, calendar_id, token, role, max_uses, use_count, expires_at, created_by, created_at FROM calendar_invites
+SELECT id, calendar_id, token, role, max_uses, use_count, is_public, expires_at, created_by, created_at FROM calendar_invites
 WHERE calendar_id = ?
 ORDER BY created_at DESC
 `
@@ -225,6 +230,7 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 			&i.Role,
 			&i.MaxUses,
 			&i.UseCount,
+			&i.IsPublic,
 			&i.ExpiresAt,
 			&i.CreatedBy,
 			&i.CreatedAt,

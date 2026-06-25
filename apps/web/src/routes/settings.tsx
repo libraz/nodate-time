@@ -696,6 +696,7 @@ interface InviteData {
   role: string;
   maxUses: number | null;
   useCount: number;
+  isPublic: boolean;
   expiresAt: string | null;
   createdAt: string;
 }
@@ -878,6 +879,10 @@ function CalendarsSection() {
     toast.success(t('common.copied'));
   };
 
+  // Public, read-only embed links are managed in the Share panel with their own
+  // /embed URL; only show joinable invites here.
+  const joinInvites = invites.filter((i) => !i.isPublic);
+
   return (
     <>
       <Section title={t('settings.calendars')}>
@@ -984,13 +989,13 @@ function CalendarsSection() {
         </button>
         {loadingInvites ? (
           <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
-        ) : invites.length === 0 ? (
+        ) : joinInvites.length === 0 ? (
           <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
             {t('invites.empty')}
           </p>
         ) : (
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
-            {invites.map((inv) => (
+            {joinInvites.map((inv) => (
               <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
                 <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
                   /share/{inv.token}

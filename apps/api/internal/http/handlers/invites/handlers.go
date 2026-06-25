@@ -71,6 +71,7 @@ func mapInvite(inv generated.CalendarInvite) InviteResponse {
 		Token:     inv.Token,
 		Role:      string(inv.Role),
 		UseCount:  inv.UseCount,
+		IsPublic:  inv.IsPublic,
 		CreatedAt: inv.CreatedAt,
 	}
 	if inv.MaxUses.Valid {
@@ -104,8 +105,15 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
+		isPublic := in.Body.IsPublic != nil && *in.Body.IsPublic
+		// A public link is a read-only embed link: force viewer role and unlimited
+		// uses so it never grants membership and never expires through use.
+		if isPublic {
+			role = "viewer"
+		}
+
 		var maxUses sql.NullInt32
-		if in.Body.MaxUses != nil {
+		if !isPublic && in.Body.MaxUses != nil {
 			maxUses = sql.NullInt32{Int32: *in.Body.MaxUses, Valid: true}
 		}
 
@@ -121,6 +129,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			MaxUses:    maxUses,
 			ExpiresAt:  expiresAt,
 			CreatedBy:  userID,
+			IsPublic:   isPublic,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -128,7 +137,21 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 
 		inviteID, _ := result.LastInsertId()
 		out := &CreateInviteOutput{}
-		out.Body = InviteResponse{ID: uint32(inviteID), Token: token, Role: role, UseCount: 0, CreatedAt: time.Now()}
+		out.Body = InviteResponse{
+			ID:        uint32(inviteID),
+			Token:     token,
+			Role:      role,
+			UseCount:  0,
+			IsPublic:  isPublic,
+			CreatedAt: time.Now(),
+		}
+		if maxUses.Valid {
+			v := uint32(maxUses.Int32)
+			out.Body.MaxUses = &v
+		}
+		if expiresAt.Valid {
+			out.Body.ExpiresAt = &expiresAt.Time
+		}
 		return out, nil
 	}
 }
@@ -164,6 +187,12 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// A public link is for read-only embedding only; it must never grant
+		// membership. Block non-members from joining through it.
+		if invite.IsPublic {
+			return nil, apierrors.ToHuma(apierrors.InvitePublicViewOnly)
 		}
 
 		tx, err := deps.DB.BeginTx(ctx, nil)
@@ -261,6 +290,7 @@ func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*Pub
 		out.Body.CalendarID = pubIDToHex(row.CalendarPublicID)
 		out.Body.Name = row.CalendarName
 		out.Body.Color = row.CalendarColor
+		out.Body.Joinable = !row.IsPublic
 		return out, nil
 	}
 }

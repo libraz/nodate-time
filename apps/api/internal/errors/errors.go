@@ -119,6 +119,9 @@ var (
 var (
 	InviteNotFound = &Spec{Status: 404, Code: "INVITE.NOT_FOUND", Message: "Invite not found or expired"}
 	InviteExpired  = &Spec{Status: 410, Code: "INVITE.EXPIRED", Message: "Invite has expired or reached max uses"}
+	// InvitePublicViewOnly rejects joining through a public, unlimited viewer link;
+	// such links exist only for read-only embedding, not for claiming membership.
+	InvitePublicViewOnly = &Spec{Status: 403, Code: "INVITE.PUBLIC_VIEW_ONLY", Message: "This is a public view-only link and cannot be joined"}
 )
 
 // --- Memo errors ---

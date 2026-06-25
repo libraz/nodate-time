@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS calendar_invites (
   role        ENUM('admin', 'member', 'viewer') NOT NULL DEFAULT 'member',
   max_uses    INT UNSIGNED NULL     COMMENT 'null = unlimited',
   use_count   INT UNSIGNED NOT NULL DEFAULT 0,
+  is_public   BOOLEAN      NOT NULL DEFAULT FALSE COMMENT 'public read-only embed link; cannot be joined',
   expires_at  DATETIME(3)  NULL,
   created_by  INT UNSIGNED NOT NULL,
   created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
