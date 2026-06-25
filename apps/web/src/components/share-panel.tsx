@@ -13,14 +13,15 @@ interface InviteData {
   role: string;
   maxUses: number | null;
   useCount: number;
+  isPublic: boolean;
   expiresAt: string | null;
   createdAt: string;
 }
 
-/** A single-use join invite is created with maxUses=1. */
-const isInviteLink = (i: InviteData) => i.maxUses === 1;
-/** A public/embed link is a non-consuming viewer link (unlimited uses). */
-const isPublicLink = (i: InviteData) => i.maxUses == null && i.role === 'viewer';
+/** A single-use join invite grants membership and is consumed after one signup. */
+const isInviteLink = (i: InviteData) => !i.isPublic && i.maxUses === 1;
+/** A public/embed link is a non-consuming, read-only viewer link. */
+const isPublicLink = (i: InviteData) => i.isPublic;
 
 export function SharePanel() {
   const t = useT();
@@ -102,6 +103,7 @@ export function SharePanel() {
     try {
       const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
         role: 'viewer',
+        isPublic: true,
       });
       setInvites((cur) => [data, ...cur.filter((i) => !isPublicLink(i))]);
     } catch (e) {

@@ -172,6 +172,51 @@ func TestShareMaxUses(t *testing.T) {
 	require.True(t, status == 404 || status == 410, "expected 404 or 410, got %d", status)
 }
 
+func TestSharePublicLinkNotJoinable(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt1 := helpers.NewTenant(t, testServerURL)
+	tt2 := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt1.CalendarID
+
+	// A public link is a read-only embed link (isPublic), not a join invite.
+	var publicInvite struct {
+		Token    string `json:"token"`
+		IsPublic bool   `json:"isPublic"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true}, &publicInvite)
+	require.True(t, publicInvite.IsPublic)
+
+	// Public calendar view reports it as not joinable.
+	var pubCal struct {
+		Joinable bool `json:"joinable"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+publicInvite.Token, "", nil, &pubCal)
+	require.False(t, pubCal.Joinable)
+
+	// Joining through a public link is forbidden.
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+publicInvite.Token+"/accept", tt2.AccessToken, nil)
+	require.Equal(t, 403, status)
+
+	// tt2 must not have gained access to the calendar.
+	status2, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/calendars/"+tt1.CalendarID, tt2.AccessToken, nil)
+	require.True(t, status2 >= 400, "non-member should not access the calendar, got %d", status2)
+
+	// A limited viewer invite remains joinable (regression guard).
+	var memberInvite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
+		map[string]any{"role": "member", "maxUses": 1}, &memberInvite)
+	var pubCal2 struct {
+		Joinable bool `json:"joinable"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+memberInvite.Token, "", nil, &pubCal2)
+	require.True(t, pubCal2.Joinable)
+}
+
 // helper
 func uintToStr(n uint32) string {
 	b, _ := json.Marshal(n)

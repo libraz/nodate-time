@@ -10,6 +10,7 @@ interface PublicCalendar {
   calendarId: string;
   name: string;
   color: string;
+  joinable: boolean;
 }
 
 interface PublicEvent {
@@ -304,22 +305,24 @@ function SharedCalendarView() {
           ))}
         </div>
 
-        {/* Join section */}
-        <div className="bg-[var(--color-surface)] px-4 py-5 shadow-inner sm:px-6">
-          {joinError && (
-            <div className="mb-3 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-center text-body text-[var(--color-danger)]">
-              {joinError}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={handleJoin}
-            disabled={joining}
-            className="btn-primary h-11 w-full rounded-xl text-callout font-bold"
-          >
-            {joining ? t('share.joining') : t('share.joinCalendar')}
-          </button>
-        </div>
+        {/* Join section — hidden for public, read-only links that cannot be joined */}
+        {calendar.joinable && (
+          <div className="bg-[var(--color-surface)] px-4 py-5 shadow-inner sm:px-6">
+            {joinError && (
+              <div className="mb-3 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-center text-body text-[var(--color-danger)]">
+                {joinError}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleJoin}
+              disabled={joining}
+              className="btn-primary h-11 w-full rounded-xl text-callout font-bold"
+            >
+              {joining ? t('share.joining') : t('share.joinCalendar')}
+            </button>
+          </div>
+        )}
 
         {/* Footer */}
         <footer className="bg-[var(--color-surface)] py-4 text-center text-footnote text-[var(--color-text-tertiary)]">

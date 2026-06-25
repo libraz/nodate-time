@@ -8,6 +8,7 @@ type InviteResponse struct {
 	Role      string     `json:"role"`
 	MaxUses   *uint32    `json:"maxUses,omitempty"`
 	UseCount  uint32     `json:"useCount"`
+	IsPublic  bool       `json:"isPublic"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 }
@@ -18,6 +19,8 @@ type CreateInviteInput struct {
 		Role           string `json:"role" enum:"member,viewer" default:"member"`
 		MaxUses        *int32 `json:"maxUses,omitempty" required:"false" minimum:"1"`
 		ExpiresInHours *int   `json:"expiresInHours,omitempty" required:"false" minimum:"1" maximum:"8760"`
+		// IsPublic marks a read-only embed link that cannot be joined.
+		IsPublic *bool `json:"isPublic,omitempty" required:"false"`
 	}
 }
 type CreateInviteOutput struct {
@@ -59,6 +62,9 @@ type PublicCalendarOutput struct {
 		CalendarID string `json:"calendarId"`
 		Name       string `json:"name"`
 		Color      string `json:"color"`
+		// Joinable is false for public, read-only embed links; the frontend hides
+		// the join action so such links cannot grant membership.
+		Joinable bool `json:"joinable"`
 	}
 }
 

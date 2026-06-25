@@ -4,8 +4,8 @@ WHERE token = ? AND (expires_at IS NULL OR expires_at > NOW())
   AND (max_uses IS NULL OR use_count < max_uses);
 
 -- name: CreateInvite :execresult
-INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by, is_public)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: IncrementInviteUseCount :exec
 UPDATE calendar_invites SET use_count = use_count + 1 WHERE id = ?;

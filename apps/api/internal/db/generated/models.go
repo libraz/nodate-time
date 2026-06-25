@@ -219,11 +219,13 @@ type CalendarInvite struct {
 	Token string              `json:"token"`
 	Role  CalendarInvitesRole `json:"role"`
 	// null = unlimited
-	MaxUses   sql.NullInt32 `json:"maxUses"`
-	UseCount  uint32        `json:"useCount"`
-	ExpiresAt sql.NullTime  `json:"expiresAt"`
-	CreatedBy uint32        `json:"createdBy"`
-	CreatedAt time.Time     `json:"createdAt"`
+	MaxUses  sql.NullInt32 `json:"maxUses"`
+	UseCount uint32        `json:"useCount"`
+	// public read-only embed link; cannot be joined
+	IsPublic  bool         `json:"isPublic"`
+	ExpiresAt sql.NullTime `json:"expiresAt"`
+	CreatedBy uint32       `json:"createdBy"`
+	CreatedAt time.Time    `json:"createdAt"`
 }
 
 type CalendarMember struct {
