@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { DEFAULT_INVITE_ROLE, isAdmin, roleForCalendar } from '@/lib/permissions';
+import { DEFAULT_INVITE_ROLE, isAdmin, roleForCalendar, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -18,6 +20,9 @@ interface InviteData {
   createdAt: string;
 }
 
+const JOIN_INVITE_ROLES = ['member', 'viewer'] as const;
+type JoinInviteRole = (typeof JOIN_INVITE_ROLES)[number];
+
 /** A public/embed link is a non-consuming, read-only viewer link. */
 const isPublicLink = (i: InviteData) => i.isPublic;
 
@@ -25,6 +30,9 @@ export function SharePanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'share', () =>
+    toggleRightPanel('share'),
+  );
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const membersMap = useCalendarStore((s) => s.membersMap);
@@ -47,6 +55,9 @@ export function SharePanel() {
   const [invites, setInvites] = useState<InviteData[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
+  const [inviteRole, setInviteRole] = useState<JoinInviteRole>(
+    DEFAULT_INVITE_ROLE as JoinInviteRole,
+  );
 
   // Several single-use invite links may coexist; the public link is at most one.
   const joinInvites = invites.filter((i) => !i.isPublic);
@@ -84,7 +95,7 @@ export function SharePanel() {
     setBusy('invite');
     try {
       const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
-        role: DEFAULT_INVITE_ROLE,
+        role: inviteRole,
         maxUses: 1,
       });
       setInvites((cur) => [data, ...cur]);
@@ -93,7 +104,7 @@ export function SharePanel() {
     } finally {
       setBusy(null);
     }
-  }, [calendarId]);
+  }, [calendarId, inviteRole]);
 
   const createPublic = useCallback(async () => {
     if (!calendarId) return;
@@ -142,7 +153,10 @@ export function SharePanel() {
         className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('share')}
       />
-      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <h2 className="truncate text-subhead font-semibold">{t('panel.share')}</h2>
           <button
@@ -210,6 +224,15 @@ export function SharePanel() {
                 <p className="text-caption text-[var(--color-text-secondary)]">
                   {t('share.inviteSingleUseNote')}
                 </p>
+                <CustomSelect
+                  value={inviteRole}
+                  onChange={(role) => setInviteRole(role as JoinInviteRole)}
+                  options={JOIN_INVITE_ROLES.map((role) => ({
+                    value: role,
+                    label: t(roleLabelKey(role)),
+                  }))}
+                  triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                />
                 {joinInvites.length > 0 && (
                   <div className="space-y-3">
                     {joinInvites.map((inv) => {

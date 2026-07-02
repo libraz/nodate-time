@@ -787,6 +787,7 @@ function CalendarsSection() {
   const [invites, setInvites] = useState<InviteData[]>([]);
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
+  const [inviteRole, setInviteRole] = useState(DEFAULT_INVITE_ROLE);
 
   useEffect(() => {
     if (!selectedId && calendars.length > 0) {
@@ -848,7 +849,7 @@ function CalendarsSection() {
     setCreatingInvite(true);
     try {
       const inv = await api.post<InviteData>(`/calendars/${selectedId}/invites`, {
-        role: DEFAULT_INVITE_ROLE,
+        role: inviteRole,
         maxUses: 1,
       });
       setInvites((cur) => [inv, ...cur]);
@@ -976,6 +977,16 @@ function CalendarsSection() {
         <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
           {t('share.inviteSingleUseNote')}
         </p>
+        <CustomSelect
+          value={inviteRole}
+          onChange={(role) => setInviteRole(role as typeof inviteRole)}
+          options={ROLE_OPTIONS.filter((role) => role !== 'admin').map((role) => ({
+            value: role,
+            label: t(roleLabelKey(role)),
+          }))}
+          className="mb-3 max-w-xs"
+          triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+        />
         <button
           type="button"
           onClick={handleCreateInvite}

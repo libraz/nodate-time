@@ -60,6 +60,26 @@ func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, err
 	return i, err
 }
 
+const getCalendarByIDForUpdate = `-- name: GetCalendarByIDForUpdate :one
+SELECT id, public_id, name, color, cover_url, created_by, created_at, updated_at FROM calendars WHERE id = ? FOR UPDATE
+`
+
+func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Calendar, error) {
+	row := q.db.QueryRowContext(ctx, getCalendarByIDForUpdate, id)
+	var i Calendar
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Color,
+		&i.CoverUrl,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCalendarByPublicID = `-- name: GetCalendarByPublicID :one
 SELECT id, public_id, name, color, cover_url, created_by, created_at, updated_at FROM calendars WHERE public_id = ?
 `

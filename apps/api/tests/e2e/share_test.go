@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -24,7 +25,7 @@ func TestShareLifecycle(t *testing.T) {
 		UseCount uint32 `json:"useCount"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
-		map[string]any{"role": "viewer"}, &invite)
+		map[string]any{"role": "viewer", "isPublic": true}, &invite)
 	require.NotEmpty(t, invite.Token)
 	require.Equal(t, "viewer", invite.Role)
 	require.NotZero(t, invite.ID)
@@ -67,8 +68,11 @@ func TestShareLifecycle(t *testing.T) {
 	require.Len(t, pubEvents, 1)
 	require.Equal(t, "公開イベント", pubEvents[0].Title)
 
+	status, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=not-a-date&end=2026-04-30", "", nil)
+	require.Equal(t, http.StatusBadRequest, status)
+
 	// Delete invite
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+uintToStr(invite.ID), tt.AccessToken, nil)
+	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+uintToStr(invite.ID), tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Public view should fail after deletion
@@ -215,6 +219,145 @@ func TestSharePublicLinkNotJoinable(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+memberInvite.Token, "", nil, &pubCal2)
 	require.True(t, pubCal2.Joinable)
+}
+
+func TestShareOnlyOneActivePublicLinkPerCalendar(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true}, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true})
+	require.Equal(t, 409, status)
+
+	var invite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "member", "maxUses": 1}, &invite)
+	require.NotEmpty(t, invite.Token)
+}
+
+func TestShareEventsRequirePublicInvite(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var invite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "maxUses": 1}, &invite)
+
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title":   "Join-only private event",
+			"allDay":  false,
+			"startAt": "2026-04-20T10:00:00+09:00",
+			"endAt":   "2026-04-20T11:00:00+09:00",
+		}, nil)
+
+	var pubCal struct {
+		Joinable bool `json:"joinable"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token, "", nil, &pubCal)
+	require.True(t, pubCal.Joinable)
+
+	var pubEvents []struct {
+		Title string `json:"title"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
+	require.Empty(t, pubEvents)
+}
+
+func TestShareRecurringEventsHonorExceptions(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
+
+	var invite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true}, &invite)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
+	require.True(t, status >= 200 && status < 300)
+
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+		map[string]any{
+			"title":   "Public moved",
+			"allDay":  false,
+			"startAt": "2026-04-17T18:00:00+09:00",
+			"endAt":   "2026-04-17T19:00:00+09:00",
+		}, nil)
+
+	var pubEvents []struct {
+		ID      string `json:"id"`
+		Title   string `json:"title"`
+		StartAt string `json:"startAt"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
+	require.Len(t, pubEvents, 3)
+
+	moved := 0
+	for _, e := range pubEvents {
+		require.NotEqual(t, evts[1].ID, e.ID, "cancelled occurrence must not appear in public feed")
+		if e.Title == "Public moved" {
+			moved++
+			require.Equal(t, evts[2].ID, e.ID)
+			require.Contains(t, e.StartAt, "T09:00:00Z")
+		}
+	}
+	require.Equal(t, 1, moved, "moved occurrence must replace its original public instance")
+}
+
+func TestShareRecurringEventsExpandInEventTimezone(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var invite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true}, &invite)
+
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title":    "NY weekly",
+			"allDay":   false,
+			"startAt":  "2026-03-01T09:00:00-05:00",
+			"endAt":    "2026-03-01T10:00:00-05:00",
+			"timezone": "America/New_York",
+			"recurrenceRule": map[string]any{
+				"freq":     "weekly",
+				"interval": 1,
+				"byDay":    []string{"SU"},
+			},
+		}, nil)
+
+	var pubEvents []struct {
+		StartAt string `json:"startAt"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-03-01&end=2026-03-15", "", nil, &pubEvents)
+	require.Len(t, pubEvents, 3)
+	require.True(t, strings.Contains(pubEvents[0].StartAt, "2026-03-01T14:00:00Z"), pubEvents[0].StartAt)
+	require.True(t, strings.Contains(pubEvents[1].StartAt, "2026-03-08T13:00:00Z"), pubEvents[1].StartAt)
+	require.True(t, strings.Contains(pubEvents[2].StartAt, "2026-03-15T13:00:00Z"), pubEvents[2].StartAt)
 }
 
 // helper

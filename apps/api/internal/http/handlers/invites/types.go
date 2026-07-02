@@ -72,7 +72,7 @@ type PublicEventsInput struct {
 	Token     string `path:"token"`
 	StartDate string `query:"start" required:"false"`
 	EndDate   string `query:"end" required:"false"`
-	Days      int    `query:"days" minimum:"1" default:"30" required:"false"`
+	Days      int    `query:"days" minimum:"1" maximum:"366" default:"30" required:"false"`
 }
 type PublicEventsOutput struct {
 	Body []PublicEventResponse
@@ -84,6 +84,7 @@ type PublicEventResponse struct {
 	AllDay   bool      `json:"allDay"`
 	StartAt  time.Time `json:"startAt"`
 	EndAt    time.Time `json:"endAt"`
+	Timezone string    `json:"timezone"`
 	Color    string    `json:"color"`
 	Location string    `json:"location,omitempty"`
 }

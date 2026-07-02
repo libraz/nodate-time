@@ -50,6 +50,7 @@ WHERE ci.token = ? AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
 SELECT e.* FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS NULL
+  AND ci.is_public = TRUE
   AND e.start_at < ? AND e.end_at > ?
 ORDER BY e.start_at;
 
@@ -57,5 +58,6 @@ ORDER BY e.start_at;
 SELECT e.* FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL
+  AND ci.is_public = TRUE
   AND e.start_at < ? AND e.recurrence_end > ?
 ORDER BY e.start_at;
