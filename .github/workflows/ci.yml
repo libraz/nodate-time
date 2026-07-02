@@ -49,8 +49,6 @@ jobs:
         run: bash sql/build-schema.sh
 
       - name: Start MySQL
-        env:
-          TC_DB_PORT: '3307'
         run: |
           docker compose up -d mysql
           # Wait for the container to report healthy (schema is applied on first init).
