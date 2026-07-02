@@ -10,6 +10,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -18,11 +19,7 @@ type Deps struct {
 }
 
 func pubIDToHex(b []byte) string {
-	u, err := uuid.FromBytes(b)
-	if err != nil {
-		return ""
-	}
-	return u.String()
+	return calresolve.PublicIDString(b)
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -34,42 +31,17 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, _, err := resolveCalendarMember(ctx, q, calPubID, userID)
-	return cal, err
+	return calresolve.Read(ctx, q, calPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, member, err := resolveCalendarMember(ctx, q, calPubID, userID)
-	if err != nil {
-		return generated.Calendar{}, err
-	}
-	if member.Role == generated.CalendarMembersRoleViewer {
-		return generated.Calendar{}, apierrors.CalendarRoleRequired
-	}
-	return cal, nil
+	return calresolve.Write(ctx, q, calPubID, userID)
 }
 
 func resolveCalendarMember(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	pubBytes, err := parseUUID(calPubID)
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-	}
-	cal, err := q.GetCalendarByPublicID(ctx, pubBytes)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-		}
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
-	}
-	member, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: cal.ID, UserID: userID,
-	})
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
-	}
-	return cal, member, nil
+	return calresolve.Member(ctx, q, calPubID, userID)
 }
 
 func mapMemo(m generated.Memo) MemoResponse {
