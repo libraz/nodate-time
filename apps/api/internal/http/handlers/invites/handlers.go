@@ -4,22 +4,29 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
+	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
-	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 type Deps struct {
 	DB      *sql.DB
 	Queries *generated.Queries
+}
+
+func isDuplicateKey(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -31,11 +38,12 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func pubIDToHex(b []byte) string {
-	u, err := uuid.FromBytes(b)
-	if err != nil {
-		return ""
-	}
-	return u.String()
+	return calresolve.PublicIDString(b)
+}
+
+func inviteAuditPublicID(inviteID uint32) []byte {
+	u := uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("nodate-time:invite:%d", inviteID)))
+	return u[:]
 }
 
 // tokenAlphabet is base62 (0-9, A-Z, a-z): URL-safe, fully alphanumeric, and
@@ -72,21 +80,7 @@ func generateToken() string {
 // resolveCalendarAdmin resolves a calendar by public ID and verifies admin role.
 func resolveCalendarAdmin(ctx context.Context, deps Deps, calPubID string) (generated.Calendar, error) {
 	userID, _ := middleware.ActorFromContext(ctx)
-	pubBytes, err := parseUUID(calPubID)
-	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
-	}
-	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
-	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
-	}
-	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: cal.ID, UserID: userID,
-	})
-	if err != nil || member.Role != "admin" {
-		return generated.Calendar{}, apierrors.CalendarRoleRequired
-	}
-	return cal, nil
+	return calresolve.Admin(ctx, deps.Queries, calPubID, userID)
 }
 
 func mapInvite(inv generated.CalendarInvite) InviteResponse {
@@ -146,7 +140,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			expiresAt = sql.NullTime{Time: time.Now().Add(time.Duration(*in.Body.ExpiresInHours) * time.Hour), Valid: true}
 		}
 
-		result, err := deps.Queries.CreateInvite(ctx, generated.CreateInviteParams{
+		params := generated.CreateInviteParams{
 			CalendarID: cal.ID,
 			Token:      token,
 			Role:       generated.CalendarInvitesRole(role),
@@ -154,12 +148,48 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			ExpiresAt:  expiresAt,
 			CreatedBy:  userID,
 			IsPublic:   isPublic,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		var result sql.Result
+		if isPublic {
+			tx, err := deps.DB.BeginTx(ctx, nil)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			defer tx.Rollback()
+			qtx := deps.Queries.WithTx(tx)
+			if _, err := qtx.GetCalendarByIDForUpdate(ctx, cal.ID); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			count, err := qtx.CountActivePublicInvites(ctx, cal.ID)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			if count > 0 {
+				return nil, apierrors.ToHuma(apierrors.InvitePublicAlreadyExists)
+			}
+			result, err = qtx.CreateInvite(ctx, params)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+		} else {
+			var err error
+			result, err = deps.Queries.CreateInvite(ctx, params)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 		}
 
 		inviteID, _ := result.LastInsertId()
+		action := audit.ActionCreate
+		if isPublic {
+			action = audit.ActionPublish
+		}
+		audit.Record(ctx, deps.Queries, cal.ID, uint32(inviteID), inviteAuditPublicID(uint32(inviteID)), audit.EntityInvite, action, userID, role)
+
 		out := &CreateInviteOutput{}
 		out.Body = InviteResponse{
 			ID:        uint32(inviteID),
@@ -242,12 +272,27 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			Color:      "#42A5F5",
 		})
 		if err != nil {
+			if isDuplicateKey(err) {
+				if existing, existingErr := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+					CalendarID: invite.CalendarID,
+					UserID:     userID,
+				}); existingErr == nil {
+					out.Body.Role = string(existing.Role)
+					return out, nil
+				}
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		if err := tx.Commit(); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		user, _ := deps.Queries.GetUserByID(ctx, userID)
+		summary := string(invite.Role)
+		if user.Name != "" {
+			summary = user.Name + " -> " + string(invite.Role)
+		}
+		audit.Record(ctx, deps.Queries, invite.CalendarID, userID, user.PublicID, audit.EntityMember, audit.ActionJoin, userID, summary)
 
 		out.Body.Role = string(invite.Role)
 		return out, nil
@@ -279,6 +324,7 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 
 func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*DeleteInviteOutput, error) {
 	return func(ctx context.Context, in *DeleteInviteInput) (*DeleteInviteOutput, error) {
+		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarAdmin(ctx, deps, in.CalendarID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
@@ -294,6 +340,7 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		audit.Record(ctx, deps.Queries, cal.ID, in.InviteID, inviteAuditPublicID(in.InviteID), audit.EntityInvite, audit.ActionRevoke, userID, "")
 		return &DeleteInviteOutput{}, nil
 	}
 }
@@ -332,8 +379,14 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 
 		var startTime, endTime time.Time
 		if in.StartDate != "" && in.EndDate != "" {
-			startTime, _ = time.Parse("2006-01-02", in.StartDate)
-			endTime, _ = time.Parse("2006-01-02", in.EndDate)
+			startTime, err = time.Parse("2006-01-02", in.StartDate)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			endTime, err = time.Parse("2006-01-02", in.EndDate)
+			if err != nil || endTime.Before(startTime) {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
 			endTime = endTime.AddDate(0, 0, 1)
 		} else {
 			startTime = time.Now().AddDate(0, 0, -7)
@@ -358,6 +411,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 				AllDay:   e.AllDay,
 				StartAt:  e.StartAt,
 				EndAt:    e.EndAt,
+				Timezone: e.Timezone,
 				Color:    e.Color,
 				Location: e.Location,
 			})
@@ -374,24 +428,30 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 
 		for _, e := range recurringRows {
-			var ruleData json.RawMessage
-			if e.RecurrenceRule != nil {
-				ruleData = *e.RecurrenceRule
-			}
-			rule := recurrence.ParseRule(ruleData)
-			if rule == nil {
-				continue
-			}
-			occurrences := recurrence.Expand(rule, e.StartAt, e.EndAt, startTime, endTime)
 			parentID := pubIDToHex(e.PublicID)
-			for _, occ := range occurrences {
-				dateStr := occ.StartAt.Format("20060102")
+			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+				if inst.IsException {
+					dateStr := inst.OriginalStart.Format("20060102")
+					results = append(results, PublicEventResponse{
+						ID:       fmt.Sprintf("%s_%s", parentID, dateStr),
+						Title:    inst.Event.Title,
+						AllDay:   inst.Event.AllDay,
+						StartAt:  inst.Event.StartAt,
+						EndAt:    inst.Event.EndAt,
+						Timezone: inst.Event.Timezone,
+						Color:    inst.Event.Color,
+						Location: inst.Event.Location,
+					})
+					continue
+				}
+				dateStr := inst.OriginalStart.Format("20060102")
 				results = append(results, PublicEventResponse{
 					ID:       fmt.Sprintf("%s_%s", parentID, dateStr),
 					Title:    e.Title,
 					AllDay:   e.AllDay,
-					StartAt:  occ.StartAt,
-					EndAt:    occ.EndAt,
+					StartAt:  inst.Occurrence.StartAt,
+					EndAt:    inst.Occurrence.EndAt,
+					Timezone: e.Timezone,
 					Color:    e.Color,
 					Location: e.Location,
 				})

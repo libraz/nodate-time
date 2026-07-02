@@ -3,7 +3,8 @@ import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { api } from '@/lib/api';
-import { formatMonthYear, getWeekdayLabel } from '@/lib/date-utils';
+import { formatMonthYear, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import { publicEventOccursOnDay } from '@/lib/public-calendar';
 import { useUiStore } from '@/stores/ui-store';
 
 interface PublicCalendar {
@@ -18,6 +19,7 @@ interface PublicEvent {
   allDay: boolean;
   startAt: string;
   endAt: string;
+  timezone?: string;
   color: string;
   location?: string;
 }
@@ -72,29 +74,14 @@ function EmbeddedCalendarView() {
     );
   }
 
-  const monthEnd = currentMonth.endOf('month');
-  const gridStart = currentMonth.startOf('week');
-  const gridEnd = monthEnd.endOf('week');
-
-  const days: DateTime[] = [];
-  let d = gridStart;
-  while (d <= gridEnd) {
-    days.push(d);
-    d = d.plus({ days: 1 });
-  }
+  const days = getMonthDays(currentMonth.year, currentMonth.month - 1);
   const weeks: DateTime[][] = [];
   for (let i = 0; i < days.length; i += 7) {
     weeks.push(days.slice(i, i + 7));
   }
 
   const getEventsForDay = (day: DateTime) => {
-    const dayStart = day.startOf('day');
-    const dayEnd = day.endOf('day');
-    return events.filter((e) => {
-      const eStart = DateTime.fromISO(e.startAt);
-      const eEnd = DateTime.fromISO(e.endAt);
-      return eStart < dayEnd && eEnd > dayStart;
-    });
+    return events.filter((e) => publicEventOccursOnDay(e, day));
   };
 
   const today = DateTime.now();
