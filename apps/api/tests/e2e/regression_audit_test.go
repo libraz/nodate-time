@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -101,6 +102,50 @@ func TestSingleUseInviteCannotBeReused(t *testing.T) {
 	// Second distinct user is rejected — the invite is exhausted.
 	secondStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", second.AccessToken, nil)
 	require.True(t, secondStatus == 404 || secondStatus == 410, "expected exhausted invite to be rejected, got %d", secondStatus)
+}
+
+// TestSingleUseInviteConcurrentAccept verifies the invite use-count guard under
+// actual concurrent accepts: exactly one distinct user can consume maxUses=1.
+func TestSingleUseInviteConcurrentAccept(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	first := helpers.NewTenant(t, testServerURL)
+	second := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member", "maxUses": 1}, &inv)
+
+	start := make(chan struct{})
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for _, token := range []string{first.AccessToken, second.AccessToken} {
+		wg.Add(1)
+		go func(accessToken string) {
+			defer wg.Done()
+			<-start
+			status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", accessToken, nil)
+			statuses <- status
+		}(token)
+	}
+	close(start)
+	wg.Wait()
+	close(statuses)
+
+	successes := 0
+	for status := range statuses {
+		if status >= 200 && status < 300 {
+			successes++
+			continue
+		}
+		require.True(t, status == http.StatusNotFound || status == http.StatusGone, "unexpected concurrent accept status %d", status)
+	}
+	require.Equal(t, 1, successes)
 }
 
 // TestReacceptInviteIsIdempotent verifies that an existing member re-accepting an
@@ -210,6 +255,159 @@ func TestAssignedToMustBeMember(t *testing.T) {
 		}, &evt)
 	require.NotNil(t, evt.AssignedTo)
 	require.Equal(t, owner.UserID, *evt.AssignedTo)
+}
+
+// TestEventHistoryIsCalendarScoped verifies an event audit history request
+// cannot read another calendar's audit log by guessing its event id.
+func TestEventHistoryIsCalendarScoped(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	victim := helpers.NewTenant(t, testServerURL)
+	attacker := helpers.NewTenant(t, testServerURL)
+
+	victimCal := testServerURL + "/calendars/" + victim.CalendarID
+	var victimEvent struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, victimCal+"/events", victim.AccessToken,
+		map[string]any{
+			"title":   "Private audited event",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+		}, &victimEvent)
+	require.NotEmpty(t, victimEvent.ID)
+
+	attackerCal := testServerURL + "/calendars/" + attacker.CalendarID
+	var history []struct {
+		ID      uint64 `json:"id"`
+		Summary string `json:"summary"`
+	}
+	helpers.DoJSON(t, http.MethodGet,
+		attackerCal+"/events/"+victimEvent.ID+"/history", attacker.AccessToken, nil, &history)
+	require.Empty(t, history, "foreign event audit history must not be returned through another calendar")
+}
+
+func TestAttachmentPresignRejectsSVG(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var evt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title":   "Attachment host",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+		}, &evt)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
+		map[string]any{"filename": "active.svg", "contentType": "image/svg+xml", "byteSize": 128})
+	require.Equal(t, http.StatusBadRequest, status)
+}
+
+func TestViewerListMembersHidesOtherEmails(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	viewer := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "viewer"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", viewer.AccessToken, nil, nil)
+
+	var members []struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/members", viewer.AccessToken, nil, &members)
+	require.Len(t, members, 2)
+
+	emails := map[string]string{}
+	for _, m := range members {
+		emails[m.ID] = m.Email
+	}
+	require.Empty(t, emails[owner.UserID], "viewer must not see another member's email")
+	require.Equal(t, viewer.Email, emails[viewer.UserID], "viewer may see their own email")
+}
+
+func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		ID    uint32 `json:"id"`
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
+	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
+		map[string]any{"role": "admin"}, nil)
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+uintToStr(inv.ID), owner.AccessToken, nil)
+	require.True(t, status >= 200 && status < 300)
+
+	type activityFeedItem struct {
+		EntityType string `json:"entityType"`
+		Action     string `json:"action"`
+		ID         uint64 `json:"id"`
+		Summary    string `json:"summary"`
+		Actor      *struct {
+			ID string `json:"id"`
+		} `json:"actor"`
+	}
+	type activityPage struct {
+		Items      []activityFeedItem `json:"items"`
+		NextCursor string             `json:"nextCursor"`
+	}
+	var feed activityPage
+	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=20", owner.AccessToken, nil, &feed)
+
+	seen := map[string]bool{}
+	for _, item := range feed.Items {
+		key := item.EntityType + ":" + item.Action
+		seen[key] = true
+		if key == "member:role_change" {
+			require.Contains(t, item.Summary, "admin")
+			require.NotNil(t, item.Actor)
+			require.Equal(t, owner.UserID, item.Actor.ID)
+		}
+	}
+	require.True(t, seen["invite:create"], "invite creation must be audited")
+	require.True(t, seen["member:join"], "invite acceptance must be audited")
+	require.True(t, seen["member:role_change"], "member role changes must be audited")
+	require.True(t, seen["invite:revoke"], "invite revocation must be audited")
+
+	var firstPage activityPage
+	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=2", owner.AccessToken, nil, &firstPage)
+	require.Len(t, firstPage.Items, 2)
+	require.NotEmpty(t, firstPage.NextCursor)
+
+	var secondPage activityPage
+	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=2&cursor="+firstPage.NextCursor, owner.AccessToken, nil, &secondPage)
+	require.NotEmpty(t, secondPage.Items)
+	ids := map[uint64]bool{}
+	for _, item := range firstPage.Items {
+		ids[item.ID] = true
+	}
+	for _, item := range secondPage.Items {
+		require.False(t, ids[item.ID], "activity cursor must not repeat items across pages")
+	}
 }
 
 // TestAttachmentDownloadIsTenantScoped verifies the cross-tenant attachment IDOR
