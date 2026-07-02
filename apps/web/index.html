@@ -6,6 +6,30 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Nodate Time</title>
+    <script>
+      (() => {
+        const read = (key, fallback) => {
+          try {
+            const raw = localStorage.getItem(`tt_${key}`);
+            return raw == null ? fallback : JSON.parse(raw);
+          } catch {
+            return fallback;
+          }
+        };
+        const root = document.documentElement;
+        const theme = read("theme", "glass");
+        if (theme && theme !== "glass") {
+          root.setAttribute("data-theme", theme);
+        }
+        const mode = read("colorMode", "system");
+        if (mode === "dark" || mode === "light") {
+          root.setAttribute("data-mode", mode);
+        } else {
+          const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+          root.setAttribute("data-mode", dark ? "dark" : "light");
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
