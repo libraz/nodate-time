@@ -176,6 +176,48 @@ func TestRemoveMember(t *testing.T) {
 	}
 }
 
+func TestMemberCanLeaveCalendar(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	member := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+member.UserID, member.AccessToken, nil)
+	require.GreaterOrEqual(t, status, 200)
+	require.Less(t, status, 300)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, calURL, member.AccessToken, nil)
+	assert.Equal(t, http.StatusForbidden, status)
+}
+
+func TestNonAdminRemoveMemberDoesNotProbeTarget(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	member := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/00000000-0000-4000-8000-000000000000", member.AccessToken, nil)
+	require.Equal(t, http.StatusForbidden, status)
+}
+
 // TestUpdateOwnRoleForbidden verifies an admin cannot change their own role even
 // when another admin exists, so the only path to a role change is via someone else.
 func TestUpdateOwnRoleForbidden(t *testing.T) {
@@ -201,9 +243,9 @@ func TestUpdateOwnRoleForbidden(t *testing.T) {
 	assert.Equal(t, 400, status)
 }
 
-// TestRemoveSelfForbidden verifies an admin cannot remove themselves even when
-// another admin exists (leaving via this endpoint is not allowed).
-func TestRemoveSelfForbidden(t *testing.T) {
+// TestAdminCanLeaveWhenAnotherAdminExists verifies self-leave is allowed once
+// the last-admin guard is satisfied.
+func TestAdminCanLeaveWhenAnotherAdminExists(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -222,7 +264,11 @@ func TestRemoveSelfForbidden(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+owner.UserID,
 		owner.AccessToken, nil)
-	assert.Equal(t, 400, status)
+	require.GreaterOrEqual(t, status, 200)
+	require.Less(t, status, 300)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, calURL, owner.AccessToken, nil)
+	assert.Equal(t, http.StatusForbidden, status)
 }
 
 // --- iCal export / import ---
