@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -39,6 +40,18 @@ func TestMemoLifecycle(t *testing.T) {
 	require.Len(t, memos, 2)
 	require.Equal(t, "シフト表作成", memos[0].Title)
 	require.Equal(t, "経費精算", memos[1].Title)
+}
+
+func TestMemoBodyLengthLimit(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/memos", tt.AccessToken,
+		map[string]any{"title": "too long", "body": strings.Repeat("a", 16001), "sortOrder": 0})
+	require.Equal(t, http.StatusUnprocessableEntity, status)
 }
 
 func TestMemoUpdateDelete(t *testing.T) {
