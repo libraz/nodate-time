@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { useEffect, useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
+import { filterEventsForSearch } from '@/lib/search';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -35,17 +36,7 @@ export function SearchPanel() {
     return () => document.removeEventListener('keydown', handler);
   }, [showSearch, toggleSearch]);
 
-  const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return events.filter((evt) => {
-      return (
-        evt.title.toLowerCase().includes(q) ||
-        evt.location.toLowerCase().includes(q) ||
-        evt.memo.toLowerCase().includes(q)
-      );
-    });
-  }, [searchQuery, events]);
+  const filtered = useMemo(() => filterEventsForSearch(events, searchQuery), [searchQuery, events]);
 
   const handleSelect = (eventId: string, startAt: string) => {
     const dt = DateTime.fromISO(startAt);
