@@ -118,7 +118,11 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	if t != nil {
 		t.Helper()
 	}
-	dsn := "ttuser:ttpw@tcp(127.0.0.1:3307)/timetree_clone?parseTime=true"
+	port := os.Getenv("TC_DB_PORT")
+	if port == "" {
+		port = "33306"
+	}
+	dsn := fmt.Sprintf("ttuser:ttpw@tcp(127.0.0.1:%s)/timetree_clone?parseTime=true", port)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		if t != nil {
@@ -131,7 +135,7 @@ func OpenTestDB(t *testing.T) *sql.DB {
 
 	if err := db.Ping(); err != nil {
 		if t != nil {
-			t.Skipf("test database not available: %v (run: TC_DB_PORT=3307 docker compose up -d mysql)", err)
+			t.Skipf("test database not available: %v (run: docker compose up -d mysql)", err)
 		}
 		return nil
 	}
