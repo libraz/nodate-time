@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CalendarEvent, Memo } from '@/types/calendar';
+import type { Calendar, CalendarEvent, Memo } from '@/types/calendar';
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -8,12 +8,33 @@ vi.mock('@/lib/api', () => ({
     put: vi.fn(),
     delete: vi.fn(),
   },
+  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+}));
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    error: vi.fn(),
+  },
 }));
 
 import { api } from '@/lib/api';
+import { toast } from '@/lib/toast';
 import { useCalendarStore } from './calendar-store';
 
 const mockApi = vi.mocked(api);
+const mockToast = vi.mocked(toast);
+
+function cal(id: string, overrides: Partial<Calendar> = {}): Calendar {
+  return {
+    id,
+    name: `Calendar ${id}`,
+    color: '#47B2F7',
+    coverUrl: '',
+    createdAt: '',
+    publicShared: false,
+    ...overrides,
+  };
+}
 
 function evt(
   id: string,
@@ -89,6 +110,54 @@ describe('fetchEvents', () => {
     const { events } = useCalendarStore.getState();
     expect(events).toHaveLength(2);
     expect(events.map((e) => e.calendarId).sort()).toEqual(['cal-1', 'cal-2']);
+  });
+
+  it('keeps successful calendars when one calendar fails', async () => {
+    useCalendarStore.setState({
+      calendars: [cal('cal-1'), cal('cal-2')],
+    });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url.includes('/calendars/cal-1/events')) return [evt('e1', 'cal-1')] as never;
+      if (url.includes('/calendars/cal-2/events')) throw new Error('cal-2 failed');
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['e1']);
+    expect(mockToast.error).toHaveBeenCalledWith('cal-2 failed');
+  });
+});
+
+describe('fetchCalendars', () => {
+  it('prunes stale active calendar ids and enables newly visible calendars', async () => {
+    localStorage.setItem('tt_activeCalendarIds', JSON.stringify(['stale', 'cal-1']));
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      if (url.endsWith('/members')) return [] as never;
+      if (url.endsWith('/labels')) return [] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-1', 'cal-2']);
+    expect(localStorage.getItem('tt_activeCalendarIds')).toBe('["cal-1","cal-2"]');
+  });
+
+  it('keeps calendar loading successful when a member request fails', async () => {
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      if (url === '/calendars/cal-1/members') return [] as never;
+      if (url === '/calendars/cal-2/members') throw new Error('members failed');
+      if (url === '/calendars/cal-1/labels') return [] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    expect(useCalendarStore.getState().calendars.map((c) => c.id)).toEqual(['cal-1', 'cal-2']);
+    expect(mockToast.error).toHaveBeenCalledWith('members failed');
   });
 });
 

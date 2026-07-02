@@ -1,7 +1,8 @@
 import { DateTime } from 'luxon';
 import { create } from 'zustand';
-import { api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 import { loadJson, saveJson } from '@/lib/storage';
+import { toast } from '@/lib/toast';
 import { useUiStore } from '@/stores/ui-store';
 import type {
   Calendar,
@@ -90,14 +91,24 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     try {
       const cals = await api.get<Calendar[]>('/calendars');
       const saved = loadJson<string[]>('activeCalendarIds', []);
-      const ids = saved.length > 0 ? saved : cals.map((c) => c.id);
+      const calendarIDs = cals.map((c) => c.id);
+      const savedActive = saved.filter((id) => calendarIDs.includes(id));
+      const newIDs = calendarIDs.filter((id) => !saved.includes(id));
+      const ids = saved.length > 0 ? [...savedActive, ...newIDs] : calendarIDs;
       set({ calendars: cals, activeCalendarIds: ids });
       saveJson('activeCalendarIds', ids);
 
-      await Promise.all(cals.map((c) => get().fetchMembers(c.id)));
+      const memberResults = await Promise.allSettled(cals.map((c) => get().fetchMembers(c.id)));
+      for (const result of memberResults) {
+        if (result.status === 'rejected') toast.error(errorMessage(result.reason));
+      }
       const first = cals[0];
       if (first && get().labels.length === 0) {
-        await get().fetchLabels(first.id);
+        try {
+          await get().fetchLabels(first.id);
+        } catch (e) {
+          toast.error(errorMessage(e));
+        }
       }
     } finally {
       set({ isLoading: false });
@@ -107,7 +118,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   async fetchEvents(start, end) {
     const { calendars } = get();
     const allEvents: CalendarEvent[] = [];
-    await Promise.all(
+    const results = await Promise.allSettled(
       calendars.map(async (cal) => {
         const evts = await api.get<CalendarEvent[]>(
           `/calendars/${cal.id}/events?start=${start}&end=${end}`,
@@ -117,13 +128,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         }
       }),
     );
+    for (const result of results) {
+      if (result.status === 'rejected') toast.error(errorMessage(result.reason));
+    }
     set({ events: allEvents });
   },
 
   async fetchMemos() {
     const { calendars } = get();
     const allMemos: Memo[] = [];
-    await Promise.all(
+    const results = await Promise.allSettled(
       calendars.map(async (cal) => {
         const ms = await api.get<Memo[]>(`/calendars/${cal.id}/memos`);
         for (const m of ms) {
@@ -131,6 +145,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         }
       }),
     );
+    for (const result of results) {
+      if (result.status === 'rejected') toast.error(errorMessage(result.reason));
+    }
     set({ memos: allMemos });
   },
 
