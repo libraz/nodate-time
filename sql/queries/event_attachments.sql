@@ -13,7 +13,21 @@ INSERT INTO event_attachments (public_id, event_id, uploaded_by, filename, conte
 VALUES (?, ?, ?, ?, ?, ?, ?, 0);
 
 -- name: ConfirmEventAttachment :execresult
-UPDATE event_attachments SET enabled = 1 WHERE id = ? AND enabled = 0;
+UPDATE event_attachments SET enabled = 1 WHERE id = ? AND uploaded_by = ? AND enabled = 0;
 
 -- name: SoftDeleteAttachment :exec
 UPDATE event_attachments SET enabled = 0 WHERE id = ?;
+
+-- name: ListAttachmentStorageKeysByEvent :many
+SELECT storage_key FROM event_attachments WHERE event_id = ?;
+
+-- name: ListAttachmentStorageKeysByCalendar :many
+SELECT ea.storage_key FROM event_attachments ea
+INNER JOIN events e ON e.id = ea.event_id
+WHERE e.calendar_id = ?;
+
+-- name: ListAbandonedAttachmentStorageKeys :many
+SELECT storage_key FROM event_attachments WHERE enabled = 0 AND created_at < ?;
+
+-- name: DeleteAbandonedAttachments :exec
+DELETE FROM event_attachments WHERE enabled = 0 AND created_at < ?;

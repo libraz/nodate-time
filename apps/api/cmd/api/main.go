@@ -53,11 +53,6 @@ func main() {
 
 	queries := generated.New(db)
 
-	// Background cleanup of expired tokens
-	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
-	defer cancelCleanup()
-	cleanup.Run(cleanupCtx, queries, 15*time.Minute)
-
 	// Storage (MinIO)
 	var storageClient *storage.Client
 	if cfg.S3Endpoint != "" {
@@ -73,6 +68,11 @@ func main() {
 			}
 		}
 	}
+
+	// Background cleanup of expired tokens and abandoned upload rows/objects.
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	defer cancelCleanup()
+	cleanup.Run(cleanupCtx, queries, storageClient, 15*time.Minute)
 
 	// Build app router
 	mailerClient := mailer.New(mailer.SMTPConfig{

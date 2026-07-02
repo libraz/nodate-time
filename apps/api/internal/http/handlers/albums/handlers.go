@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -15,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -34,11 +33,7 @@ type Deps struct {
 }
 
 func pubIDToHex(b []byte) string {
-	u, err := uuid.FromBytes(b)
-	if err != nil {
-		return hex.EncodeToString(b)
-	}
-	return u.String()
+	return calresolve.PublicIDString(b)
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -50,48 +45,22 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, _, err := resolveCalendarMember(ctx, deps, calPubID, userID)
-	return cal, err
+	return calresolve.Read(ctx, deps.Queries, calPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
-	if err != nil {
-		return generated.Calendar{}, err
-	}
-	if member.Role == generated.CalendarMembersRoleViewer {
-		return generated.Calendar{}, apierrors.CalendarRoleRequired
-	}
-	return cal, nil
+	return calresolve.Write(ctx, deps.Queries, calPubID, userID)
 }
 
 func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	pubBytes, err := parseUUID(calPubID)
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-	}
-	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-		}
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
-	}
-	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: cal.ID,
-		UserID:     userID,
-	})
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
-	}
-	return cal, member, nil
+	return calresolve.Member(ctx, deps.Queries, calPubID, userID)
 }
 
 func isImageContentType(ct string) bool {
 	ct = strings.ToLower(strings.TrimSpace(ct))
-	return strings.HasPrefix(ct, "image/")
+	return strings.HasPrefix(ct, "image/") && ct != "image/svg+xml"
 }
 
 func photoStorageKey(calPubHex, photoPubHex string) string {
@@ -147,6 +116,110 @@ func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUpl
 	if deps.Storage != nil && u.AvatarStorageKey.Valid && u.AvatarStorageKey.String != "" {
 		if url, err := deps.Storage.PresignGet(ctx, u.AvatarStorageKey.String, downloadTTL); err == nil {
 			resp.AvatarURL = url
+		}
+	}
+	return resp
+}
+
+type albumPhotoListRow struct {
+	id                uint32
+	publicID          []byte
+	caption           string
+	contentType       string
+	byteSize          int64
+	width             sql.NullInt32
+	height            sql.NullInt32
+	storageKey        string
+	takenAt           time.Time
+	createdAt         time.Time
+	uploaderPublicID  []byte
+	uploaderName      string
+	uploaderAvatarKey sql.NullString
+	eventPublicID     sql.NullString
+}
+
+func firstPagePhotoRows(rows []generated.ListAlbumPhotosFirstPageRow) []albumPhotoListRow {
+	out := make([]albumPhotoListRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, albumPhotoListRow{
+			id:                r.ID,
+			publicID:          r.PublicID,
+			caption:           r.Caption,
+			contentType:       r.ContentType,
+			byteSize:          r.ByteSize,
+			width:             r.Width,
+			height:            r.Height,
+			storageKey:        r.StorageKey,
+			takenAt:           r.TakenAt,
+			createdAt:         r.CreatedAt,
+			uploaderPublicID:  r.UploaderPublicID,
+			uploaderName:      r.UploaderName,
+			uploaderAvatarKey: r.UploaderAvatarKey,
+			eventPublicID:     r.EventPublicID,
+		})
+	}
+	return out
+}
+
+func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoListRow {
+	out := make([]albumPhotoListRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, albumPhotoListRow{
+			id:                r.ID,
+			publicID:          r.PublicID,
+			caption:           r.Caption,
+			contentType:       r.ContentType,
+			byteSize:          r.ByteSize,
+			width:             r.Width,
+			height:            r.Height,
+			storageKey:        r.StorageKey,
+			takenAt:           r.TakenAt,
+			createdAt:         r.CreatedAt,
+			uploaderPublicID:  r.UploaderPublicID,
+			uploaderName:      r.UploaderName,
+			uploaderAvatarKey: r.UploaderAvatarKey,
+			eventPublicID:     r.EventPublicID,
+		})
+	}
+	return out
+}
+
+func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albumPhotoListRow, avatarURLs map[string]string) AlbumPhotoResponse {
+	resp := AlbumPhotoResponse{
+		ID:          pubIDToHex(p.publicID),
+		CalendarID:  pubIDToHex(cal.PublicID),
+		Caption:     p.caption,
+		ContentType: p.contentType,
+		ByteSize:    p.byteSize,
+		TakenAt:     p.takenAt,
+		CreatedAt:   p.createdAt,
+		UploadedBy:  AlbumUploader{ID: pubIDToHex(p.uploaderPublicID), Name: p.uploaderName},
+	}
+	if p.eventPublicID.Valid {
+		resp.EventID = pubIDToHex([]byte(p.eventPublicID.String))
+	}
+	if p.width.Valid {
+		w := int(p.width.Int32)
+		resp.Width = &w
+	}
+	if p.height.Valid {
+		h := int(p.height.Int32)
+		resp.Height = &h
+	}
+	if deps.Storage != nil && p.uploaderAvatarKey.Valid && p.uploaderAvatarKey.String != "" {
+		key := p.uploaderAvatarKey.String
+		if cached, ok := avatarURLs[key]; ok {
+			resp.UploadedBy.AvatarURL = cached
+		} else if url, err := deps.Storage.PresignGet(ctx, key, downloadTTL); err == nil {
+			avatarURLs[key] = url
+			resp.UploadedBy.AvatarURL = url
+		}
+	}
+	if deps.Storage != nil {
+		if url, err := deps.Storage.PresignGet(ctx, p.storageKey, downloadTTL); err == nil {
+			resp.ImageURL = url
+		} else {
+			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.id, "error", err)
 		}
 	}
 	return resp
@@ -221,23 +294,27 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		// fetch one extra to determine if there is a next page
 		fetchLimit := limit + 1
 
-		var photos []generated.AlbumPhoto
+		var photos []albumPhotoListRow
 		if in.Cursor == "" {
-			photos, err = deps.Queries.ListAlbumPhotosFirstPage(ctx, generated.ListAlbumPhotosFirstPageParams{
+			rows, qerr := deps.Queries.ListAlbumPhotosFirstPage(ctx, generated.ListAlbumPhotosFirstPageParams{
 				CalendarID: cal.ID,
 				Limit:      fetchLimit,
 			})
+			err = qerr
+			photos = firstPagePhotoRows(rows)
 		} else {
 			takenAt, idBefore, derr := decodeCursor(in.Cursor)
 			if derr != nil {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
-			photos, err = deps.Queries.ListAlbumPhotosAfter(ctx, generated.ListAlbumPhotosAfterParams{
+			rows, qerr := deps.Queries.ListAlbumPhotosAfter(ctx, generated.ListAlbumPhotosAfterParams{
 				CalendarID:  cal.ID,
 				TakenBefore: takenAt,
 				IDBefore:    idBefore,
 				Limit:       fetchLimit,
 			})
+			err = qerr
+			photos = afterPagePhotoRows(rows)
 		}
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -250,12 +327,13 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		if hasMore {
 			photos = photos[:limit]
 		}
+		avatarURLs := make(map[string]string)
 		for _, p := range photos {
-			out.Body.Items = append(out.Body.Items, mapPhoto(ctx, deps, cal, p))
+			out.Body.Items = append(out.Body.Items, mapListPhoto(ctx, deps, cal, p, avatarURLs))
 		}
 		if hasMore && len(photos) > 0 {
 			last := photos[len(photos)-1]
-			out.Body.NextCursor = encodeCursor(last.TakenAt, last.ID)
+			out.Body.NextCursor = encodeCursor(last.takenAt, last.id)
 		}
 		return out, nil
 	}
@@ -276,14 +354,14 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if deps.Storage == nil {
-			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-		}
 		if !isImageContentType(in.Body.ContentType) {
 			return nil, apierrors.ToHuma(apierrors.InvalidImageContentType)
 		}
 		if in.Body.ByteSize > maxPhotoSize {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
+		}
+		if deps.Storage == nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
 		eventID, err := resolveEventForCalendar(ctx, deps, cal.ID, in.Body.EventID)
@@ -369,17 +447,33 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		if err != nil || p.CalendarID != cal.ID {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
+		if p.Enabled || p.UploadedBy != userID {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
+		}
 
-		exists, err := deps.Storage.StatObject(ctx, p.StorageKey)
+		info, exists, err := deps.Storage.StatObject(ctx, p.StorageKey)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 		if !exists {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
+		if info.Size > maxPhotoSize {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
+		}
+		if info.Size != p.ByteSize {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
 
-		if _, err := deps.Queries.ConfirmAlbumPhoto(ctx, p.ID); err != nil {
+		res, err := deps.Queries.ConfirmAlbumPhoto(ctx, generated.ConfirmAlbumPhotoParams{
+			ID:         p.ID,
+			UploadedBy: userID,
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
 		p.Enabled = true
 		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, p)}, nil
@@ -514,7 +608,7 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
-		url, err := deps.Storage.PresignGet(ctx, photo.StorageKey, downloadTTL)
+		url, err := deps.Storage.PresignDownload(ctx, photo.StorageKey, downloadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

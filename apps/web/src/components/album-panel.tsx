@@ -37,7 +37,9 @@ export function AlbumPanel() {
   const me = useAuthStore((s) => s.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
+  const [nextCursor, setNextCursor] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<AlbumPhoto | null>(null);
@@ -51,6 +53,7 @@ export function AlbumPanel() {
   const reload = useCallback(async () => {
     if (!activeCalendarId) {
       setPhotos([]);
+      setNextCursor('');
       return;
     }
     setLoading(true);
@@ -58,12 +61,30 @@ export function AlbumPanel() {
     try {
       const data = await api.get<AlbumListResponse>(`/calendars/${activeCalendarId}/albums`);
       setPhotos(data.items ?? []);
+      setNextCursor(data.nextCursor ?? '');
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
   }, [activeCalendarId]);
+
+  const loadMore = useCallback(async () => {
+    if (!activeCalendarId || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const data = await api.get<AlbumListResponse>(
+        `/calendars/${activeCalendarId}/albums?cursor=${encodeURIComponent(nextCursor)}`,
+      );
+      setPhotos((cur) => [...cur, ...(data.items ?? [])]);
+      setNextCursor(data.nextCursor ?? '');
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeCalendarId, nextCursor, loadingMore]);
 
   useEffect(() => {
     if (rightPanel === 'album') {
@@ -224,22 +245,34 @@ export function AlbumPanel() {
               {t('panel.noPhotos')}
             </p>
           ) : (
-            <div className="grid grid-cols-3 gap-1">
-              {photos.map((p) => (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-1">
+                {photos.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => openLightbox(p)}
+                    className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-surface-secondary)]"
+                  >
+                    <img
+                      src={p.imageUrl}
+                      alt={p.caption}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+              {nextCursor && (
                 <button
-                  key={p.id}
                   type="button"
-                  onClick={() => openLightbox(p)}
-                  className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-surface-secondary)]"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="btn-secondary w-full text-body disabled:opacity-50"
                 >
-                  <img
-                    src={p.imageUrl}
-                    alt={p.caption}
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                  />
+                  {loadingMore ? t('common.loading') : t('album.loadMore')}
                 </button>
-              ))}
+              )}
             </div>
           )}
         </div>

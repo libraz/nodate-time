@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,10 @@ import (
 )
 
 const maxAttachmentSize = 100 * 1024 * 1024 // 100 MB
+
+func isRejectedAttachmentContentType(contentType string) bool {
+	return strings.EqualFold(strings.TrimSpace(contentType), "image/svg+xml")
+}
 
 func mapAttachment(att generated.EventAttachment) AttachmentResponse {
 	return AttachmentResponse{
@@ -44,10 +49,6 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		if deps.Storage == nil {
-			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-		}
-
 		if in.Body.ByteSize > maxAttachmentSize {
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
 		}
@@ -55,6 +56,13 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		contentType := in.Body.ContentType
 		if contentType == "" {
 			contentType = "application/octet-stream"
+		}
+		if isRejectedAttachmentContentType(contentType) {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+
+		if deps.Storage == nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
 		attachPubID, _ := uuid.NewV7()
@@ -164,7 +172,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
-		url, err := deps.Storage.PresignGet(ctx, att.StorageKey, 5*time.Minute)
+		url, err := deps.Storage.PresignDownload(ctx, att.StorageKey, 5*time.Minute)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -204,6 +212,9 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 		if att.EventID != evt.ID {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+		if !att.Enabled {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
@@ -257,17 +268,33 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		if err != nil || att.EventID != evt.ID {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
+		if att.Enabled || att.UploadedBy != userID {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
 
-		exists, err := deps.Storage.StatObject(ctx, att.StorageKey)
+		info, exists, err := deps.Storage.StatObject(ctx, att.StorageKey)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 		if !exists {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
+		if info.Size > maxAttachmentSize {
+			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
+		}
+		if info.Size != att.ByteSize {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
 
-		if _, err := deps.Queries.ConfirmEventAttachment(ctx, att.ID); err != nil {
+		res, err := deps.Queries.ConfirmEventAttachment(ctx, generated.ConfirmEventAttachmentParams{
+			ID:         att.ID,
+			UploadedBy: userID,
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if affected, _ := res.RowsAffected(); affected != 1 {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 		att.Enabled = true
 		return &ConfirmAttachmentOutput{Body: mapAttachment(att)}, nil
