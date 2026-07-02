@@ -16,6 +16,7 @@ import {
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { layoutTimedEventsForDay, resizedEndForDaySegment } from '@/lib/timed-layout';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { useAuthStore } from '@/stores/auth-store';
@@ -46,8 +47,12 @@ export function WeeklyTimeline() {
   const MIN_DURATION_MIN = 30;
 
   // Live end-minute preview while resizing, so the block follows the cursor.
-  const [resizePreview, setResizePreview] = useState<{ id: string; endMin: number } | null>(null);
-  const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; startMin: number } | null>(null);
+  const [resizePreview, setResizePreview] = useState<{
+    id: string;
+    dayKey: string;
+    endMin: number;
+  } | null>(null);
+  const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; dayStart: DateTime } | null>(null);
   // A resize ends with a pointerup inside the block, which the browser turns into
   // a click on the parent button. Suppress that click so it doesn't open the modal.
   const suppressClick = useRef(false);
@@ -86,26 +91,39 @@ export function WeeklyTimeline() {
   // Resize: drag the bottom edge of a timed block to change its end time. The
   // start and day stay fixed; the end snaps and keeps a minimum duration.
   const startResize = useCallback(
-    (evt: CalendarEvent, blockTop: number, e: ReactPointerEvent) => {
+    (evt: CalendarEvent, e: ReactPointerEvent) => {
       e.stopPropagation();
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if (!canMove(evt)) return;
       const col = (e.currentTarget as HTMLElement).closest('[data-daycol]') as HTMLElement | null;
       if (!col) return;
+      const dayKey = col.getAttribute('data-daycol');
+      if (!dayKey) return;
       const colTop = col.getBoundingClientRect().top;
-      const startMin = Math.round((blockTop / HOUR_HEIGHT) * 60);
-      resizeRef.current = { evt, colTop, startMin };
+      const dayStart = DateTime.fromFormat(dayKey, 'yyyy-MM-dd', { zone: timezone }).startOf('day');
+      resizeRef.current = { evt, colTop, dayStart };
 
       const ctrl = new AbortController();
       let moved = false;
       const computeEnd = (clientY: number) => {
-        const rawMin = ((clientY - colTop) / HOUR_HEIGHT) * 60;
-        const snapped = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
-        return Math.min(Math.max(snapped, startMin + MIN_DURATION_MIN), 24 * 60);
+        const end = resizedEndForDaySegment({
+          eventStartISO: evt.startAt,
+          dayStart,
+          clientY,
+          colTop,
+          hourHeight: HOUR_HEIGHT,
+          snapMinutes: SNAP_MINUTES,
+          minDurationMinutes: MIN_DURATION_MIN,
+          zone: timezone,
+        });
+        return {
+          end,
+          endMin: end.diff(dayStart, 'minutes').minutes,
+        };
       };
       const onMove = (ev: globalThis.PointerEvent) => {
         moved = true;
-        setResizePreview({ id: evt.id, endMin: computeEnd(ev.clientY) });
+        setResizePreview({ id: evt.id, dayKey, endMin: computeEnd(ev.clientY).endMin });
       };
       const onUp = (ev: globalThis.PointerEvent) => {
         ctrl.abort();
@@ -119,9 +137,8 @@ export function WeeklyTimeline() {
         window.setTimeout(() => {
           suppressClick.current = false;
         }, 0);
-        const endMin = computeEnd(ev.clientY);
-        const dayStart = fromISOInZone(evt.startAt, timezone).startOf('day');
-        requestUpdate(evt, buildResizedEvent(evt, dayStart.plus({ minutes: endMin })));
+        const { end } = computeEnd(ev.clientY);
+        requestUpdate(evt, buildResizedEvent(evt, end));
       };
       window.addEventListener('pointermove', onMove, { signal: ctrl.signal });
       window.addEventListener('pointerup', onUp, { signal: ctrl.signal });
@@ -174,6 +191,18 @@ export function WeeklyTimeline() {
     }
     return { allDayEvents: allDay, timedEvents: timed };
   }, [events, activeCalendarIds, days, timezone]);
+
+  const timedLayouts = useMemo(() => {
+    const layouts: Map<string, ReturnType<typeof layoutTimedEventsForDay>> = new Map();
+    for (const day of days) {
+      const key = day.toFormat('yyyy-MM-dd');
+      layouts.set(
+        key,
+        layoutTimedEventsForDay(timedEvents.get(key) ?? [], day.startOf('day'), timezone),
+      );
+    }
+    return layouts;
+  }, [days, timedEvents, timezone]);
 
   /** Convert ISO string to pixel offset within the day column. */
   const timeToY = (iso: string, dayStartMs: number): number => {
@@ -275,7 +304,7 @@ export function WeeklyTimeline() {
           {/* Day columns */}
           {days.map((day) => {
             const key = day.toFormat('yyyy-MM-dd');
-            const dayTimed = timedEvents.get(key) ?? [];
+            const dayLayouts = timedLayouts.get(key) ?? [];
             const dayStartMs = day.startOf('day').toMillis();
             const today = isToday(day);
 
@@ -317,7 +346,7 @@ export function WeeklyTimeline() {
                 )}
 
                 {/* Timed event blocks */}
-                {dayTimed.map((evt) => {
+                {dayLayouts.map(({ event: evt, leftPct, widthPct }) => {
                   const evtStartMs = fromISOInZone(evt.startAt, timezone).toMillis();
                   const evtEndMs = fromISOInZone(evt.endAt, timezone).toMillis();
                   const clampedStart =
@@ -329,7 +358,7 @@ export function WeeklyTimeline() {
                   const baseHeight = Math.max(timeToY(clampedEnd, dayStartMs) - top, 20);
                   const startDt = fromISOInZone(evt.startAt, timezone);
                   const endDt = fromISOInZone(evt.endAt, timezone);
-                  const resizing = resizePreview?.id === evt.id;
+                  const resizing = resizePreview?.id === evt.id && resizePreview.dayKey === key;
                   const height = resizing
                     ? Math.max((resizePreview.endMin * HOUR_HEIGHT) / 60 - top, 20)
                     : baseHeight;
@@ -357,12 +386,14 @@ export function WeeklyTimeline() {
                         }
                         openEventModal(evt.id);
                       }}
-                      className={`absolute left-0.5 right-0.5 z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
+                      className={`absolute z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                       style={{
                         top,
                         height,
+                        left: `calc(${leftPct}% + 2px)`,
+                        width: `calc(${widthPct}% - 4px)`,
                         backgroundColor: `${evt.color}15`,
                         border: `1px solid ${evt.color}40`,
                       }}
@@ -376,7 +407,7 @@ export function WeeklyTimeline() {
                       {movable && (
                         <div
                           aria-hidden
-                          onPointerDown={(e) => startResize(evt, top, e)}
+                          onPointerDown={(e) => startResize(evt, e)}
                           className="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize touch-none"
                         />
                       )}
