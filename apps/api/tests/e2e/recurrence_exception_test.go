@@ -151,3 +151,153 @@ func TestRecurringDeleteAllPurgesOverrides(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 0, "series delete must also remove overrides")
 }
+
+// TestRecurringEditAllFromOccurrencePreservesPastInstances verifies scope=all
+// from an expanded occurrence shifts the master by delta instead of re-anchoring
+// the whole series to the occurrence date.
+func TestRecurringEditAllFromOccurrencePreservesPastInstances(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
+	target := evts[2] // 2026-04-17 occurrence
+	require.True(t, strings.Contains(target.ID, "_"))
+
+	var updated recInstance
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=all", tt.AccessToken,
+		map[string]any{
+			"title":   "Weekly meeting shifted",
+			"allDay":  false,
+			"startAt": "2026-04-17T18:00:00+09:00",
+			"endAt":   "2026-04-17T19:00:00+09:00",
+			"recurrenceRule": map[string]any{
+				"freq":     "weekly",
+				"interval": 1,
+				"byDay":    []string{"FR"},
+			},
+		}, &updated)
+	assert.False(t, strings.Contains(updated.ID, "_"))
+	assert.Contains(t, updated.StartAt, "T09:00:00Z")
+
+	var after []recInstance
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	require.Len(t, after, 4)
+	for _, e := range after {
+		assert.Equal(t, "Weekly meeting shifted", e.Title)
+		assert.Contains(t, e.StartAt, "T09:00:00Z", "all instances should shift to 18:00 JST, got %s", e.StartAt)
+	}
+}
+
+// TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift verifies a
+// cancellation tombstone keeps applying after a whole-series time edit changes
+// the absolute occurrence start instant.
+func TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
+	deleted := evts[1] // 2026-04-10
+	parentID := strings.Split(evts[0].ID, "_")[0]
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+deleted.ID+"?scope=this", tt.AccessToken, nil)
+	require.True(t, status >= 200 && status < 300)
+
+	var updated recInstance
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+parentID+"?scope=all", tt.AccessToken,
+		map[string]any{
+			"title":   "Weekly meeting shifted later",
+			"allDay":  false,
+			"startAt": "2026-04-03T16:00:00+09:00",
+			"endAt":   "2026-04-03T17:00:00+09:00",
+			"recurrenceRule": map[string]any{
+				"freq":     "weekly",
+				"interval": 1,
+				"byDay":    []string{"FR"},
+			},
+		}, &updated)
+	assert.Equal(t, parentID, updated.ID)
+
+	var after []recInstance
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	require.Len(t, after, 3, "deleted occurrence must not reappear after a series time shift")
+	for _, e := range after {
+		assert.NotEqual(t, deleted.ID, e.ID)
+		assert.NotContains(t, e.StartAt, "2026-04-10T07:00:00Z")
+	}
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, calURL+"/events/"+deleted.ID, tt.AccessToken, nil)
+	assert.Equal(t, http.StatusNotFound, status)
+}
+
+func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
+
+	var master struct {
+		ID           string   `json:"id"`
+		Participants []string `json:"participants"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
+		map[string]any{
+			"title":        "Weekly with participants",
+			"allDay":       false,
+			"startAt":      "2026-04-03T15:00:00+09:00",
+			"endAt":        "2026-04-03T16:00:00+09:00",
+			"participants": []string{guest.UserID},
+			"recurrenceRule": map[string]any{
+				"freq":     "weekly",
+				"interval": 1,
+				"byDay":    []string{"FR"},
+			},
+		}, &master)
+	require.Equal(t, []string{guest.UserID}, master.Participants)
+
+	var instances []struct {
+		ID           string   `json:"id"`
+		Participants []string `json:"participants"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &instances)
+	require.Len(t, instances, 4)
+	for _, inst := range instances {
+		require.Equal(t, []string{guest.UserID}, inst.Participants)
+	}
+
+	var got struct {
+		Participants []string `json:"participants"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+instances[1].ID, owner.AccessToken, nil, &got)
+	require.Equal(t, []string{guest.UserID}, got.Participants)
+
+	var updated struct {
+		Participants []string `json:"participants"`
+	}
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+instances[1].ID+"?scope=this", owner.AccessToken,
+		map[string]any{
+			"title":        "Owner-only occurrence",
+			"allDay":       false,
+			"startAt":      "2026-04-10T15:00:00+09:00",
+			"endAt":        "2026-04-10T16:00:00+09:00",
+			"participants": []string{owner.UserID},
+		}, &updated)
+	require.Equal(t, []string{owner.UserID}, updated.Participants)
+
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+instances[1].ID, owner.AccessToken, nil, &got)
+	require.Equal(t, []string{owner.UserID}, got.Participants)
+}
