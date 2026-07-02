@@ -10,7 +10,7 @@ import (
 )
 
 // TestUpdateCalendarIsAdminOnly verifies that only admins can update calendar
-// settings; members and viewers are rejected (audit H-2).
+// settings; members and viewers are rejected.
 func TestUpdateCalendarIsAdminOnly(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -38,7 +38,7 @@ func TestUpdateCalendarIsAdminOnly(t *testing.T) {
 }
 
 // TestViewerCannotImportICal verifies a read-only viewer cannot inject events
-// via the iCal import endpoint (audit H-1).
+// via the iCal import endpoint.
 func TestViewerCannotImportICal(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -60,8 +60,7 @@ func TestViewerCannotImportICal(t *testing.T) {
 	require.Equal(t, 403, status)
 }
 
-// TestInviteCannotGrantAdmin verifies invite links may not grant the admin role
-// (audit H-11).
+// TestInviteCannotGrantAdmin verifies invite links may not grant the admin role.
 func TestInviteCannotGrantAdmin(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -79,7 +78,7 @@ func TestInviteCannotGrantAdmin(t *testing.T) {
 }
 
 // TestSingleUseInviteCannotBeReused verifies the atomic use-count guard: a
-// max_uses=1 invite admits exactly one new member (audit H-10).
+// max_uses=1 invite admits exactly one new member.
 func TestSingleUseInviteCannotBeReused(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -149,7 +148,7 @@ func TestSingleUseInviteConcurrentAccept(t *testing.T) {
 }
 
 // TestReacceptInviteIsIdempotent verifies that an existing member re-accepting an
-// invite succeeds without burning a use (audit H-12).
+// invite succeeds without burning a use.
 func TestReacceptInviteIsIdempotent(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -171,7 +170,7 @@ func TestReacceptInviteIsIdempotent(t *testing.T) {
 }
 
 // TestUpdateEventRejectsInvalidDates verifies UpdateEvent no longer silently
-// writes a zero timestamp on a malformed date (audit H-8).
+// writes a zero timestamp on a malformed date.
 func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -201,7 +200,7 @@ func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 }
 
 // TestCreateEventRejectsInvalidRecurrence verifies unknown recurrence freq is
-// rejected rather than producing an invisible event (audit H-7).
+// rejected rather than producing an invisible event.
 func TestCreateEventRejectsInvalidRecurrence(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -221,7 +220,7 @@ func TestCreateEventRejectsInvalidRecurrence(t *testing.T) {
 }
 
 // TestAssignedToMustBeMember verifies an event assignee must be a calendar
-// member, and that a valid assignee round-trips (audit M-20, H-9 sibling).
+// member, and that a valid assignee round-trips.
 func TestAssignedToMustBeMember(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -412,7 +411,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 
 // TestAttachmentDownloadIsTenantScoped verifies the cross-tenant attachment IDOR
 // is closed: a foreign attachment id cannot be downloaded through another
-// calendar/event path (audit C-1). Requires object storage.
+// calendar/event path. Requires object storage.
 func TestAttachmentDownloadIsTenantScoped(t *testing.T) {
 	bootstrap(t)
 	if testStorage == nil {
