@@ -36,12 +36,6 @@ ON DUPLICATE KEY UPDATE
   assigned_to = VALUES(assigned_to), notification_offset = VALUES(notification_offset),
   recurrence_cancelled = VALUES(recurrence_cancelled);
 
--- name: ListEventsByUserAndRange :many
-SELECT e.* FROM events e
-INNER JOIN calendar_members cm ON cm.calendar_id = e.calendar_id
-WHERE cm.user_id = ? AND e.start_at < ? AND e.end_at > ?
-ORDER BY e.start_at;
-
 -- name: CreateEvent :execresult
 INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

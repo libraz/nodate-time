@@ -15,6 +15,12 @@ FROM event_comments ec
 INNER JOIN users u ON u.id = ec.user_id
 WHERE ec.public_id = ?;
 
+-- name: GetEventCommentByPublicIDAndEvent :one
+SELECT ec.*, u.name AS user_name, u.icon AS user_icon, u.public_id AS user_public_id
+FROM event_comments ec
+INNER JOIN users u ON u.id = ec.user_id
+WHERE ec.public_id = ? AND ec.event_id = ?;
+
 -- name: UpdateEventComment :exec
 UPDATE event_comments SET body = ? WHERE id = ?;
 

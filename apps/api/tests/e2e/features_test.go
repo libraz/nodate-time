@@ -385,6 +385,46 @@ func TestCommentEditDenied(t *testing.T) {
 	assert.Equal(t, 403, status2)
 }
 
+func TestCommentEditDeleteMustMatchEventPath(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var first struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title": "First", "allDay": false,
+			"startAt": "2026-04-20T10:00:00+09:00", "endAt": "2026-04-20T11:00:00+09:00",
+		}, &first)
+
+	var second struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title": "Second", "allDay": false,
+			"startAt": "2026-04-21T10:00:00+09:00", "endAt": "2026-04-21T11:00:00+09:00",
+		}, &second)
+
+	var comment struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+first.ID+"/activities", tt.AccessToken,
+		map[string]any{"content": "first comment"}, &comment)
+
+	wrongPath := calURL + "/events/" + second.ID + "/activities/" + comment.ID
+	status, _ := helpers.DoJSONStatus(t, http.MethodPut, wrongPath, tt.AccessToken,
+		map[string]any{"content": "wrong event"})
+	require.Equal(t, http.StatusNotFound, status)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, wrongPath, tt.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status)
+}
+
 func TestChecklistOnRecurringEvent(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()

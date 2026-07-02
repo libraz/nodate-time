@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
+import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { api, errorMessage } from '@/lib/api';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
@@ -24,7 +25,7 @@ import {
 
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
 function toLocalDatetime(iso: string, zone: string): string {
-  return DateTime.fromISO(iso, { zone }).toFormat("yyyy-MM-dd'T'HH:mm");
+  return toLocalDatetimeInput(iso, zone);
 }
 
 /** Interprets a wall-clock `yyyy-MM-ddTHH:mm` string as an instant in the given zone. */
@@ -78,7 +79,7 @@ function getNthWeekday(dt: DateTime): number {
   return Math.ceil(dt.day / 7);
 }
 
-function presetToRule(preset: RecurrencePreset, dt: DateTime): RecurrenceRule | null {
+export function presetToRule(preset: RecurrencePreset, dt: DateTime): RecurrenceRule | null {
   const dayIdx = dt.weekday % 7;
   const dayCode = WEEKDAY_CODES[dayIdx] ?? 'SU';
   switch (preset) {
@@ -120,7 +121,7 @@ function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): Recurre
   return next;
 }
 
-function ruleToPreset(rule: RecurrenceRule | null, dt: DateTime): RecurrencePreset {
+export function ruleToPreset(rule: RecurrenceRule | null, dt: DateTime): RecurrencePreset {
   if (!rule) return 'none';
   const dayIdx = dt.weekday % 7;
   const dayCode = WEEKDAY_CODES[dayIdx] ?? 'SU';
@@ -140,6 +141,15 @@ function ruleToPreset(rule: RecurrenceRule | null, dt: DateTime): RecurrencePres
     if (rule.byMonthDay) return 'monthly_date';
   }
   return 'custom';
+}
+
+export function recurrenceUntilDateValue(until: string, zone: string): DateTime {
+  return DateTime.fromISO(until, { zone });
+}
+
+export function clampRecurrenceUntilDate(date: DateTime, startAt: string, zone: string): DateTime {
+  const min = DateTime.fromISO(startAt, { zone }).startOf('day');
+  return date < min ? min : date;
 }
 
 function recurrenceLabel(
@@ -878,15 +888,18 @@ export function EventModal() {
 
   useEffect(() => {
     if (!showEventModal) return;
-    setShowCustomRecurrence(false);
     if (editingEvent) {
       const rule = editingEvent.recurrenceRule ?? null;
       const startDt = DateTime.fromISO(editingEvent.startAt, { zone: timezone });
+      const preset = ruleToPreset(rule, startDt);
+      setShowCustomRecurrence(preset === 'custom');
       setForm({
         title: editingEvent.title,
         allDay: editingEvent.allDay,
         startAt: toLocalDatetime(editingEvent.startAt, timezone),
-        endAt: toLocalDatetime(editingEvent.endAt, timezone),
+        endAt: editingEvent.allDay
+          ? toAllDayInclusiveEndInput(editingEvent.endAt, timezone)
+          : toLocalDatetime(editingEvent.endAt, timezone),
         color: editingEvent.color,
         calendarId: editingEvent.calendarId,
         location: editingEvent.location,
@@ -896,7 +909,7 @@ export function EventModal() {
         participants: editingEvent.participants ?? [],
         assignedTo: editingEvent.assignedTo ?? null,
         recurrenceRule: rule,
-        recurrencePreset: ruleToPreset(rule, startDt),
+        recurrencePreset: preset,
       });
       setShowMore(
         !!(
@@ -917,6 +930,7 @@ export function EventModal() {
         ? base.set({ second: 0, millisecond: 0 })
         : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
       const end = start.plus({ hours: 1 });
+      setShowCustomRecurrence(false);
       setForm({
         title: '',
         allDay: !timed,
@@ -1225,7 +1239,11 @@ export function EventModal() {
                 const durationMs = oldEndDt.diff(oldStartDt).milliseconds;
                 const newEndDt = newStartDt.plus({ milliseconds: Math.max(durationMs, 0) });
                 const newEnd = newEndDt.toFormat("yyyy-MM-dd'T'HH:mm");
-                return { ...f, startAt: newStart, endAt: newEnd };
+                const recurrenceRule =
+                  f.recurrencePreset !== 'custom' && f.recurrenceRule
+                    ? presetToRule(f.recurrencePreset, newStartDt)
+                    : f.recurrenceRule;
+                return { ...f, startAt: newStart, endAt: newEnd, recurrenceRule };
               });
             }}
             onTimeChange={(time) => {
@@ -1595,18 +1613,22 @@ export function EventModal() {
                     {form.recurrenceRule.until && (
                       <DateTimeField
                         label=""
-                        dateValue={DateTime.fromISO(form.recurrenceRule.until)}
+                        dateValue={recurrenceUntilDateValue(form.recurrenceRule.until, timezone)}
                         timeValue="00:00"
                         showTime={false}
                         onDateChange={(date) =>
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, until: date.toFormat('yyyy-MM-dd') }
-                              : null,
-                          }))
+                          setForm((f) => {
+                            const clamped = clampRecurrenceUntilDate(date, f.startAt, timezone);
+                            return {
+                              ...f,
+                              recurrenceRule: f.recurrenceRule
+                                ? { ...f.recurrenceRule, until: clamped.toFormat('yyyy-MM-dd') }
+                                : null,
+                            };
+                          })
                         }
                         onTimeChange={() => {}}
+                        minDate={DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day')}
                       />
                     )}
                   </label>
