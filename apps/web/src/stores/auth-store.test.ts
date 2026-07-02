@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/api', () => {
@@ -5,6 +6,7 @@ vi.mock('@/lib/api', () => {
     constructor(
       public status: number,
       public detail: string,
+      public code = '',
     ) {
       super(detail);
     }
@@ -16,6 +18,8 @@ vi.mock('@/lib/api', () => {
     setToken: vi.fn(),
     clearToken: vi.fn(),
     hasToken: vi.fn(() => false),
+    // biome-ignore lint/style/useNamingConvention: must mirror the real module export
+    SESSION_EXPIRED_EVENT: 'nodate:session-expired',
   };
 });
 
@@ -29,6 +33,7 @@ vi.mock('@/lib/image-resize', () => ({
 
 import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
 const mockApi = vi.mocked(api);
@@ -54,6 +59,19 @@ beforeEach(() => {
     isInitializing: false,
     isLoading: false,
     error: null,
+  });
+  useUiStore.setState({
+    showEventModal: false,
+    editingEventId: null,
+    eventDraftStart: null,
+    showDayDetail: false,
+    rightPanel: null,
+    showSearch: false,
+    searchQuery: '',
+    mobileTab: 'calendar',
+    showSettings: false,
+    showMobileMenu: false,
+    showActivity: false,
   });
 });
 
@@ -103,6 +121,19 @@ describe('logout', () => {
       memos: [],
       activeCalendarIds: ['cal-1'],
     });
+    useUiStore.setState({
+      showEventModal: true,
+      editingEventId: 'evt-1',
+      eventDraftStart: DateTime.fromISO('2026-04-20T10:00:00+09:00'),
+      showDayDetail: true,
+      rightPanel: 'memo',
+      showSearch: true,
+      searchQuery: 'draft',
+      mobileTab: 'memo',
+      showSettings: true,
+      showMobileMenu: true,
+      showActivity: true,
+    });
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
 
     useAuthStore.getState().logout();
@@ -114,6 +145,19 @@ describe('logout', () => {
     expect(auth.user).toBeNull();
     expect(auth.isAuthenticated).toBe(false);
     expect(useCalendarStore.getState().calendars).toEqual([]);
+    expect(useUiStore.getState()).toMatchObject({
+      showEventModal: false,
+      editingEventId: null,
+      eventDraftStart: null,
+      showDayDetail: false,
+      rightPanel: null,
+      showSearch: false,
+      searchQuery: '',
+      mobileTab: 'calendar',
+      showSettings: false,
+      showMobileMenu: false,
+      showActivity: false,
+    });
   });
 });
 
@@ -149,6 +193,20 @@ describe('fetchMe', () => {
     const s = useAuthStore.getState();
     expect(s.user).toBeNull();
     expect(s.isAuthenticated).toBe(false);
+    expect(s.isInitializing).toBe(false);
+  });
+
+  it('keeps the current session when user hydration fails with a server error', async () => {
+    mockHasToken.mockReturnValue(true);
+    mockApi.get.mockRejectedValue(new ApiError(500, 'temporary outage'));
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true, isInitializing: true });
+
+    await useAuthStore.getState().fetchMe();
+
+    expect(mockClearToken).not.toHaveBeenCalled();
+    const s = useAuthStore.getState();
+    expect(s.user).toEqual(sampleUser);
+    expect(s.isAuthenticated).toBe(true);
     expect(s.isInitializing).toBe(false);
   });
 });

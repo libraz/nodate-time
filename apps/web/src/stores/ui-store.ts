@@ -58,6 +58,7 @@ interface UiState {
   setLocale: (locale: Locale) => void;
   setTimezone: (tz: string) => void;
   setHolidaysCountry: (country: string | null) => void;
+  resetSessionUi: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -142,4 +143,18 @@ export const useUiStore = create<UiState>((set) => ({
     saveJson('holidaysCountry', country);
     set({ holidaysCountry: country });
   },
+  resetSessionUi: () =>
+    set({
+      showEventModal: false,
+      editingEventId: null,
+      eventDraftStart: null,
+      showDayDetail: false,
+      rightPanel: null,
+      showSearch: false,
+      searchQuery: '',
+      mobileTab: 'calendar',
+      showSettings: false,
+      showMobileMenu: false,
+      showActivity: false,
+    }),
 }));

@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -22,6 +24,20 @@ const avatarDownloadTTL = 5 * time.Minute
 // attempted for a non-existent account, so that the response time does not
 // reveal whether the email exists (user-enumeration side channel).
 var dummyPasswordHash, _ = auth.HashPassword("nodate-time-login-timing-equalizer")
+
+func isDuplicateKey(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+func passwordHashForLogin(passwordHash string) string {
+	if strings.HasPrefix(passwordHash, "$2a$") ||
+		strings.HasPrefix(passwordHash, "$2b$") ||
+		strings.HasPrefix(passwordHash, "$2y$") {
+		return passwordHash
+	}
+	return dummyPasswordHash
+}
 
 type Deps struct {
 	Queries   *generated.Queries
@@ -87,7 +103,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		// Check existing
 		_, err = deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err == nil {
-			return nil, apierrors.ToHuma(apierrors.AuthEmailExists)
+			return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -108,11 +124,14 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			PasswordHash: hash,
 		})
 		if err != nil {
+			if isDuplicateKey(err) {
+				return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		insertID, _ := result.LastInsertId()
-		token, err := auth.GenerateToken(uint32(insertID), deps.JWTSecret)
+		token, err := auth.GenerateToken(uint32(insertID), 1, deps.JWTSecret)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -145,11 +164,11 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		if !auth.CheckPassword(in.Body.Password, user.PasswordHash) {
+		if !auth.CheckPassword(in.Body.Password, passwordHashForLogin(user.PasswordHash)) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
-		token, err := auth.GenerateToken(user.ID, deps.JWTSecret)
+		token, err := auth.GenerateToken(user.ID, user.TokenVersion, deps.JWTSecret)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

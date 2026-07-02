@@ -72,7 +72,7 @@ func (q *Queries) CreateUserWithRole(ctx context.Context, arg CreateUserWithRole
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE email = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -88,6 +88,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -96,7 +98,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
@@ -112,6 +114,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -120,7 +124,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, is_admin, created_at, updated_at FROM users WHERE public_id = ?
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE public_id = ?
 `
 
 func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User, error) {
@@ -136,6 +140,8 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User,
 		&i.AvatarStorageKey,
 		&i.AvatarContentType,
 		&i.PasswordHash,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -194,7 +200,9 @@ func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarPara
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = ? WHERE id = ?
+UPDATE users
+SET password_hash = ?, token_version = token_version + 1, password_changed_at = NOW(3)
+WHERE id = ?
 `
 
 type UpdateUserPasswordParams struct {

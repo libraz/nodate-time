@@ -22,7 +22,9 @@ UPDATE users SET is_admin = ? WHERE id = ?;
 UPDATE users SET name = ?, icon = ?, color = ? WHERE id = ?;
 
 -- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = ? WHERE id = ?;
+UPDATE users
+SET password_hash = ?, token_version = token_version + 1, password_changed_at = NOW(3)
+WHERE id = ?;
 
 -- name: UpdateUserAvatar :exec
 UPDATE users SET avatar_storage_key = ?, avatar_content_type = ? WHERE id = ?;

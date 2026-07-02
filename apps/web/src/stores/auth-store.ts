@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { getT } from '@/i18n';
-import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
+import { ApiError, api, clearToken, hasToken, SESSION_EXPIRED_EVENT, setToken } from '@/lib/api';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useUiStore } from '@/stores/ui-store';
 
 interface User {
   id: string;
@@ -103,6 +104,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       labels: [],
       activeCalendarIds: [],
     });
+    useUiStore.getState().resetSessionUi();
   },
 
   fetchMe: async () => {
@@ -111,9 +113,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await api.get<User>('/user');
       set({ user, isAuthenticated: true, isInitializing: false });
-    } catch {
-      clearToken();
-      set({ user: null, isAuthenticated: false, isInitializing: false });
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 401 || e.code === 'AUTH.TOKEN_INVALID')) {
+        clearToken();
+        set({ user: null, isAuthenticated: false, isInitializing: false });
+        return;
+      }
+      set({ isInitializing: false });
     } finally {
       fetchMeInFlight = false;
     }
@@ -148,3 +154,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(SESSION_EXPIRED_EVENT, () => {
+    useAuthStore.setState({
+      user: null,
+      isAuthenticated: false,
+      isInitializing: false,
+      isLoading: false,
+      error: null,
+    });
+  });
+}

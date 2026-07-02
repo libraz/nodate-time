@@ -34,7 +34,7 @@ func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		token, err := auth.GenerateToken(user.ID, deps.JWTSecret)
+		token, err := auth.GenerateToken(user.ID, user.TokenVersion, deps.JWTSecret)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
