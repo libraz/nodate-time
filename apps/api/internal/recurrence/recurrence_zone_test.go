@@ -35,6 +35,32 @@ func TestExpandInZonePreservesWallClockAcrossDST(t *testing.T) {
 	}
 }
 
+func TestExpandInZonePreservesWallClockAcrossFallBack(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+
+	// 2025-11-01 09:00 EDT; DST fall-back is 2025-11-02.
+	start := time.Date(2025, 11, 1, 9, 0, 0, 0, ny)
+	end := start.Add(time.Hour)
+	rule := &Rule{Freq: "daily", Interval: 1}
+
+	winStart := time.Date(2025, 10, 31, 0, 0, 0, 0, time.UTC)
+	winEnd := time.Date(2025, 11, 5, 0, 0, 0, 0, time.UTC)
+
+	occ := ExpandInZone(rule, start.UTC(), end.UTC(), winStart, winEnd, "America/New_York")
+	if len(occ) < 3 {
+		t.Fatalf("expected at least 3 occurrences, got %d", len(occ))
+	}
+	for _, o := range occ {
+		local := o.StartAt.In(ny)
+		if h, m := local.Hour(), local.Minute(); h != 9 || m != 0 {
+			t.Errorf("occurrence %s drifted to %02d:%02d local (want 09:00)", o.StartAt.Format(time.RFC3339), h, m)
+		}
+	}
+}
+
 // TestExpandUTCAnchorWouldDrift documents that the plain UTC Expand (no zone)
 // does NOT preserve wall-clock across DST — confirming ExpandInZone is required.
 func TestExpandHonorsCount(t *testing.T) {

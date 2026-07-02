@@ -103,6 +103,21 @@ func TestExpandMonthlyByNthWeekday(t *testing.T) {
 	assert.Equal(t, 21, results[2].StartAt.Day()) // Jun 21
 }
 
+func TestExpandMonthlyByNthWeekdaySkipsGapMonths(t *testing.T) {
+	// 5th Monday exists only in some months; missing months must not terminate
+	// the rest of the series.
+	rule := &Rule{Freq: "monthly", Interval: 1, BySetPos: 5, ByDay: []string{"MO"}}
+	start := d("2026-03-30 10:00") // 5th Monday of March
+	end := d("2026-03-30 11:00")
+
+	results := Expand(rule, start, end, d("2026-03-01 00:00"), d("2027-03-01 00:00"))
+	require.Len(t, results, 4)
+	assert.Equal(t, d("2026-03-30 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2026-06-29 10:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-08-31 10:00"), results[2].StartAt)
+	assert.Equal(t, d("2026-11-30 10:00"), results[3].StartAt)
+}
+
 func TestExpandYearly(t *testing.T) {
 	rule := &Rule{Freq: "yearly", Interval: 1}
 	start := d("2026-04-19 00:00")
@@ -133,6 +148,35 @@ func TestExpandWithUntil(t *testing.T) {
 	require.Len(t, results, 10) // Apr 1-10
 }
 
+func TestExpandWithIntervalCountAndUntilUsesEarliestBoundary(t *testing.T) {
+	until := "2026-04-20"
+	rule := &Rule{Freq: "daily", Interval: 2, Count: 4, Until: &until}
+	start := d("2026-04-01 10:00")
+	end := d("2026-04-01 11:00")
+
+	results := Expand(rule, start, end, d("2026-04-01 00:00"), d("2026-05-01 00:00"))
+
+	require.Len(t, results, 4)
+	assert.Equal(t, d("2026-04-01 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2026-04-03 10:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-04-05 10:00"), results[2].StartAt)
+	assert.Equal(t, d("2026-04-07 10:00"), results[3].StartAt)
+}
+
+func TestExpandWithIntervalUntilStopsBeforeCountWhenUntilEarlier(t *testing.T) {
+	until := "2026-04-05"
+	rule := &Rule{Freq: "daily", Interval: 2, Count: 10, Until: &until}
+	start := d("2026-04-01 10:00")
+	end := d("2026-04-01 11:00")
+
+	results := Expand(rule, start, end, d("2026-04-01 00:00"), d("2026-05-01 00:00"))
+
+	require.Len(t, results, 3)
+	assert.Equal(t, d("2026-04-01 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2026-04-03 10:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-04-05 10:00"), results[2].StartAt)
+}
+
 func TestExpandWindowFiltering(t *testing.T) {
 	rule := &Rule{Freq: "daily", Interval: 1}
 	start := d("2026-04-01 10:00")
@@ -142,6 +186,28 @@ func TestExpandWindowFiltering(t *testing.T) {
 	results := Expand(rule, start, end, d("2026-04-05 00:00"), d("2026-04-08 00:00"))
 	require.Len(t, results, 3) // Apr 5, 6, 7
 	assert.Equal(t, d("2026-04-05 10:00"), results[0].StartAt)
+}
+
+func TestExpandDailyFastForwardsBeyondSafetyCap(t *testing.T) {
+	rule := &Rule{Freq: "daily", Interval: 1}
+	start := d("2026-04-01 10:00")
+	end := d("2026-04-01 11:00")
+
+	results := Expand(rule, start, end, d("2060-04-01 00:00"), d("2060-04-04 00:00"))
+
+	require.Len(t, results, 3)
+	assert.Equal(t, d("2060-04-01 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2060-04-03 10:00"), results[2].StartAt)
+}
+
+func TestExpandDailyFastForwardHonorsCount(t *testing.T) {
+	rule := &Rule{Freq: "daily", Interval: 1, Count: 3}
+	start := d("2026-04-01 10:00")
+	end := d("2026-04-01 11:00")
+
+	results := Expand(rule, start, end, d("2060-04-01 00:00"), d("2060-04-04 00:00"))
+
+	require.Empty(t, results)
 }
 
 func TestParseRule(t *testing.T) {
@@ -177,4 +243,18 @@ func TestComputeEnd(t *testing.T) {
 		end := ComputeEnd(nil, d("2026-04-01 10:00"))
 		assert.Equal(t, d("2026-04-01 10:00"), end)
 	})
+}
+
+func TestExpandYearlyFromLeapDayFollowsAddDateNormalization(t *testing.T) {
+	rule := &Rule{Freq: "yearly", Interval: 1, Count: 4}
+	start := d("2024-02-29 09:00")
+	end := d("2024-02-29 10:00")
+
+	results := Expand(rule, start, end, d("2024-01-01 00:00"), d("2028-12-31 00:00"))
+
+	require.Len(t, results, 4)
+	assert.Equal(t, d("2024-02-29 09:00"), results[0].StartAt)
+	assert.Equal(t, d("2025-03-01 09:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-03-01 09:00"), results[2].StartAt)
+	assert.Equal(t, d("2027-03-01 09:00"), results[3].StartAt)
 }
