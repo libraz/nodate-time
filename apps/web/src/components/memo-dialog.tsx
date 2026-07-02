@@ -3,6 +3,7 @@ import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 
 interface MemoDialogProps {
@@ -21,6 +22,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
 
   const editing = memoId ? (memos.find((m) => m.id === memoId) ?? null) : null;
   const titleRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useModalA11y<HTMLDivElement>(true, onClose);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ title: '', body: '', done: false });
 
@@ -148,6 +150,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
           placeholder={t('memo.bodyPlaceholder')}
           rows={4}
+          maxLength={16000}
           className="w-full resize-none bg-transparent text-callout leading-relaxed text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
         />
       </div>
@@ -225,7 +228,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   );
 
   return (
-    <>
+    <div ref={dialogRef}>
       {/* Mobile: bottom sheet */}
       <div className="sm:hidden">
         <button
@@ -256,6 +259,6 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

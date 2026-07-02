@@ -1,6 +1,7 @@
 import { CalendarList } from '@/components/calendar-list';
 import type { TranslationKey } from '@/i18n';
 import { useT } from '@/i18n';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { type RightPanelId, useUiStore } from '@/stores/ui-store';
 
 interface MenuAction {
@@ -21,6 +22,7 @@ export function MobileMenu() {
   const setShow = useUiStore((s) => s.setShowMobileMenu);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const setShowActivity = useUiStore((s) => s.setShowActivity);
+  const panelRef = useModalA11y<HTMLDivElement>(show, () => setShow(false));
 
   if (!show) return null;
 
@@ -138,7 +140,10 @@ export function MobileMenu() {
         className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
         onClick={() => setShow(false)}
       />
-      <div className="glass-surface-heavy drawer-panel fixed left-0 top-0 z-50 flex h-full w-[280px] max-w-[82vw] flex-col border-r border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        className="glass-surface-heavy drawer-panel fixed left-0 top-0 z-50 flex h-full w-[280px] max-w-[82vw] flex-col border-r border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-title font-semibold text-[var(--color-text-primary)]">
             {t('tabs.calendar')}
