@@ -4,21 +4,29 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
 // Entity types recorded in the audit log.
 const (
-	EntityEvent = "event"
-	EntityMemo  = "memo"
+	EntityEvent  = "event"
+	EntityMemo   = "memo"
+	EntityMember = "member"
+	EntityInvite = "invite"
 )
 
 // Actions recorded in the audit log.
 const (
-	ActionCreate = "create"
-	ActionUpdate = "update"
-	ActionDelete = "delete"
+	ActionCreate     = "create"
+	ActionUpdate     = "update"
+	ActionDelete     = "delete"
+	ActionJoin       = "join"
+	ActionLeave      = "leave"
+	ActionRoleChange = "role_change"
+	ActionRevoke     = "revoke"
+	ActionPublish    = "publish"
 )
 
 // summaryMaxRunes bounds the stored summary so an oversized title cannot exceed
@@ -32,7 +40,7 @@ func Record(ctx context.Context, q *generated.Queries, calendarID, entityID uint
 	if q == nil {
 		return
 	}
-	_ = q.InsertAuditLog(ctx, generated.InsertAuditLogParams{
+	if err := q.InsertAuditLog(ctx, generated.InsertAuditLogParams{
 		CalendarID:     calendarID,
 		EntityType:     entityType,
 		EntityID:       entityID,
@@ -40,7 +48,9 @@ func Record(ctx context.Context, q *generated.Queries, calendarID, entityID uint
 		Action:         action,
 		ActorID:        sql.NullInt32{Int32: int32(actorID), Valid: actorID != 0},
 		Summary:        truncateRunes(summary, summaryMaxRunes),
-	})
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to record audit log", "calendarID", calendarID, "entityType", entityType, "entityID", entityID, "action", action, "error", err)
+	}
 }
 
 // truncateRunes returns s limited to at most max runes.

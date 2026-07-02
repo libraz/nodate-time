@@ -11,25 +11,62 @@ import { useUiStore } from '@/stores/ui-store';
 
 interface FeedItem {
   id: number;
-  action: 'create' | 'update' | 'delete';
+  action: 'create' | 'update' | 'delete' | 'join' | 'leave' | 'role_change' | 'revoke' | 'publish';
   summary: string;
   createdAt: string;
   actor: HistoryActor | null;
-  entityType: 'event' | 'memo';
+  entityType: 'event' | 'memo' | 'member' | 'invite';
   entityId: string;
 }
 
-const ACTION_LABEL: Record<FeedItem['action'], TranslationKey> = {
-  create: 'history.created',
-  update: 'history.updated',
-  delete: 'history.deleted',
+interface ActivityPage {
+  items: FeedItem[];
+  nextCursor?: string;
+}
+
+const ENTITY_LABEL: Record<FeedItem['entityType'], TranslationKey> = {
+  event: 'activity.entityEvent',
+  memo: 'activity.entityMemo',
+  member: 'activity.entityMember',
+  invite: 'activity.entityInvite',
 };
 
-const ACTION_COLOR: Record<FeedItem['action'], string> = {
-  create: 'var(--color-accent)',
-  update: 'var(--color-text-tertiary)',
-  delete: 'var(--color-danger)',
-};
+function actionLabel(action: FeedItem['action']): TranslationKey {
+  switch (action) {
+    case 'create':
+      return 'history.created';
+    case 'update':
+      return 'history.updated';
+    case 'delete':
+      return 'history.deleted';
+    case 'join':
+      return 'activity.joined';
+    case 'leave':
+      return 'activity.left';
+    case 'role_change':
+      return 'activity.roleChanged';
+    case 'revoke':
+      return 'activity.revoked';
+    case 'publish':
+      return 'activity.published';
+  }
+}
+
+function actionColor(action: FeedItem['action']): string {
+  switch (action) {
+    case 'create':
+    case 'join':
+    case 'publish':
+      return 'var(--color-accent)';
+    case 'delete':
+    case 'revoke':
+      return 'var(--color-danger)';
+    case 'update':
+    case 'leave':
+    case 'role_change':
+      return 'var(--color-text-tertiary)';
+  }
+}
 
 interface ActivityPanelProps {
   onClose: () => void;
@@ -60,16 +97,22 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
   const calendarId = target?.id ?? '';
 
   const [items, setItems] = useState<FeedItem[]>([]);
+  const [nextCursor, setNextCursor] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!calendarId) return;
     let cancelled = false;
     setIsLoading(true);
+    setNextCursor('');
     (async () => {
       try {
-        const data = await api.get<FeedItem[]>(`/calendars/${calendarId}/activity?limit=50`);
-        if (!cancelled) setItems(data);
+        const data = await api.get<ActivityPage>(`/calendars/${calendarId}/activity?limit=50`);
+        if (!cancelled) {
+          setItems(data.items);
+          setNextCursor(data.nextCursor ?? '');
+        }
       } catch (e) {
         if (!cancelled) toast.error(errorMessage(e));
       } finally {
@@ -80,6 +123,22 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
       cancelled = true;
     };
   }, [calendarId]);
+
+  const loadMore = async () => {
+    if (!calendarId || !nextCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const data = await api.get<ActivityPage>(
+        `/calendars/${calendarId}/activity?limit=50&cursor=${encodeURIComponent(nextCursor)}`,
+      );
+      setItems((prev) => [...prev, ...data.items]);
+      setNextCursor(data.nextCursor ?? '');
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   return (
     <>
@@ -185,15 +244,13 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
                             {item.actor?.name ?? t('history.deletedUser')}
                           </span>
                           <span className="rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-text-secondary)]">
-                            {item.entityType === 'event'
-                              ? t('activity.entityEvent')
-                              : t('activity.entityMemo')}
+                            {t(ENTITY_LABEL[item.entityType])}
                           </span>
                           <span
                             className="text-caption font-medium"
-                            style={{ color: ACTION_COLOR[item.action] }}
+                            style={{ color: actionColor(item.action) }}
                           >
-                            {t(ACTION_LABEL[item.action])}
+                            {t(actionLabel(item.action))}
                           </span>
                           <span className="text-caption text-[var(--color-text-tertiary)]">
                             {formatRelativeTime(item.createdAt, locale)}
@@ -207,6 +264,16 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
                       </div>
                     </div>
                   ))}
+                  {nextCursor && (
+                    <button
+                      type="button"
+                      onClick={loadMore}
+                      disabled={isLoadingMore}
+                      className="btn-secondary w-full text-body disabled:opacity-50"
+                    >
+                      {isLoadingMore ? t('history.loading') : t('activity.loadMore')}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

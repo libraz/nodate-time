@@ -45,8 +45,13 @@ type MemoHistoryOutput struct {
 
 type ActivityInput struct {
 	CalendarID string `path:"calendarId"`
+	Cursor     string `query:"cursor" required:"false" doc:"Opaque cursor from a previous response"`
 	Limit      int    `query:"limit" required:"false" minimum:"1" maximum:"200"`
 }
+type ActivityPage struct {
+	Items      []FeedItem `json:"items"`
+	NextCursor string     `json:"nextCursor,omitempty"`
+}
 type ActivityOutput struct {
-	Body []FeedItem
+	Body ActivityPage
 }

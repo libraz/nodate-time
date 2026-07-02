@@ -9,7 +9,9 @@ SELECT al.id, al.action, al.summary, al.created_at,
 FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.entity_type = ? AND al.entity_public_id = ?
-ORDER BY al.created_at ASC, al.id ASC;
+  AND al.calendar_id = ?
+ORDER BY al.created_at ASC, al.id ASC
+LIMIT ?;
 
 -- name: ListAuditByCalendar :many
 SELECT al.id, al.entity_type, al.entity_public_id, al.action, al.summary, al.created_at,
@@ -18,5 +20,6 @@ SELECT al.id, al.entity_type, al.entity_public_id, al.action, al.summary, al.cre
 FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.calendar_id = ?
+  AND (sqlc.arg(after_id) = 0 OR al.id < sqlc.arg(after_id))
 ORDER BY al.created_at DESC, al.id DESC
 LIMIT ?;

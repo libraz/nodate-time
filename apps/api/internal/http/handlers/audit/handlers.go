@@ -5,13 +5,16 @@ package audit
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"encoding/base64"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	auditlog "github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -29,16 +32,32 @@ const actorAvatarTTL = time.Hour
 
 // defaultActivityLimit and maxActivityLimit bound the activity feed page size.
 const (
-	defaultActivityLimit = 50
-	maxActivityLimit     = 200
+	defaultActivityLimit  = 50
+	maxActivityLimit      = 200
+	perEntityHistoryLimit = 200
 )
 
-func pubIDToHex(b []byte) string {
-	u, err := uuid.FromBytes(b)
-	if err != nil {
-		return ""
+func encodeActivityCursor(id uint64) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatUint(id, 10)))
+}
+
+func decodeActivityCursor(cursor string) (uint64, error) {
+	if cursor == "" {
+		return 0, nil
 	}
-	return u.String()
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return 0, fmt.Errorf("decode cursor: %w", err)
+	}
+	id, err := strconv.ParseUint(string(raw), 10, 64)
+	if err != nil || id == 0 {
+		return 0, fmt.Errorf("invalid cursor")
+	}
+	return id, nil
+}
+
+func pubIDToHex(b []byte) string {
+	return calresolve.PublicIDString(b)
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -52,24 +71,7 @@ func parseUUID(s string) ([]byte, error) {
 // resolveCalendar resolves the calendar by public ID and verifies the caller is
 // a member, returning the calendar on success.
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	pubBytes, err := parseUUID(calPubID)
-	if err != nil {
-		return generated.Calendar{}, apierrors.CalendarNotFound
-	}
-	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, apierrors.CalendarNotFound
-		}
-		return generated.Calendar{}, apierrors.InternalUnexpected
-	}
-	if _, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: cal.ID,
-		UserID:     userID,
-	}); err != nil {
-		return generated.Calendar{}, apierrors.CalendarAccessDenied
-	}
-	return cal, nil
+	return calresolve.Read(ctx, deps.Queries, calPubID, userID)
 }
 
 // resolveActor builds the actor identity from the joined audit row fields,
@@ -95,7 +97,8 @@ func resolveActor(ctx context.Context, deps Deps, publicID, name, icon, avatarKe
 func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHistoryOutput, error) {
 	return func(ctx context.Context, in *EventHistoryInput) (*EventHistoryOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
 			}
@@ -110,6 +113,8 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 		rows, err := deps.Queries.ListAuditByEntity(ctx, generated.ListAuditByEntityParams{
 			EntityType:     auditlog.EntityEvent,
 			EntityPublicID: entityPub,
+			CalendarID:     cal.ID,
+			Limit:          perEntityHistoryLimit,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -133,7 +138,8 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHistoryOutput, error) {
 	return func(ctx context.Context, in *MemoHistoryInput) (*MemoHistoryOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
 			}
@@ -148,6 +154,8 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 		rows, err := deps.Queries.ListAuditByEntity(ctx, generated.ListAuditByEntityParams{
 			EntityType:     auditlog.EntityMemo,
 			EntityPublicID: entityPub,
+			CalendarID:     cal.ID,
+			Limit:          perEntityHistoryLimit,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -186,18 +194,32 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		if limit > maxActivityLimit {
 			limit = maxActivityLimit
 		}
+		afterID, err := decodeActivityCursor(in.Cursor)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		fetchLimit := limit + 1
 
 		rows, err := deps.Queries.ListAuditByCalendar(ctx, generated.ListAuditByCalendarParams{
 			CalendarID: cal.ID,
-			Limit:      int32(limit),
+			AfterID:    afterID,
+			Limit:      int32(fetchLimit),
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		out := &ActivityOutput{Body: make([]FeedItem, 0, len(rows))}
+		nextCursor := ""
+		if len(rows) > limit {
+			nextCursor = encodeActivityCursor(rows[limit-1].ID)
+			rows = rows[:limit]
+		}
+
+		out := &ActivityOutput{
+			Body: ActivityPage{Items: make([]FeedItem, 0, len(rows)), NextCursor: nextCursor},
+		}
 		for _, r := range rows {
-			out.Body = append(out.Body, FeedItem{
+			out.Body.Items = append(out.Body.Items, FeedItem{
 				HistoryItem: HistoryItem{
 					ID:        r.ID,
 					Action:    r.Action,

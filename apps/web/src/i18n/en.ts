@@ -363,6 +363,7 @@ export const en: Record<TranslationKey, string> = {
   'album.captionPlaceholder': 'Add a caption...',
   'album.saveCaption': 'Save',
   'album.download': 'Download',
+  'album.loadMore': 'Load more',
 
   // Calendar settings (name / color / cover)
   'settings.calendarColor': 'Color',
@@ -395,4 +396,12 @@ export const en: Record<TranslationKey, string> = {
   'activity.targetCalendar': 'Calendar',
   'activity.entityEvent': 'Event',
   'activity.entityMemo': 'Memo',
+  'activity.entityMember': 'Member',
+  'activity.entityInvite': 'Invite',
+  'activity.joined': 'Joined',
+  'activity.left': 'Left',
+  'activity.roleChanged': 'Role changed',
+  'activity.revoked': 'Revoked',
+  'activity.published': 'Published',
+  'activity.loadMore': 'Load more',
 };
