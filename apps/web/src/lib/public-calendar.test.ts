@@ -10,9 +10,17 @@ describe('publicEventOccursOnDay', () => {
       timezone: 'America/Chicago',
     };
 
-    expect(publicEventOccursOnDay(event, DateTime.fromISO('2026-04-01T00:00:00+09:00'))).toBe(true);
-    expect(publicEventOccursOnDay(event, DateTime.fromISO('2026-04-02T00:00:00+09:00'))).toBe(
-      false,
-    );
+    expect(
+      publicEventOccursOnDay(
+        event,
+        DateTime.fromISO('2026-04-01T00:00:00+09:00', { setZone: true }),
+      ),
+    ).toBe(true);
+    expect(
+      publicEventOccursOnDay(
+        event,
+        DateTime.fromISO('2026-04-02T00:00:00+09:00', { setZone: true }),
+      ),
+    ).toBe(false);
   });
 });
