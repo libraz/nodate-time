@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import {
   formatMonthYear,
@@ -31,8 +32,10 @@ import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
 
-/** How many months of weeks to render before/after the current month. */
+/** How many months of weeks to keep mounted before/after the moving anchor month. */
 const RANGE_MONTHS = 18;
+const RANGE_SHIFT_MONTHS = 12;
+const EDGE_EXTEND_PX = 700;
 
 /** Fixed vertical metrics (px) that keep single-day chips aligned with multi-day bars. */
 const DATE_ROW_H = 24;
@@ -381,14 +384,19 @@ export function MonthScroll() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef(0);
   const activeMonthRef = useRef('');
+  const initialScrollDoneRef = useRef(false);
+  const pendingScrollRef = useRef<{ month?: string; today?: boolean; smooth: boolean } | null>(
+    null,
+  );
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
+  const [anchorMonth, setAnchorMonth] = useState(DateTime.now().startOf('month'));
+  const anchorKey = anchorMonth.toFormat('yyyy-MM');
 
   /** Window for treating a second tap on the same day as a double-tap (ms). */
   const DOUBLE_TAP_MS = 260;
 
-  // Build the week range once (anchored on mount); today never moves within a session.
-  const { items, todayKey } = useMemo(() => buildItems(DateTime.now()), []);
+  const { items, todayKey } = useMemo(() => buildItems(anchorMonth), [anchorMonth]);
 
   const visibleEvents = useMemo(
     () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
@@ -486,27 +494,50 @@ export function MonthScroll() {
     [consumeClick, openEventModal],
   );
 
+  const scrollToWeek = useCallback((weekKey: string, smooth: boolean) => {
+    const container = scrollRef.current;
+    if (!container || !weekKey) return false;
+    const el = container.querySelector<HTMLElement>(`[data-week="${weekKey.slice(2)}"]`);
+    if (!el) return false;
+    const cRect = container.getBoundingClientRect();
+    const tRect = el.getBoundingClientRect();
+    const delta = tRect.top - cRect.top - MONTH_HEADER_H;
+    container.scrollTo({
+      top: container.scrollTop + delta,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+    return true;
+  }, []);
+
+  const scrollToMonth = useCallback((monthKey: string, smooth: boolean) => {
+    const container = scrollRef.current;
+    if (!container || !monthKey) return false;
+    const el = container.querySelector<HTMLElement>(`[data-month="${monthKey}"]`);
+    if (!el) return false;
+    const cRect = container.getBoundingClientRect();
+    const tRect = el.getBoundingClientRect();
+    const delta = tRect.top - cRect.top - MONTH_HEADER_H;
+    container.scrollTo({
+      top: container.scrollTop + delta,
+      behavior: smooth ? 'smooth' : 'auto',
+    });
+    return true;
+  }, []);
+
   const scrollToToday = useCallback(
     (smooth: boolean) => {
-      const container = scrollRef.current;
-      if (!container) return;
-      const el = container.querySelector<HTMLElement>(`[data-week="${todayKey.slice(2)}"]`);
-      if (!el) return;
-      const cRect = container.getBoundingClientRect();
-      const tRect = el.getBoundingClientRect();
-      const delta = tRect.top - cRect.top - MONTH_HEADER_H;
-      container.scrollTo({
-        top: container.scrollTop + delta,
-        behavior: smooth ? 'smooth' : 'auto',
-      });
+      if (scrollToWeek(todayKey, smooth)) return;
+      pendingScrollRef.current = { today: true, smooth };
+      setAnchorMonth(DateTime.now().startOf('month'));
     },
-    [todayKey],
+    [scrollToWeek, todayKey],
   );
 
-  // Initial position: align today's week just under the pinned month header.
-  useLayoutEffect(() => {
-    scrollToToday(false);
-  }, [scrollToToday]);
+  const extendRange = useCallback((direction: -1 | 1) => {
+    const keepMonth = activeMonthRef.current;
+    if (keepMonth) pendingScrollRef.current = { month: keepMonth, smooth: false };
+    setAnchorMonth((m) => m.plus({ months: direction * RANGE_SHIFT_MONTHS }));
+  }, []);
 
   // "Today" button (header) bumps this signal; scroll only on an actual change.
   const lastSignal = useRef(scrollToTodaySignal);
@@ -536,13 +567,44 @@ export function MonthScroll() {
     }
   }, [setCurrentMonth]);
 
+  useLayoutEffect(() => {
+    if (!anchorKey) return;
+    const pending = pendingScrollRef.current;
+    if (pending) {
+      const done = pending.today
+        ? scrollToWeek(todayKey, pending.smooth)
+        : scrollToMonth(pending.month ?? '', pending.smooth);
+      if (done) {
+        pendingScrollRef.current = null;
+        updateActiveMonth();
+      }
+      return;
+    }
+    if (!initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
+      scrollToToday(false);
+    }
+  }, [anchorKey, scrollToMonth, scrollToToday, scrollToWeek, todayKey, updateActiveMonth]);
+
+  const maybeExtendRange = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    if (container.scrollTop < EDGE_EXTEND_PX) {
+      extendRange(-1);
+      return;
+    }
+    const remaining = container.scrollHeight - container.clientHeight - container.scrollTop;
+    if (remaining < EDGE_EXTEND_PX) extendRange(1);
+  }, [extendRange]);
+
   const handleScroll = useCallback(() => {
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = 0;
       updateActiveMonth();
+      maybeExtendRange();
     });
-  }, [updateActiveMonth]);
+  }, [maybeExtendRange, updateActiveMonth]);
 
   useEffect(() => {
     return () => {
@@ -565,7 +627,7 @@ export function MonthScroll() {
         ))}
       </div>
 
-      {/* Infinite scroll body */}
+      {/* Month range extends as the user approaches either edge. */}
       <div ref={scrollRef} onScroll={handleScroll} className="relative flex-1 overflow-y-auto">
         {items.map((item) =>
           item.kind === 'header' ? (
