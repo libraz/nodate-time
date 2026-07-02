@@ -159,7 +159,7 @@ func TestAvatarReplaceClearsOldKey(t *testing.T) {
 
 	// The first object should now be gone from MinIO. We assert via StatObject.
 	if testStorageClient := getTestStorage(); testStorageClient != nil {
-		exists, err := testStorageClient.StatObject(testCtx(), pres1.StorageKey)
+		_, exists, err := testStorageClient.StatObject(testCtx(), pres1.StorageKey)
 		require.NoError(t, err)
 		assert.False(t, exists, "previous avatar object should be removed")
 	}

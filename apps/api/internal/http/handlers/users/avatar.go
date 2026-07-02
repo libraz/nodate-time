@@ -109,7 +109,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 		}
 
 		key := avatarStorageKey(pubIDToHex(user.PublicID), avatarPubHex)
-		exists, err := deps.Storage.StatObject(ctx, key)
+		_, exists, err := deps.Storage.StatObject(ctx, key)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

@@ -251,3 +251,14 @@ func TestAlbumWithoutStorage(t *testing.T) {
 		tt.AccessToken, nil, &list)
 	assert.Len(t, list.Items, 0)
 }
+
+func TestAlbumPresignRejectsSVG(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
+		map[string]any{"contentType": "image/svg+xml", "byteSize": 128})
+	assert.Equal(t, http.StatusBadRequest, status)
+}

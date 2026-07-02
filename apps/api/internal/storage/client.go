@@ -70,6 +70,24 @@ func (c *Client) PresignGet(ctx context.Context, key string, expires time.Durati
 	return u.String(), nil
 }
 
+// PresignDownload returns a presigned GET URL that forces browsers to download
+// the object as inert bytes instead of rendering potentially active content.
+func (c *Client) PresignDownload(ctx context.Context, key string, expires time.Duration) (string, error) {
+	params := downloadResponseParams()
+	u, err := c.mc.PresignedGetObject(ctx, c.bucket, key, expires, params)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func downloadResponseParams() url.Values {
+	params := url.Values{}
+	params.Set("response-content-disposition", "attachment")
+	params.Set("response-content-type", "application/octet-stream")
+	return params
+}
+
 // DeleteObject removes an object from the bucket. Returns nil if the key is empty.
 func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	if key == "" {
@@ -78,15 +96,22 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	return c.mc.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
 }
 
-// StatObject returns true if the object exists in the bucket.
-func (c *Client) StatObject(ctx context.Context, key string) (bool, error) {
-	_, err := c.mc.StatObject(ctx, c.bucket, key, minio.StatObjectOptions{})
+// ObjectInfo is the subset of object metadata needed by API confirmation
+// handlers.
+type ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
+// StatObject returns object metadata and whether the object exists.
+func (c *Client) StatObject(ctx context.Context, key string) (ObjectInfo, bool, error) {
+	info, err := c.mc.StatObject(ctx, c.bucket, key, minio.StatObjectOptions{})
 	if err != nil {
 		resp := minio.ToErrorResponse(err)
 		if resp.StatusCode == 404 || resp.Code == "NoSuchKey" {
-			return false, nil
+			return ObjectInfo{}, false, nil
 		}
-		return false, err
+		return ObjectInfo{}, false, err
 	}
-	return true, nil
+	return ObjectInfo{Size: info.Size, ContentType: info.ContentType}, true, nil
 }

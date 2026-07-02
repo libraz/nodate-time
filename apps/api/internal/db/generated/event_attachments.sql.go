@@ -8,14 +8,20 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const confirmEventAttachment = `-- name: ConfirmEventAttachment :execresult
-UPDATE event_attachments SET enabled = 1 WHERE id = ? AND enabled = 0
+UPDATE event_attachments SET enabled = 1 WHERE id = ? AND uploaded_by = ? AND enabled = 0
 `
 
-func (q *Queries) ConfirmEventAttachment(ctx context.Context, id uint32) (sql.Result, error) {
-	return q.db.ExecContext(ctx, confirmEventAttachment, id)
+type ConfirmEventAttachmentParams struct {
+	ID         uint32 `json:"id"`
+	UploadedBy uint32 `json:"uploadedBy"`
+}
+
+func (q *Queries) ConfirmEventAttachment(ctx context.Context, arg ConfirmEventAttachmentParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, confirmEventAttachment, arg.ID, arg.UploadedBy)
 }
 
 const createEventAttachment = `-- name: CreateEventAttachment :execresult
@@ -47,6 +53,15 @@ func (q *Queries) CreateEventAttachment(ctx context.Context, arg CreateEventAtta
 	)
 }
 
+const deleteAbandonedAttachments = `-- name: DeleteAbandonedAttachments :exec
+DELETE FROM event_attachments WHERE enabled = 0 AND created_at < ?
+`
+
+func (q *Queries) DeleteAbandonedAttachments(ctx context.Context, createdAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteAbandonedAttachments, createdAt)
+	return err
+}
+
 const getAttachmentByPublicID = `-- name: GetAttachmentByPublicID :one
 SELECT id, public_id, event_id, uploaded_by, filename, content_type, byte_size, storage_key, enabled, created_at FROM event_attachments WHERE public_id = ?
 `
@@ -67,6 +82,89 @@ func (q *Queries) GetAttachmentByPublicID(ctx context.Context, publicID []byte) 
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAbandonedAttachmentStorageKeys = `-- name: ListAbandonedAttachmentStorageKeys :many
+SELECT storage_key FROM event_attachments WHERE enabled = 0 AND created_at < ?
+`
+
+func (q *Queries) ListAbandonedAttachmentStorageKeys(ctx context.Context, createdAt time.Time) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAbandonedAttachmentStorageKeys, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var storage_key string
+		if err := rows.Scan(&storage_key); err != nil {
+			return nil, err
+		}
+		items = append(items, storage_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttachmentStorageKeysByCalendar = `-- name: ListAttachmentStorageKeysByCalendar :many
+SELECT ea.storage_key FROM event_attachments ea
+INNER JOIN events e ON e.id = ea.event_id
+WHERE e.calendar_id = ?
+`
+
+func (q *Queries) ListAttachmentStorageKeysByCalendar(ctx context.Context, calendarID uint32) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentStorageKeysByCalendar, calendarID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var storage_key string
+		if err := rows.Scan(&storage_key); err != nil {
+			return nil, err
+		}
+		items = append(items, storage_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttachmentStorageKeysByEvent = `-- name: ListAttachmentStorageKeysByEvent :many
+SELECT storage_key FROM event_attachments WHERE event_id = ?
+`
+
+func (q *Queries) ListAttachmentStorageKeysByEvent(ctx context.Context, eventID uint32) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentStorageKeysByEvent, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var storage_key string
+		if err := rows.Scan(&storage_key); err != nil {
+			return nil, err
+		}
+		items = append(items, storage_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEventAttachments = `-- name: ListEventAttachments :many

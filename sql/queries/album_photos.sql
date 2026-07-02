@@ -8,26 +8,40 @@ INSERT INTO album_photos (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
 
 -- name: ConfirmAlbumPhoto :execresult
-UPDATE album_photos SET enabled = 1 WHERE id = ? AND enabled = 0;
+UPDATE album_photos SET enabled = 1 WHERE id = ? AND uploaded_by = ? AND enabled = 0;
 
 -- name: GetAlbumPhotoByPublicID :one
 SELECT * FROM album_photos WHERE public_id = ?;
 
 -- name: ListAlbumPhotosFirstPage :many
-SELECT * FROM album_photos
-WHERE calendar_id = ? AND enabled = 1
-ORDER BY taken_at DESC, id DESC
+SELECT ap.*,
+       u.public_id AS uploader_public_id,
+       u.name AS uploader_name,
+       u.avatar_storage_key AS uploader_avatar_key,
+       e.public_id AS event_public_id
+FROM album_photos ap
+INNER JOIN users u ON u.id = ap.uploaded_by
+LEFT JOIN events e ON e.id = ap.event_id
+WHERE ap.calendar_id = ? AND ap.enabled = 1
+ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?;
 
 -- name: ListAlbumPhotosAfter :many
-SELECT * FROM album_photos
-WHERE calendar_id = ?
-  AND enabled = 1
+SELECT ap.*,
+       u.public_id AS uploader_public_id,
+       u.name AS uploader_name,
+       u.avatar_storage_key AS uploader_avatar_key,
+       e.public_id AS event_public_id
+FROM album_photos ap
+INNER JOIN users u ON u.id = ap.uploaded_by
+LEFT JOIN events e ON e.id = ap.event_id
+WHERE ap.calendar_id = ?
+  AND ap.enabled = 1
   AND (
-    taken_at < sqlc.arg(taken_before)
-    OR (taken_at = sqlc.arg(taken_before) AND id < sqlc.arg(id_before))
+    ap.taken_at < sqlc.arg(taken_before)
+    OR (ap.taken_at = sqlc.arg(taken_before) AND ap.id < sqlc.arg(id_before))
   )
-ORDER BY taken_at DESC, id DESC
+ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?;
 
 -- name: UpdateAlbumPhotoMeta :exec
@@ -35,3 +49,12 @@ UPDATE album_photos SET caption = ?, event_id = ? WHERE id = ?;
 
 -- name: SoftDeleteAlbumPhoto :exec
 UPDATE album_photos SET enabled = 0 WHERE id = ?;
+
+-- name: ListAlbumPhotoStorageKeysByCalendar :many
+SELECT storage_key FROM album_photos WHERE calendar_id = ?;
+
+-- name: ListAbandonedAlbumPhotoStorageKeys :many
+SELECT storage_key FROM album_photos WHERE enabled = 0 AND created_at < ?;
+
+-- name: DeleteAbandonedAlbumPhotos :exec
+DELETE FROM album_photos WHERE enabled = 0 AND created_at < ?;
