@@ -311,15 +311,15 @@ export function App() {
   useEffect(() => {
     if (initDone.current) return;
     initDone.current = true;
-    fetchCalendars();
+    fetchCalendars().catch(() => {});
   }, [fetchCalendars]);
 
   useEffect(() => {
     if (calendars.length === 0) return;
     const start = currentMonth.minus({ months: 1 }).toFormat('yyyy-MM-dd');
     const end = currentMonth.plus({ months: 2 }).toFormat('yyyy-MM-dd');
-    fetchEvents(start, end);
-    fetchMemos();
+    fetchEvents(start, end).catch(() => {});
+    fetchMemos().catch(() => {});
   }, [calendars, currentMonth, fetchEvents, fetchMemos]);
 
   const calendarContent = (
