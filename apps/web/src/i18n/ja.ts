@@ -382,6 +382,7 @@ export const ja = {
   'album.captionPlaceholder': 'キャプションを追加...',
   'album.saveCaption': '保存',
   'album.download': 'ダウンロード',
+  'album.loadMore': 'さらに読み込む',
 
   // Calendar settings (name / color / cover)
   'settings.calendarColor': 'カラー',
@@ -414,6 +415,14 @@ export const ja = {
   'activity.targetCalendar': '対象カレンダー',
   'activity.entityEvent': '予定',
   'activity.entityMemo': 'メモ',
+  'activity.entityMember': 'メンバー',
+  'activity.entityInvite': '招待',
+  'activity.joined': '参加',
+  'activity.left': '退出',
+  'activity.roleChanged': 'ロール変更',
+  'activity.revoked': '失効',
+  'activity.published': '公開',
+  'activity.loadMore': 'さらに読み込む',
 } as const;
 
 export type TranslationKey = keyof typeof ja;

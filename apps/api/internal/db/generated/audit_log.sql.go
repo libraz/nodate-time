@@ -46,12 +46,14 @@ SELECT al.id, al.entity_type, al.entity_public_id, al.action, al.summary, al.cre
 FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.calendar_id = ?
+  AND (? = 0 OR al.id < ?)
 ORDER BY al.created_at DESC, al.id DESC
 LIMIT ?
 `
 
 type ListAuditByCalendarParams struct {
 	CalendarID uint32 `json:"calendarId"`
+	AfterID    uint64 `json:"afterId"`
 	Limit      int32  `json:"limit"`
 }
 
@@ -69,7 +71,12 @@ type ListAuditByCalendarRow struct {
 }
 
 func (q *Queries) ListAuditByCalendar(ctx context.Context, arg ListAuditByCalendarParams) ([]ListAuditByCalendarRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAuditByCalendar, arg.CalendarID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listAuditByCalendar,
+		arg.CalendarID,
+		arg.AfterID,
+		arg.AfterID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -109,12 +116,16 @@ SELECT al.id, al.action, al.summary, al.created_at,
 FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.entity_type = ? AND al.entity_public_id = ?
+  AND al.calendar_id = ?
 ORDER BY al.created_at ASC, al.id ASC
+LIMIT ?
 `
 
 type ListAuditByEntityParams struct {
 	EntityType     string `json:"entityType"`
 	EntityPublicID []byte `json:"entityPublicId"`
+	CalendarID     uint32 `json:"calendarId"`
+	Limit          int32  `json:"limit"`
 }
 
 type ListAuditByEntityRow struct {
@@ -129,7 +140,12 @@ type ListAuditByEntityRow struct {
 }
 
 func (q *Queries) ListAuditByEntity(ctx context.Context, arg ListAuditByEntityParams) ([]ListAuditByEntityRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAuditByEntity, arg.EntityType, arg.EntityPublicID)
+	rows, err := q.db.QueryContext(ctx, listAuditByEntity,
+		arg.EntityType,
+		arg.EntityPublicID,
+		arg.CalendarID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
