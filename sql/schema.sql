@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_storage_key  VARCHAR(1000) NULL,
   avatar_content_type VARCHAR(255)  NULL,
   password_hash VARCHAR(255) NOT NULL,
+  token_version INT UNSIGNED NOT NULL DEFAULT 1,
+  password_changed_at DATETIME(3) NULL,
   is_admin   BOOLEAN      NOT NULL DEFAULT FALSE,
   created_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -310,4 +312,38 @@ CREATE TABLE IF NOT EXISTS audit_log (
   CONSTRAINT fk_audit_calendar FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
   CONSTRAINT fk_audit_actor FOREIGN KEY (actor_id) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== tables/999_compat.sql =====
+-- Idempotent compatibility alters for existing local development databases.
+-- The table definitions above initialize fresh databases; these statements
+-- bring already-created compose volumes up to the current schema.
+SET @add_token_version = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE users ADD COLUMN token_version INT UNSIGNED NOT NULL DEFAULT 1 AFTER password_hash',
+    'SELECT 1'
+  )
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'users'
+    AND column_name = 'token_version'
+);
+PREPARE stmt FROM @add_token_version;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_password_changed_at = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE users ADD COLUMN password_changed_at DATETIME(3) NULL AFTER token_version',
+    'SELECT 1'
+  )
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'users'
+    AND column_name = 'password_changed_at'
+);
+PREPARE stmt FROM @add_password_changed_at;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 

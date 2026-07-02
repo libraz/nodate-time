@@ -446,7 +446,11 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		token, err := auth.GenerateToken(userID, deps.JWTSecret)
+		user, err := deps.Queries.GetUserByID(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		token, err := auth.GenerateToken(userID, user.TokenVersion, deps.JWTSecret)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

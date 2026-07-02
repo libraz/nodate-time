@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
@@ -21,10 +23,54 @@ type ResetDeps struct {
 	WebURL  string
 }
 
+const (
+	passwordResetEmailLimit  = 3
+	passwordResetEmailWindow = time.Hour
+)
+
+type resetEmailBucket struct {
+	count       int
+	windowStart time.Time
+}
+
+var resetEmailLimiter = struct {
+	sync.Mutex
+	buckets map[string]*resetEmailBucket
+}{buckets: map[string]*resetEmailBucket{}}
+
+func allowPasswordResetEmail(email string, now time.Time) bool {
+	key := strings.ToLower(strings.TrimSpace(email))
+	if key == "" {
+		return false
+	}
+
+	resetEmailLimiter.Lock()
+	defer resetEmailLimiter.Unlock()
+
+	b, exists := resetEmailLimiter.buckets[key]
+	if !exists || now.Sub(b.windowStart) >= passwordResetEmailWindow {
+		b = &resetEmailBucket{windowStart: now}
+		resetEmailLimiter.buckets[key] = b
+		if len(resetEmailLimiter.buckets) > 10000 {
+			for k, bb := range resetEmailLimiter.buckets {
+				if now.Sub(bb.windowStart) >= passwordResetEmailWindow {
+					delete(resetEmailLimiter.buckets, k)
+				}
+			}
+		}
+	}
+	b.count++
+	return b.count <= passwordResetEmailLimit
+}
+
 func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInput) (*RequestResetOutput, error) {
 	return func(ctx context.Context, in *RequestResetInput) (*RequestResetOutput, error) {
 		out := &RequestResetOutput{}
 		out.Body.OK = true
+
+		if !allowPasswordResetEmail(in.Body.Email, time.Now()) {
+			return out, nil
+		}
 
 		user, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err != nil {

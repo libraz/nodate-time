@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
+	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
 type ctxKey int
@@ -26,7 +27,7 @@ func ActorFromContext(ctx context.Context) (uint32, bool) {
 }
 
 // RequireAuth is middleware that validates the JWT Bearer token.
-func RequireAuth(jwtSecret string) func(http.Handler) http.Handler {
+func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -43,6 +44,11 @@ func RequireAuth(jwtSecret string) func(http.Handler) http.Handler {
 
 			claims, err := auth.ValidateToken(tok, jwtSecret)
 			if err != nil {
+				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Bearer token is invalid or expired"}`, http.StatusUnauthorized)
+				return
+			}
+			user, err := queries.GetUserByID(r.Context(), claims.UserID)
+			if err != nil || user.TokenVersion != claims.TokenVersion {
 				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Bearer token is invalid or expired"}`, http.StatusUnauthorized)
 				return
 			}

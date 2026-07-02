@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -87,7 +88,32 @@ func TestAuthDuplicateEmail(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/auth/register", "",
 		map[string]any{"name": "A", "email": email, "password": "password123"}, nil)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/auth/register", "",
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/auth/register", "",
 		map[string]any{"name": "B", "email": email, "password": "password123"})
-	require.Equal(t, 409, status)
+	require.Equal(t, 400, status)
+	var body struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "AUTH.REGISTER_FAILED", body.Code)
+}
+
+func TestPasswordChangeInvalidatesExistingToken(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+
+	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/password", tt.AccessToken,
+		map[string]any{"currentPassword": tt.Password, "newPassword": "new-password-123"}, nil)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil)
+	require.Equal(t, 401, status)
+
+	var loginResp struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/auth/login", "",
+		map[string]any{"email": tt.Email, "password": "new-password-123"}, &loginResp)
+	require.NotEmpty(t, loginResp.Token)
 }

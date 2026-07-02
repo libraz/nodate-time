@@ -45,6 +45,7 @@ var (
 	AuthTokenMissing     = &Spec{Status: 401, Code: "AUTH.TOKEN_MISSING", Message: "Authorization header is required"}
 	AuthTokenInvalid     = &Spec{Status: 401, Code: "AUTH.TOKEN_INVALID", Message: "Bearer token is invalid or expired"}
 	AuthEmailExists      = &Spec{Status: 409, Code: "AUTH.EMAIL_EXISTS", Message: "Email address is already registered"}
+	AuthRegisterFailed   = &Spec{Status: 400, Code: "AUTH.REGISTER_FAILED", Message: "Unable to register with the supplied information"}
 	AuthBadCredentials   = &Spec{Status: 401, Code: "AUTH.BAD_CREDENTIALS", Message: "Invalid email or password"}
 	AuthWrongPassword    = &Spec{Status: 400, Code: "AUTH.WRONG_PASSWORD", Message: "Current password is incorrect"}
 	AuthResetInvalid     = &Spec{Status: 400, Code: "AUTH.RESET_INVALID", Message: "Reset token is invalid or expired"}
@@ -121,7 +122,8 @@ var (
 	InviteExpired  = &Spec{Status: 410, Code: "INVITE.EXPIRED", Message: "Invite has expired or reached max uses"}
 	// InvitePublicViewOnly rejects joining through a public, unlimited viewer link;
 	// such links exist only for read-only embedding, not for claiming membership.
-	InvitePublicViewOnly = &Spec{Status: 403, Code: "INVITE.PUBLIC_VIEW_ONLY", Message: "This is a public view-only link and cannot be joined"}
+	InvitePublicViewOnly      = &Spec{Status: 403, Code: "INVITE.PUBLIC_VIEW_ONLY", Message: "This is a public view-only link and cannot be joined"}
+	InvitePublicAlreadyExists = &Spec{Status: 409, Code: "INVITE.PUBLIC_ALREADY_EXISTS", Message: "An active public link already exists for this calendar"}
 )
 
 // --- Memo errors ---

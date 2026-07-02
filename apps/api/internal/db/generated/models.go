@@ -406,6 +406,8 @@ type User struct {
 	AvatarStorageKey  sql.NullString `json:"avatarStorageKey"`
 	AvatarContentType sql.NullString `json:"avatarContentType"`
 	PasswordHash      string         `json:"passwordHash"`
+	TokenVersion      uint32         `json:"tokenVersion"`
+	PasswordChangedAt sql.NullTime   `json:"passwordChangedAt"`
 	IsAdmin           bool           `json:"isAdmin"`
 	CreatedAt         time.Time      `json:"createdAt"`
 	UpdatedAt         time.Time      `json:"updatedAt"`

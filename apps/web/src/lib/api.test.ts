@@ -153,16 +153,19 @@ describe('request', () => {
 
 describe('401 handling', () => {
   beforeEach(() => {
-    vi.stubGlobal('location', { href: '' } as Location);
+    window.history.replaceState(null, '', '/calendar?view=month#draft');
   });
 
-  it('clears the token and redirects to /login by default', async () => {
+  it('clears the token and navigates to /login with the current path as redirect by default', async () => {
     setToken('expired');
     fetchMock.mockResolvedValue(jsonResponse({ detail: 'nope' }, 401));
 
     await expect(api.get('/calendars')).rejects.toMatchObject({ status: 401 });
     expect(hasToken()).toBe(false);
-    expect(window.location.href).toBe('/login');
+    expect(window.location.pathname).toBe('/login');
+    expect(window.location.search).toBe(
+      `?redirect=${encodeURIComponent('/calendar?view=month#draft')}`,
+    );
   });
 
   it('does not redirect when skipAuthRedirect is set', async () => {
@@ -170,6 +173,18 @@ describe('401 handling', () => {
     fetchMock.mockResolvedValue(jsonResponse({ detail: 'nope' }, 401));
 
     await expect(api.get('/calendars', true)).rejects.toMatchObject({ status: 401 });
-    expect(window.location.href).toBe('');
+    expect(window.location.pathname).toBe('/calendar');
+  });
+
+  it('does not redirect or clear the token for /auth/* failures', async () => {
+    setToken('still-current');
+    fetchMock.mockResolvedValue(jsonResponse({ detail: 'Invalid credentials' }, 401));
+
+    await expect(
+      api.post('/auth/login', { email: 'a@b.c', password: 'bad' }),
+    ).rejects.toMatchObject({ status: 401, detail: 'Invalid credentials' });
+
+    expect(hasToken()).toBe(true);
+    expect(window.location.pathname).toBe('/calendar');
   });
 });

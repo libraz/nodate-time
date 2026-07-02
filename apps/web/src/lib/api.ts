@@ -2,6 +2,7 @@ import { getT } from '@/i18n';
 import { toast } from '@/lib/toast';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
+export const SESSION_EXPIRED_EVENT = 'nodate:session-expired';
 
 /**
  * Decodes the `exp` claim (seconds since epoch) from a JWT without verifying
@@ -98,6 +99,31 @@ async function buildError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, detail, code);
 }
 
+function redirectTarget(): string | null {
+  const { pathname, search, hash } = window.location;
+  if (pathname === '/login') return null;
+  const target = `${pathname}${search}${hash}`;
+  return target.startsWith('/') && !target.startsWith('//') ? target : null;
+}
+
+function navigateToLogin(): void {
+  const redirect = redirectTarget();
+  const next = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  if (`${window.location.pathname}${window.location.search}` === next) return;
+  window.history.pushState(null, '', next);
+  window.dispatchEvent(
+    typeof PopStateEvent === 'function' ? new PopStateEvent('popstate') : new Event('popstate'),
+  );
+}
+
+function expireSession(): never {
+  clearToken();
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  toast.error(getT()('error.sessionExpired'));
+  navigateToLogin();
+  throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -116,11 +142,9 @@ async function request<T>(
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!res.ok) {
-    if (res.status === 401 && !skipAuthRedirect) {
-      clearToken();
-      toast.error(getT()('error.sessionExpired'));
-      window.location.href = '/login';
-      throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
+    const shouldRedirectOnAuth = !skipAuthRedirect && !path.startsWith('/auth/');
+    if (res.status === 401 && shouldRedirectOnAuth) {
+      expireSession();
     }
     throw await buildError(res);
   }
@@ -144,10 +168,7 @@ export const api = {
     const res = await fetch(`${API_BASE}${path}`, { headers });
     if (!res.ok) {
       if (res.status === 401) {
-        clearToken();
-        toast.error(getT()('error.sessionExpired'));
-        window.location.href = '/login';
-        throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
+        expireSession();
       }
       throw await buildError(res);
     }
