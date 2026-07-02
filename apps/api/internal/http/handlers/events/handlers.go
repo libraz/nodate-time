@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -13,6 +13,8 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
+	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -25,11 +27,7 @@ type Deps struct {
 }
 
 func pubIDToHex(b []byte) string {
-	u, err := uuid.FromBytes(b)
-	if err != nil {
-		return ""
-	}
-	return u.String()
+	return calresolve.PublicIDString(b)
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -41,43 +39,17 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, _, err := resolveCalendarMember(ctx, deps, calPubID, userID)
-	return cal, err
+	return calresolve.Read(ctx, deps.Queries, calPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
-	if err != nil {
-		return generated.Calendar{}, err
-	}
-	if member.Role == generated.CalendarMembersRoleViewer {
-		return generated.Calendar{}, apierrors.CalendarRoleRequired
-	}
-	return cal, nil
+	return calresolve.Write(ctx, deps.Queries, calPubID, userID)
 }
 
 func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	pubBytes, err := parseUUID(calPubID)
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-	}
-	cal, err := deps.Queries.GetCalendarByPublicID(ctx, pubBytes)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
-		}
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
-	}
-	member, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: cal.ID,
-		UserID:     userID,
-	})
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
-	}
-	return cal, member, nil
+	return calresolve.Member(ctx, deps.Queries, calPubID, userID)
 }
 
 func mapRecurrenceRule(data *json.RawMessage) *RecurrenceRuleResponse {
@@ -145,6 +117,7 @@ func mapRecurringInstance(e generated.Event, calPubID []byte, occ recurrence.Occ
 		AllDay:             e.AllDay,
 		StartAt:            occ.StartAt,
 		EndAt:              occ.EndAt,
+		Timezone:           e.Timezone,
 		Color:              e.Color,
 		Location:           e.Location,
 		Memo:               e.Memo,
@@ -157,6 +130,43 @@ func mapRecurringInstance(e generated.Event, calPubID []byte, occ recurrence.Occ
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          e.UpdatedAt,
 	}
+}
+
+func participantPublicIDs(ctx context.Context, deps Deps, eventID uint32) []string {
+	rows, err := deps.Queries.ListEventParticipants(ctx, eventID)
+	if err != nil || len(rows) == 0 {
+		return []string{}
+	}
+	ids := make([]string, 0, len(rows))
+	for _, p := range rows {
+		ids = append(ids, pubIDToHex(p.UserPublicID))
+	}
+	return ids
+}
+
+func replaceEventParticipants(ctx context.Context, deps Deps, calID uint32, eventID uint32, participantIDs []string) []string {
+	_ = deps.Queries.DeleteAllEventParticipants(ctx, eventID)
+	participants := []string{}
+	for _, pUUID := range participantIDs {
+		pPub, err := parseUUID(pUUID)
+		if err != nil {
+			continue
+		}
+		u, err := deps.Queries.GetUserByPublicID(ctx, pPub)
+		if err != nil {
+			continue
+		}
+		// Only calendar members may be added as participants.
+		if !isMember(ctx, deps, calID, u.ID) {
+			continue
+		}
+		_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
+			EventID: eventID,
+			UserID:  u.ID,
+		})
+		participants = append(participants, pUUID)
+	}
+	return participants
 }
 
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
@@ -331,30 +341,6 @@ func isMember(ctx context.Context, deps Deps, calID, userID uint32) bool {
 	return err == nil
 }
 
-// exceptionInfo holds a single-occurrence override row for a recurring series.
-type exceptionInfo struct {
-	child     generated.Event
-	cancelled bool
-}
-
-// loadExceptions returns the override rows for a recurring master keyed by the
-// UTC millisecond of the original occurrence they replace, so the expander can
-// substitute or skip individual instances.
-func loadExceptions(ctx context.Context, deps Deps, parentID uint32) map[int64]exceptionInfo {
-	rows, err := deps.Queries.ListRecurrenceExceptionsByParent(ctx, sql.NullInt32{Int32: int32(parentID), Valid: true})
-	if err != nil || len(rows) == 0 {
-		return nil
-	}
-	m := make(map[int64]exceptionInfo, len(rows))
-	for _, r := range rows {
-		if !r.RecurrenceOriginalStart.Valid {
-			continue
-		}
-		m[r.RecurrenceOriginalStart.Time.UTC().UnixMilli()] = exceptionInfo{child: r, cancelled: r.RecurrenceCancelled}
-	}
-	return m
-}
-
 // mapExceptionInstance renders a modified occurrence using the override row's own
 // fields while keeping the composite ID anchored to the original occurrence date,
 // so a subsequent edit resolves back to the same override.
@@ -458,48 +444,21 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 
 		for _, e := range recurringRows {
-			if e.RecurrenceRule == nil {
-				continue
-			}
-			rule := recurrence.ParseRule(*e.RecurrenceRule)
-			if rule == nil {
-				continue
-			}
 			assignee := assigneePublicID(ctx, deps, e.AssignedTo)
 			creator := lookupUser(ctx, deps, e.CreatedBy, creatorCache)
-			exceptions := loadExceptions(ctx, deps, e.ID)
-			consumed := make(map[int64]bool, len(exceptions))
-			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, startTime, endTime, e.Timezone)
-			for _, occ := range occurrences {
-				key := occ.StartAt.UTC().UnixMilli()
-				if ex, ok := exceptions[key]; ok {
-					consumed[key] = true
-					if ex.cancelled {
-						continue // this occurrence was deleted from the series
-					}
-					inst := mapExceptionInstance(e, ex.child, cal.PublicID, occ.StartAt)
-					inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
+			masterParticipants := participantPublicIDs(ctx, deps, e.ID)
+			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+				if expanded.IsException {
+					inst := mapExceptionInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
+					inst.AssignedTo = assigneePublicID(ctx, deps, expanded.Event.AssignedTo)
+					inst.Participants = participantPublicIDs(ctx, deps, expanded.Event.ID)
 					applyCreator(&inst, creator)
 					results = append(results, inst)
 					continue
 				}
-				inst := mapRecurringInstance(e, cal.PublicID, occ)
+				inst := mapRecurringInstance(e, cal.PublicID, expanded.Occurrence)
 				inst.AssignedTo = assignee
-				applyCreator(&inst, creator)
-				results = append(results, inst)
-			}
-			// Modified overrides whose original occurrence no longer exists (e.g.
-			// the series rule or time changed) still surface at their own time so
-			// the user's edit is not silently lost.
-			for key, ex := range exceptions {
-				if consumed[key] || ex.cancelled {
-					continue
-				}
-				if ex.child.StartAt.Before(startTime) || !ex.child.StartAt.Before(endTime) {
-					continue
-				}
-				inst := mapExceptionInstance(e, ex.child, cal.PublicID, ex.child.RecurrenceOriginalStart.Time.UTC())
-				inst.AssignedTo = assigneePublicID(ctx, deps, ex.child.AssignedTo)
+				inst.Participants = masterParticipants
 				applyCreator(&inst, creator)
 				results = append(results, inst)
 			}
@@ -540,54 +499,31 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 
-			if evt.RecurrenceRule == nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			rule := recurrence.ParseRule(*evt.RecurrenceRule)
-			if rule == nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-
 			instanceDate, err := time.Parse("20060102", dateStr)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 
-			// Confirm the requested date is an actual occurrence of the rule
-			// rather than an arbitrary date crafted into the composite ID.
 			dayStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(), 0, 0, 0, 0, time.UTC)
 			dayEnd := dayStart.AddDate(0, 0, 1)
-			var matched *recurrence.Occurrence
-			for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt, evt.EndAt, dayStart, dayEnd, evt.Timezone) {
-				if occ.StartAt.UTC().Format("20060102") == dateStr {
-					o := occ
-					matched = &o
-					break
+			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, evt, dayStart, dayEnd) {
+				if expanded.OriginalStart.Format("20060102") != dateStr {
+					continue
 				}
-			}
-			if matched == nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-
-			// Honor a single-occurrence override if one exists for this instant.
-			ex, err := deps.Queries.GetRecurrenceException(ctx, generated.GetRecurrenceExceptionParams{
-				RecurrenceParentID:      sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-				RecurrenceOriginalStart: sql.NullTime{Time: matched.StartAt.UTC(), Valid: true},
-			})
-			if err == nil {
-				if ex.RecurrenceCancelled {
-					return nil, apierrors.ToHuma(apierrors.EventNotFound)
+				if expanded.IsException {
+					resp := mapExceptionInstance(evt, expanded.Event, cal.PublicID, expanded.OriginalStart)
+					resp.AssignedTo = assigneePublicID(ctx, deps, expanded.Event.AssignedTo)
+					resp.Participants = participantPublicIDs(ctx, deps, expanded.Event.ID)
+					setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
+					return &GetEventOutput{Body: resp}, nil
 				}
-				resp := mapExceptionInstance(evt, ex, cal.PublicID, matched.StartAt)
-				resp.AssignedTo = assigneePublicID(ctx, deps, ex.AssignedTo)
+				resp := mapRecurringInstance(evt, cal.PublicID, expanded.Occurrence)
+				resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
+				resp.Participants = participantPublicIDs(ctx, deps, evt.ID)
 				setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 				return &GetEventOutput{Body: resp}, nil
 			}
-
-			resp := mapRecurringInstance(evt, cal.PublicID, *matched)
-			resp.AssignedTo = assigneePublicID(ctx, deps, evt.AssignedTo)
-			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
-			return &GetEventOutput{Body: resp}, nil
+			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 
 		evtPub, err := parseUUID(in.EventID)
@@ -607,11 +543,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 		participants, _ := deps.Queries.ListEventParticipants(ctx, evt.ID)
 		if len(participants) > 0 {
-			pids := make([]string, 0, len(participants))
-			for _, p := range participants {
-				pids = append(pids, pubIDToHex(p.UserPublicID))
-			}
-			resp.Participants = pids
+			resp.Participants = participantPublicIDs(ctx, deps, evt.ID)
 		}
 		return &GetEventOutput{Body: resp}, nil
 	}
@@ -683,31 +615,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		participants := []string{}
-		if len(in.Body.Participants) > 0 {
-			eventID64, _ := result.LastInsertId()
-			eventID := uint32(eventID64)
-			for _, pUUID := range in.Body.Participants {
-				pPub, err := parseUUID(pUUID)
-				if err != nil {
-					continue
-				}
-				u, err := deps.Queries.GetUserByPublicID(ctx, pPub)
-				if err != nil {
-					continue
-				}
-				// Only calendar members may be added as participants, so a
-				// foreign user's name/avatar cannot be attached and leaked.
-				if !isMember(ctx, deps, cal.ID, u.ID) {
-					continue
-				}
-				_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
-					EventID: eventID,
-					UserID:  u.ID,
-				})
-				participants = append(participants, pUUID)
-			}
-		}
+		eventID64, _ := result.LastInsertId()
+		eventID := uint32(eventID64)
+		participants := replaceEventParticipants(ctx, deps, cal.ID, eventID, in.Body.Participants)
 
 		resp := EventResponse{
 			ID:                 pubID.String(),
@@ -788,12 +698,29 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 		}
 
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
-
 		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
+
+		// Whole-series edit from a composite occurrence ID receives dates for the
+		// dragged/edited occurrence. Re-anchor those as a delta against the master
+		// so earlier instances do not disappear.
+		if isOccurrence && in.Scope == "all" && evt.RecurrenceRule != nil {
+			rule := recurrence.ParseRule(*evt.RecurrenceRule)
+			if rule == nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
+			if oerr != nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			duration := endAt.Sub(startAt)
+			startAt = evt.StartAt.Add(startAt.Sub(originalStart))
+			endAt = startAt.Add(duration)
+		}
+
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
 
 		// Single-occurrence edit: write an override row instead of mutating the
 		// whole series, so editing one instance no longer rewrites every instance.
@@ -839,6 +766,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 			resp := mapExceptionInstance(evt, child, cal.PublicID, originalStart)
 			resp.AssignedTo = assigneePublicID(ctx, deps, child.AssignedTo)
+			resp.Participants = replaceEventParticipants(ctx, deps, cal.ID, child.ID, in.Body.Participants)
 			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 
 			audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionUpdate, userID, in.Body.Title+" (occurrence)")
@@ -866,28 +794,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// Replace participants
-		_ = deps.Queries.DeleteAllEventParticipants(ctx, evt.ID)
-		participants := []string{}
-		for _, pUUID := range in.Body.Participants {
-			pPub, err := parseUUID(pUUID)
-			if err != nil {
-				continue
-			}
-			u, err := deps.Queries.GetUserByPublicID(ctx, pPub)
-			if err != nil {
-				continue
-			}
-			// Only calendar members may be added as participants.
-			if !isMember(ctx, deps, cal.ID, u.ID) {
-				continue
-			}
-			_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
-				EventID: evt.ID,
-				UserID:  u.ID,
-			})
-			participants = append(participants, pUUID)
-		}
+		participants := replaceEventParticipants(ctx, deps, cal.ID, evt.ID, in.Body.Participants)
 
 		updated, _ := deps.Queries.GetEventByPublicID(ctx, evtPub)
 		resp := mapEvent(updated, cal.PublicID)
@@ -966,15 +873,35 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			return &DeleteEventOutput{}, nil
 		}
 
+		attachmentKeys, err := deps.Queries.ListAttachmentStorageKeysByEvent(ctx, evt.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
 		// Whole-series delete: removing the master cascades to its override rows.
 		err = deps.Queries.DeleteEvent(ctx, evt.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		deleteStorageObjects(ctx, deps.Storage, attachmentKeys)
 
 		audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionDelete, userID, evt.Title)
 
 		return &DeleteEventOutput{}, nil
+	}
+}
+
+func deleteStorageObjects(ctx context.Context, storageClient *storage.Client, keys []string) {
+	if storageClient == nil {
+		return
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if err := storageClient.DeleteObject(ctx, key); err != nil {
+			slog.WarnContext(ctx, "failed to delete cascaded storage object", "key", key, "error", err)
+		}
 	}
 }
 
@@ -1076,10 +1003,32 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 	}
 }
 
+func resolveCommentEvent(ctx context.Context, deps Deps, calID uint32, eventID string) (generated.Event, error) {
+	if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
+		eventID = parentUUID
+	}
+	evtPub, err := parseUUID(eventID)
+	if err != nil {
+		return generated.Event{}, apierrors.EventNotFound
+	}
+	evt, err := deps.Queries.GetEventByPublicID(ctx, evtPub)
+	if err != nil || evt.CalendarID != calID {
+		return generated.Event{}, apierrors.EventNotFound
+	}
+	return evt, nil
+}
+
 func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*UpdateCommentOutput, error) {
 	return func(ctx context.Context, in *UpdateCommentInput) (*UpdateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -1091,7 +1040,10 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
 		}
-		comment, err := deps.Queries.GetEventCommentByPublicID(ctx, commentPub)
+		comment, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
+			PublicID: commentPub,
+			EventID:  evt.ID,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
 		}
@@ -1123,7 +1075,14 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*DeleteCommentOutput, error) {
 	return func(ctx context.Context, in *DeleteCommentInput) (*DeleteCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			if spec, ok := err.(*apierrors.Spec); ok {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
 			if spec, ok := err.(*apierrors.Spec); ok {
 				return nil, apierrors.ToHuma(spec)
@@ -1135,7 +1094,10 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
 		}
-		comment, err := deps.Queries.GetEventCommentByPublicID(ctx, commentPub)
+		comment, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
+			PublicID: commentPub,
+			EventID:  evt.ID,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
 		}

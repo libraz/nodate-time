@@ -79,6 +79,49 @@ func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte
 	return i, err
 }
 
+const getEventCommentByPublicIDAndEvent = `-- name: GetEventCommentByPublicIDAndEvent :one
+SELECT ec.id, ec.public_id, ec.event_id, ec.user_id, ec.body, ec.created_at, ec.updated_at, u.name AS user_name, u.icon AS user_icon, u.public_id AS user_public_id
+FROM event_comments ec
+INNER JOIN users u ON u.id = ec.user_id
+WHERE ec.public_id = ? AND ec.event_id = ?
+`
+
+type GetEventCommentByPublicIDAndEventParams struct {
+	PublicID []byte `json:"publicId"`
+	EventID  uint32 `json:"eventId"`
+}
+
+type GetEventCommentByPublicIDAndEventRow struct {
+	ID           uint32    `json:"id"`
+	PublicID     []byte    `json:"publicId"`
+	EventID      uint32    `json:"eventId"`
+	UserID       uint32    `json:"userId"`
+	Body         string    `json:"body"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	UserName     string    `json:"userName"`
+	UserIcon     string    `json:"userIcon"`
+	UserPublicID []byte    `json:"userPublicId"`
+}
+
+func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg GetEventCommentByPublicIDAndEventParams) (GetEventCommentByPublicIDAndEventRow, error) {
+	row := q.db.QueryRowContext(ctx, getEventCommentByPublicIDAndEvent, arg.PublicID, arg.EventID)
+	var i GetEventCommentByPublicIDAndEventRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.EventID,
+		&i.UserID,
+		&i.Body,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserName,
+		&i.UserIcon,
+		&i.UserPublicID,
+	)
+	return i, err
+}
+
 const listEventComments = `-- name: ListEventComments :many
 SELECT ec.id, ec.public_id, ec.event_id, ec.user_id, ec.body, ec.created_at, ec.updated_at, u.name AS user_name, u.icon AS user_icon, u.public_id AS user_public_id
 FROM event_comments ec

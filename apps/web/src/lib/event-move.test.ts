@@ -40,6 +40,20 @@ describe('buildMovedEvent', () => {
     );
   });
 
+  it('preserves wall-clock duration across DST transitions', () => {
+    const evt = makeEvent({
+      startAt: '2026-03-08T01:30:00-05:00',
+      endAt: '2026-03-08T03:30:00-04:00',
+      timezone: 'America/New_York',
+    });
+    const newStart = DateTime.fromISO('2026-03-09T01:30:00', { zone: 'America/New_York' });
+    const moved = buildMovedEvent(evt, newStart);
+
+    expect(DateTime.fromISO(moved.endAt, { zone: 'America/New_York' }).toFormat('H:mm')).toBe(
+      '3:30',
+    );
+  });
+
   it('carries over every other field', () => {
     const evt = makeEvent({ title: 'Lunch', location: 'Cafe', allDay: true });
     const moved = buildMovedEvent(evt, DateTime.fromISO('2025-06-26T00:00:00+09:00'));

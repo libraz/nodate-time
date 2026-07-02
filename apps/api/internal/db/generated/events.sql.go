@@ -233,65 +233,6 @@ func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEven
 	return items, nil
 }
 
-const listEventsByUserAndRange = `-- name: ListEventsByUserAndRange :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
-INNER JOIN calendar_members cm ON cm.calendar_id = e.calendar_id
-WHERE cm.user_id = ? AND e.start_at < ? AND e.end_at > ?
-ORDER BY e.start_at
-`
-
-type ListEventsByUserAndRangeParams struct {
-	UserID  uint32    `json:"userId"`
-	StartAt time.Time `json:"startAt"`
-	EndAt   time.Time `json:"endAt"`
-}
-
-func (q *Queries) ListEventsByUserAndRange(ctx context.Context, arg ListEventsByUserAndRangeParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listEventsByUserAndRange, arg.UserID, arg.StartAt, arg.EndAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRecurrenceExceptionsByParent = `-- name: ListRecurrenceExceptionsByParent :many
 SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE recurrence_parent_id = ? ORDER BY recurrence_original_start
 `

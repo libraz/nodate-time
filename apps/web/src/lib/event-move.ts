@@ -1,4 +1,5 @@
 import type { DateTime } from 'luxon';
+import { fromISOInZone } from '@/lib/date-utils';
 import type { EventInput } from '@/stores/calendar-store';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -7,8 +8,12 @@ import type { CalendarEvent } from '@/types/calendar';
  * duration and every other field. `newStart` must carry the intended timezone.
  */
 export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventInput {
-  const durationMs = new Date(evt.endAt).getTime() - new Date(evt.startAt).getTime();
-  const newEnd = newStart.plus({ milliseconds: durationMs });
+  const start = fromISOInZone(evt.startAt, evt.timezone);
+  const end = fromISOInZone(evt.endAt, evt.timezone);
+  const duration = end
+    .setZone('UTC', { keepLocalTime: true })
+    .diff(start.setZone('UTC', { keepLocalTime: true }), ['days', 'hours', 'minutes']);
+  const newEnd = newStart.plus(duration);
   return {
     title: evt.title,
     allDay: evt.allDay,
