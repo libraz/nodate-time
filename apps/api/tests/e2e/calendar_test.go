@@ -99,6 +99,17 @@ func TestCalendarLabels(t *testing.T) {
 	require.Equal(t, "#47B2F7", labels[0].Color)
 }
 
+func TestCalendarLabelsRequireMembership(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	outsider := helpers.NewTenant(t, testServerURL)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/calendars/"+owner.CalendarID+"/labels", outsider.AccessToken, nil)
+	require.Equal(t, http.StatusForbidden, status)
+}
+
 func TestCalendarAccessDenied(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -109,4 +120,24 @@ func TestCalendarAccessDenied(t *testing.T) {
 	// tt2 cannot access tt1's calendar
 	status, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/calendars/"+tt1.CalendarID, tt2.AccessToken, nil)
 	require.Equal(t, 403, status)
+}
+
+func TestCalendarColorMustBeHex(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/calendars", tt.AccessToken,
+		map[string]any{"name": "bad color", "color": "nothex"})
+	require.Equal(t, http.StatusUnprocessableEntity, status)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
+		map[string]any{"name": "bad color", "color": "#12345g"})
+	require.Equal(t, http.StatusUnprocessableEntity, status)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/members", tt.AccessToken,
+		map[string]any{"email": guest.Email, "role": "member", "color": "blue"})
+	require.Equal(t, http.StatusUnprocessableEntity, status)
 }

@@ -182,11 +182,11 @@ func Build(deps Deps) http.Handler {
 
 	// --- Protected routes (require auth) ---
 	r.Group(func(prot chi.Router) {
-		prot.Use(middleware.RequireAuth(deps.JWTSecret))
+		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
 		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
-		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries}
+		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}
 		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
@@ -292,6 +292,14 @@ func Build(deps Deps) http.Handler {
 			Summary:     "List calendar members",
 			Tags:        []string{"Member"},
 		}, calendars.ListMembers(calDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "add-member",
+			Method:      http.MethodPost,
+			Path:        "/calendars/{calendarId}/members",
+			Summary:     "Add a member to a calendar",
+			Tags:        []string{"Member"},
+		}, calendars.AddMember(calDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "update-member-role",
@@ -631,7 +639,7 @@ func Build(deps Deps) http.Handler {
 
 	// --- Admin routes (require auth + admin allowlist) ---
 	r.Group(func(adm chi.Router) {
-		adm.Use(middleware.RequireAuth(deps.JWTSecret))
+		adm.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		adm.Use(middleware.RequireAdmin(deps.Queries))
 		api := humachi.New(adm, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
