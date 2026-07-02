@@ -67,7 +67,7 @@ func TestBuildICSTimedEmitsTZID(t *testing.T) {
 	}
 }
 
-// TestBuildICSEscaping verifies TEXT vs URI escaping rules (L-12 / L-13).
+// TestBuildICSEscaping verifies TEXT vs URI escaping rules.
 func TestBuildICSEscaping(t *testing.T) {
 	ev := generated.Event{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
