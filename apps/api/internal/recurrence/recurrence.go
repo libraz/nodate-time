@@ -109,11 +109,6 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 
 	duration := eventEnd.Sub(eventStart)
 	var results []Occurrence
-	count := 0
-	hardCap := rule.Count
-	if hardCap <= 0 || hardCap > maxExpansionIterations {
-		hardCap = maxExpansionIterations // safety limit for unbounded recurrence
-	}
 
 	var untilTime time.Time
 	if rule.Until != nil {
@@ -125,13 +120,17 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	}
 
 	iterator := newIterator(rule, eventStart)
-	iterations := 0
-	for iterations < maxExpansionIterations {
-		iterations++
+	occurrenceOrdinal := fastForwardInitialStep(rule, eventStart, duration, windowStart)
+	iterator.step = occurrenceOrdinal
+	emittedCandidates := 0
+	scannedCandidates := 0
+	for scannedCandidates < maxExpansionIterations && emittedCandidates < maxExpansionIterations {
+		scannedCandidates++
 		candidate := iterator.next()
 		if candidate.IsZero() {
 			break
 		}
+		occurrenceOrdinal++
 
 		// Check until boundary
 		if !untilTime.IsZero() && candidate.After(untilTime) {
@@ -143,10 +142,10 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 			break
 		}
 
-		count++
-		if count > hardCap {
+		if rule.Count > 0 && occurrenceOrdinal > rule.Count {
 			break
 		}
+		emittedCandidates++
 
 		candidateEnd := candidate.Add(duration)
 		// Check overlap with window
@@ -156,6 +155,34 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	}
 
 	return results
+}
+
+func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Duration, windowStart time.Time) int {
+	if rule.Freq != "daily" || rule.Interval <= 0 || !windowStart.After(eventStart) {
+		return 0
+	}
+
+	approxDays := int(windowStart.Sub(eventStart.Add(duration)).Hours() / 24)
+	step := approxDays / rule.Interval
+	if step < 0 {
+		step = 0
+	}
+
+	for step > 0 {
+		prev := eventStart.AddDate(0, 0, (step-1)*rule.Interval)
+		if !prev.Add(duration).After(windowStart) {
+			break
+		}
+		step--
+	}
+	for {
+		candidate := eventStart.AddDate(0, 0, step*rule.Interval)
+		if candidate.Add(duration).After(windowStart) {
+			break
+		}
+		step++
+	}
+	return step
 }
 
 type iterator struct {
@@ -288,11 +315,17 @@ func (it *iterator) nextMonthlyBySetPos() time.Time {
 	}
 
 	base := it.start
-	monthStart := time.Date(base.Year(), base.Month(), 1, base.Hour(), base.Minute(), base.Second(), 0, base.Location())
-	monthStart = monthStart.AddDate(0, it.step*it.rule.Interval, 0)
-	it.step++
+	for skipped := 0; skipped < maxExpansionIterations; skipped++ {
+		monthStart := time.Date(base.Year(), base.Month(), 1, base.Hour(), base.Minute(), base.Second(), 0, base.Location())
+		monthStart = monthStart.AddDate(0, it.step*it.rule.Interval, 0)
+		it.step++
 
-	return nthWeekdayOfMonth(monthStart.Year(), monthStart.Month(), targetDay, it.rule.BySetPos, base.Location(), base.Hour(), base.Minute(), base.Second())
+		candidate := nthWeekdayOfMonth(monthStart.Year(), monthStart.Month(), targetDay, it.rule.BySetPos, base.Location(), base.Hour(), base.Minute(), base.Second())
+		if !candidate.IsZero() {
+			return candidate
+		}
+	}
+	return time.Time{}
 }
 
 func nthWeekdayOfMonth(year int, month time.Month, weekday time.Weekday, n int, loc *time.Location, hour, min, sec int) time.Time {
