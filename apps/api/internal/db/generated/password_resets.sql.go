@@ -36,7 +36,12 @@ func (q *Queries) DeleteExpiredPasswordResets(ctx context.Context, expiresAt tim
 }
 
 const getPasswordResetByTokenHash = `-- name: GetPasswordResetByTokenHash :one
-SELECT id, user_id, token_hash, expires_at, used_at, created_at FROM password_resets WHERE token_hash = ? LIMIT 1
+SELECT id, user_id, token_hash, expires_at, used_at, created_at FROM password_resets
+WHERE token_hash = ?
+  AND used_at IS NULL
+  AND expires_at > CURRENT_TIMESTAMP(3)
+LIMIT 1
+FOR UPDATE
 `
 
 func (q *Queries) GetPasswordResetByTokenHash(ctx context.Context, tokenHash string) (PasswordReset, error) {
@@ -63,11 +68,12 @@ func (q *Queries) InvalidateUserPasswordResets(ctx context.Context, userID uint3
 	return err
 }
 
-const markPasswordResetUsed = `-- name: MarkPasswordResetUsed :exec
-UPDATE password_resets SET used_at = CURRENT_TIMESTAMP(3) WHERE id = ?
+const markPasswordResetUsed = `-- name: MarkPasswordResetUsed :execresult
+UPDATE password_resets
+SET used_at = CURRENT_TIMESTAMP(3)
+WHERE id = ? AND used_at IS NULL
 `
 
-func (q *Queries) MarkPasswordResetUsed(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, markPasswordResetUsed, id)
-	return err
+func (q *Queries) MarkPasswordResetUsed(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, markPasswordResetUsed, id)
 }
