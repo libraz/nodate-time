@@ -53,6 +53,16 @@ export interface EventAttachment {
   createdAt: string;
 }
 
+/** Comment response returned by the event activities API. */
+export interface EventComment {
+  id: string;
+  body: string;
+  userName: string;
+  userIcon: string;
+  userPublicId: string;
+  createdAt: string;
+}
+
 export const NOTIFICATION_OFFSETS = [
   { label: 'none', value: null },
   { label: 'atTime', value: 0 },
