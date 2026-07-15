@@ -9,6 +9,7 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { eventEndDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -21,6 +22,7 @@ export function YearView() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
+  useHolidayLoader(holidaysCountry, [currentMonth.year]);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
 

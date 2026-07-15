@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -33,6 +34,11 @@ export function ListView() {
     }
     return Array.from(map.entries());
   }, [events, activeCalendarIds, timezone]);
+  const holidayYears = useMemo(
+    () => grouped.map(([date]) => Number(date.slice(0, 4))).filter(Number.isFinite),
+    [grouped],
+  );
+  useHolidayLoader(holidaysCountry, holidayYears);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">

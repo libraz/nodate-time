@@ -1,29 +1,59 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityPanel } from '@/components/activity-panel';
-import { AlbumPanel } from '@/components/album-panel';
+import { lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
-import { DayDetail } from '@/components/day-detail';
-import { EventModal } from '@/components/event-modal';
 import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
-import { ListView } from '@/components/list-view';
-import { MembersPanel } from '@/components/members-panel';
-import { MobileMenu } from '@/components/mobile-menu';
 import { MonthScroll } from '@/components/month-scroll';
-import { NotificationsPanel } from '@/components/notifications-panel';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
-import { SearchPanel } from '@/components/search-panel';
-import { SharePanel } from '@/components/share-panel';
-import { WeeklyTimeline } from '@/components/weekly-timeline';
-import { YearView } from '@/components/year-view';
 import { useT } from '@/i18n';
 import { fromISOInZone } from '@/lib/date-utils';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
+
+const ActivityPanel = lazy(() =>
+  import('@/components/activity-panel').then((module) => ({ default: module.ActivityPanel })),
+);
+const AlbumPanel = lazy(() =>
+  import('@/components/album-panel').then((module) => ({ default: module.AlbumPanel })),
+);
+const DayDetail = lazy(() =>
+  import('@/components/day-detail').then((module) => ({ default: module.DayDetail })),
+);
+const EventModal = lazy(() =>
+  import('@/components/event-modal').then((module) => ({ default: module.EventModal })),
+);
+const ListView = lazy(() =>
+  import('@/components/list-view').then((module) => ({ default: module.ListView })),
+);
+const MembersPanel = lazy(() =>
+  import('@/components/members-panel').then((module) => ({ default: module.MembersPanel })),
+);
+const MobileMenu = lazy(() =>
+  import('@/components/mobile-menu').then((module) => ({ default: module.MobileMenu })),
+);
+const NotificationsPanel = lazy(() =>
+  import('@/components/notifications-panel').then((module) => ({
+    default: module.NotificationsPanel,
+  })),
+);
+const SearchPanel = lazy(() =>
+  import('@/components/search-panel').then((module) => ({ default: module.SearchPanel })),
+);
+const SharePanel = lazy(() =>
+  import('@/components/share-panel').then((module) => ({ default: module.SharePanel })),
+);
+const WeeklyTimeline = lazy(() =>
+  import('@/components/weekly-timeline').then((module) => ({ default: module.WeeklyTimeline })),
+);
+const YearView = lazy(() =>
+  import('@/components/year-view').then((module) => ({ default: module.YearView })),
+);
+function Deferred({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
 
 function MobileSearchView() {
   const t = useT();
@@ -301,12 +331,20 @@ export function App() {
   const mobileTab = useUiStore((s) => s.mobileTab);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
   const showActivity = useUiStore((s) => s.showActivity);
+  const showDayDetail = useUiStore((s) => s.showDayDetail);
+  const showEventModal = useUiStore((s) => s.showEventModal);
+  const showMobileMenu = useUiStore((s) => s.showMobileMenu);
+  const showSearch = useUiStore((s) => s.showSearch);
+  const showSettings = useUiStore((s) => s.showSettings);
+  const rightPanel = useUiStore((s) => s.rightPanel);
   const setShowActivity = useUiStore((s) => s.setShowActivity);
   const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const fetchMemos = useCalendarStore((s) => s.fetchMemos);
   const calendars = useCalendarStore((s) => s.calendars);
   const initDone = useRef(false);
+  const eventModalLoaded = useRef(false);
+  if (showEventModal) eventModalLoaded.current = true;
 
   useEffect(() => {
     if (initDone.current) return;
@@ -324,29 +362,33 @@ export function App() {
 
   const calendarContent = (
     <div className="relative flex-1 overflow-hidden">
-      {calendarView === 'month' && (
-        <div className="h-full">
-          <CalendarGrid />
-        </div>
-      )}
-      {calendarView === 'week' && <WeeklyTimeline />}
-      {calendarView === 'list' && <ListView />}
-      {calendarView === 'year' && <YearView />}
+      <Suspense fallback={null}>
+        {calendarView === 'month' && (
+          <div className="h-full">
+            <CalendarGrid />
+          </div>
+        )}
+        {calendarView === 'week' && <WeeklyTimeline />}
+        {calendarView === 'list' && <ListView />}
+        {calendarView === 'year' && <YearView />}
+      </Suspense>
     </div>
   );
 
   // Mobile month view is a continuous vertical infinite scroll (no month paging).
   const mobileCalendarContent = (
     <div className="relative flex-1 overflow-hidden">
-      {calendarView === 'month' ? (
-        <MonthScroll />
-      ) : calendarView === 'week' ? (
-        <WeeklyTimeline />
-      ) : calendarView === 'list' ? (
-        <ListView />
-      ) : (
-        <YearView />
-      )}
+      <Suspense fallback={null}>
+        {calendarView === 'month' ? (
+          <MonthScroll />
+        ) : calendarView === 'week' ? (
+          <WeeklyTimeline />
+        ) : calendarView === 'list' ? (
+          <ListView />
+        ) : (
+          <YearView />
+        )}
+      </Suspense>
     </div>
   );
 
@@ -366,7 +408,11 @@ export function App() {
       {/* SP layout: tab-switched content */}
       <div className="relative z-[1] flex flex-1 flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom))] sm:hidden">
         {mobileTab === 'calendar' && mobileCalendarContent}
-        {mobileTab === 'memo' && <MemoSection />}
+        {mobileTab === 'memo' && (
+          <Deferred>
+            <MemoSection />
+          </Deferred>
+        )}
         {mobileTab === 'search' && <MobileSearchView />}
         {mobileTab === 'settings' && <MobileSettingsView />}
       </div>
@@ -396,34 +442,74 @@ export function App() {
       <FabButton />
 
       {/* Settings modal (PC) */}
-      <SettingsModal />
+      {showSettings && (
+        <Deferred>
+          <SettingsModal />
+        </Deferred>
+      )}
 
       {/* Day detail overlay */}
-      <DayDetail />
+      {showDayDetail && (
+        <Deferred>
+          <DayDetail />
+        </Deferred>
+      )}
 
       {/* Search overlay / panel (PC only) */}
-      <SearchPanel />
+      {showSearch && (
+        <Deferred>
+          <SearchPanel />
+        </Deferred>
+      )}
 
       {/* Album overlay */}
-      <AlbumPanel />
+      {rightPanel === 'album' && (
+        <Deferred>
+          <AlbumPanel />
+        </Deferred>
+      )}
 
       {/* Members overlay */}
-      <MembersPanel />
+      {rightPanel === 'members' && (
+        <Deferred>
+          <MembersPanel />
+        </Deferred>
+      )}
 
       {/* Notifications overlay */}
-      <NotificationsPanel />
+      {rightPanel === 'notifications' && (
+        <Deferred>
+          <NotificationsPanel />
+        </Deferred>
+      )}
 
       {/* Share overlay */}
-      <SharePanel />
+      {rightPanel === 'share' && (
+        <Deferred>
+          <SharePanel />
+        </Deferred>
+      )}
 
       {/* Event create/edit modal — top-level so its z-50 beats the bottom nav */}
-      <EventModal />
+      {eventModalLoaded.current && (
+        <Deferred>
+          <EventModal />
+        </Deferred>
+      )}
 
       {/* Activity feed overlay (desktop + mobile) */}
-      {showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
+      {showActivity && (
+        <Deferred>
+          <ActivityPanel onClose={() => setShowActivity(false)} />
+        </Deferred>
+      )}
 
       {/* Mobile slide-in menu: calendar list + shared-calendar panels */}
-      <MobileMenu />
+      {showMobileMenu && (
+        <Deferred>
+          <MobileMenu />
+        </Deferred>
+      )}
     </div>
   );
 }
