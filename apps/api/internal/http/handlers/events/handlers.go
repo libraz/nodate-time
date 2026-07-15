@@ -144,29 +144,63 @@ func participantPublicIDs(ctx context.Context, deps Deps, eventID uint32) []stri
 	return ids
 }
 
-func replaceEventParticipants(ctx context.Context, deps Deps, calID uint32, eventID uint32, participantIDs []string) []string {
-	_ = deps.Queries.DeleteAllEventParticipants(ctx, eventID)
-	participants := []string{}
+type eventParticipant struct {
+	publicID string
+	userID   uint32
+}
+
+func validateEventParticipants(ctx context.Context, q *generated.Queries, calID uint32, participantIDs []string) ([]eventParticipant, *apierrors.Spec) {
+	participants := make([]eventParticipant, 0, len(participantIDs))
+	seen := make(map[uint32]struct{}, len(participantIDs))
 	for _, pUUID := range participantIDs {
 		pPub, err := parseUUID(pUUID)
 		if err != nil {
-			continue
+			return nil, apierrors.BadRequest
 		}
-		u, err := deps.Queries.GetUserByPublicID(ctx, pPub)
+		u, err := q.GetUserByPublicID(ctx, pPub)
 		if err != nil {
-			continue
+			if err == sql.ErrNoRows {
+				return nil, apierrors.BadRequest
+			}
+			return nil, apierrors.InternalUnexpected
 		}
 		// Only calendar members may be added as participants.
-		if !isMember(ctx, deps, calID, u.ID) {
+		if _, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: calID, UserID: u.ID}); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, apierrors.BadRequest
+			}
+			return nil, apierrors.InternalUnexpected
+		}
+		if _, duplicate := seen[u.ID]; duplicate {
 			continue
 		}
-		_ = deps.Queries.AddEventParticipant(ctx, generated.AddEventParticipantParams{
-			EventID: eventID,
-			UserID:  u.ID,
-		})
-		participants = append(participants, pUUID)
+		seen[u.ID] = struct{}{}
+		participants = append(participants, eventParticipant{publicID: pubIDToHex(u.PublicID), userID: u.ID})
 	}
-	return participants
+	return participants, nil
+}
+
+func replaceEventParticipants(ctx context.Context, q *generated.Queries, eventID uint32, participants []eventParticipant) error {
+	if err := q.DeleteAllEventParticipants(ctx, eventID); err != nil {
+		return err
+	}
+	for _, participant := range participants {
+		if err := q.AddEventParticipant(ctx, generated.AddEventParticipantParams{
+			EventID: eventID,
+			UserID:  participant.userID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func participantPublicIDList(participants []eventParticipant) []string {
+	ids := make([]string, 0, len(participants))
+	for _, participant := range participants {
+		ids = append(ids, participant.publicID)
+	}
+	return ids
 }
 
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
@@ -592,8 +626,19 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
+		participants, spec := validateEventParticipants(ctx, deps.Queries, cal.ID, in.Body.Participants)
+		if spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
-		result, err := deps.Queries.CreateEvent(ctx, generated.CreateEventParams{
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		q := generated.New(tx)
+
+		result, err := q.CreateEvent(ctx, generated.CreateEventParams{
 			PublicID:           pubID[:],
 			CalendarID:         cal.ID,
 			Title:              in.Body.Title,
@@ -617,7 +662,12 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		eventID64, _ := result.LastInsertId()
 		eventID := uint32(eventID64)
-		participants := replaceEventParticipants(ctx, deps, cal.ID, eventID, in.Body.Participants)
+		if err := replaceEventParticipants(ctx, q, eventID, participants); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
 		resp := EventResponse{
 			ID:                 pubID.String(),
@@ -632,7 +682,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			Memo:               in.Body.Memo,
 			URL:                in.Body.URL,
 			NotificationOffset: in.Body.NotificationOffset,
-			Participants:       participants,
+			Participants:       participantPublicIDList(participants),
 			AssignedTo:         assigneePublicID(ctx, deps, assignedTo),
 			RecurrenceRule:     mapRecurrenceRule(ruleData),
 			CreatedAt:          time.Now(),
@@ -702,6 +752,10 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
+		participants, spec := validateEventParticipants(ctx, deps.Queries, cal.ID, in.Body.Participants)
+		if spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
 		// Whole-series edit from a composite occurrence ID receives dates for the
 		// dragged/edited occurrence. Re-anchor those as a delta against the master
@@ -736,7 +790,13 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			pubID, _ := uuid.NewV7()
 			parentRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
 			originalRef := sql.NullTime{Time: originalStart, Valid: true}
-			if _, err := deps.Queries.UpsertRecurrenceException(ctx, generated.UpsertRecurrenceExceptionParams{
+			tx, err := deps.DB.BeginTx(ctx, nil)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			defer tx.Rollback()
+			q := generated.New(tx)
+			if _, err := q.UpsertRecurrenceException(ctx, generated.UpsertRecurrenceExceptionParams{
 				PublicID:                pubID[:],
 				CalendarID:              cal.ID,
 				Title:                   in.Body.Title,
@@ -757,16 +817,22 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}); err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
-			child, err := deps.Queries.GetRecurrenceException(ctx, generated.GetRecurrenceExceptionParams{
+			child, err := q.GetRecurrenceException(ctx, generated.GetRecurrenceExceptionParams{
 				RecurrenceParentID:      parentRef,
 				RecurrenceOriginalStart: originalRef,
 			})
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
+			if err := replaceEventParticipants(ctx, q, child.ID, participants); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			resp := mapExceptionInstance(evt, child, cal.PublicID, originalStart)
 			resp.AssignedTo = assigneePublicID(ctx, deps, child.AssignedTo)
-			resp.Participants = replaceEventParticipants(ctx, deps, cal.ID, child.ID, in.Body.Participants)
+			resp.Participants = participantPublicIDList(participants)
 			setCreator(ctx, deps, &resp, evt.CreatedBy, nil)
 
 			audit.Record(ctx, deps.Queries, cal.ID, evt.ID, evt.PublicID, audit.EntityEvent, audit.ActionUpdate, userID, in.Body.Title+" (occurrence)")
@@ -774,7 +840,14 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return &UpdateEventOutput{Body: resp}, nil
 		}
 
-		err = deps.Queries.UpdateEvent(ctx, generated.UpdateEventParams{
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		q := generated.New(tx)
+
+		err = q.UpdateEvent(ctx, generated.UpdateEventParams{
 			Title:              in.Body.Title,
 			AllDay:             in.Body.AllDay,
 			StartAt:            startAt,
@@ -794,11 +867,19 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		participants := replaceEventParticipants(ctx, deps, cal.ID, evt.ID, in.Body.Participants)
+		if err := replaceEventParticipants(ctx, q, evt.ID, participants); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
-		updated, _ := deps.Queries.GetEventByPublicID(ctx, evtPub)
+		updated, err := q.GetEventByPublicID(ctx, evtPub)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		resp := mapEvent(updated, cal.PublicID)
-		resp.Participants = participants
+		resp.Participants = participantPublicIDList(participants)
 		resp.AssignedTo = assigneePublicID(ctx, deps, updated.AssignedTo)
 		setCreator(ctx, deps, &resp, updated.CreatedBy, nil)
 
