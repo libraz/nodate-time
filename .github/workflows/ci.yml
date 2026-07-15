@@ -14,7 +14,7 @@ jobs:
     name: Web (typecheck, lint, test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -34,13 +34,17 @@ jobs:
         working-directory: apps/web
         run: bun run test
 
+      - name: Production build and bundle budget
+        working-directory: apps/web
+        run: bun run build
+
   api:
     name: API (build, e2e)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache-dependency-path: apps/api/go.sum
@@ -63,9 +67,26 @@ jobs:
             docker compose logs mysql; exit 1
           fi
 
+      - name: Start MinIO
+        run: |
+          docker compose up -d minio
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q minio)" 2>/dev/null || echo starting)
+            if [ "$status" = "healthy" ]; then
+              echo "MinIO is healthy"; break
+            fi
+            echo "Waiting for MinIO ($status)..."; sleep 3
+          done
+          if [ "$status" != "healthy" ]; then
+            docker compose logs minio; exit 1
+          fi
+
       - name: Build
         working-directory: apps/api
         run: go build ./...
+
+      - name: Test schema upgrade
+        run: bash sql/test-schema-upgrade.sh
 
       - name: Go vet
         working-directory: apps/api
@@ -75,4 +96,5 @@ jobs:
         working-directory: apps/api
         env:
           TC_TEST_INTEGRATION: '1'
+          TC_TEST_MINIO: '1'
         run: go test ./... -count=1
