@@ -337,11 +337,12 @@ func Build(deps Deps) http.Handler {
 		}, calendars.ExportEvents(calDeps))
 
 		huma.Register(api, huma.Operation{
-			OperationID: "import-events",
-			Method:      http.MethodPost,
-			Path:        "/calendars/{calendarId}/import",
-			Summary:     "Import events from iCal text",
-			Tags:        []string{"Calendar"},
+			OperationID:  "import-events",
+			Method:       http.MethodPost,
+			Path:         "/calendars/{calendarId}/import",
+			Summary:      "Import events from iCal text",
+			Tags:         []string{"Calendar"},
+			MaxBodyBytes: 12 * 1024 * 1024,
 		}, calendars.ImportEvents(calDeps))
 
 		// Events
