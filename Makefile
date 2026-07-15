@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage minio-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage test-schema-upgrade minio-up format lint
 
 # Local dev defaults: enable dev-login (admin rights come from the users.is_admin
 # flag, seeded for admin@example.com). Respects values already set in the shell.
@@ -62,6 +62,9 @@ test-e2e:
 
 test-e2e-storage:
 	cd apps/api && TC_TEST_INTEGRATION=1 TC_TEST_MINIO=1 go test ./tests/e2e/ -v -count=1
+
+test-schema-upgrade:
+	bash sql/test-schema-upgrade.sh
 
 minio-up:
 	docker compose up -d minio
