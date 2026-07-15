@@ -13,6 +13,7 @@ import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { eventEndDay, isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
@@ -27,6 +28,11 @@ export function CalendarGrid() {
   const selectedDate = useUiStore((s) => s.selectedDate);
   const calendarView = useUiStore((s) => s.calendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
+  useHolidayLoader(holidaysCountry, [
+    currentMonth.year - 1,
+    currentMonth.year,
+    currentMonth.year + 1,
+  ]);
   const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);

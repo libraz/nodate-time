@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { getHoliday, HOLIDAY_COUNTRIES } from './holidays';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { getHoliday, HOLIDAY_COUNTRIES, preloadHolidays } from './holidays';
 
 describe('HOLIDAY_COUNTRIES', () => {
   it('includes Japan as a supported country', () => {
@@ -10,6 +10,10 @@ describe('HOLIDAY_COUNTRIES', () => {
 });
 
 describe('getHoliday', () => {
+  beforeAll(async () => {
+    await preloadHolidays('JP', [2026]);
+    await preloadHolidays('US', [2026]);
+  });
   it('returns the New Year holiday for Japan on Jan 1', () => {
     const holiday = getHoliday('JP', '2026-01-01');
     expect(holiday).not.toBeNull();

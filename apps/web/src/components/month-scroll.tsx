@@ -19,6 +19,7 @@ import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import {
   eventEndDay,
@@ -391,6 +392,13 @@ export function MonthScroll() {
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
   const [anchorMonth, setAnchorMonth] = useState(DateTime.now().startOf('month'));
+  useHolidayLoader(holidaysCountry, [
+    anchorMonth.year - 2,
+    anchorMonth.year - 1,
+    anchorMonth.year,
+    anchorMonth.year + 1,
+    anchorMonth.year + 2,
+  ]);
   const anchorKey = anchorMonth.toFormat('yyyy-MM');
 
   /** Window for treating a second tap on the same day as a double-tap (ms). */
