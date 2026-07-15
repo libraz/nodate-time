@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 type EventModalExports = typeof import('./event-modal');
 
 let clampRecurrenceUntilDate: EventModalExports['clampRecurrenceUntilDate'];
+let eventCommentText: EventModalExports['eventCommentText'];
 let presetToRule: EventModalExports['presetToRule'];
 let recurrenceUntilDateValue: EventModalExports['recurrenceUntilDateValue'];
 let ruleToPreset: EventModalExports['ruleToPreset'];
@@ -19,8 +20,28 @@ beforeAll(async () => {
     },
     configurable: true,
   });
-  ({ clampRecurrenceUntilDate, presetToRule, recurrenceUntilDateValue, ruleToPreset } =
-    await import('./event-modal'));
+  ({
+    clampRecurrenceUntilDate,
+    eventCommentText,
+    presetToRule,
+    recurrenceUntilDateValue,
+    ruleToPreset,
+  } = await import('./event-modal'));
+});
+
+describe('event comment API contract', () => {
+  it('reads the backend body field', () => {
+    expect(
+      eventCommentText({
+        id: 'comment-1',
+        body: 'Visible comment',
+        userName: 'Alice',
+        userIcon: 'A',
+        userPublicId: 'user-1',
+        createdAt: '2026-07-16T00:00:00Z',
+      }),
+    ).toBe('Visible comment');
+  });
 });
 
 describe('event modal recurrence helpers', () => {

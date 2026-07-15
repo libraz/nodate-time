@@ -14,6 +14,7 @@ import { useUiStore } from '@/stores/ui-store';
 import type {
   ChecklistItem,
   EventAttachment,
+  EventComment,
   RecurrencePreset,
   RecurrenceRule,
 } from '@/types/calendar';
@@ -33,13 +34,8 @@ function fromLocalDatetimeToISO(s: string, zone: string): string {
   return DateTime.fromISO(s, { zone }).toISO() ?? s;
 }
 
-interface Activity {
-  id: string;
-  content: string;
-  userName: string;
-  userIcon: string;
-  userPublicId: string;
-  createdAt: string;
+export function eventCommentText(comment: EventComment): string {
+  return comment.body;
 }
 
 // Format a relative time string according to locale
@@ -194,7 +190,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const user = useAuthStore((s) => s.user);
-  const [comments, setComments] = useState<Activity[]>([]);
+  const [comments, setComments] = useState<EventComment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -205,7 +201,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
   const fetchComments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.get<Activity[]>(
+      const data = await api.get<EventComment[]>(
         `/calendars/${calendarId}/events/${eventId}/activities`,
       );
       setComments(data);
@@ -297,7 +293,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                         type="button"
                         onClick={() => {
                           setEditingId(c.id);
-                          setEditContent(c.content);
+                          setEditContent(eventCommentText(c));
                         }}
                         className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
                       >
@@ -359,7 +355,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                   </div>
                 ) : (
                   <p className="mt-0.5 whitespace-pre-wrap break-words text-default text-[var(--color-text-primary)]">
-                    {c.content}
+                    {eventCommentText(c)}
                   </p>
                 )}
               </div>
