@@ -404,6 +404,21 @@ func TestICalExportImportRoundTrip(t *testing.T) {
 	assert.True(t, titles["Holiday"])
 }
 
+func TestICalImportAcceptsBodyAboveFrameworkDefault(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	ics := "BEGIN:VCALENDAR\r\nX-PADDING:" + strings.Repeat("x", 1100*1024) + "\r\nEND:VCALENDAR\r\n"
+
+	var result struct {
+		Imported int `json:"imported"`
+	}
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/import", tt.AccessToken,
+		map[string]any{"ics": ics}, &result)
+	assert.Zero(t, result.Imported)
+}
+
 // --- OAuth state validation ---
 
 func TestOAuthCallbackBadState(t *testing.T) {
