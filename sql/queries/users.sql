@@ -1,6 +1,9 @@
 -- name: GetUserByID :one
 SELECT * FROM users WHERE id = ?;
 
+-- name: GetUserByIDForUpdate :one
+SELECT * FROM users WHERE id = ? FOR UPDATE;
+
 -- name: GetUserByPublicID :one
 SELECT * FROM users WHERE public_id = ?;
 

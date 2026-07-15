@@ -29,5 +29,6 @@ WHERE e.calendar_id = ?;
 -- name: ListAbandonedAttachmentStorageKeys :many
 SELECT storage_key FROM event_attachments WHERE enabled = 0 AND created_at < ?;
 
--- name: DeleteAbandonedAttachments :exec
-DELETE FROM event_attachments WHERE enabled = 0 AND created_at < ?;
+-- name: DeleteAbandonedAttachmentByStorageKey :execresult
+DELETE FROM event_attachments
+WHERE storage_key = ? AND enabled = 0 AND created_at < ?;

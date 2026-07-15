@@ -16,6 +16,7 @@ import (
 
 const (
 	maxAvatarSize      = 5 * 1024 * 1024
+	maxAvatarUploads   = 5
 	avatarUploadTTL    = 15 * time.Minute
 	avatarStoragePath  = "avatars"
 	avatarContentTypes = "image/jpeg,image/png,image/webp"
@@ -63,16 +64,55 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 		userPubHex := pubIDToHex(user.PublicID)
 		avatarPubHex := avatarPubID.String()
 		key := avatarStorageKey(userPubHex, avatarPubHex)
+		expiresAt := time.Now().Add(avatarUploadTTL)
+
+		activeUploads, err := deps.Queries.CountActiveAvatarUploads(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if activeUploads >= maxAvatarUploads {
+			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
+		}
 
 		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, avatarUploadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
+		if deps.DB == nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		q := generated.New(tx)
+		if _, err := q.GetUserByIDForUpdate(ctx, userID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		activeUploads, err = q.CountActiveAvatarUploads(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if activeUploads >= maxAvatarUploads {
+			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
+		}
+		if _, err := q.CreateAvatarUpload(ctx, generated.CreateAvatarUploadParams{
+			PublicID:    avatarPubID[:],
+			UserID:      userID,
+			StorageKey:  key,
+			ContentType: strings.ToLower(in.Body.ContentType),
+			ByteSize:    in.Body.ByteSize,
+			ExpiresAt:   expiresAt,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
 		out := &PresignAvatarOutput{}
-		// AvatarID encodes both the avatar UUID and the content-type so that
-		// ConfirmAvatar can persist the latter without a second client round trip.
-		out.Body.AvatarID = avatarPubHex + ":" + strings.ToLower(in.Body.ContentType)
+		out.Body.AvatarID = avatarPubHex
 		out.Body.UploadURL = url
 		out.Body.StorageKey = key
 		return out, nil
@@ -92,29 +132,60 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
-		avatarPubHex, contentType, ok := strings.Cut(in.Body.AvatarID, ":")
-		if !ok || avatarPubHex == "" || contentType == "" {
+		avatarPubID, err := uuid.Parse(in.Body.AvatarID)
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
-		}
-		if _, err := uuid.Parse(avatarPubHex); err != nil {
-			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
-		}
-		if !isAcceptedImageContentType(contentType) {
-			return nil, apierrors.ToHuma(apierrors.InvalidImageContentType)
 		}
 
-		user, err := deps.Queries.GetUserByID(ctx, userID)
+		upload, err := deps.Queries.GetAvatarUploadForUser(ctx, generated.GetAvatarUploadForUserParams{
+			PublicID: avatarPubID[:],
+			UserID:   userID,
+		})
 		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		key := avatarStorageKey(pubIDToHex(user.PublicID), avatarPubHex)
-		_, exists, err := deps.Storage.StatObject(ctx, key)
+		info, exists, err := deps.Storage.StatObject(ctx, upload.StorageKey)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 		if !exists {
 			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
+		}
+		actualContentType := strings.ToLower(strings.TrimSpace(info.ContentType))
+		if info.Size != upload.ByteSize || info.Size > maxAvatarSize || actualContentType != upload.ContentType {
+			if err := deps.Storage.DeleteObject(ctx, upload.StorageKey); err != nil {
+				slog.WarnContext(ctx, "failed to delete invalid avatar upload", "key", upload.StorageKey, "error", err)
+				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+			}
+			if err := deps.Queries.DeleteAvatarUpload(ctx, upload.ID); err != nil {
+				slog.WarnContext(ctx, "failed to delete invalid avatar upload session", "uploadID", upload.ID, "error", err)
+			}
+			return nil, apierrors.ToHuma(apierrors.AvatarUploadInvalid)
+		}
+
+		if deps.DB == nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		tx, err := deps.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		defer tx.Rollback()
+		q := generated.New(tx)
+		lockedUpload, err := q.GetAvatarUploadForUserForUpdate(ctx, generated.GetAvatarUploadForUserForUpdateParams{
+			ID:     upload.ID,
+			UserID: userID,
+		})
+		if err != nil || lockedUpload.StorageKey != upload.StorageKey {
+			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
+		}
+		user, err := q.GetUserByIDForUpdate(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		oldKey := ""
@@ -122,16 +193,22 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			oldKey = user.AvatarStorageKey.String
 		}
 
-		err = deps.Queries.UpdateUserAvatar(ctx, generated.UpdateUserAvatarParams{
-			AvatarStorageKey:  sql.NullString{String: key, Valid: true},
-			AvatarContentType: sql.NullString{String: contentType, Valid: true},
+		err = q.UpdateUserAvatar(ctx, generated.UpdateUserAvatarParams{
+			AvatarStorageKey:  sql.NullString{String: upload.StorageKey, Valid: true},
+			AvatarContentType: sql.NullString{String: upload.ContentType, Valid: true},
 			ID:                userID,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		if err := q.DeleteAvatarUpload(ctx, upload.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
-		if oldKey != "" && oldKey != key {
+		if oldKey != "" && oldKey != upload.StorageKey {
 			if err := deps.Storage.DeleteObject(ctx, oldKey); err != nil {
 				slog.WarnContext(ctx, "failed to delete previous avatar", "key", oldKey, "error", err)
 			}

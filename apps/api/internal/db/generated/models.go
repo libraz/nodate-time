@@ -219,6 +219,17 @@ type AuditLog struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type AvatarUpload struct {
+	ID          uint32    `json:"id"`
+	PublicID    []byte    `json:"publicId"`
+	UserID      uint32    `json:"userId"`
+	StorageKey  string    `json:"storageKey"`
+	ContentType string    `json:"contentType"`
+	ByteSize    int64     `json:"byteSize"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 type Calendar struct {
 	ID        uint32    `json:"id"`
 	PublicID  []byte    `json:"publicId"`

@@ -56,5 +56,6 @@ SELECT storage_key FROM album_photos WHERE calendar_id = ?;
 -- name: ListAbandonedAlbumPhotoStorageKeys :many
 SELECT storage_key FROM album_photos WHERE enabled = 0 AND created_at < ?;
 
--- name: DeleteAbandonedAlbumPhotos :exec
-DELETE FROM album_photos WHERE enabled = 0 AND created_at < ?;
+-- name: DeleteAbandonedAlbumPhotoByStorageKey :execresult
+DELETE FROM album_photos
+WHERE storage_key = ? AND enabled = 0 AND created_at < ?;

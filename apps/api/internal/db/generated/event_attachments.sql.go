@@ -53,13 +53,18 @@ func (q *Queries) CreateEventAttachment(ctx context.Context, arg CreateEventAtta
 	)
 }
 
-const deleteAbandonedAttachments = `-- name: DeleteAbandonedAttachments :exec
-DELETE FROM event_attachments WHERE enabled = 0 AND created_at < ?
+const deleteAbandonedAttachmentByStorageKey = `-- name: DeleteAbandonedAttachmentByStorageKey :execresult
+DELETE FROM event_attachments
+WHERE storage_key = ? AND enabled = 0 AND created_at < ?
 `
 
-func (q *Queries) DeleteAbandonedAttachments(ctx context.Context, createdAt time.Time) error {
-	_, err := q.db.ExecContext(ctx, deleteAbandonedAttachments, createdAt)
-	return err
+type DeleteAbandonedAttachmentByStorageKeyParams struct {
+	StorageKey string    `json:"storageKey"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+func (q *Queries) DeleteAbandonedAttachmentByStorageKey(ctx context.Context, arg DeleteAbandonedAttachmentByStorageKeyParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteAbandonedAttachmentByStorageKey, arg.StorageKey, arg.CreatedAt)
 }
 
 const getAttachmentByPublicID = `-- name: GetAttachmentByPublicID :one
