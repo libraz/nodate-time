@@ -137,18 +137,19 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if row.UsedAt.Valid || time.Now().After(row.ExpiresAt) {
-			return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
-		}
-
 		if err := q.UpdateUserPassword(ctx, generated.UpdateUserPasswordParams{
 			PasswordHash: newHash,
 			ID:           row.UserID,
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if err := q.MarkPasswordResetUsed(ctx, row.ID); err != nil {
+		consumeResult, err := q.MarkPasswordResetUsed(ctx, row.ID)
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		consumed, err := consumeResult.RowsAffected()
+		if err != nil || consumed != 1 {
+			return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
 		}
 		// Invalidate every other outstanding reset for this user so a second
 		// stolen/leaked token cannot be used after a successful reset.

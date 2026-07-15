@@ -1,10 +1,14 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,6 +80,56 @@ func TestPasswordResetTokenSingleUse(t *testing.T) {
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/auth/password-reset/confirm", "",
 		map[string]any{"token": token, "newPassword": "second-pass-secure"})
 	assert.Equal(t, 400, status)
+}
+
+func TestPasswordResetTokenConcurrentSingleUse(t *testing.T) {
+	bootstrap(t)
+
+	tt := helpers.NewTenant(t, testServerURL)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/auth/password-reset/request", "",
+		map[string]any{"email": tt.Email}, nil)
+
+	msg, ok := testMailer.LastFor(tt.Email)
+	require.True(t, ok)
+	token := extractResetToken(t, msg.Text)
+
+	type result struct {
+		status int
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	var wg sync.WaitGroup
+	for _, password := range []string{"concurrent-pass-one", "concurrent-pass-two"} {
+		wg.Add(1)
+		go func(password string) {
+			defer wg.Done()
+			payload, err := json.Marshal(map[string]any{"token": token, "newPassword": password})
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			<-start
+			resp, err := http.Post(testServerURL+"/auth/password-reset/confirm", "application/json", bytes.NewReader(payload))
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			results <- result{status: resp.StatusCode}
+		}(password)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	statuses := make([]int, 0, 2)
+	for got := range results {
+		require.NoError(t, got.err)
+		statuses = append(statuses, got.status)
+	}
+	assert.ElementsMatch(t, []int{http.StatusOK, http.StatusBadRequest}, statuses)
 }
 
 func TestPasswordResetUnknownEmail(t *testing.T) {
