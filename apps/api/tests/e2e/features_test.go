@@ -181,6 +181,62 @@ func TestEventParticipants(t *testing.T) {
 	assert.Empty(t, got2.Participants)
 }
 
+func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	guest := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var invite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "member"}, &invite)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", guest.AccessToken, nil, nil)
+
+	var event struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
+		map[string]any{
+			"title":        "Original title",
+			"allDay":       false,
+			"startAt":      "2026-05-01T12:00:00+09:00",
+			"endAt":        "2026-05-01T13:00:00+09:00",
+			"participants": []string{guest.UserID},
+		}, &event)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+event.ID, owner.AccessToken,
+		map[string]any{
+			"title":        "Must not persist",
+			"allDay":       false,
+			"startAt":      "2026-05-01T12:00:00+09:00",
+			"endAt":        "2026-05-01T13:00:00+09:00",
+			"participants": []string{"not-a-uuid"},
+		})
+	require.Equal(t, http.StatusBadRequest, status)
+
+	var got struct {
+		Title        string   `json:"title"`
+		Participants []string `json:"participants"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+event.ID, owner.AccessToken, nil, &got)
+	assert.Equal(t, "Original title", got.Title)
+	assert.Equal(t, []string{guest.UserID}, got.Participants)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", owner.AccessToken,
+		map[string]any{
+			"title":        "Must not be created",
+			"allDay":       false,
+			"startAt":      "2026-05-01T14:00:00+09:00",
+			"endAt":        "2026-05-01T15:00:00+09:00",
+			"participants": []string{"not-a-uuid"},
+		})
+	assert.Equal(t, http.StatusBadRequest, status)
+}
+
 func TestChecklistCRUD(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
