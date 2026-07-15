@@ -41,7 +41,10 @@ func Member(ctx context.Context, q Querier, calendarPublicID string, userID uint
 		UserID:     userID,
 	})
 	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
+		if errors.Is(err, sql.ErrNoRows) {
+			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
+		}
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
 	}
 	return cal, member, nil
 }
