@@ -127,6 +127,48 @@ describe('fetchEvents', () => {
     expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['e1']);
     expect(mockToast.error).toHaveBeenCalledWith('cal-2 failed');
   });
+
+  it('ignores an older range response that finishes after the latest request', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+    let resolveOlder: ((events: CalendarEvent[]) => void) | undefined;
+    let resolveLatest: ((events: CalendarEvent[]) => void) | undefined;
+    mockApi.get.mockImplementation((url: string) => {
+      if (url.includes('start=2026-04-01')) {
+        return new Promise<CalendarEvent[]>((resolve) => {
+          resolveOlder = resolve;
+        }) as never;
+      }
+      return new Promise<CalendarEvent[]>((resolve) => {
+        resolveLatest = resolve;
+      }) as never;
+    });
+
+    const older = useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+    const latest = useCalendarStore.getState().fetchEvents('2026-05-01', '2026-05-31');
+    resolveLatest?.([evt('latest', 'cal-1')]);
+    await latest;
+    resolveOlder?.([evt('older', 'cal-1')]);
+    await older;
+
+    expect(useCalendarStore.getState().events.map((event) => event.id)).toEqual(['latest']);
+  });
+
+  it('does not repopulate events after session data is reset', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+    let resolveRequest: ((events: CalendarEvent[]) => void) | undefined;
+    mockApi.get.mockReturnValue(
+      new Promise<CalendarEvent[]>((resolve) => {
+        resolveRequest = resolve;
+      }) as never,
+    );
+
+    const request = useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+    useCalendarStore.getState().resetSessionData();
+    resolveRequest?.([evt('stale', 'cal-1')]);
+    await request;
+
+    expect(useCalendarStore.getState().events).toEqual([]);
+  });
 });
 
 describe('fetchCalendars', () => {

@@ -93,17 +93,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     // Drop the auth token and per-session calendar state, but keep user
     // preferences (theme, locale, timezone) that are not tied to the account.
     clearToken();
-    localStorage.removeItem('tt_activeCalendarIds');
-    set({ user: null, isAuthenticated: false, error: null });
-    // Reset calendar store in-memory state, including per-calendar data.
-    useCalendarStore.setState({
-      calendars: [],
-      events: [],
-      memos: [],
-      membersMap: {},
-      labels: [],
-      activeCalendarIds: [],
+    set({
+      user: null,
+      isAuthenticated: false,
+      isInitializing: false,
+      isLoading: false,
+      error: null,
     });
+    useCalendarStore.getState().resetSessionData();
     useUiStore.getState().resetSessionUi();
   },
 
@@ -115,8 +112,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user, isAuthenticated: true, isInitializing: false });
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.code === 'AUTH.TOKEN_INVALID')) {
-        clearToken();
-        set({ user: null, isAuthenticated: false, isInitializing: false });
+        useAuthStore.getState().logout();
         return;
       }
       set({ isInitializing: false });
@@ -157,12 +153,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
 if (typeof window !== 'undefined') {
   window.addEventListener(SESSION_EXPIRED_EVENT, () => {
-    useAuthStore.setState({
-      user: null,
-      isAuthenticated: false,
-      isInitializing: false,
-      isLoading: false,
-      error: null,
-    });
+    useAuthStore.getState().logout();
   });
 }
