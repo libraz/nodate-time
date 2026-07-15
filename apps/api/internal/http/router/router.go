@@ -69,7 +69,7 @@ func Build(deps Deps) http.Handler {
 		}
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
 
 		// Email+password auth (register, login, password reset) is registered
 		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
@@ -185,7 +185,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
 		memoDeps := memos.Deps{Queries: deps.Queries}

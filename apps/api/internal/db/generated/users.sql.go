@@ -123,6 +123,32 @@ func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 	return i, err
 }
 
+const getUserByIDForUpdate = `-- name: GetUserByIDForUpdate :one
+SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE id = ? FOR UPDATE
+`
+
+func (q *Queries) GetUserByIDForUpdate(ctx context.Context, id uint32) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByIDForUpdate, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Email,
+		&i.Icon,
+		&i.Color,
+		&i.AvatarStorageKey,
+		&i.AvatarContentType,
+		&i.PasswordHash,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByPublicID = `-- name: GetUserByPublicID :one
 SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE public_id = ?
 `

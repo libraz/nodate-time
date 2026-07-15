@@ -40,6 +40,7 @@ func passwordHashForLogin(passwordHash string) string {
 }
 
 type Deps struct {
+	DB        *sql.DB
 	Queries   *generated.Queries
 	JWTSecret string
 	Storage   *storage.Client

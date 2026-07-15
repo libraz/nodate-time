@@ -96,6 +96,8 @@ var (
 var (
 	AvatarNotFound          = &Spec{Status: 404, Code: "AVATAR.NOT_FOUND", Message: "Avatar upload session not found"}
 	AvatarTooLarge          = &Spec{Status: 400, Code: "AVATAR.TOO_LARGE", Message: "Avatar exceeds maximum size of 5MB"}
+	AvatarUploadInvalid     = &Spec{Status: 400, Code: "AVATAR.UPLOAD_INVALID", Message: "Uploaded avatar does not match the declared file"}
+	AvatarUploadLimit       = &Spec{Status: 429, Code: "AVATAR.UPLOAD_LIMIT", Message: "Too many active avatar uploads"}
 	InvalidImageContentType = &Spec{Status: 400, Code: "IMAGE.INVALID_CONTENT_TYPE", Message: "Only JPEG, PNG, and WebP images are accepted"}
 )
 

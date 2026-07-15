@@ -64,13 +64,18 @@ func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoPara
 	)
 }
 
-const deleteAbandonedAlbumPhotos = `-- name: DeleteAbandonedAlbumPhotos :exec
-DELETE FROM album_photos WHERE enabled = 0 AND created_at < ?
+const deleteAbandonedAlbumPhotoByStorageKey = `-- name: DeleteAbandonedAlbumPhotoByStorageKey :execresult
+DELETE FROM album_photos
+WHERE storage_key = ? AND enabled = 0 AND created_at < ?
 `
 
-func (q *Queries) DeleteAbandonedAlbumPhotos(ctx context.Context, createdAt time.Time) error {
-	_, err := q.db.ExecContext(ctx, deleteAbandonedAlbumPhotos, createdAt)
-	return err
+type DeleteAbandonedAlbumPhotoByStorageKeyParams struct {
+	StorageKey string    `json:"storageKey"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+func (q *Queries) DeleteAbandonedAlbumPhotoByStorageKey(ctx context.Context, arg DeleteAbandonedAlbumPhotoByStorageKeyParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteAbandonedAlbumPhotoByStorageKey, arg.StorageKey, arg.CreatedAt)
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one

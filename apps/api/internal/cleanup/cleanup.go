@@ -47,33 +47,63 @@ func runOnce(ctx context.Context, q *generated.Queries, storageClient *storage.C
 }
 
 func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageClient *storage.Client, olderThan time.Time) {
-	if storageClient != nil {
-		if keys, err := q.ListAbandonedAttachmentStorageKeys(ctx, olderThan); err != nil {
-			slog.Warn("cleanup: list abandoned attachment objects failed", "error", err)
-		} else {
-			deleteObjects(ctx, storageClient, keys)
-		}
-		if keys, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, olderThan); err != nil {
-			slog.Warn("cleanup: list abandoned album objects failed", "error", err)
-		} else {
-			deleteObjects(ctx, storageClient, keys)
-		}
+	if storageClient == nil {
+		return
 	}
-	if err := q.DeleteAbandonedAttachments(ctx, olderThan); err != nil {
-		slog.Warn("cleanup: delete abandoned attachment rows failed", "error", err)
+
+	if keys, err := q.ListAbandonedAttachmentStorageKeys(ctx, olderThan); err != nil {
+		slog.Warn("cleanup: list abandoned attachment objects failed", "error", err)
+	} else {
+		deleteObjects(ctx, storageClient, keys, func(ctx context.Context, key string) error {
+			_, err := q.DeleteAbandonedAttachmentByStorageKey(ctx, generated.DeleteAbandonedAttachmentByStorageKeyParams{
+				StorageKey: key,
+				CreatedAt:  olderThan,
+			})
+			return err
+		})
 	}
-	if err := q.DeleteAbandonedAlbumPhotos(ctx, olderThan); err != nil {
-		slog.Warn("cleanup: delete abandoned album rows failed", "error", err)
+	if keys, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, olderThan); err != nil {
+		slog.Warn("cleanup: list abandoned album objects failed", "error", err)
+	} else {
+		deleteObjects(ctx, storageClient, keys, func(ctx context.Context, key string) error {
+			_, err := q.DeleteAbandonedAlbumPhotoByStorageKey(ctx, generated.DeleteAbandonedAlbumPhotoByStorageKeyParams{
+				StorageKey: key,
+				CreatedAt:  olderThan,
+			})
+			return err
+		})
+	}
+
+	expiredUploads, err := q.ListExpiredAvatarUploads(ctx, olderThan.Add(abandonedUploadAge))
+	if err != nil {
+		slog.Warn("cleanup: list expired avatar uploads failed", "error", err)
+		return
+	}
+	for _, upload := range expiredUploads {
+		deleteObjects(ctx, storageClient, []string{upload.StorageKey}, func(ctx context.Context, _ string) error {
+			_, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
+				ID:        upload.ID,
+				ExpiresAt: olderThan.Add(abandonedUploadAge),
+			})
+			return err
+		})
 	}
 }
 
-func deleteObjects(ctx context.Context, storageClient *storage.Client, keys []string) {
+type objectDeleter interface {
+	DeleteObject(context.Context, string) error
+}
+
+func deleteObjects(ctx context.Context, storageClient objectDeleter, keys []string, deleteRow func(context.Context, string) error) {
 	for _, key := range keys {
-		if key == "" {
-			continue
+		if key != "" {
+			if err := storageClient.DeleteObject(ctx, key); err != nil {
+				slog.Warn("cleanup: delete abandoned object failed", "key", key, "error", err)
+				continue
+			}
 		}
-		if err := storageClient.DeleteObject(ctx, key); err != nil {
-			slog.Warn("cleanup: delete abandoned object failed", "key", key, "error", err)
+		if err := deleteRow(ctx, key); err != nil {
+			slog.Warn("cleanup: delete abandoned upload row failed", "key", key, "error", err)
 		}
 	}
 }

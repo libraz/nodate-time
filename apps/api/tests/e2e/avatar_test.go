@@ -104,6 +104,51 @@ func TestAvatarConfirmWithoutUpload(t *testing.T) {
 	assert.Equal(t, 404, status)
 }
 
+func TestAvatarConfirmRejectsMismatchedActualSizeAndDeletesObject(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	png := helpers.TinyPNG()
+
+	var pres avatarPresignResp
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
+		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
+	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
+		map[string]any{"avatarId": pres.AvatarID})
+	assert.Equal(t, http.StatusBadRequest, status)
+
+	if storageClient := getTestStorage(); storageClient != nil {
+		_, exists, err := storageClient.StatObject(testCtx(), pres.StorageKey)
+		require.NoError(t, err)
+		assert.False(t, exists, "invalid avatar object should be removed")
+	}
+	status, _ = helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
+		map[string]any{"avatarId": pres.AvatarID})
+	assert.Equal(t, http.StatusNotFound, status)
+}
+
+func TestAvatarPresignLimitsActiveSessionsPerUser(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	for range 5 {
+		var pres avatarPresignResp
+		helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
+			map[string]any{"contentType": "image/png", "byteSize": 64}, &pres)
+		require.NotEmpty(t, pres.AvatarID)
+	}
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
+		map[string]any{"contentType": "image/png", "byteSize": 64})
+	assert.Equal(t, http.StatusTooManyRequests, status)
+}
+
 func TestAvatarDeleteRestoresEmoji(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
