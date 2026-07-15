@@ -159,6 +159,36 @@ describe('logout', () => {
       showActivity: false,
     });
   });
+
+  it('clears account-owned state when the API expires the session', () => {
+    localStorage.setItem('tt_token', 'tok');
+    localStorage.setItem('tt_activeCalendarIds', '["cal-1"]');
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+    useCalendarStore.setState({
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+      ],
+      events: [],
+      memos: [],
+      membersMap: { 'cal-1': [] },
+      labels: [{ id: 'label-1', nameKey: 'work', color: '#000' }],
+      activeCalendarIds: ['cal-1'],
+    });
+
+    window.dispatchEvent(new Event('nodate:session-expired'));
+
+    expect(mockClearToken).toHaveBeenCalled();
+    expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(useCalendarStore.getState()).toMatchObject({
+      calendars: [],
+      events: [],
+      memos: [],
+      membersMap: {},
+      labels: [],
+      activeCalendarIds: [],
+    });
+  });
 });
 
 describe('fetchMe', () => {

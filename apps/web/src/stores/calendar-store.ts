@@ -72,10 +72,16 @@ interface CalendarState {
 
   toggleCalendarFilter: (calId: string) => void;
   setActiveCalendarIds: (ids: string[]) => void;
+  resetSessionData: () => void;
 
   /** Returns the currently visible event window as ISO date strings. */
   visibleRange: () => { start: string; end: string };
 }
+
+let accountGeneration = 0;
+let calendarRequestGeneration = 0;
+let eventRequestGeneration = 0;
+let memoRequestGeneration = 0;
 
 export const useCalendarStore = create<CalendarState>((set, get) => ({
   calendars: [],
@@ -87,9 +93,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   isLoading: false,
 
   async fetchCalendars() {
+    const requestGeneration = ++calendarRequestGeneration;
+    const currentAccountGeneration = accountGeneration;
     set({ isLoading: true });
     try {
       const cals = await api.get<Calendar[]>('/calendars');
+      if (
+        requestGeneration !== calendarRequestGeneration ||
+        currentAccountGeneration !== accountGeneration
+      )
+        return;
       const saved = loadJson<string[]>('activeCalendarIds', []);
       const calendarIDs = cals.map((c) => c.id);
       const savedActive = saved.filter((id) => calendarIDs.includes(id));
@@ -99,6 +112,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       saveJson('activeCalendarIds', ids);
 
       const memberResults = await Promise.allSettled(cals.map((c) => get().fetchMembers(c.id)));
+      if (
+        requestGeneration !== calendarRequestGeneration ||
+        currentAccountGeneration !== accountGeneration
+      )
+        return;
       for (const result of memberResults) {
         if (result.status === 'rejected') toast.error(errorMessage(result.reason));
       }
@@ -111,11 +129,18 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         }
       }
     } finally {
-      set({ isLoading: false });
+      if (
+        requestGeneration === calendarRequestGeneration &&
+        currentAccountGeneration === accountGeneration
+      ) {
+        set({ isLoading: false });
+      }
     }
   },
 
   async fetchEvents(start, end) {
+    const requestGeneration = ++eventRequestGeneration;
+    const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
     const allEvents: CalendarEvent[] = [];
     const results = await Promise.allSettled(
@@ -128,13 +153,25 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         }
       }),
     );
+    if (
+      requestGeneration !== eventRequestGeneration ||
+      currentAccountGeneration !== accountGeneration
+    )
+      return;
     for (const result of results) {
       if (result.status === 'rejected') toast.error(errorMessage(result.reason));
     }
-    set({ events: allEvents });
+    if (
+      requestGeneration === eventRequestGeneration &&
+      currentAccountGeneration === accountGeneration
+    ) {
+      set({ events: allEvents });
+    }
   },
 
   async fetchMemos() {
+    const requestGeneration = ++memoRequestGeneration;
+    const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
     const allMemos: Memo[] = [];
     const results = await Promise.allSettled(
@@ -145,21 +182,35 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         }
       }),
     );
+    if (
+      requestGeneration !== memoRequestGeneration ||
+      currentAccountGeneration !== accountGeneration
+    )
+      return;
     for (const result of results) {
       if (result.status === 'rejected') toast.error(errorMessage(result.reason));
     }
-    set({ memos: allMemos });
+    if (
+      requestGeneration === memoRequestGeneration &&
+      currentAccountGeneration === accountGeneration
+    ) {
+      set({ memos: allMemos });
+    }
   },
 
   async fetchMembers(calendarId) {
+    const currentAccountGeneration = accountGeneration;
     const members = await api.get<Member[]>(`/calendars/${calendarId}/members`);
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       membersMap: { ...s.membersMap, [calendarId]: members },
     }));
   },
 
   async fetchLabels(calendarId) {
+    const currentAccountGeneration = accountGeneration;
     const labels = await api.get<Label[]>(`/calendars/${calendarId}/labels`);
+    if (currentAccountGeneration !== accountGeneration) return;
     set({ labels });
   },
 
@@ -308,6 +359,23 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   setActiveCalendarIds(ids) {
     saveJson('activeCalendarIds', ids);
     set({ activeCalendarIds: ids });
+  },
+
+  resetSessionData() {
+    accountGeneration++;
+    calendarRequestGeneration++;
+    eventRequestGeneration++;
+    memoRequestGeneration++;
+    localStorage.removeItem('tt_activeCalendarIds');
+    set({
+      calendars: [],
+      events: [],
+      memos: [],
+      membersMap: {},
+      labels: [],
+      activeCalendarIds: [],
+      isLoading: false,
+    });
   },
 
   visibleRange() {
