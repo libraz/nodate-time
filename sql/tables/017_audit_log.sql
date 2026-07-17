@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS audit_log (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   calendar_id      INT UNSIGNED    NOT NULL,
-  entity_type      VARCHAR(16)     NOT NULL COMMENT 'event | memo',
+  entity_type      VARCHAR(16)     NOT NULL COMMENT 'event | memo | member | invite | album_photo',
   entity_id        INT UNSIGNED    NOT NULL COMMENT 'internal id of the target row (may no longer exist)',
   entity_public_id BINARY(16)      NOT NULL COMMENT 'public id of the target, stable across deletion',
   action           VARCHAR(16)     NOT NULL COMMENT 'create | update | delete',

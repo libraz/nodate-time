@@ -11,10 +11,11 @@ import (
 
 // Entity types recorded in the audit log.
 const (
-	EntityEvent  = "event"
-	EntityMemo   = "memo"
-	EntityMember = "member"
-	EntityInvite = "invite"
+	EntityEvent      = "event"
+	EntityMemo       = "memo"
+	EntityMember     = "member"
+	EntityInvite     = "invite"
+	EntityAlbumPhoto = "album_photo"
 )
 
 // Actions recorded in the audit log.

@@ -102,8 +102,13 @@ func TestOAuthGoogleFlowWithVerifiedEmailLinksExistingAccount(t *testing.T) {
 	require.Equal(t, 1, tokenRequests)
 	require.Equal(t, 1, userinfoRequests)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodGet, callbackURL, token, nil)
-	require.Equal(t, http.StatusBadRequest, status, "OAuth callback must require the state cookie, not a bearer token")
+	// Replaying the callback without the one-time state cookie (a bearer token
+	// is not a substitute) must not raw-error; it redirects to the login screen
+	// with a friendly error code instead.
+	replay := requestNoRedirect(t, http.MethodGet, callbackURL, "")
+	defer replay.Body.Close()
+	require.Equal(t, http.StatusFound, replay.StatusCode, "OAuth callback must require the state cookie, not a bearer token")
+	require.Equal(t, helpers.TestWebURL+"/login?error=oauth_state", replay.Header.Get("Location"))
 }
 
 func TestOAuthGoogleFlowRejectsUnverifiedEmail(t *testing.T) {

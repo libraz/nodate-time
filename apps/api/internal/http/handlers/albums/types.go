@@ -54,9 +54,8 @@ type PresignPhotoInput struct {
 }
 
 type PresignPhotoResult struct {
-	PhotoID    string `json:"photoId"`
-	UploadURL  string `json:"uploadUrl"`
-	StorageKey string `json:"storageKey"`
+	PhotoID   string `json:"photoId"`
+	UploadURL string `json:"uploadUrl"`
 }
 
 type PresignPhotoOutput struct {

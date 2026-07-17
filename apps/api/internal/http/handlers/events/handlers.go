@@ -217,6 +217,16 @@ func parseCompositeID(eventID string) (parentUUID string, dateStr string) {
 	return "", ""
 }
 
+// validateTimezone rejects a timezone that Go's zone database cannot load, so an
+// invalid IANA name (e.g. a typo like "America/New_Yrok") fails loudly with a
+// BadRequest instead of silently falling back to UTC.
+func validateTimezone(tz string) *apierrors.Spec {
+	if _, err := time.LoadLocation(tz); err != nil {
+		return apierrors.BadRequest
+	}
+	return nil
+}
+
 func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
 	if ruleData == nil || string(*ruleData) == "null" {
 		return nil, sql.NullTime{}
@@ -620,6 +630,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if tz == "" {
 			tz = "UTC"
 		}
+		if spec := validateTimezone(tz); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
 		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
 
@@ -736,6 +749,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			if tz == "" {
 				tz = "UTC"
 			}
+		}
+		if spec := validateTimezone(tz); spec != nil {
+			return nil, apierrors.ToHuma(spec)
 		}
 
 		// Mirror the create path's fallback so an empty color cannot be persisted.

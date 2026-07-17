@@ -78,6 +78,23 @@ func (q *Queries) DeleteAbandonedAlbumPhotoByStorageKey(ctx context.Context, arg
 	return q.db.ExecContext(ctx, deleteAbandonedAlbumPhotoByStorageKey, arg.StorageKey, arg.CreatedAt)
 }
 
+const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :exec
+DELETE FROM album_photos WHERE id = ? AND uploaded_by = ? AND enabled = 0
+`
+
+type DeletePendingAlbumPhotoParams struct {
+	ID         uint32 `json:"id"`
+	UploadedBy uint32 `json:"uploadedBy"`
+}
+
+// Removes an unconfirmed (enabled = 0) row whose uploaded object failed the
+// Confirm-time size/type check, so it is not left as an orphan pointing at a
+// deleted object.
+func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePendingAlbumPhotoParams) error {
+	_, err := q.db.ExecContext(ctx, deletePendingAlbumPhoto, arg.ID, arg.UploadedBy)
+	return err
+}
+
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
 SELECT id, public_id, calendar_id, uploaded_by, event_id, caption, content_type, byte_size, width, height, storage_key, enabled, taken_at, created_at FROM album_photos WHERE public_id = ?
 `

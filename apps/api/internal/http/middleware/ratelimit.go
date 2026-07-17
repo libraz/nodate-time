@@ -2,8 +2,8 @@ package middleware
 
 import (
 	"fmt"
-	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -20,31 +20,24 @@ type rateBucket struct {
 // OAuth) to blunt brute-force and mail-bombing; it is process-local and not a
 // substitute for an edge limiter in a multi-instance deployment.
 type RateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*rateBucket
-	limit   int
-	window  time.Duration
+	mu             sync.Mutex
+	buckets        map[string]*rateBucket
+	limit          int
+	window         time.Duration
+	trustedProxies []netip.Prefix
 }
 
-// NewRateLimiter creates a limiter allowing limit requests per window per IP.
-func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+// NewRateLimiter creates a limiter allowing limit requests per window per
+// client IP. trustedProxies lists the reverse-proxy hops allowed to set
+// X-Forwarded-For (see ClientIP); pass nil to trust only the direct peer.
+func NewRateLimiter(limit int, window time.Duration, trustedProxies []netip.Prefix) *RateLimiter {
 	rl := &RateLimiter{
-		buckets: make(map[string]*rateBucket),
-		limit:   limit,
-		window:  window,
+		buckets:        make(map[string]*rateBucket),
+		limit:          limit,
+		window:         window,
+		trustedProxies: trustedProxies,
 	}
 	return rl
-}
-
-// clientIP extracts the direct peer IP. X-Forwarded-For is intentionally not
-// trusted here: unless the deployment has explicitly configured trusted proxy
-// hops, callers can spoof it to bypass per-client limits.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // allow records a request for key and reports whether it is within the limit,
@@ -80,7 +73,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now()
-			ok, remaining, reset := rl.allow(clientIP(r), now)
+			ok, remaining, reset := rl.allow(ClientIP(r, rl.trustedProxies), now)
 			h := w.Header()
 			h.Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
 			h.Set("X-RateLimit-Remaining", strconv.Itoa(remaining))

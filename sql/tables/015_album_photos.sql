@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS album_photos (
   UNIQUE KEY uk_album_pub (public_id),
   KEY idx_album_cal_taken (calendar_id, enabled, taken_at, id),
   KEY idx_album_event (event_id),
+  KEY idx_album_enabled_created (enabled, created_at) COMMENT 'supports the abandoned-upload cleanup scan',
   CONSTRAINT fk_album_cal   FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
   CONSTRAINT fk_album_user  FOREIGN KEY (uploaded_by) REFERENCES users     (id) ON DELETE CASCADE,
   CONSTRAINT fk_album_event FOREIGN KEY (event_id)    REFERENCES events    (id) ON DELETE SET NULL

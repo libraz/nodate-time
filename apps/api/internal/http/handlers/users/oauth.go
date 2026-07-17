@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -149,6 +150,28 @@ func idTokenNonce(idToken string) string {
 		return ""
 	}
 	return claims.Nonce
+}
+
+// idTokenEmail extracts the email claim from a JWT id_token without verifying
+// its signature, for the same reason as idTokenNonce: the token was just
+// received over TLS directly from the provider's token endpoint. LINE's
+// userinfo endpoint never returns email, so this is the only source for it.
+func idTokenEmail(idToken string) string {
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return claims.Email
 }
 
 // safeRedirect returns a path safe to redirect the user to after OAuth.
@@ -349,11 +372,13 @@ func consumeState(ctx context.Context, q *generated.Queries, state, provider str
 	}, nil
 }
 
-// oauthDenied redirects back to the login page with an error code so the user
-// sees a friendly message instead of a raw API error. Used when a Google
-// account is not permitted to sign in (domain not allowed / email unverified).
-func oauthDenied(deps OAuthDeps) *OAuthCallbackOutput {
-	dest := strings.TrimRight(deps.WebURL, "/") + "/login?error=oauth_not_allowed"
+// oauthRedirect sends the browser back to the login page with an error code in
+// the query string, so the user sees a friendly message instead of a raw API
+// error page. Used for every OAuth failure path (provider denial, state
+// mismatch, token exchange failure, disallowed account) so none of them ever
+// surface Huma's JSON error body to a browser mid-redirect.
+func oauthRedirect(deps OAuthDeps, code string) *OAuthCallbackOutput {
+	dest := strings.TrimRight(deps.WebURL, "/") + "/login?error=" + url.QueryEscape(code)
 	return &OAuthCallbackOutput{
 		Status:    http.StatusFound,
 		URL:       dest,
@@ -363,32 +388,44 @@ func oauthDenied(deps OAuthDeps) *OAuthCallbackOutput {
 
 func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*OAuthCallbackOutput, error) {
 	return func(ctx context.Context, in *OAuthCallbackInput) (*OAuthCallbackOutput, error) {
+		// The provider itself reported a failure (e.g. the user canceled consent).
+		// Neither Code nor State is guaranteed usable here, so react before
+		// touching either.
+		if in.Error != "" {
+			code := "oauth_failed"
+			if in.Error == "access_denied" {
+				code = "oauth_denied"
+			}
+			slog.InfoContext(ctx, "oauth callback reported by provider", "provider", in.Provider, "error", in.Error, "description", in.ErrorDesc)
+			return oauthRedirect(deps, code), nil
+		}
+
 		// Bind the callback to the browser that started the flow: the state cookie
 		// (set at OAuthStart) must be present and match the state query param.
 		// This defeats login CSRF where an attacker feeds a victim their own code.
 		if in.StateCookie == "" || in.StateCookie != in.State {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_state"), nil
 		}
 
 		st, err := consumeState(ctx, deps.Queries, in.State, in.Provider)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_state"), nil
 		}
 		redirectPath := st.Redirect
 		pc, ok := resolveProvider(ctx, deps, in.Provider)
 		if !ok {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 
 		accessToken, idToken, err := exchangeCode(ctx, pc, in.Code, redirectURI(deps.Config, in.Provider), st.CodeVerifier)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 
 		// Verify the OIDC nonce echoes back in the id_token, rejecting a token
 		// that was minted for a different authorization request (replay).
 		if st.Nonce != "" && idTokenNonce(idToken) != st.Nonce {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_state"), nil
 		}
 
 		var subject, email, name string
@@ -399,25 +436,30 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		case "google":
 			var u googleUserinfo
 			if err := fetchUserinfo(ctx, pc, accessToken, &u); err != nil {
-				return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+				return oauthRedirect(deps, "oauth_failed"), nil
 			}
 			// OIDC: only trust a verified email for access decisions.
 			if u.Email == "" || !u.EmailVerified {
-				return oauthDenied(deps), nil
+				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
 			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
 			if !allowed {
-				return oauthDenied(deps), nil
+				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
 			subject, email, name = u.Sub, u.Email, u.Name
 			emailVerified = true
 		case "line":
 			var u lineUserinfo
 			if err := fetchUserinfo(ctx, pc, accessToken, &u); err != nil {
-				return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+				return oauthRedirect(deps, "oauth_failed"), nil
+			}
+			// LINE's userinfo endpoint never returns an email; the only source is
+			// the id_token issued alongside the access token.
+			if u.Email == "" {
+				u.Email = idTokenEmail(idToken)
 			}
 			// The allow-list applies to every provider. LINE does not return a
 			// verified-email proof, so when a domain/email restriction is active
@@ -427,7 +469,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
 			if !allowed {
-				return oauthDenied(deps), nil
+				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
 			// LINE's email claim is not a verified ownership proof: never use it
 			// to auto-link to a pre-existing account.
@@ -435,7 +477,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			emailVerified = false
 		}
 		if subject == "" {
-			return nil, apierrors.ToHuma(apierrors.AuthOAuthFailed)
+			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 		if name == "" {
 			name = "OAuth User"

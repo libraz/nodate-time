@@ -79,7 +79,14 @@ type ChangePasswordInput struct {
 	}
 }
 
-type ChangePasswordOutput struct{}
+type ChangePasswordOutput struct {
+	Body struct {
+		// Token is a freshly signed JWT carrying the bumped token_version, so the
+		// device that changed the password stays signed in. Every other device
+		// holding an older token is invalidated, as before.
+		Token string `json:"token"`
+	}
+}
 
 type RequestResetInput struct {
 	Body struct {
@@ -137,9 +144,14 @@ type OAuthStartOutput struct {
 }
 
 type OAuthCallbackInput struct {
-	Provider    string `path:"provider" enum:"google,line"`
-	Code        string `query:"code"`
-	State       string `query:"state"`
+	Provider string `path:"provider" enum:"google,line"`
+	Code     string `query:"code" required:"false"`
+	State    string `query:"state" required:"false"`
+	// Error and ErrorDescription carry the provider's own failure report (e.g.
+	// "access_denied" when the user cancels consent). Neither Code nor State is
+	// guaranteed to be usable when Error is set.
+	Error       string `query:"error" required:"false"`
+	ErrorDesc   string `query:"error_description" required:"false"`
 	StateCookie string `cookie:"oauth_state"`
 }
 
@@ -161,9 +173,8 @@ type PresignAvatarInput struct {
 
 type PresignAvatarOutput struct {
 	Body struct {
-		AvatarID   string `json:"avatarId" doc:"Opaque ID to send back to ConfirmAvatar"`
-		UploadURL  string `json:"uploadUrl" doc:"Presigned PUT URL, valid for 15 minutes"`
-		StorageKey string `json:"storageKey" doc:"Internal key, mostly for debugging"`
+		AvatarID  string `json:"avatarId" doc:"Opaque ID to send back to ConfirmAvatar"`
+		UploadURL string `json:"uploadUrl" doc:"Presigned PUT URL, valid for 15 minutes"`
 	}
 }
 

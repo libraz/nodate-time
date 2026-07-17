@@ -1,10 +1,24 @@
 package middleware
 
 import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
+
+// writeJSONError writes a Huma-shaped JSON error body with the correct
+// Content-Type, matching what huma.StatusError responses look like so clients
+// can rely on a single parsing path regardless of which layer rejected the
+// request.
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"status":%d,"code":%q,"message":%q}`, status, code, message)
+}
 
 // RequireAdmin gates access to platform admin endpoints. It assumes RequireAuth
 // has already populated the actor in context, then checks the user's is_admin
@@ -14,16 +28,23 @@ func RequireAdmin(q *generated.Queries) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := ActorFromContext(r.Context())
 			if !ok {
-				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Authentication required"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Authentication required")
 				return
 			}
 			user, err := q.GetUserByID(r.Context(), userID)
 			if err != nil {
-				http.Error(w, `{"status":403,"code":"AUTH.ADMIN_REQUIRED","message":"Admin privileges required"}`, http.StatusForbidden)
+				if errors.Is(err, sql.ErrNoRows) {
+					// The token's subject no longer exists (deleted account); treat
+					// like any other unauthorized access rather than a server error.
+					writeJSONError(w, http.StatusForbidden, "AUTH.ADMIN_REQUIRED", "Admin privileges required")
+					return
+				}
+				slog.ErrorContext(r.Context(), "failed to load user for admin check", "userID", userID, "error", err)
+				writeJSONError(w, http.StatusInternalServerError, "INTERNAL.UNEXPECTED", "An unexpected error occurred")
 				return
 			}
 			if !user.IsAdmin {
-				http.Error(w, `{"status":403,"code":"AUTH.ADMIN_REQUIRED","message":"Admin privileges required"}`, http.StatusForbidden)
+				writeJSONError(w, http.StatusForbidden, "AUTH.ADMIN_REQUIRED", "Admin privileges required")
 				return
 			}
 			next.ServeHTTP(w, r)

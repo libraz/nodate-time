@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"mime"
 	"strings"
 	"time"
 
@@ -15,8 +16,18 @@ import (
 
 const maxAttachmentSize = 100 * 1024 * 1024 // 100 MB
 
+// isRejectedAttachmentContentType blocks SVG, which browsers can render
+// inline with active content (<script>) when opened directly. mime.ParseMediaType
+// strips parameters first, so "image/svg+xml; charset=utf-8" cannot slip past
+// this the way it could past a plain string-equality check.
 func isRejectedAttachmentContentType(contentType string) bool {
-	return strings.EqualFold(strings.TrimSpace(contentType), "image/svg+xml")
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		// An unparsable content type is passed through as-is (attachments accept
+		// arbitrary types by default); only a confirmed SVG is rejected here.
+		return strings.EqualFold(strings.TrimSpace(contentType), "image/svg+xml")
+	}
+	return strings.EqualFold(mediaType, "image/svg+xml")
 }
 
 func mapAttachment(att generated.EventAttachment) AttachmentResponse {
@@ -88,7 +99,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, storageKey, contentType, 15*time.Minute)
+		url, err := deps.Storage.PresignPut(ctx, storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -133,6 +144,23 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 	}
 }
 
+// deleteMismatchedAttachment removes an uploaded object (and its pending row)
+// that failed the Confirm-time size check, so a mismatched upload does not
+// linger as an orphan until the 7-day abandoned-upload sweep. Best-effort:
+// errors are logged, not surfaced, since the caller is already returning the
+// mismatch error to the client.
+func deleteMismatchedAttachment(ctx context.Context, deps Deps, att generated.EventAttachment) {
+	if err := deps.Storage.DeleteObject(ctx, att.StorageKey); err != nil {
+		slog.WarnContext(ctx, "failed to delete mismatched attachment object", "key", att.StorageKey, "error", err)
+	}
+	if err := deps.Queries.DeletePendingAttachment(ctx, generated.DeletePendingAttachmentParams{
+		ID:         att.ID,
+		UploadedBy: att.UploadedBy,
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", att.ID, "error", err)
+	}
+}
+
 // GetAttachmentDownload generates a presigned download URL for an attachment.
 func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
 	return func(ctx context.Context, in *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
@@ -172,7 +200,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
-		url, err := deps.Storage.PresignDownload(ctx, att.StorageKey, 5*time.Minute)
+		url, err := deps.Storage.PresignDownload(ctx, att.StorageKey, att.Filename, 5*time.Minute)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -280,9 +308,11 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 		if info.Size > maxAttachmentSize {
+			deleteMismatchedAttachment(ctx, deps, att)
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
 		}
 		if info.Size != att.ByteSize {
+			deleteMismatchedAttachment(ctx, deps, att)
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 

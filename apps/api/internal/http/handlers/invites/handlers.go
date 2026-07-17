@@ -333,12 +333,22 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		err = deps.Queries.DeleteInviteByIDAndCalendar(ctx, generated.DeleteInviteByIDAndCalendarParams{
+		res, err := deps.Queries.DeleteInviteByIDAndCalendar(ctx, generated.DeleteInviteByIDAndCalendarParams{
 			ID:         in.InviteID,
 			CalendarID: cal.ID,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if affected == 0 {
+			// No-op: the invite id does not exist (or already belongs to another
+			// calendar, which resolveCalendarAdmin already scoped out). Do not
+			// audit a revoke that did not happen.
+			return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 		}
 		audit.Record(ctx, deps.Queries, cal.ID, in.InviteID, inviteAuditPublicID(in.InviteID), audit.EntityInvite, audit.ActionRevoke, userID, "")
 		return &DeleteInviteOutput{}, nil

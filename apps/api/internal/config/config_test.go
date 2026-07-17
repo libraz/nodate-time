@@ -50,3 +50,27 @@ func TestValidateDevModeSkipsGuards(t *testing.T) {
 		t.Fatalf("dev config should pass validation, got %v", err)
 	}
 }
+
+func TestTrustedProxyListParsesBareIPsAndCIDRsAndSkipsGarbage(t *testing.T) {
+	c := &Config{TrustedProxies: " 10.0.0.1 , 192.168.1.0/24,not-an-ip, ,2001:db8::1"}
+	got := c.TrustedProxyList()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 valid entries, got %d: %v", len(got), got)
+	}
+	if got[0].String() != "10.0.0.1/32" {
+		t.Fatalf("expected bare IPv4 to become a /32, got %s", got[0])
+	}
+	if got[1].String() != "192.168.1.0/24" {
+		t.Fatalf("expected explicit CIDR to pass through unchanged, got %s", got[1])
+	}
+	if got[2].String() != "2001:db8::1/128" {
+		t.Fatalf("expected bare IPv6 to become a /128, got %s", got[2])
+	}
+}
+
+func TestTrustedProxyListEmptyMeansNoProxyTrusted(t *testing.T) {
+	c := &Config{}
+	if got := c.TrustedProxyList(); len(got) != 0 {
+		t.Fatalf("expected no trusted proxies for empty config, got %v", got)
+	}
+}

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
+	"strconv"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
@@ -36,11 +38,18 @@ type Config struct {
 	SMTPFrom           string `env:"TC_SMTP_FROM" envDefault:"no-reply@nodate-time.local"`
 	CORSAllowedOrigins string `env:"TC_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:5173,http://127.0.0.1:5173"`
 	CookieSecure       bool   `env:"TC_COOKIE_SECURE" envDefault:"false"`
-	S3Endpoint         string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`
-	S3AccessKey        string `env:"TC_S3_ACCESS_KEY" envDefault:"minioadmin"`
-	S3SecretKey        string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
-	S3Bucket           string `env:"TC_S3_BUCKET" envDefault:"nodate-time"`
-	S3UseSSL           bool   `env:"TC_S3_USE_SSL" envDefault:"false"`
+
+	// TrustedProxies lists reverse-proxy hops (comma-separated CIDR or bare IP)
+	// allowed to set X-Forwarded-For for per-client rate limiting. Empty (the
+	// default) trusts no proxy: RemoteAddr is always used directly, so a
+	// deployment behind an unlisted proxy has every request collapse onto one
+	// rate-limit bucket rather than risk trusting a spoofable header.
+	TrustedProxies string `env:"TC_TRUSTED_PROXIES" envDefault:""`
+	S3Endpoint     string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`
+	S3AccessKey    string `env:"TC_S3_ACCESS_KEY" envDefault:"minioadmin"`
+	S3SecretKey    string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
+	S3Bucket       string `env:"TC_S3_BUCKET" envDefault:"nodate-time"`
+	S3UseSSL       bool   `env:"TC_S3_USE_SSL" envDefault:"false"`
 
 	WebURL    string `env:"TC_WEB_URL" envDefault:"http://localhost:5173"`
 	APIPublic string `env:"TC_API_PUBLIC_URL" envDefault:"http://localhost:8080"`
@@ -124,6 +133,33 @@ func (c *Config) CORSAllowedOriginList() []string {
 		if o != "" {
 			out = append(out, o)
 		}
+	}
+	return out
+}
+
+// TrustedProxyList parses TrustedProxies into netip.Prefix entries. A bare IP
+// (no "/bits" suffix) is treated as an exact match. Malformed entries are
+// skipped rather than failing startup, since a typo here should degrade to
+// "trust nothing" rather than crash the process.
+func (c *Config) TrustedProxyList() []netip.Prefix {
+	var out []netip.Prefix
+	for _, raw := range strings.Split(c.TrustedProxies, ",") {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		if !strings.Contains(s, "/") {
+			addr, err := netip.ParseAddr(s)
+			if err != nil {
+				continue
+			}
+			s = addr.String() + "/" + strconv.Itoa(addr.BitLen())
+		}
+		prefix, err := netip.ParsePrefix(s)
+		if err != nil {
+			continue
+		}
+		out = append(out, prefix)
 	}
 	return out
 }

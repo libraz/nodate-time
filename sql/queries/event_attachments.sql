@@ -18,6 +18,12 @@ UPDATE event_attachments SET enabled = 1 WHERE id = ? AND uploaded_by = ? AND en
 -- name: SoftDeleteAttachment :exec
 UPDATE event_attachments SET enabled = 0 WHERE id = ?;
 
+-- name: DeletePendingAttachment :exec
+-- Removes an unconfirmed (enabled = 0) row whose uploaded object failed the
+-- Confirm-time size/type check, so it is not left as an orphan pointing at a
+-- deleted object.
+DELETE FROM event_attachments WHERE id = ? AND uploaded_by = ? AND enabled = 0;
+
 -- name: ListAttachmentStorageKeysByEvent :many
 SELECT storage_key FROM event_attachments WHERE event_id = ?;
 

@@ -22,7 +22,7 @@ SELECT * FROM calendar_invites
 WHERE calendar_id = ?
 ORDER BY created_at DESC;
 
--- name: DeleteInviteByIDAndCalendar :exec
+-- name: DeleteInviteByIDAndCalendar :execresult
 DELETE FROM calendar_invites WHERE id = ? AND calendar_id = ?;
 
 -- name: ListPublicSharedCalendarIDs :many
@@ -47,6 +47,10 @@ WHERE ci.token = ? AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
   AND (ci.max_uses IS NULL OR ci.use_count < ci.max_uses);
 
 -- name: ListEventsByInviteCalendar :many
+-- recurrence_parent_id IS NULL excludes single-occurrence override rows: they
+-- are surfaced only through ListRecurringEventsByInviteCalendar's expansion,
+-- keyed off the master's own recurrence rule, so an override row must never
+-- appear here as if it were its own independent event.
 SELECT e.* FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
 WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS NULL
@@ -55,9 +59,13 @@ WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS N
 ORDER BY e.start_at;
 
 -- name: ListRecurringEventsByInviteCalendar :many
+-- recurrence_parent_id IS NULL keeps this to master recurring events only, so
+-- an override row (which also carries a copy of the rule) is expanded once
+-- through its own master rather than surfacing a second time as if it were an
+-- independent recurring series.
 SELECT e.* FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL
+WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL AND e.recurrence_parent_id IS NULL
   AND ci.is_public = TRUE
   AND e.start_at < ? AND e.recurrence_end > ?
 ORDER BY e.start_at;

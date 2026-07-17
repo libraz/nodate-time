@@ -70,7 +70,7 @@ func (q *Queries) DeleteInvite(ctx context.Context, id uint32) error {
 	return err
 }
 
-const deleteInviteByIDAndCalendar = `-- name: DeleteInviteByIDAndCalendar :exec
+const deleteInviteByIDAndCalendar = `-- name: DeleteInviteByIDAndCalendar :execresult
 DELETE FROM calendar_invites WHERE id = ? AND calendar_id = ?
 `
 
@@ -79,9 +79,8 @@ type DeleteInviteByIDAndCalendarParams struct {
 	CalendarID uint32 `json:"calendarId"`
 }
 
-func (q *Queries) DeleteInviteByIDAndCalendar(ctx context.Context, arg DeleteInviteByIDAndCalendarParams) error {
-	_, err := q.db.ExecContext(ctx, deleteInviteByIDAndCalendar, arg.ID, arg.CalendarID)
-	return err
+func (q *Queries) DeleteInviteByIDAndCalendar(ctx context.Context, arg DeleteInviteByIDAndCalendarParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteInviteByIDAndCalendar, arg.ID, arg.CalendarID)
 }
 
 const getInviteByToken = `-- name: GetInviteByToken :one
@@ -177,6 +176,10 @@ type ListEventsByInviteCalendarParams struct {
 	EndAt   time.Time `json:"endAt"`
 }
 
+// recurrence_parent_id IS NULL excludes single-occurrence override rows: they
+// are surfaced only through ListRecurringEventsByInviteCalendar's expansion,
+// keyed off the master's own recurrence rule, so an override row must never
+// appear here as if it were its own independent event.
 func (q *Queries) ListEventsByInviteCalendar(ctx context.Context, arg ListEventsByInviteCalendarParams) ([]Event, error) {
 	rows, err := q.db.QueryContext(ctx, listEventsByInviteCalendar, arg.Token, arg.StartAt, arg.EndAt)
 	if err != nil {
@@ -298,7 +301,7 @@ func (q *Queries) ListPublicSharedCalendarIDs(ctx context.Context, userID uint32
 const listRecurringEventsByInviteCalendar = `-- name: ListRecurringEventsByInviteCalendar :many
 SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
 INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL
+WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL AND e.recurrence_parent_id IS NULL
   AND ci.is_public = TRUE
   AND e.start_at < ? AND e.recurrence_end > ?
 ORDER BY e.start_at
@@ -310,6 +313,10 @@ type ListRecurringEventsByInviteCalendarParams struct {
 	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
 }
 
+// recurrence_parent_id IS NULL keeps this to master recurring events only, so
+// an override row (which also carries a copy of the rule) is expanded once
+// through its own master rather than surfacing a second time as if it were an
+// independent recurring series.
 func (q *Queries) ListRecurringEventsByInviteCalendar(ctx context.Context, arg ListRecurringEventsByInviteCalendarParams) ([]Event, error) {
 	rows, err := q.db.QueryContext(ctx, listRecurringEventsByInviteCalendar, arg.Token, arg.StartAt, arg.RecurrenceEnd)
 	if err != nil {

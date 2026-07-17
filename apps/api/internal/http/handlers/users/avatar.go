@@ -74,7 +74,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, avatarUploadTTL)
+		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, in.Body.ByteSize, avatarUploadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -114,7 +114,6 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 		out := &PresignAvatarOutput{}
 		out.Body.AvatarID = avatarPubHex
 		out.Body.UploadURL = url
-		out.Body.StorageKey = key
 		return out, nil
 	}
 }

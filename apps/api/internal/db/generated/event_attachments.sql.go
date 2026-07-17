@@ -67,6 +67,23 @@ func (q *Queries) DeleteAbandonedAttachmentByStorageKey(ctx context.Context, arg
 	return q.db.ExecContext(ctx, deleteAbandonedAttachmentByStorageKey, arg.StorageKey, arg.CreatedAt)
 }
 
+const deletePendingAttachment = `-- name: DeletePendingAttachment :exec
+DELETE FROM event_attachments WHERE id = ? AND uploaded_by = ? AND enabled = 0
+`
+
+type DeletePendingAttachmentParams struct {
+	ID         uint32 `json:"id"`
+	UploadedBy uint32 `json:"uploadedBy"`
+}
+
+// Removes an unconfirmed (enabled = 0) row whose uploaded object failed the
+// Confirm-time size/type check, so it is not left as an orphan pointing at a
+// deleted object.
+func (q *Queries) DeletePendingAttachment(ctx context.Context, arg DeletePendingAttachmentParams) error {
+	_, err := q.db.ExecContext(ctx, deletePendingAttachment, arg.ID, arg.UploadedBy)
+	return err
+}
+
 const getAttachmentByPublicID = `-- name: GetAttachmentByPublicID :one
 SELECT id, public_id, event_id, uploaded_by, filename, content_type, byte_size, storage_key, enabled, created_at FROM event_attachments WHERE public_id = ?
 `

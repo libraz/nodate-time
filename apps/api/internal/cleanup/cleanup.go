@@ -12,6 +12,14 @@ import (
 
 const abandonedUploadAge = 7 * 24 * time.Hour
 
+// avatarUploadListBatchSize must match the LIMIT in avatar_uploads.sql's
+// ListExpiredAvatarUploads query.
+const avatarUploadListBatchSize = 500
+
+// maxAvatarUploadBatches bounds how many pages a single cleanup tick will
+// drain, so a persistent per-row failure cannot turn this into an infinite loop.
+const maxAvatarUploadBatches = 1000
+
 // Run starts a goroutine that periodically deletes expired tokens.
 // It returns immediately and runs until ctx is canceled.
 func Run(ctx context.Context, q *generated.Queries, storageClient *storage.Client, interval time.Duration) {
@@ -74,19 +82,31 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 		})
 	}
 
-	expiredUploads, err := q.ListExpiredAvatarUploads(ctx, olderThan.Add(abandonedUploadAge))
-	if err != nil {
-		slog.Warn("cleanup: list expired avatar uploads failed", "error", err)
-		return
-	}
-	for _, upload := range expiredUploads {
-		deleteObjects(ctx, storageClient, []string{upload.StorageKey}, func(ctx context.Context, _ string) error {
-			_, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
-				ID:        upload.ID,
-				ExpiresAt: olderThan.Add(abandonedUploadAge),
+	// ListExpiredAvatarUploads caps each call at avatarUploadListBatchSize rows;
+	// loop until a short batch confirms the backlog is drained, rather than
+	// leaving anything beyond the first page for expensive objects (their
+	// 7-day storage) to sit around until the next tick. maxAvatarUploadBatches
+	// bounds one cleanup run in case rows are somehow never removed (e.g. a
+	// persistent delete failure), so this cannot spin forever.
+	expiresBefore := olderThan.Add(abandonedUploadAge)
+	for range maxAvatarUploadBatches {
+		expiredUploads, err := q.ListExpiredAvatarUploads(ctx, expiresBefore)
+		if err != nil {
+			slog.Warn("cleanup: list expired avatar uploads failed", "error", err)
+			return
+		}
+		for _, upload := range expiredUploads {
+			deleteObjects(ctx, storageClient, []string{upload.StorageKey}, func(ctx context.Context, _ string) error {
+				_, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
+					ID:        upload.ID,
+					ExpiresAt: expiresBefore,
+				})
+				return err
 			})
-			return err
-		})
+		}
+		if len(expiredUploads) < avatarUploadListBatchSize {
+			return
+		}
 	}
 }
 

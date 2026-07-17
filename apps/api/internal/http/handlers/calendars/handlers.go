@@ -246,6 +246,11 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 	}
 }
 
+// deleteStorageObjects removes cascaded storage objects on a best-effort basis:
+// the owning rows are already gone by the time it runs, so a failure or a crash
+// mid-loop leaves the objects orphaned with no record to reconcile against.
+// Individual failures are logged rather than propagated so one bad key cannot
+// block the rest of the cleanup.
 func deleteStorageObjects(ctx context.Context, storageClient *storage.Client, keys []string) {
 	if storageClient == nil {
 		return

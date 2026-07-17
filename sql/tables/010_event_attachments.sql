@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS event_attachments (
   PRIMARY KEY (id),
   UNIQUE KEY uk_att_pub (public_id),
   KEY idx_att_event (event_id, enabled),
+  KEY idx_att_enabled_created (enabled, created_at) COMMENT 'supports the abandoned-upload cleanup scan',
   CONSTRAINT fk_att_event FOREIGN KEY (event_id)    REFERENCES events (id) ON DELETE CASCADE,
   CONSTRAINT fk_att_user  FOREIGN KEY (uploaded_by)  REFERENCES users  (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

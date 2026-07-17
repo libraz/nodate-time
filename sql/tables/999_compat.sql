@@ -226,3 +226,33 @@ SET @add_oauth_nonce = (
 PREPARE stmt FROM @add_oauth_nonce;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+SET @add_att_enabled_created_index = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE event_attachments ADD KEY idx_att_enabled_created (enabled, created_at)',
+    'DO 0'
+  )
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'event_attachments'
+    AND index_name = 'idx_att_enabled_created'
+);
+PREPARE stmt FROM @add_att_enabled_created_index;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_album_enabled_created_index = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE album_photos ADD KEY idx_album_enabled_created (enabled, created_at)',
+    'DO 0'
+  )
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'album_photos'
+    AND index_name = 'idx_album_enabled_created'
+);
+PREPARE stmt FROM @add_album_enabled_created_index;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
