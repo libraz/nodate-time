@@ -109,6 +109,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     fetchMeInFlight = true;
     try {
       const user = await api.get<User>('/user');
+      // Re-check the token: a logout may have landed while the request was in
+      // flight. Without this, a late success would restore isAuthenticated and
+      // flash the authed shell before the next request bounces to /login.
+      if (!hasToken()) return;
       set({ user, isAuthenticated: true, isInitializing: false });
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.code === 'AUTH.TOKEN_INVALID')) {
@@ -154,5 +158,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 if (typeof window !== 'undefined') {
   window.addEventListener(SESSION_EXPIRED_EVENT, () => {
     useAuthStore.getState().logout();
+  });
+
+  // A token can lapse while the tab sits in the background, leaving the cached
+  // authed UI on screen until the next request. Re-check when the tab regains
+  // focus so an expired session drops to the login screen proactively.
+  // hasToken() prunes the stale token as a side effect.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (useAuthStore.getState().isAuthenticated && !hasToken()) {
+      useAuthStore.getState().logout();
+    }
   });
 }

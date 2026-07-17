@@ -186,7 +186,15 @@ function recurrenceLabel(
   }
 }
 
-function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId: string }) {
+function CommentsSection({
+  calendarId,
+  eventId,
+  editable,
+}: {
+  calendarId: string;
+  eventId: string;
+  editable: boolean;
+}) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const user = useAuthStore((s) => s.user);
@@ -287,7 +295,7 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
                   <span className="text-caption text-[var(--color-text-tertiary)]">
                     {formatRelativeTime(c.createdAt, locale)}
                   </span>
-                  {c.userPublicId === user?.id && editingId !== c.id && (
+                  {editable && c.userPublicId === user?.id && editingId !== c.id && (
                     <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
@@ -365,39 +373,49 @@ function CommentsSection({ calendarId, eventId }: { calendarId: string; eventId:
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder={t('event.commentPlaceholder')}
-          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={!newComment.trim() || isSending}
-          className="flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-accent)] disabled:opacity-40"
-          style={{ borderRadius: 'var(--radius-sm)' }}
-          aria-label={t('event.send')}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-          </svg>
-        </button>
-      </div>
+      {editable && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={t('event.commentPlaceholder')}
+            className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+            style={{ borderRadius: 'var(--radius-sm)' }}
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!newComment.trim() || isSending}
+            className="flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-accent)] disabled:opacity-40"
+            style={{ borderRadius: 'var(--radius-sm)' }}
+            aria-label={t('event.send')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId: string }) {
+function ChecklistSection({
+  calendarId,
+  eventId,
+  editable,
+}: {
+  calendarId: string;
+  eventId: string;
+  editable: boolean;
+}) {
   const t = useT();
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [newTitle, setNewTitle] = useState('');
@@ -490,7 +508,8 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
               <button
                 type="button"
                 onClick={() => handleToggle(item)}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border)]"
+                disabled={!editable}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border)] disabled:cursor-default"
                 style={{
                   backgroundColor: item.done ? 'var(--color-accent)' : 'transparent',
                   borderColor: item.done ? 'var(--color-accent)' : undefined,
@@ -518,48 +537,60 @@ function ChecklistSection({ calendarId, eventId }: { calendarId: string; eventId
               >
                 {item.title}
               </span>
-              <button
-                type="button"
-                onClick={() => handleDelete(item.id)}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(item.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleAdd();
-            }
-          }}
-          placeholder={t('event.checklistPlaceholder')}
-          className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
-        />
-      </div>
+      {editable && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAdd();
+              }
+            }}
+            placeholder={t('event.checklistPlaceholder')}
+            className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+            style={{ borderRadius: 'var(--radius-sm)' }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function AttachmentsSection({ calendarId, eventId }: { calendarId: string; eventId: string }) {
+function AttachmentsSection({
+  calendarId,
+  eventId,
+  editable,
+}: {
+  calendarId: string;
+  eventId: string;
+  editable: boolean;
+}) {
   const t = useT();
   const [attachments, setAttachments] = useState<EventAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -686,49 +717,55 @@ function AttachmentsSection({ calendarId, eventId }: { calendarId: string; event
               >
                 {t('event.download')}
               </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(att.id)}
-                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(att.id)}
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-body text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
-        style={{ borderRadius: 'var(--radius-md)' }}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        {uploading ? t('event.uploading') : t('event.uploadAttachment')}
-      </button>
+      {editable && (
+        <>
+          <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-body text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
+            style={{ borderRadius: 'var(--radius-md)' }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            {uploading ? t('event.uploading') : t('event.uploadAttachment')}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -1315,7 +1352,7 @@ export function EventModal() {
           {/* Recurrence */}
           <div className="flex items-center justify-between py-2.5">
             <span className="text-default text-[var(--color-text-primary)]">
-              {t('event.recurrenceNone').split('/')[0] || 'Repeat'}
+              {t('event.recurrence')}
             </span>
             <CustomSelect
               value={form.recurrencePreset}
@@ -1902,17 +1939,29 @@ export function EventModal() {
 
       {/* Checklist (edit mode only) */}
       {editingEvent && (
-        <ChecklistSection calendarId={editingEvent.calendarId} eventId={editingEvent.id} />
+        <ChecklistSection
+          calendarId={editingEvent.calendarId}
+          eventId={editingEvent.id}
+          editable={editable}
+        />
       )}
 
       {/* Attachments (edit mode only) */}
       {editingEvent && (
-        <AttachmentsSection calendarId={editingEvent.calendarId} eventId={editingEvent.id} />
+        <AttachmentsSection
+          calendarId={editingEvent.calendarId}
+          eventId={editingEvent.id}
+          editable={editable}
+        />
       )}
 
       {/* Comments (edit mode only) */}
       {editingEvent && (
-        <CommentsSection calendarId={editingEvent.calendarId} eventId={editingEvent.id} />
+        <CommentsSection
+          calendarId={editingEvent.calendarId}
+          eventId={editingEvent.id}
+          editable={editable}
+        />
       )}
 
       {/* History (edit mode only) */}

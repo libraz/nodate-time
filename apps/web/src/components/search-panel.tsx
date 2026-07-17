@@ -1,6 +1,6 @@
-import { DateTime } from 'luxon';
 import { useEffect, useMemo, useRef } from 'react';
 import { useT } from '@/i18n';
+import { fromISOInZone } from '@/lib/date-utils';
 import { filterEventsForSearch } from '@/lib/search';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/ui-store';
 export function SearchPanel() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
   const showSearch = useUiStore((s) => s.showSearch);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
@@ -39,7 +40,7 @@ export function SearchPanel() {
   const filtered = useMemo(() => filterEventsForSearch(events, searchQuery), [searchQuery, events]);
 
   const handleSelect = (eventId: string, startAt: string) => {
-    const dt = DateTime.fromISO(startAt);
+    const dt = fromISOInZone(startAt, timezone);
     setCurrentMonth(dt.startOf('month'));
     setSelectedDate(dt);
     toggleSearch();
@@ -73,8 +74,8 @@ export function SearchPanel() {
       ) : (
         <div className="py-1">
           {filtered.map((evt) => {
-            const dt = DateTime.fromISO(evt.startAt);
-            const endDt = DateTime.fromISO(evt.endAt);
+            const dt = fromISOInZone(evt.startAt, timezone);
+            const endDt = fromISOInZone(evt.endAt, timezone);
             const dateLabel = evt.allDay
               ? dt.toFormat('yyyy/MM/dd (EEE)', { locale })
               : `${dt.toFormat('yyyy/MM/dd (EEE) HH:mm', { locale })} - ${endDt.toFormat('HH:mm')}`;
