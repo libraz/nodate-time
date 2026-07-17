@@ -191,6 +191,32 @@ describe('logout', () => {
   });
 });
 
+describe('changePassword', () => {
+  it('persists the rotated token so the device stays signed in', async () => {
+    mockApi.put.mockResolvedValue({ token: 'rotated-token' } as never);
+
+    await useAuthStore.getState().changePassword('old-pw', 'new-pw-1234');
+
+    expect(mockApi.put).toHaveBeenCalledWith('/user/password', {
+      currentPassword: 'old-pw',
+      newPassword: 'new-pw-1234',
+    });
+    expect(mockSetToken).toHaveBeenCalledWith('rotated-token');
+    // The current session is preserved, not cleared.
+    expect(mockClearToken).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a token and rethrows when the change fails', async () => {
+    mockApi.put.mockRejectedValue(new ApiError(400, 'wrong password'));
+
+    await expect(
+      useAuthStore.getState().changePassword('bad', 'new-pw-1234'),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(mockSetToken).not.toHaveBeenCalled();
+  });
+});
+
 describe('visibilitychange', () => {
   it('logs out when the tab refocuses with an expired token', () => {
     Object.defineProperty(document, 'visibilityState', {

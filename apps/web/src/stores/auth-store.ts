@@ -28,6 +28,7 @@ interface AuthState {
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   fetchMe: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   updateProfile: (data: { name: string; icon: string; color: string }) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   removeAvatar: () => Promise<void>;
@@ -123,6 +124,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     } finally {
       fetchMeInFlight = false;
     }
+  },
+
+  changePassword: async (currentPassword, newPassword) => {
+    // The server rotates the token on a password change; persist the fresh one
+    // so the current device stays signed in instead of failing the next request.
+    const { token } = await api.put<{ token: string }>('/user/password', {
+      currentPassword,
+      newPassword,
+    });
+    setToken(token);
   },
 
   updateProfile: async (data) => {

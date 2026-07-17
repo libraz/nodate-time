@@ -54,7 +54,8 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
     (async () => {
       try {
         const data = await api.get<HistoryItem[]>(path);
-        if (!cancelled) setItems(data);
+        // The API returns newest-first; reverse for the oldest-to-newest timeline.
+        if (!cancelled) setItems([...data].reverse());
       } catch {
         if (!cancelled) setItems([]);
       } finally {
