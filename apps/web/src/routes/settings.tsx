@@ -307,6 +307,7 @@ function ProfileSection() {
   const updateProfile = useAuthStore((s) => s.updateProfile);
   const uploadAvatar = useAuthStore((s) => s.uploadAvatar);
   const removeAvatar = useAuthStore((s) => s.removeAvatar);
+  const changePasswordAction = useAuthStore((s) => s.changePassword);
   const [name, setName] = useState(user?.name ?? '');
   const [icon, setIcon] = useState(user?.icon ?? '');
   const [color, setColor] = useState(user?.color ?? '#42A5F5');
@@ -373,7 +374,7 @@ function ProfileSection() {
     }
     setPwSaving(true);
     try {
-      await api.put('/user/password', { currentPassword: currentPw, newPassword: newPw });
+      await changePasswordAction(currentPw, newPw);
       toast.success(t('profile.passwordChanged'));
       setCurrentPw('');
       setNewPw('');

@@ -257,6 +257,8 @@ export const ja = {
   'auth.oauthOr': 'または',
   'auth.signingIn': 'サインイン中...',
   'auth.oauthFailed': 'OAuth ログインに失敗しました。もう一度お試しください',
+  'auth.oauthDenied': 'ログインがキャンセルされました',
+  'auth.oauthState': 'セッションの有効期限が切れました。もう一度ログインしてください',
   'auth.emailPlaceholder': 'you@example.com',
 
   // Timezone / event extras

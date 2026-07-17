@@ -245,6 +245,8 @@ export const en: Record<TranslationKey, string> = {
   'auth.oauthOr': 'or',
   'auth.signingIn': 'Signing in...',
   'auth.oauthFailed': 'OAuth sign-in failed. Please try again',
+  'auth.oauthDenied': 'Sign-in was cancelled',
+  'auth.oauthState': 'Your session expired. Please try signing in again',
   'auth.emailPlaceholder': 'you@example.com',
 
   'event.timezone': 'Timezone',

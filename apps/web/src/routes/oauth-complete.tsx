@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
@@ -29,7 +29,6 @@ function OAuthCompletePage() {
   const navigate = useNavigate();
   const { redirect } = Route.useSearch();
   const fetchMe = useAuthStore((s) => s.fetchMe);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +44,9 @@ function OAuthCompletePage() {
       try {
         await fetchMe();
       } catch {
-        if (!cancelled) setError(t('auth.oauthFailed'));
+        // User resolution failed after a successful redirect; surface the error
+        // on the login screen instead of leaving the user on a blank shell.
+        if (!cancelled) navigate({ to: '/login', search: { error: 'oauth_failed' } });
         return;
       }
       if (cancelled) return;
@@ -55,41 +56,15 @@ function OAuthCompletePage() {
     return () => {
       cancelled = true;
     };
-  }, [redirect, navigate, fetchMe, t]);
+  }, [redirect, navigate, fetchMe]);
 
   return (
-    <AuthShell title="Nodate Time" subtitle={error ?? t('auth.signingIn')}>
+    <AuthShell title="Nodate Time" subtitle={t('auth.signingIn')}>
       <div className="flex flex-col items-center gap-4 py-6">
-        {error ? (
-          <>
-            <div
-              aria-hidden
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-danger-bg)] text-[var(--color-danger)]"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-                <path
-                  d="M12 8v4M12 16h.01"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate({ to: '/login' })}
-              className="btn-primary rounded-xl px-5"
-            >
-              {t('auth.backToLogin')}
-            </button>
-          </>
-        ) : (
-          <div
-            aria-hidden
-            className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]"
-          />
-        )}
+        <div
+          aria-hidden
+          className="h-10 w-10 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]"
+        />
       </div>
     </AuthShell>
   );

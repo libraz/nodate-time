@@ -1,11 +1,32 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
-import { useT } from '@/i18n';
+import { type TranslationKey, useT } from '@/i18n';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 
 type OAuthProvider = 'google' | 'line';
+
+/**
+ * Resolves the `error` search param (an OAuth failure code from `/login?error=`)
+ * to a message key. Returns null when absent and falls back to the generic
+ * failure message for any unrecognized code.
+ */
+export function oauthErrorMessageKey(code: string | undefined): TranslationKey | null {
+  switch (code) {
+    case undefined:
+    case '':
+      return null;
+    case 'oauth_denied':
+      return 'auth.oauthDenied';
+    case 'oauth_state':
+      return 'auth.oauthState';
+    case 'oauth_not_allowed':
+      return 'auth.oauthNotAllowed';
+    default:
+      return 'auth.oauthFailed';
+  }
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
 
@@ -96,6 +117,8 @@ function LoginPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const navigate = useNavigate();
 
+  const oauthErrorKey = oauthErrorMessageKey(oauthError);
+
   // Only render social buttons for providers that are actually configured.
   const [providers, setProviders] = useState<OAuthProvider[] | null>(null);
   const [oauthShown, setOauthShown] = useState(false);
@@ -182,12 +205,12 @@ function LoginPage() {
       }
     >
       <form onSubmit={handleSubmit} noValidate>
-        {oauthError === 'oauth_not_allowed' && (
+        {oauthErrorKey && (
           <div
             role="alert"
             className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
           >
-            {t('auth.oauthNotAllowed')}
+            {t(oauthErrorKey)}
           </div>
         )}
         {error && (
