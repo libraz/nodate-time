@@ -26,6 +26,10 @@ type Deps struct {
 	Storage *storage.Client
 }
 
+// defaultEventColor is applied whenever a client sends an empty color, on both
+// the create and update paths.
+const defaultEventColor = "#47B2F7"
+
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
@@ -213,7 +217,7 @@ func parseCompositeID(eventID string) (parentUUID string, dateStr string) {
 	return "", ""
 }
 
-func prepareRecurrence(ruleData *json.RawMessage, startAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
+func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
 	if ruleData == nil || string(*ruleData) == "null" {
 		return nil, sql.NullTime{}
 	}
@@ -223,7 +227,7 @@ func prepareRecurrence(ruleData *json.RawMessage, startAt time.Time, tz string) 
 	}
 	// Anchor the recurrence end in the event's timezone so DST does not shift
 	// the boundary used by SQL range queries.
-	end := recurrence.ComputeEndInZone(rule, startAt, tz)
+	end := recurrence.ComputeEndInZone(rule, startAt, endAt, tz)
 	return ruleData, sql.NullTime{Time: end, Valid: true}
 }
 
@@ -565,11 +569,8 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 		evt, err := deps.Queries.GetEventByPublicID(ctx, evtPub)
-		if err != nil {
+		if err != nil || evt.CalendarID != cal.ID {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
-		}
-		if evt.CalendarID != cal.ID {
-			return nil, apierrors.ToHuma(apierrors.EventAccessDenied)
 		}
 
 		resp := mapEvent(evt, cal.PublicID)
@@ -612,7 +613,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		pubID, _ := uuid.NewV7()
 		color := in.Body.Color
 		if color == "" {
-			color = "#47B2F7"
+			color = defaultEventColor
 		}
 
 		tz := in.Body.Timezone
@@ -620,7 +621,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			tz = "UTC"
 		}
 
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
 
 		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
 		if spec != nil {
@@ -665,33 +666,22 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if err := replaceEventParticipants(ctx, q, eventID, participants); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		// Reload the stored row so the response reflects DB truth (normalized
+		// datetimes, DB-assigned created_at/updated_at) rather than time.Now().
+		created, err := q.GetEventByPublicID(ctx, pubID[:])
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		resp := EventResponse{
-			ID:                 pubID.String(),
-			CalendarID:         pubIDToHex(cal.PublicID),
-			Title:              in.Body.Title,
-			AllDay:             in.Body.AllDay,
-			StartAt:            startAt,
-			EndAt:              endAt,
-			Timezone:           tz,
-			Color:              color,
-			Location:           in.Body.Location,
-			Memo:               in.Body.Memo,
-			URL:                in.Body.URL,
-			NotificationOffset: in.Body.NotificationOffset,
-			Participants:       participantPublicIDList(participants),
-			AssignedTo:         assigneePublicID(ctx, deps, assignedTo),
-			RecurrenceRule:     mapRecurrenceRule(ruleData),
-			CreatedAt:          time.Now(),
-			UpdatedAt:          time.Now(),
-		}
+		resp := mapEvent(created, cal.PublicID)
+		resp.Participants = participantPublicIDList(participants)
+		resp.AssignedTo = assigneePublicID(ctx, deps, created.AssignedTo)
 		setCreator(ctx, deps, &resp, userID, nil)
 
-		newID64, _ := result.LastInsertId()
-		audit.Record(ctx, deps.Queries, cal.ID, uint32(newID64), pubID[:], audit.EntityEvent, audit.ActionCreate, userID, in.Body.Title)
+		audit.Record(ctx, deps.Queries, cal.ID, eventID, pubID[:], audit.EntityEvent, audit.ActionCreate, userID, in.Body.Title)
 
 		return &CreateEventOutput{Body: resp}, nil
 	}
@@ -748,6 +738,12 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 		}
 
+		// Mirror the create path's fallback so an empty color cannot be persisted.
+		color := in.Body.Color
+		if color == "" {
+			color = defaultEventColor
+		}
+
 		assignedTo, spec := resolveAssignee(ctx, deps, cal.ID, in.Body.AssignedTo)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
@@ -774,7 +770,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			endAt = startAt.Add(duration)
 		}
 
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, tz)
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
 
 		// Single-occurrence edit: write an override row instead of mutating the
 		// whole series, so editing one instance no longer rewrites every instance.
@@ -804,7 +800,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				StartAt:                 startAt,
 				EndAt:                   endAt,
 				Timezone:                tz,
-				Color:                   in.Body.Color,
+				Color:                   color,
 				Location:                in.Body.Location,
 				Memo:                    in.Body.Memo,
 				Url:                     in.Body.URL,
@@ -847,13 +843,38 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		defer tx.Rollback()
 		q := generated.New(tx)
 
+		// Series-wide edits must keep exception rows resolvable: their
+		// recurrence_original_start values are keyed to the old occurrence grid,
+		// so moving the anchor (e.g. weekly Wed -> Thu) would resurrect cancelled
+		// occurrences and duplicate edited ones.
+		if evt.RecurrenceRule != nil {
+			parentRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
+			if ruleData == nil {
+				// Recurrence removed: the series collapses to a single event and
+				// override rows can never resolve to an occurrence again.
+				if err := q.DeleteRecurrenceExceptionsByParent(ctx, parentRef); err != nil {
+					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				}
+			} else if delta := startAt.Sub(evt.StartAt); delta != 0 {
+				deltaUs := delta.Microseconds()
+				if err := q.ShiftRecurrenceExceptions(ctx, generated.ShiftRecurrenceExceptionsParams{
+					DeltaUs:            deltaUs,
+					DeltaUs_2:          deltaUs,
+					DeltaUs_3:          deltaUs,
+					RecurrenceParentID: parentRef,
+				}); err != nil {
+					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				}
+			}
+		}
+
 		err = q.UpdateEvent(ctx, generated.UpdateEventParams{
 			Title:              in.Body.Title,
 			AllDay:             in.Body.AllDay,
 			StartAt:            startAt,
 			EndAt:              endAt,
 			Timezone:           tz,
-			Color:              in.Body.Color,
+			Color:              color,
 			Location:           in.Body.Location,
 			Memo:               in.Body.Memo,
 			Url:                in.Body.URL,

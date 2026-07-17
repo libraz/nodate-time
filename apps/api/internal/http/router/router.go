@@ -294,14 +294,6 @@ func Build(deps Deps) http.Handler {
 		}, calendars.ListMembers(calDeps))
 
 		huma.Register(api, huma.Operation{
-			OperationID: "add-member",
-			Method:      http.MethodPost,
-			Path:        "/calendars/{calendarId}/members",
-			Summary:     "Add a member to a calendar",
-			Tags:        []string{"Member"},
-		}, calendars.AddMember(calDeps))
-
-		huma.Register(api, huma.Operation{
 			OperationID: "update-member-role",
 			Method:      http.MethodPut,
 			Path:        "/calendars/{calendarId}/members/{userId}/role",
@@ -363,11 +355,12 @@ func Build(deps Deps) http.Handler {
 		}, events.GetEvent(evtDeps))
 
 		huma.Register(api, huma.Operation{
-			OperationID: "create-event",
-			Method:      http.MethodPost,
-			Path:        "/calendars/{calendarId}/events",
-			Summary:     "Create an event",
-			Tags:        []string{"Event"},
+			OperationID:   "create-event",
+			Method:        http.MethodPost,
+			Path:          "/calendars/{calendarId}/events",
+			Summary:       "Create an event",
+			Tags:          []string{"Event"},
+			DefaultStatus: http.StatusCreated,
 		}, events.CreateEvent(evtDeps))
 
 		huma.Register(api, huma.Operation{

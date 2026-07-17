@@ -66,6 +66,15 @@ func (q *Queries) DeleteEvent(ctx context.Context, id uint32) error {
 	return err
 }
 
+const deleteRecurrenceExceptionsByParent = `-- name: DeleteRecurrenceExceptionsByParent :exec
+DELETE FROM events WHERE recurrence_parent_id = ?
+`
+
+func (q *Queries) DeleteRecurrenceExceptionsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) error {
+	_, err := q.db.ExecContext(ctx, deleteRecurrenceExceptionsByParent, recurrenceParentID)
+	return err
+}
+
 const getEventByID = `-- name: GetEventByID :one
 SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE id = ?
 `
@@ -340,6 +349,31 @@ func (q *Queries) ListRecurringEventsByCalendarAndRange(ctx context.Context, arg
 		return nil, err
 	}
 	return items, nil
+}
+
+const shiftRecurrenceExceptions = `-- name: ShiftRecurrenceExceptions :exec
+UPDATE events
+SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), recurrence_original_start),
+    start_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), start_at),
+    end_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), end_at)
+WHERE recurrence_parent_id = ?
+`
+
+type ShiftRecurrenceExceptionsParams struct {
+	DeltaUs            int64         `json:"deltaUs"`
+	DeltaUs_2          int64         `json:"deltaUs2"`
+	DeltaUs_3          int64         `json:"deltaUs3"`
+	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
+}
+
+func (q *Queries) ShiftRecurrenceExceptions(ctx context.Context, arg ShiftRecurrenceExceptionsParams) error {
+	_, err := q.db.ExecContext(ctx, shiftRecurrenceExceptions,
+		arg.DeltaUs,
+		arg.DeltaUs_2,
+		arg.DeltaUs_3,
+		arg.RecurrenceParentID,
+	)
+	return err
 }
 
 const updateEvent = `-- name: UpdateEvent :exec

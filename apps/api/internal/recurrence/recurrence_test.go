@@ -228,24 +228,50 @@ func TestComputeEnd(t *testing.T) {
 	t.Run("with until", func(t *testing.T) {
 		until := "2026-06-01"
 		rule := &Rule{Freq: "daily", Interval: 1, Until: &until}
-		end := ComputeEnd(rule, d("2026-04-01 00:00"))
+		end := ComputeEnd(rule, d("2026-04-01 00:00"), d("2026-04-01 01:00"))
 		assert.Equal(t, 2026, end.Year())
 		assert.Equal(t, time.June, end.Month())
 	})
 
 	t.Run("infinite", func(t *testing.T) {
 		rule := &Rule{Freq: "daily", Interval: 1}
-		end := ComputeEnd(rule, d("2026-04-01 00:00"))
+		end := ComputeEnd(rule, d("2026-04-01 00:00"), d("2026-04-01 01:00"))
 		assert.Equal(t, 2099, end.Year())
 	})
 
 	t.Run("nil rule", func(t *testing.T) {
-		end := ComputeEnd(nil, d("2026-04-01 10:00"))
-		assert.Equal(t, d("2026-04-01 10:00"), end)
+		end := ComputeEnd(nil, d("2026-04-01 10:00"), d("2026-04-01 11:00"))
+		assert.Equal(t, d("2026-04-01 11:00"), end)
+	})
+
+	t.Run("count includes full duration of last occurrence", func(t *testing.T) {
+		// A 3-day event recurring weekly, 2 occurrences: the boundary must
+		// cover the last occurrence's whole span, not a fixed 24h buffer.
+		rule := &Rule{Freq: "weekly", Interval: 1, Count: 2}
+		end := ComputeEnd(rule, d("2026-04-01 10:00"), d("2026-04-04 10:00"))
+		assert.Equal(t, d("2026-04-11 10:00"), end)
+	})
+
+	t.Run("rfc3339 until includes duration", func(t *testing.T) {
+		until := "2026-06-01T10:00:00Z"
+		rule := &Rule{Freq: "daily", Interval: 1, Until: &until}
+		end := ComputeEnd(rule, d("2026-04-01 10:00"), d("2026-04-03 10:00"))
+		assert.Equal(t, d("2026-06-03 10:00"), end)
+	})
+
+	t.Run("date-only until is end of day in event zone", func(t *testing.T) {
+		tokyo, err := time.LoadLocation("Asia/Tokyo")
+		require.NoError(t, err)
+		until := "2026-06-01"
+		rule := &Rule{Freq: "daily", Interval: 1, Until: &until}
+		start := time.Date(2026, 4, 1, 10, 0, 0, 0, tokyo)
+		end := ComputeEnd(rule, start, start.Add(time.Hour))
+		// End of June 1 in Tokyo (plus the 1h duration), not a UTC boundary.
+		assert.Equal(t, time.Date(2026, 6, 2, 1, 0, 0, 0, tokyo), end)
 	})
 }
 
-func TestExpandYearlyFromLeapDayFollowsAddDateNormalization(t *testing.T) {
+func TestExpandYearlyFromLeapDayClampsToFebEnd(t *testing.T) {
 	rule := &Rule{Freq: "yearly", Interval: 1, Count: 4}
 	start := d("2024-02-29 09:00")
 	end := d("2024-02-29 10:00")
@@ -254,7 +280,43 @@ func TestExpandYearlyFromLeapDayFollowsAddDateNormalization(t *testing.T) {
 
 	require.Len(t, results, 4)
 	assert.Equal(t, d("2024-02-29 09:00"), results[0].StartAt)
-	assert.Equal(t, d("2025-03-01 09:00"), results[1].StartAt)
-	assert.Equal(t, d("2026-03-01 09:00"), results[2].StartAt)
-	assert.Equal(t, d("2027-03-01 09:00"), results[3].StartAt)
+	assert.Equal(t, d("2025-02-28 09:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-02-28 09:00"), results[2].StartAt)
+	assert.Equal(t, d("2027-02-28 09:00"), results[3].StartAt)
+}
+
+func TestExpandDateOnlyUntilRespectsEventZone(t *testing.T) {
+	// 21:00 New York daily until 2026-04-10 (a wall date). Interpreted as a
+	// UTC boundary, Apr 10 21:00 EDT (= Apr 11 01:00 UTC) would fall past it
+	// and the final occurrence would be dropped.
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	until := "2026-04-10"
+	rule := &Rule{Freq: "daily", Interval: 1, Until: &until}
+	start := time.Date(2026, 4, 1, 21, 0, 0, 0, ny)
+
+	results := Expand(rule, start, start.Add(time.Hour),
+		time.Date(2026, 4, 1, 0, 0, 0, 0, ny), time.Date(2026, 5, 1, 0, 0, 0, 0, ny))
+
+	require.Len(t, results, 10) // Apr 1-10 inclusive
+	assert.Equal(t, time.Date(2026, 4, 10, 21, 0, 0, 0, ny), results[9].StartAt)
+}
+
+func TestExpandAllDayKeepsSingleDayAcrossDST(t *testing.T) {
+	// US spring-forward: Mar 8 2026 is a 23h day in New York. A fixed 24h
+	// duration would make that occurrence end at 01:00 the next day.
+	ny, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	rule := &Rule{Freq: "daily", Interval: 1}
+	start := time.Date(2026, 3, 7, 0, 0, 0, 0, ny)
+	end := time.Date(2026, 3, 8, 0, 0, 0, 0, ny)
+
+	results := Expand(rule, start, end,
+		time.Date(2026, 3, 7, 0, 0, 0, 0, ny), time.Date(2026, 3, 10, 0, 0, 0, 0, ny))
+
+	require.Len(t, results, 3)
+	for _, occ := range results {
+		next := occ.StartAt.AddDate(0, 0, 1)
+		assert.Equal(t, next, occ.EndAt, "each all-day occurrence must span exactly one calendar day")
+	}
 }

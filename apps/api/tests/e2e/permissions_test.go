@@ -46,10 +46,18 @@ func TestMemberCanManageEvents(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, member.AccessToken,
 		map[string]any{
-			"title":   "Member-edited event",
-			"allDay":  false,
-			"startAt": "2026-05-10T10:00:00+09:00",
-			"endAt":   "2026-05-10T12:00:00+09:00",
+			"title":              "Member-edited event",
+			"allDay":             false,
+			"startAt":            "2026-05-10T10:00:00+09:00",
+			"endAt":              "2026-05-10T12:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, &updated)
 	require.Equal(t, "Member-edited event", updated.Title)
 
@@ -115,10 +123,18 @@ func TestNonMemberCannotAccessEvents(t *testing.T) {
 	// Outsider cannot edit the event.
 	updateStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, outsider.AccessToken,
 		map[string]any{
-			"title":   "Hijacked",
-			"allDay":  false,
-			"startAt": "2026-05-12T09:00:00+09:00",
-			"endAt":   "2026-05-12T10:00:00+09:00",
+			"title":              "Hijacked",
+			"allDay":             false,
+			"startAt":            "2026-05-12T09:00:00+09:00",
+			"endAt":              "2026-05-12T10:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		})
 	require.Equal(t, 403, updateStatus)
 
@@ -182,10 +198,18 @@ func TestViewerIsReadOnly(t *testing.T) {
 	// Viewer CANNOT edit the event.
 	updateStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, viewer.AccessToken,
 		map[string]any{
-			"title":   "Edited by viewer",
-			"allDay":  false,
-			"startAt": "2026-05-15T09:00:00+09:00",
-			"endAt":   "2026-05-15T10:00:00+09:00",
+			"title":              "Edited by viewer",
+			"allDay":             false,
+			"startAt":            "2026-05-15T09:00:00+09:00",
+			"endAt":              "2026-05-15T10:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		})
 	require.Equal(t, 403, updateStatus)
 

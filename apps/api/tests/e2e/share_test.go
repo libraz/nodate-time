@@ -297,10 +297,18 @@ func TestShareRecurringEventsHonorExceptions(t *testing.T) {
 
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
-			"title":   "Public moved",
-			"allDay":  false,
-			"startAt": "2026-04-17T18:00:00+09:00",
-			"endAt":   "2026-04-17T19:00:00+09:00",
+			"title":              "Public moved",
+			"allDay":             false,
+			"startAt":            "2026-04-17T18:00:00+09:00",
+			"endAt":              "2026-04-17T19:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, nil)
 
 	var pubEvents []struct {

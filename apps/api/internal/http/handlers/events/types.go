@@ -85,13 +85,17 @@ type CreateEventInput struct {
 		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
 		Participants       []string         `json:"participants,omitempty" required:"false"`
 		AssignedTo         *string          `json:"assignedTo,omitempty" required:"false" doc:"public user ID of the assigned member"`
-		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false"`
+		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false" doc:"Weekly rules with interval > 1 use a fixed Sunday week start (WKST=SU)."`
 	}
 }
 type CreateEventOutput struct {
 	Body EventResponse
 }
 
+// UpdateEventInput is a full-replace update: every content field is
+// authoritative and must carry the complete desired state. Omitting a field is
+// a contract violation, not a "keep current value" request — clearing is done
+// with an explicit empty string, empty array, or null.
 type UpdateEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
@@ -101,15 +105,15 @@ type UpdateEventInput struct {
 		AllDay             bool             `json:"allDay"`
 		StartAt            string           `json:"startAt"`
 		EndAt              string           `json:"endAt"`
-		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to UTC)"`
-		Color              string           `json:"color,omitempty" maxLength:"7" required:"false"`
-		Location           string           `json:"location,omitempty" maxLength:"500" required:"false"`
-		Memo               string           `json:"memo,omitempty" required:"false"`
-		URL                string           `json:"url,omitempty" maxLength:"2000" required:"false"`
-		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
-		Participants       []string         `json:"participants,omitempty" required:"false"`
-		AssignedTo         *string          `json:"assignedTo,omitempty" required:"false" doc:"public user ID of the assigned member"`
-		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false"`
+		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to the event's current zone)"`
+		Color              string           `json:"color" maxLength:"7" doc:"empty applies the default color"`
+		Location           string           `json:"location" maxLength:"500"`
+		Memo               string           `json:"memo"`
+		URL                string           `json:"url" maxLength:"2000"`
+		NotificationOffset *int             `json:"notificationOffset" doc:"null clears the notification"`
+		Participants       []string         `json:"participants" doc:"full participant list; an empty array removes all participants"`
+		AssignedTo         *string          `json:"assignedTo" doc:"public user ID of the assigned member; null clears the assignment"`
+		RecurrenceRule     *json.RawMessage `json:"recurrenceRule" doc:"full recurrence rule; null makes the event non-recurring. Weekly rules with interval > 1 use a fixed Sunday week start (WKST=SU)."`
 	}
 }
 type UpdateEventOutput struct {
@@ -200,7 +204,7 @@ type UpdateChecklistItemInput struct {
 	Body       struct {
 		Title     string `json:"title" minLength:"1" maxLength:"500"`
 		Done      bool   `json:"done"`
-		SortOrder int    `json:"sortOrder,omitempty" required:"false"`
+		SortOrder *int   `json:"sortOrder,omitempty" required:"false" doc:"omit to keep the current position"`
 	}
 }
 type UpdateChecklistItemOutput struct {

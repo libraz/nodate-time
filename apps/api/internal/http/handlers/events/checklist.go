@@ -144,10 +144,16 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
 		}
 
+		// sortOrder is unchanged when omitted so title/done edits cannot
+		// silently reorder the item to position zero.
+		sortOrder := item.SortOrder
+		if in.Body.SortOrder != nil {
+			sortOrder = int32(*in.Body.SortOrder)
+		}
 		err = deps.Queries.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
 			Title:     in.Body.Title,
 			Done:      in.Body.Done,
-			SortOrder: int32(in.Body.SortOrder),
+			SortOrder: sortOrder,
 			ID:        item.ID,
 		})
 		if err != nil {

@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
@@ -87,21 +90,29 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		// Expansion goes through eventexpand so recurrence exceptions are
+		// honored: cancelled occurrences stay out of the export and edited
+		// ones carry their overridden values, matching what the app displays.
 		for _, e := range recurringRows {
 			if e.RecurrenceRule == nil {
 				continue
 			}
-			rule := recurrence.ParseRule(*e.RecurrenceRule)
-			if rule == nil {
-				continue
-			}
-			occurrences := recurrence.ExpandInZone(rule, e.StartAt, e.EndAt, windowStart, windowEnd, e.Timezone)
-			for _, occ := range occurrences {
+			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, windowStart, windowEnd) {
+				uidSuffix := "-" + inst.OriginalStart.UTC().Format("20060102T150405")
+				if inst.IsException {
+					exports = append(exports, exportEvent{
+						event:     inst.Event,
+						startAt:   inst.Event.StartAt,
+						endAt:     inst.Event.EndAt,
+						uidSuffix: uidSuffix,
+					})
+					continue
+				}
 				exports = append(exports, exportEvent{
 					event:     e,
-					startAt:   occ.StartAt,
-					endAt:     occ.EndAt,
-					uidSuffix: "-" + occ.StartAt.UTC().Format("20060102T150405"),
+					startAt:   inst.Occurrence.StartAt,
+					endAt:     inst.Occurrence.EndAt,
+					uidSuffix: uidSuffix,
 				})
 			}
 		}
@@ -315,17 +326,23 @@ type rawEvent struct {
 	start    time.Time
 	end      time.Time
 	allDay   bool
+	tzid     string
+	rrule    string
 }
 
-func parseICSTime(value string, allDay bool) (time.Time, error) {
+// parseICSTime parses a DTSTART/DTEND value. Wall-clock values carrying a TZID
+// are anchored in that zone; UTC values end in Z; floating values (no TZID, no
+// Z) are treated as UTC. An unknown TZID falls back to UTC.
+func parseICSTime(value, tzid string, allDay bool) (time.Time, error) {
 	value = strings.TrimSpace(value)
+	loc := loadLocationOrUTC(tzid)
 	if allDay {
-		return time.Parse("20060102", value)
+		return time.ParseInLocation("20060102", value, loc)
 	}
 	if strings.HasSuffix(value, "Z") {
 		return time.Parse("20060102T150405Z", value)
 	}
-	return time.ParseInLocation("20060102T150405", value, time.UTC)
+	return time.ParseInLocation("20060102T150405", value, loc)
 }
 
 func unfoldICS(text string) string {
@@ -360,9 +377,13 @@ func parseICS(text string) []rawEvent {
 			parts := strings.Split(rawKey, ";")
 			key := strings.ToUpper(parts[0])
 			isDate := false
+			tzid := ""
 			for _, p := range parts[1:] {
 				if strings.EqualFold(p, "VALUE=DATE") {
 					isDate = true
+				}
+				if len(p) > 5 && strings.EqualFold(p[:5], "TZID=") {
+					tzid = strings.Trim(p[5:], `"`)
 				}
 			}
 			switch key {
@@ -376,19 +397,145 @@ func parseICS(text string) []rawEvent {
 				cur.desc = unescapeICS(val)
 			case "URL":
 				cur.url = val
+			case "RRULE":
+				cur.rrule = val
 			case "DTSTART":
 				cur.allDay = isDate
-				if t, err := parseICSTime(val, isDate); err == nil {
+				if tzid != "" {
+					cur.tzid = tzid
+				}
+				if t, err := parseICSTime(val, tzid, isDate); err == nil {
 					cur.start = t
 				}
 			case "DTEND":
-				if t, err := parseICSTime(val, isDate); err == nil {
+				if cur.tzid == "" && tzid != "" {
+					cur.tzid = tzid
+				}
+				if t, err := parseICSTime(val, tzid, isDate); err == nil {
 					cur.end = t
 				}
 			}
 		}
 	}
 	return events
+}
+
+var icalWeekdays = map[string]bool{
+	"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true,
+}
+
+// convertRRuleUntil maps an RRULE UNTIL value onto the internal rule's until
+// string: dates stay date-only, instants become RFC 3339. A local-time UNTIL
+// (no Z) is anchored in the event's zone.
+func convertRRuleUntil(val string, loc *time.Location) (string, bool) {
+	if t, err := time.Parse("20060102T150405Z", val); err == nil {
+		return t.UTC().Format(time.RFC3339), true
+	}
+	if t, err := time.ParseInLocation("20060102T150405", val, loc); err == nil {
+		return t.Format(time.RFC3339), true
+	}
+	if _, err := time.Parse("20060102", val); err == nil {
+		return val[:4] + "-" + val[4:6] + "-" + val[6:8], true
+	}
+	return "", false
+}
+
+// convertRRule maps an RFC 5545 RRULE value onto the app's internal recurrence
+// rule JSON. It supports the subset the expander implements (FREQ, INTERVAL,
+// COUNT, UNTIL, BYDAY, BYMONTHDAY, BYSETPOS); anything else returns false so
+// the caller can skip the event instead of silently importing a single
+// occurrence.
+func convertRRule(value string, loc *time.Location) (*json.RawMessage, bool) {
+	rule := recurrence.Rule{Interval: 1}
+	wkst := ""
+	for _, part := range strings.Split(value, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		eq := strings.Index(part, "=")
+		if eq < 0 {
+			return nil, false
+		}
+		key := strings.ToUpper(part[:eq])
+		val := part[eq+1:]
+		switch key {
+		case "FREQ":
+			switch strings.ToUpper(val) {
+			case "DAILY":
+				rule.Freq = "daily"
+			case "WEEKLY":
+				rule.Freq = "weekly"
+			case "MONTHLY":
+				rule.Freq = "monthly"
+			case "YEARLY":
+				rule.Freq = "yearly"
+			default:
+				return nil, false
+			}
+		case "INTERVAL":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 999 {
+				return nil, false
+			}
+			rule.Interval = n
+		case "COUNT":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 1000 {
+				return nil, false
+			}
+			rule.Count = n
+		case "UNTIL":
+			until, ok := convertRRuleUntil(val, loc)
+			if !ok {
+				return nil, false
+			}
+			rule.Until = &until
+		case "BYDAY":
+			for _, d := range strings.Split(val, ",") {
+				d = strings.ToUpper(strings.TrimSpace(d))
+				// Ordinal prefixes such as 2MO or -1FR are not supported.
+				if !icalWeekdays[d] {
+					return nil, false
+				}
+				rule.ByDay = append(rule.ByDay, d)
+			}
+		case "BYMONTHDAY":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 31 {
+				return nil, false
+			}
+			rule.ByMonthDay = n
+		case "BYSETPOS":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 || n > 5 {
+				return nil, false
+			}
+			rule.BySetPos = n
+		case "WKST":
+			wkst = strings.ToUpper(val)
+		default:
+			return nil, false
+		}
+	}
+	if rule.Freq == "" {
+		return nil, false
+	}
+	// The expander is fixed to WKST=SU; a differing week start only changes the
+	// result for weekly byDay rules with interval > 1.
+	if wkst != "" && wkst != "SU" && rule.Freq == "weekly" && rule.Interval > 1 && len(rule.ByDay) > 0 {
+		return nil, false
+	}
+	// The expander treats monthly byDay without bySetPos as ambiguous.
+	if rule.Freq == "monthly" && len(rule.ByDay) > 0 && rule.BySetPos == 0 {
+		return nil, false
+	}
+	data, err := json.Marshal(rule)
+	if err != nil {
+		return nil, false
+	}
+	raw := json.RawMessage(data)
+	return &raw, true
 }
 
 func unescapeICS(s string) string {
@@ -432,24 +579,51 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 					endAt = e.start.Add(time.Hour)
 				}
 			}
+			// Preserve the source zone so wall-clock semantics (recurrence,
+			// all-day rendering) survive the import. Unknown TZIDs fall back
+			// to UTC to match how the times were parsed.
+			tz := "UTC"
+			if e.tzid != "" {
+				if _, lerr := time.LoadLocation(e.tzid); lerr == nil {
+					tz = e.tzid
+				}
+			}
+			var ruleData *json.RawMessage
+			recEnd := sql.NullTime{}
+			if e.rrule != "" {
+				converted, ok := convertRRule(e.rrule, loadLocationOrUTC(tz))
+				if !ok {
+					// An unsupported RRULE must not silently collapse a
+					// recurring event into a single occurrence.
+					skipped++
+					continue
+				}
+				ruleData = converted
+				recEnd = sql.NullTime{
+					Time:  recurrence.ComputeEndInZone(recurrence.ParseRule(*ruleData), e.start, endAt, tz),
+					Valid: true,
+				}
+			}
 			pubID, err := uuid.NewV7()
 			if err != nil {
 				failed++
 				continue
 			}
 			if _, err := deps.Queries.CreateEvent(ctx, generated.CreateEventParams{
-				PublicID:   pubID[:],
-				CalendarID: cal.ID,
-				Title:      e.summary,
-				AllDay:     e.allDay,
-				StartAt:    e.start,
-				EndAt:      endAt,
-				Timezone:   "UTC",
-				Color:      "#47B2F7",
-				Location:   e.location,
-				Memo:       e.desc,
-				Url:        e.url,
-				CreatedBy:  userID,
+				PublicID:       pubID[:],
+				CalendarID:     cal.ID,
+				Title:          e.summary,
+				AllDay:         e.allDay,
+				StartAt:        e.start,
+				EndAt:          endAt,
+				Timezone:       tz,
+				Color:          "#47B2F7",
+				Location:       e.location,
+				Memo:           e.desc,
+				Url:            e.url,
+				CreatedBy:      userID,
+				RecurrenceRule: ruleData,
+				RecurrenceEnd:  recEnd,
 			}); err != nil {
 				failed++
 				continue
