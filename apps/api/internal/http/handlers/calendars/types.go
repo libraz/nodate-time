@@ -55,7 +55,7 @@ type CreateCalendarOutput struct {
 type UpdateCalendarInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
-		Name     string  `json:"name" minLength:"1" maxLength:"200"`
+		Name     *string `json:"name,omitempty" minLength:"1" maxLength:"200" required:"false"`
 		Color    *string `json:"color,omitempty" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
 		CoverURL *string `json:"coverUrl,omitempty" maxLength:"500" required:"false"`
 	}
@@ -76,18 +76,6 @@ type ListMembersInput struct {
 }
 type ListMembersOutput struct {
 	Body []MemberResponse
-}
-
-type AddMemberInput struct {
-	CalendarID string `path:"calendarId"`
-	Body       struct {
-		Email string `json:"email" format:"email"`
-		Role  string `json:"role" enum:"admin,member,viewer" default:"member"`
-		Color string `json:"color" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$"`
-	}
-}
-type AddMemberOutput struct {
-	Body MemberResponse
 }
 
 type RemoveMemberInput struct {

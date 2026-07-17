@@ -36,6 +36,16 @@ ON DUPLICATE KEY UPDATE
   assigned_to = VALUES(assigned_to), notification_offset = VALUES(notification_offset),
   recurrence_cancelled = VALUES(recurrence_cancelled);
 
+-- name: DeleteRecurrenceExceptionsByParent :exec
+DELETE FROM events WHERE recurrence_parent_id = ?;
+
+-- name: ShiftRecurrenceExceptions :exec
+UPDATE events
+SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), recurrence_original_start),
+    start_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), start_at),
+    end_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), end_at)
+WHERE recurrence_parent_id = sqlc.arg(recurrence_parent_id);
+
 -- name: CreateEvent :execresult
 INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

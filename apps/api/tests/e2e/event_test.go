@@ -64,13 +64,18 @@ func TestEventLifecycle(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt.AccessToken,
 		map[string]any{
-			"title":    "定例MTG（更新）",
-			"allDay":   false,
-			"startAt":  "2026-04-20T15:00:00+09:00",
-			"endAt":    "2026-04-20T17:00:00+09:00",
-			"color":    "#2ECC87",
-			"location": "会議室B",
-			"memo":     "",
+			"title":              "定例MTG（更新）",
+			"allDay":             false,
+			"startAt":            "2026-04-20T15:00:00+09:00",
+			"endAt":              "2026-04-20T17:00:00+09:00",
+			"color":              "#2ECC87",
+			"location":           "会議室B",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, &updated)
 	require.Equal(t, "定例MTG（更新）", updated.Title)
 	require.Equal(t, "#2ECC87", updated.Color)
@@ -287,10 +292,17 @@ func TestRecurringEventUpdate(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[0].ID, tt.AccessToken,
 		map[string]any{
-			"title":   "Team sync v2",
-			"allDay":  false,
-			"startAt": "2026-04-06T10:00:00+09:00",
-			"endAt":   "2026-04-06T11:00:00+09:00",
+			"title":              "Team sync v2",
+			"allDay":             false,
+			"startAt":            "2026-04-06T10:00:00+09:00",
+			"endAt":              "2026-04-06T11:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,

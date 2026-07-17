@@ -45,11 +45,18 @@ func TestEventURLField(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt.AccessToken,
 		map[string]any{
-			"title":   "Meeting with link",
-			"allDay":  false,
-			"startAt": "2026-04-20T15:00:00+09:00",
-			"endAt":   "2026-04-20T16:00:00+09:00",
-			"url":     "https://zoom.us/j/123",
+			"title":              "Meeting with link",
+			"allDay":             false,
+			"startAt":            "2026-04-20T15:00:00+09:00",
+			"endAt":              "2026-04-20T16:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "https://zoom.us/j/123",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Equal(t, "https://zoom.us/j/123", updated.URL)
 
@@ -103,7 +110,14 @@ func TestEventNotificationOffset(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-21T10:00:00+09:00",
 			"endAt":              "2026-04-21T11:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
 			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Nil(t, updated.NotificationOffset)
 
@@ -165,11 +179,18 @@ func TestEventParticipants(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt1.AccessToken,
 		map[string]any{
-			"title":        "Team lunch",
-			"allDay":       false,
-			"startAt":      "2026-04-22T12:00:00+09:00",
-			"endAt":        "2026-04-22T13:00:00+09:00",
-			"participants": []string{},
+			"title":              "Team lunch",
+			"allDay":             false,
+			"startAt":            "2026-04-22T12:00:00+09:00",
+			"endAt":              "2026-04-22T13:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Empty(t, updated.Participants)
 
@@ -210,11 +231,18 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+event.ID, owner.AccessToken,
 		map[string]any{
-			"title":        "Must not persist",
-			"allDay":       false,
-			"startAt":      "2026-05-01T12:00:00+09:00",
-			"endAt":        "2026-05-01T13:00:00+09:00",
-			"participants": []string{"not-a-uuid"},
+			"title":              "Must not persist",
+			"allDay":             false,
+			"startAt":            "2026-05-01T12:00:00+09:00",
+			"endAt":              "2026-05-01T13:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{"not-a-uuid"},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		})
 	require.Equal(t, http.StatusBadRequest, status)
 

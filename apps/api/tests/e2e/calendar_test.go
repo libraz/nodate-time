@@ -127,7 +127,6 @@ func TestCalendarColorMustBeHex(t *testing.T) {
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	guest := helpers.NewTenant(t, testServerURL)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/calendars", tt.AccessToken,
 		map[string]any{"name": "bad color", "color": "nothex"})
@@ -135,9 +134,5 @@ func TestCalendarColorMustBeHex(t *testing.T) {
 
 	status, _ = helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
 		map[string]any{"name": "bad color", "color": "#12345g"})
-	require.Equal(t, http.StatusUnprocessableEntity, status)
-
-	status, _ = helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/members", tt.AccessToken,
-		map[string]any{"email": guest.Email, "role": "member", "color": "blue"})
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 }

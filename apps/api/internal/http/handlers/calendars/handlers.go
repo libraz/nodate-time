@@ -1,6 +1,7 @@
 package calendars
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"log/slog"
@@ -178,8 +179,12 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
-		// Color and cover are optional: when omitted, keep the current values so a
-		// rename does not blank them out.
+		// All fields are optional: when omitted, keep the current values so a
+		// partial update does not blank out other fields.
+		name := cal.Name
+		if in.Body.Name != nil {
+			name = *in.Body.Name
+		}
 		color := cal.Color
 		if in.Body.Color != nil {
 			color = *in.Body.Color
@@ -189,7 +194,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			coverURL = *in.Body.CoverURL
 		}
 		err = deps.Queries.UpdateCalendar(ctx, generated.UpdateCalendarParams{
-			Name:     in.Body.Name,
+			Name:     name,
 			Color:    color,
 			CoverUrl: coverURL,
 			ID:       cal.ID,
@@ -297,64 +302,6 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 	}
 }
 
-func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutput, error) {
-	return func(ctx context.Context, in *AddMemberInput) (*AddMemberOutput, error) {
-		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
-		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if actorMember.Role != generated.CalendarMembersRoleAdmin {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
-
-		target, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if _, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID}); err == nil {
-			return nil, apierrors.ToHuma(apierrors.MemberAlreadyExists)
-		} else if err != sql.ErrNoRows {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		role := generated.CalendarMembersRole(in.Body.Role)
-		if role == "" {
-			role = generated.CalendarMembersRoleMember
-		}
-		color := in.Body.Color
-		if color == "" {
-			color = target.Color
-		}
-		result, err := deps.Queries.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
-			CalendarID: cal.ID,
-			UserID:     target.ID,
-			Role:       role,
-			Color:      color,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		memberID, _ := result.LastInsertId()
-		audit.Record(ctx, deps.Queries, cal.ID, uint32(memberID), target.PublicID, audit.EntityMember, audit.ActionJoin, actorID, target.Name)
-
-		return &AddMemberOutput{Body: MemberResponse{
-			ID:    pubIDToHex(target.PublicID),
-			Name:  target.Name,
-			Email: target.Email,
-			Icon:  target.Icon,
-			Role:  string(role),
-			Color: color,
-		}}, nil
-	}
-}
-
 func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 	return func(ctx context.Context, in *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
@@ -446,14 +393,16 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		isSelfLeave := in.UserID == pubIDToHex(actor.PublicID)
-		if !isSelfLeave && actorMember.Role != generated.CalendarMembersRoleAdmin {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
 
 		targetPub, err := parseUUID(in.UserID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		// Compare parsed UUID bytes so a self-leave is recognized regardless of the
+		// hex casing the client used in the path.
+		isSelfLeave := bytes.Equal(targetPub, actor.PublicID)
+		if !isSelfLeave && actorMember.Role != generated.CalendarMembersRoleAdmin {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
 		if err != nil {

@@ -191,10 +191,18 @@ func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
 		map[string]any{
-			"title":   "Broken",
-			"allDay":  false,
-			"startAt": "not-a-date",
-			"endAt":   "2026-05-12T10:00:00+09:00",
+			"title":              "Broken",
+			"allDay":             false,
+			"startAt":            "not-a-date",
+			"endAt":              "2026-05-12T10:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
 		})
 	require.Equal(t, 400, status)
 }

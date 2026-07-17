@@ -9,7 +9,7 @@ import (
 type Rule struct {
 	Freq       string   `json:"freq"`                 // daily, weekly, monthly, yearly
 	Interval   int      `json:"interval"`             // repeat every N freq units (1-99)
-	ByDay      []string `json:"byDay,omitempty"`      // MO,TU,WE,TH,FR,SA,SU
+	ByDay      []string `json:"byDay,omitempty"`      // MO,TU,WE,TH,FR,SA,SU (weeks start on Sunday: WKST=SU)
 	ByMonthDay int      `json:"byMonthDay,omitempty"` // 1-31
 	BySetPos   int      `json:"bySetPos,omitempty"`   // Nth weekday of month (1-5)
 	Until      *string  `json:"until,omitempty"`      // ISO 8601 date string
@@ -38,21 +38,28 @@ func ParseRule(data json.RawMessage) *Rule {
 }
 
 // ComputeEnd calculates the effective end date for a recurrence rule,
-// used for efficient SQL range queries.
-func ComputeEnd(rule *Rule, eventStart time.Time) time.Time {
+// used for efficient SQL range queries. eventEnd is the master event's end,
+// so the returned boundary covers the full duration of the last occurrence
+// (an event longer than a day would otherwise drop out of window queries).
+// A date-only until is interpreted as end-of-day in eventStart's location.
+func ComputeEnd(rule *Rule, eventStart, eventEnd time.Time) time.Time {
 	if rule == nil {
-		return eventStart
+		return eventEnd
+	}
+	duration := eventEnd.Sub(eventStart)
+	if duration < 0 {
+		duration = 0
 	}
 	if rule.Until != nil {
 		if t, err := time.Parse(time.RFC3339, *rule.Until); err == nil {
-			return t
+			return t.Add(duration)
 		}
-		if t, err := time.Parse("2006-01-02", *rule.Until); err == nil {
-			return t.Add(24 * time.Hour)
+		if t, err := time.ParseInLocation("2006-01-02", *rule.Until, eventStart.Location()); err == nil {
+			return t.AddDate(0, 0, 1).Add(duration)
 		}
 	}
 	if rule.Count > 0 {
-		return computeNthOccurrence(rule, eventStart, rule.Count)
+		return computeNthOccurrence(rule, eventStart, rule.Count).Add(duration)
 	}
 	// Infinite recurrence: use far-future sentinel
 	return time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
@@ -61,9 +68,9 @@ func ComputeEnd(rule *Rule, eventStart time.Time) time.Time {
 // ComputeEndInZone is ComputeEnd anchored in the event's IANA timezone, with the
 // result normalized to UTC. Used to populate the recurrence_end column so SQL
 // range queries select the right master events regardless of DST.
-func ComputeEndInZone(rule *Rule, eventStart time.Time, tz string) time.Time {
+func ComputeEndInZone(rule *Rule, eventStart, eventEnd time.Time, tz string) time.Time {
 	loc := loadLocation(tz)
-	return ComputeEnd(rule, eventStart.In(loc)).UTC()
+	return ComputeEnd(rule, eventStart.In(loc), eventEnd.In(loc)).UTC()
 }
 
 // maxExpansionIterations bounds how many candidates Expand will ever step
@@ -110,12 +117,23 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	duration := eventEnd.Sub(eventStart)
 	var results []Occurrence
 
+	// All-day events are stored as [midnight, midnight) wall-clock in the
+	// event's location. Track the calendar-day span instead of the absolute
+	// duration so a DST transition does not stretch an occurrence into an
+	// extra day (a 23h spring-forward day plus fixed 24h would end at 01:00).
+	allDaySpan := 0
+	if isWallMidnight(eventStart) && isWallMidnight(eventEnd) && eventEnd.After(eventStart) {
+		allDaySpan = calendarDaySpan(eventStart, eventEnd)
+	}
+
 	var untilTime time.Time
 	if rule.Until != nil {
 		if t, err := time.Parse(time.RFC3339, *rule.Until); err == nil {
 			untilTime = t
-		} else if t, err := time.Parse("2006-01-02", *rule.Until); err == nil {
-			untilTime = t.Add(24 * time.Hour)
+		} else if t, err := time.ParseInLocation("2006-01-02", *rule.Until, eventStart.Location()); err == nil {
+			// Date-only until means "through the end of that day" in the
+			// event's own location, not a UTC instant.
+			untilTime = t.AddDate(0, 0, 1).Add(-time.Second)
 		}
 	}
 
@@ -148,6 +166,9 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		emittedCandidates++
 
 		candidateEnd := candidate.Add(duration)
+		if allDaySpan > 0 {
+			candidateEnd = candidate.AddDate(0, 0, allDaySpan)
+		}
 		// Check overlap with window
 		if candidateEnd.After(windowStart) {
 			results = append(results, Occurrence{StartAt: candidate, EndAt: candidateEnd})
@@ -155,6 +176,22 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 	}
 
 	return results
+}
+
+// isWallMidnight reports whether t sits exactly at wall-clock midnight in its
+// own location.
+func isWallMidnight(t time.Time) bool {
+	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+}
+
+// calendarDaySpan counts calendar days between two wall-clock midnights in the
+// same location, tolerating DST offsets that make a day 23 or 25 hours long.
+func calendarDaySpan(start, end time.Time) int {
+	days := int((end.Sub(start) + 12*time.Hour) / (24 * time.Hour))
+	if days < 1 {
+		days = 1
+	}
+	return days
 }
 
 func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Duration, windowStart time.Time) int {
@@ -230,7 +267,7 @@ func (it *iterator) next() time.Time {
 			}
 
 		case "yearly":
-			candidate = it.start.AddDate(it.step*it.rule.Interval, 0, 0)
+			candidate = addYearsClamped(it.start, it.step*it.rule.Interval)
 			it.step++
 
 		default:
@@ -241,6 +278,23 @@ func (it *iterator) next() time.Time {
 	}
 }
 
+// addYearsClamped advances t by the given number of years, clamping the day to
+// the last day of the month so a Feb 29 anchor lands on Feb 28 in non-leap
+// years instead of rolling over to Mar 1 (mirrors the monthly clamping).
+func addYearsClamped(t time.Time, years int) time.Time {
+	year := t.Year() + years
+	day := t.Day()
+	lastDay := time.Date(year, t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(year, t.Month(), day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
+// nextWeeklyByDay iterates weekly byDay occurrences. The week starts on Sunday
+// (WKST=SU): with interval > 1, the skipped weeks are counted from each Sunday
+// boundary. This intentionally diverges from the RFC 5545 default of WKST=MO
+// and is part of the documented API contract for recurrence rules.
 func (it *iterator) nextWeeklyByDay() time.Time {
 	dayMap := map[string]time.Weekday{
 		"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday,
@@ -347,6 +401,8 @@ func nthWeekdayOfMonth(year int, month time.Month, weekday time.Weekday, n int, 
 	return result
 }
 
+// computeNthOccurrence returns the start of the nth occurrence; callers add the
+// event duration to obtain the series end boundary.
 func computeNthOccurrence(rule *Rule, start time.Time, n int) time.Time {
 	last := start
 	r := *rule
@@ -360,5 +416,5 @@ func computeNthOccurrence(rule *Rule, start time.Time, n int) time.Time {
 		}
 		last = t
 	}
-	return last.Add(24 * time.Hour) // buffer for end-of-day
+	return last
 }
