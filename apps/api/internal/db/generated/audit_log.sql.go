@@ -47,7 +47,7 @@ FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.calendar_id = ?
   AND (? = 0 OR al.id < ?)
-ORDER BY al.created_at DESC, al.id DESC
+ORDER BY al.id DESC
 LIMIT ?
 `
 
@@ -70,6 +70,10 @@ type ListAuditByCalendarRow struct {
 	ActorAvatarKey sql.NullString `json:"actorAvatarKey"`
 }
 
+// Ordered and keyset-paginated by id alone (not created_at): id is a strictly
+// monotonic insertion-order key, so this is already equivalent to ordering by
+// time, and keeps the ORDER BY and the "id < after_id" cursor condition from
+// ever disagreeing about tie-breaking.
 func (q *Queries) ListAuditByCalendar(ctx context.Context, arg ListAuditByCalendarParams) ([]ListAuditByCalendarRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAuditByCalendar,
 		arg.CalendarID,
@@ -117,7 +121,7 @@ FROM audit_log al
 LEFT JOIN users u ON u.id = al.actor_id
 WHERE al.entity_type = ? AND al.entity_public_id = ?
   AND al.calendar_id = ?
-ORDER BY al.created_at ASC, al.id ASC
+ORDER BY al.id DESC
 LIMIT ?
 `
 
@@ -139,6 +143,8 @@ type ListAuditByEntityRow struct {
 	ActorAvatarKey sql.NullString `json:"actorAvatarKey"`
 }
 
+// Most-recent-first: a fixed LIMIT with no cursor must show the latest
+// changes, not truncate to whatever happened first in the entity's history.
 func (q *Queries) ListAuditByEntity(ctx context.Context, arg ListAuditByEntityParams) ([]ListAuditByEntityRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAuditByEntity,
 		arg.EntityType,

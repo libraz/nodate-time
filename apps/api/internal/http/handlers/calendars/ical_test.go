@@ -53,8 +53,9 @@ func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
 	}
 }
 
-// TestBuildICSTimedEmitsTZID verifies timed events carry their original zone.
-func TestBuildICSTimedEmitsTZID(t *testing.T) {
+// TestBuildICSTimedEmitsUTC verifies timed events are normalized to UTC (Z),
+// so no TZID reference is emitted without an accompanying VTIMEZONE component.
+func TestBuildICSTimedEmitsUTC(t *testing.T) {
 	start := time.Date(2025, 6, 24, 1, 0, 0, 0, time.UTC) // 10:00 JST
 	ev := generated.Event{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
@@ -62,8 +63,11 @@ func TestBuildICSTimedEmitsTZID(t *testing.T) {
 		Timezone: "Asia/Tokyo",
 	}
 	out := buildICS("Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour)}})
-	if !strings.Contains(out, "DTSTART;TZID=Asia/Tokyo:20250624T100000") {
-		t.Errorf("timed event should emit TZID local time, got:\n%s", out)
+	if !strings.Contains(out, "DTSTART:20250624T010000Z") {
+		t.Errorf("timed event should emit a UTC instant, got:\n%s", out)
+	}
+	if strings.Contains(out, "TZID=") {
+		t.Errorf("export must not reference TZID without a VTIMEZONE component, got:\n%s", out)
 	}
 }
 

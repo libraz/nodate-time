@@ -3,6 +3,7 @@ package router
 import (
 	"database/sql"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -44,10 +45,15 @@ type Deps struct {
 	// endpoints. Zero applies the default (60/min); a negative value disables the
 	// limiter entirely (used by parallel integration tests).
 	AuthRateLimit int
+	// TrustedProxies lists reverse-proxy hops allowed to set X-Forwarded-For for
+	// per-client rate limiting. Nil trusts no proxy: RemoteAddr is always used.
+	// See config.Config.TrustedProxyList.
+	TrustedProxies []netip.Prefix
 }
 
 func Build(deps Deps) http.Handler {
 	r := chi.NewRouter()
+	r.Use(middleware.ClientIPMiddleware(deps.TrustedProxies))
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -65,7 +71,7 @@ func Build(deps Deps) http.Handler {
 	}
 	r.Group(func(pub chi.Router) {
 		if authLimit > 0 {
-			pub.Use(middleware.NewRateLimiter(authLimit, time.Minute).Middleware())
+			pub.Use(middleware.NewRateLimiter(authLimit, time.Minute, deps.TrustedProxies).Middleware())
 		}
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
@@ -211,12 +217,11 @@ func Build(deps Deps) http.Handler {
 		}, users.UpdateMe(userDeps))
 
 		huma.Register(api, huma.Operation{
-			OperationID:   "change-password",
-			Method:        http.MethodPut,
-			Path:          "/user/password",
-			Summary:       "Change current user password",
-			Tags:          []string{"User"},
-			DefaultStatus: 204,
+			OperationID: "change-password",
+			Method:      http.MethodPut,
+			Path:        "/user/password",
+			Summary:     "Change current user password",
+			Tags:        []string{"User"},
 		}, users.ChangePassword(userDeps))
 
 		huma.Register(api, huma.Operation{

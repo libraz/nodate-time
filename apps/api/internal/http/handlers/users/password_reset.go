@@ -13,6 +13,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 )
 
@@ -38,11 +39,15 @@ var resetEmailLimiter = struct {
 	buckets map[string]*resetEmailBucket
 }{buckets: map[string]*resetEmailBucket{}}
 
-func allowPasswordResetEmail(email string, now time.Time) bool {
-	key := strings.ToLower(strings.TrimSpace(email))
-	if key == "" {
+// allowPasswordResetEmail scopes the send budget to (email, IP) rather than
+// email alone: an attacker hammering one IP against a victim's address can no
+// longer silently exhaust the victim's own quota for that mailbox.
+func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
 		return false
 	}
+	key := email + "|" + clientIP
 
 	resetEmailLimiter.Lock()
 	defer resetEmailLimiter.Unlock()
@@ -68,7 +73,13 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 		out := &RequestResetOutput{}
 		out.Body.OK = true
 
-		if !allowPasswordResetEmail(in.Body.Email, time.Now()) {
+		clientIP, _ := middleware.ClientIPFromContext(ctx)
+		if !allowPasswordResetEmail(in.Body.Email, clientIP, time.Now()) {
+			// The response stays {ok:true} regardless so this endpoint cannot be
+			// used to probe whether an email exists; the suppression itself is
+			// still logged so a mail-bombing attempt against a real mailbox is
+			// visible to operators even though no mail was sent.
+			slog.WarnContext(ctx, "password reset request suppressed by rate limiter", "clientIP", clientIP)
 			return out, nil
 		}
 

@@ -204,7 +204,7 @@ type AlbumPhoto struct {
 type AuditLog struct {
 	ID         uint64 `json:"id"`
 	CalendarID uint32 `json:"calendarId"`
-	// event | memo
+	// event | memo | member | invite | album_photo
 	EntityType string `json:"entityType"`
 	// internal id of the target row (may no longer exist)
 	EntityID uint32 `json:"entityId"`

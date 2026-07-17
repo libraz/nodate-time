@@ -231,13 +231,11 @@ func buildICS(calName string, rows []exportEvent) string {
 		if e.AllDay {
 			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt, e.Timezone))
 			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt, e.Timezone))
-		} else if tz := e.Timezone; tz != "" && tz != "UTC" {
-			// Emit local wall time anchored to the event's timezone so the
-			// original zone survives the round-trip.
-			loc := loadLocationOrUTC(tz)
-			writeFolded(&b, "DTSTART;TZID="+tz+":"+x.startAt.In(loc).Format("20060102T150405"))
-			writeFolded(&b, "DTEND;TZID="+tz+":"+x.endAt.In(loc).Format("20060102T150405"))
 		} else {
+			// Timed values are normalized to UTC (Z suffix). Referencing a
+			// TZID without emitting a matching VTIMEZONE component violates
+			// RFC 5545 and makes some clients treat the times as floating,
+			// so the display-zone hint is intentionally dropped.
 			writeFolded(&b, "DTSTART:"+icsTime(x.startAt))
 			writeFolded(&b, "DTEND:"+icsTime(x.endAt))
 		}

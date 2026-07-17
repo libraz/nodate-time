@@ -32,24 +32,24 @@ func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
 			if header == "" {
-				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_MISSING","message":"Authorization header is required"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_MISSING", "Authorization header is required")
 				return
 			}
 
 			tok, ok := strings.CutPrefix(header, "Bearer ")
 			if !ok {
-				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Bearer token is invalid"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid")
 				return
 			}
 
 			claims, err := auth.ValidateToken(tok, jwtSecret)
 			if err != nil {
-				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Bearer token is invalid or expired"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
 				return
 			}
 			user, err := queries.GetUserByID(r.Context(), claims.UserID)
 			if err != nil || user.TokenVersion != claims.TokenVersion {
-				http.Error(w, `{"status":401,"code":"AUTH.TOKEN_INVALID","message":"Bearer token is invalid or expired"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
 				return
 			}
 

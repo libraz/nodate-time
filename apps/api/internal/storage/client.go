@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -40,20 +43,30 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
-// PresignPut returns a presigned PUT URL for uploading an object. When
-// contentType is non-empty it is bound into the signature so the client must
-// send a matching Content-Type header, preventing callers from uploading an
-// arbitrary type (e.g. HTML) to an image-only slot.
-func (c *Client) PresignPut(ctx context.Context, key string, contentType string, expires time.Duration) (string, error) {
-	if contentType == "" {
+// PresignPut returns a presigned PUT URL for uploading an object of exactly
+// byteSize bytes. Content-Type and Content-Length are both bound into the
+// signature, so the client's actual request must carry a matching
+// Content-Type and a body of exactly that length or the signature is
+// rejected — this is what keeps a byteSize the caller validated against its
+// own limit (e.g. 100MB attachments) from being a value trusted only at
+// Confirm time, when a much larger object could already have been written.
+// byteSize <= 0 skips the length binding (a caller that has no size to
+// declare yet); contentType == "" likewise skips the type binding.
+func (c *Client) PresignPut(ctx context.Context, key string, contentType string, byteSize int64, expires time.Duration) (string, error) {
+	headers := http.Header{}
+	if contentType != "" {
+		headers.Set("Content-Type", contentType)
+	}
+	if byteSize > 0 {
+		headers.Set("Content-Length", strconv.FormatInt(byteSize, 10))
+	}
+	if len(headers) == 0 {
 		u, err := c.mc.PresignedPutObject(ctx, c.bucket, key, expires)
 		if err != nil {
 			return "", err
 		}
 		return u.String(), nil
 	}
-	headers := http.Header{}
-	headers.Set("Content-Type", contentType)
 	u, err := c.mc.PresignHeader(ctx, http.MethodPut, c.bucket, key, expires, url.Values{}, headers)
 	if err != nil {
 		return "", err
@@ -72,8 +85,11 @@ func (c *Client) PresignGet(ctx context.Context, key string, expires time.Durati
 
 // PresignDownload returns a presigned GET URL that forces browsers to download
 // the object as inert bytes instead of rendering potentially active content.
-func (c *Client) PresignDownload(ctx context.Context, key string, expires time.Duration) (string, error) {
-	params := downloadResponseParams()
+// filename, if non-empty, is carried in Content-Disposition so the saved file
+// keeps its original name (including non-ASCII characters) instead of the
+// bucket's opaque, extensionless object key.
+func (c *Client) PresignDownload(ctx context.Context, key string, filename string, expires time.Duration) (string, error) {
+	params := downloadResponseParams(filename)
 	u, err := c.mc.PresignedGetObject(ctx, c.bucket, key, expires, params)
 	if err != nil {
 		return "", err
@@ -81,11 +97,57 @@ func (c *Client) PresignDownload(ctx context.Context, key string, expires time.D
 	return u.String(), nil
 }
 
-func downloadResponseParams() url.Values {
+func downloadResponseParams(filename string) url.Values {
 	params := url.Values{}
-	params.Set("response-content-disposition", "attachment")
+	params.Set("response-content-disposition", contentDisposition(filename))
 	params.Set("response-content-type", "application/octet-stream")
 	return params
+}
+
+// contentDisposition builds an attachment Content-Disposition value per
+// RFC 6266 / RFC 5987: filename carries an ASCII-safe fallback for older
+// clients, filename* carries the exact, percent-encoded UTF-8 name for
+// clients that support it (all modern browsers).
+func contentDisposition(filename string) string {
+	if filename == "" {
+		return "attachment"
+	}
+	return `attachment; filename="` + asciiFallbackFilename(filename) + `"; filename*=UTF-8''` + rfc5987Encode(filename)
+}
+
+// asciiFallbackFilename replaces anything outside printable ASCII (and the
+// characters that would break the quoted-string) with "_", so it is always
+// safe inside filename="...".
+func asciiFallbackFilename(filename string) string {
+	var b strings.Builder
+	for _, r := range filename {
+		if r < 0x20 || r > 0x7E || r == '"' || r == '\\' {
+			b.WriteByte('_')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if b.Len() == 0 {
+		return "download"
+	}
+	return b.String()
+}
+
+// rfc5987AttrChars is the RFC 5987 "attr-char" set: everything else in an
+// ext-value must be percent-encoded.
+const rfc5987AttrChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$&+-.^_`|~"
+
+func rfc5987Encode(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if strings.IndexByte(rfc5987AttrChars, c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 // DeleteObject removes an object from the bucket. Returns nil if the key is empty.

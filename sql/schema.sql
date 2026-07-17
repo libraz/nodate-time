@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS event_attachments (
   PRIMARY KEY (id),
   UNIQUE KEY uk_att_pub (public_id),
   KEY idx_att_event (event_id, enabled),
+  KEY idx_att_enabled_created (enabled, created_at) COMMENT 'supports the abandoned-upload cleanup scan',
   CONSTRAINT fk_att_event FOREIGN KEY (event_id)    REFERENCES events (id) ON DELETE CASCADE,
   CONSTRAINT fk_att_user  FOREIGN KEY (uploaded_by)  REFERENCES users  (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -271,6 +272,7 @@ CREATE TABLE IF NOT EXISTS album_photos (
   UNIQUE KEY uk_album_pub (public_id),
   KEY idx_album_cal_taken (calendar_id, enabled, taken_at, id),
   KEY idx_album_event (event_id),
+  KEY idx_album_enabled_created (enabled, created_at) COMMENT 'supports the abandoned-upload cleanup scan',
   CONSTRAINT fk_album_cal   FOREIGN KEY (calendar_id) REFERENCES calendars (id) ON DELETE CASCADE,
   CONSTRAINT fk_album_user  FOREIGN KEY (uploaded_by) REFERENCES users     (id) ON DELETE CASCADE,
   CONSTRAINT fk_album_event FOREIGN KEY (event_id)    REFERENCES events    (id) ON DELETE SET NULL
@@ -299,7 +301,7 @@ CREATE TABLE IF NOT EXISTS oauth_allowed_emails (
 CREATE TABLE IF NOT EXISTS audit_log (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   calendar_id      INT UNSIGNED    NOT NULL,
-  entity_type      VARCHAR(16)     NOT NULL COMMENT 'event | memo',
+  entity_type      VARCHAR(16)     NOT NULL COMMENT 'event | memo | member | invite | album_photo',
   entity_id        INT UNSIGNED    NOT NULL COMMENT 'internal id of the target row (may no longer exist)',
   entity_public_id BINARY(16)      NOT NULL COMMENT 'public id of the target, stable across deletion',
   action           VARCHAR(16)     NOT NULL COMMENT 'create | update | delete',
@@ -557,6 +559,36 @@ SET @add_oauth_nonce = (
     AND column_name = 'nonce'
 );
 PREPARE stmt FROM @add_oauth_nonce;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_att_enabled_created_index = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE event_attachments ADD KEY idx_att_enabled_created (enabled, created_at)',
+    'DO 0'
+  )
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'event_attachments'
+    AND index_name = 'idx_att_enabled_created'
+);
+PREPARE stmt FROM @add_att_enabled_created_index;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_album_enabled_created_index = (
+  SELECT IF(
+    COUNT(*) = 0,
+    'ALTER TABLE album_photos ADD KEY idx_album_enabled_created (enabled, created_at)',
+    'DO 0'
+  )
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE()
+    AND table_name = 'album_photos'
+    AND index_name = 'idx_album_enabled_created'
+);
+PREPARE stmt FROM @add_album_enabled_created_index;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 

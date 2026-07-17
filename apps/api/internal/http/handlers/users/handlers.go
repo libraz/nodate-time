@@ -224,7 +224,22 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		return &ChangePasswordOutput{}, nil
+		// UpdateUserPassword bumped token_version, invalidating every outstanding
+		// token — including the one this request just authenticated with. Issue a
+		// fresh token carrying the new version so this device stays signed in;
+		// every other device is invalidated as intended.
+		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		token, err := auth.GenerateToken(userID, refreshed.TokenVersion, deps.JWTSecret)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		out := &ChangePasswordOutput{}
+		out.Body.Token = token
+		return out, nil
 	}
 }
 

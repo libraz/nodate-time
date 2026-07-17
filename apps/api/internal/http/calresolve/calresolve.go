@@ -83,3 +83,15 @@ func parseUUID(s string) ([]byte, error) {
 	}
 	return u[:], nil
 }
+
+// SplitCompositeID splits a recurring-instance id ("uuid_YYYYMMDD") into its
+// parent event UUID and occurrence date. Returns an empty parentUUID if id is
+// not in that composite form (a plain UUID, or a foreign string that will
+// simply fail uuid.Parse downstream).
+func SplitCompositeID(id string) (parentUUID string, dateStr string) {
+	// UUID is 36 chars, separator is "_", date is 8 chars = 45 total.
+	if len(id) == 45 && id[36] == '_' {
+		return id[:36], id[37:]
+	}
+	return "", ""
+}

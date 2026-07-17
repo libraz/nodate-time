@@ -104,11 +104,22 @@ func TestPasswordChangeInvalidatesExistingToken(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 
+	var changeResp struct {
+		Token string `json:"token"`
+	}
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/password", tt.AccessToken,
-		map[string]any{"currentPassword": tt.Password, "newPassword": "new-password-123"}, nil)
+		map[string]any{"currentPassword": tt.Password, "newPassword": "new-password-123"}, &changeResp)
 
+	// The old token, still held by any other device, is invalidated.
 	status, _ := helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil)
 	require.Equal(t, 401, status)
+
+	// The device that made the change gets a fresh token in the response, so it
+	// stays signed in without needing to log in again.
+	require.NotEmpty(t, changeResp.Token)
+	require.NotEqual(t, tt.AccessToken, changeResp.Token)
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/user", changeResp.Token, nil)
+	require.Equal(t, 200, status)
 
 	var loginResp struct {
 		Token string `json:"token"`

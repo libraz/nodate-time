@@ -50,6 +50,12 @@ UPDATE album_photos SET caption = ?, event_id = ? WHERE id = ?;
 -- name: SoftDeleteAlbumPhoto :exec
 UPDATE album_photos SET enabled = 0 WHERE id = ?;
 
+-- name: DeletePendingAlbumPhoto :exec
+-- Removes an unconfirmed (enabled = 0) row whose uploaded object failed the
+-- Confirm-time size/type check, so it is not left as an orphan pointing at a
+-- deleted object.
+DELETE FROM album_photos WHERE id = ? AND uploaded_by = ? AND enabled = 0;
+
 -- name: ListAlbumPhotoStorageKeysByCalendar :many
 SELECT storage_key FROM album_photos WHERE calendar_id = ?;
 

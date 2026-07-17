@@ -123,6 +123,7 @@ func main() {
 		GoogleAllowedDomains: cfg.GoogleAllowedDomainList(),
 		DevMode:              cfg.IsDev(),
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
+		TrustedProxies:       cfg.TrustedProxyList(),
 	})
 	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
 		slog.Info("Google sign-in restricted to domains", "domains", domains)

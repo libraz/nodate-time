@@ -15,6 +15,7 @@ var (
 	testDB        *sql.DB
 	testMailer    *helpers.CapturingMailer
 	testStorage   *storage.Client
+	testBucket    string
 )
 
 func TestMain(m *testing.M) {
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 	testServerURL = srv.BaseURL
 	testMailer = srv.Mailer
 	testStorage = srv.Storage
+	testBucket = srv.Bucket
 
 	code := m.Run()
 	srv.Server.Close()
@@ -52,6 +54,9 @@ func bootstrap(t *testing.T) {
 
 // getTestStorage returns the package-wide storage client (may be nil).
 func getTestStorage() *storage.Client { return testStorage }
+
+// getTestBucket returns the per-run MinIO bucket the test server uploads into.
+func getTestBucket() string { return testBucket }
 
 // testCtx returns a fresh context for ad-hoc storage assertions in tests.
 func testCtx() context.Context { return context.Background() }

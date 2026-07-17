@@ -10,9 +10,8 @@ import (
 )
 
 type albumPresignResp struct {
-	PhotoID    string `json:"photoId"`
-	UploadURL  string `json:"uploadUrl"`
-	StorageKey string `json:"storageKey"`
+	PhotoID   string `json:"photoId"`
+	UploadURL string `json:"uploadUrl"`
 }
 
 type albumPhotoResp struct {
@@ -93,6 +92,45 @@ func TestAlbumPhotoLifecycle(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/albums",
 		tt.AccessToken, nil, &listAfter)
 	assert.Len(t, listAfter.Items, 0)
+}
+
+// TestAlbumPhotoChangesAppearInActivity verifies photo confirm/update/delete
+// are recorded to the calendar audit log, not just soft-deleted silently.
+func TestAlbumPhotoChangesAppearInActivity(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	pres := uploadOnePhoto(t, tt, map[string]any{"caption": "hello"})
+
+	helpers.DoJSON(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
+		tt.AccessToken, map[string]any{"caption": "updated"}, nil)
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID, tt.AccessToken, nil)
+	require.Equal(t, 204, status)
+
+	type activityFeedItem struct {
+		EntityType string `json:"entityType"`
+		Action     string `json:"action"`
+		EntityID   string `json:"entityId"`
+	}
+	type activityPage struct {
+		Items []activityFeedItem `json:"items"`
+	}
+	var feed activityPage
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/activity?limit=20",
+		tt.AccessToken, nil, &feed)
+
+	seen := map[string]bool{}
+	for _, item := range feed.Items {
+		if item.EntityID == pres.PhotoID {
+			seen[item.Action] = true
+		}
+	}
+	require.True(t, seen["create"], "confirming an album photo must be audited")
+	require.True(t, seen["update"], "editing an album photo must be audited")
+	require.True(t, seen["delete"], "deleting an album photo must be audited")
 }
 
 func TestAlbumPhotoEventLink(t *testing.T) {
@@ -261,4 +299,52 @@ func TestAlbumPresignRejectsSVG(t *testing.T) {
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/svg+xml", "byteSize": 128})
 	assert.Equal(t, http.StatusBadRequest, status)
+}
+
+// TestAlbumPresignRejectsMismatchedContentTypeParams verifies a parameterized
+// SVG content type ("image/svg+xml; charset=utf-8") cannot slip past the
+// allowlist the way a plain prefix/inequality check could.
+func TestAlbumPresignRejectsMismatchedContentTypeParams(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
+		map[string]any{"contentType": "image/svg+xml; charset=utf-8", "byteSize": 128})
+	assert.Equal(t, http.StatusBadRequest, status)
+}
+
+// TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt verifies the
+// Confirm-time defense-in-depth: an object at the presigned key that
+// disagrees with the declared size is rejected and removed rather than left
+// as an orphan.
+func TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	png := helpers.TinyPNG()
+
+	var pres albumPresignResp
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
+		tt.AccessToken, map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
+	storageKey := helpers.AlbumPhotoStorageKey(tt.CalendarID, pres.PhotoID)
+	// Bypass the presigned URL, which now enforces the declared size, to place
+	// a mismatched object directly.
+	helpers.PutRawObject(t, getTestBucket(), storageKey, "image/png", png)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
+	assert.Equal(t, http.StatusBadRequest, status)
+
+	if storageClient := getTestStorage(); storageClient != nil {
+		_, exists, err := storageClient.StatObject(testCtx(), storageKey)
+		require.NoError(t, err)
+		assert.False(t, exists, "mismatched album photo object should be removed")
+	}
+	status, _ = helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
+	assert.Equal(t, http.StatusNotFound, status, "the pending row should have been deleted, not just disabled")
 }

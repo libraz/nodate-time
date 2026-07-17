@@ -425,9 +425,11 @@ func TestOAuthCallbackBadState(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
-	// State that was never issued should be rejected.
-	status, _ := helpers.DoJSONStatus(t, http.MethodGet,
-		testServerURL+"/auth/oauth/google/callback?code=abc&state=fakestate", "", nil)
-	assert.GreaterOrEqual(t, status, 400)
-	assert.Less(t, status, 500)
+	// State that was never issued should be rejected with a friendly redirect
+	// to the login screen, not a raw API error page.
+	resp := requestNoRedirect(t, http.MethodGet,
+		testServerURL+"/auth/oauth/google/callback?code=abc&state=fakestate", "")
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.Equal(t, helpers.TestWebURL+"/login?error=oauth_state", resp.Header.Get("Location"))
 }

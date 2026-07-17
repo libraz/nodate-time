@@ -6,17 +6,29 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"mime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
+
+// allowedAlbumImageTypes is an exact allowlist of image formats a browser will
+// render inline without also being able to execute active content (unlike
+// image/svg+xml, which can carry <script>).
+var allowedAlbumImageTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+	"image/gif":  true,
+}
 
 const (
 	maxPhotoSize    = 20 * 1024 * 1024
@@ -58,13 +70,41 @@ func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, user
 	return calresolve.Member(ctx, deps.Queries, calPubID, userID)
 }
 
+// isImageContentType checks against an exact allowlist rather than a
+// "image/*, except svg" prefix rule: mime.ParseMediaType strips parameters
+// first, so a value like "image/svg+xml; charset=utf-8" cannot slip past a
+// naive HasPrefix/inequality check the way it could before.
 func isImageContentType(ct string) bool {
-	ct = strings.ToLower(strings.TrimSpace(ct))
-	return strings.HasPrefix(ct, "image/") && ct != "image/svg+xml"
+	mediaType, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return false
+	}
+	return allowedAlbumImageTypes[strings.ToLower(mediaType)]
 }
 
 func photoStorageKey(calPubHex, photoPubHex string) string {
 	return fmt.Sprintf("albums/%s/%s", calPubHex, photoPubHex)
+}
+
+// photoExtensions maps the allowed album image content types to a file
+// extension for the synthesized download filename (album photos have no
+// stored original filename, unlike event attachments).
+var photoExtensions = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// photoDownloadFilename builds a human-readable download filename from a
+// photo's caption (if any) and its content type, so a saved file is not just
+// an opaque UUID.
+func photoDownloadFilename(p generated.AlbumPhoto) string {
+	name := strings.TrimSpace(p.Caption)
+	if name == "" {
+		name = "photo"
+	}
+	return name + photoExtensions[strings.ToLower(p.ContentType)]
 }
 
 // encodeCursor turns a (takenAt, id) tuple into an opaque base64 cursor.
@@ -408,7 +448,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, uploadTTL)
+		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, in.Body.ByteSize, uploadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -416,7 +456,6 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		out := &PresignPhotoOutput{}
 		out.Body.PhotoID = photoPubHex
 		out.Body.UploadURL = url
-		out.Body.StorageKey = key
 		return out, nil
 	}
 }
@@ -459,9 +498,11 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
 		if info.Size > maxPhotoSize {
+			deleteMismatchedPhoto(ctx, deps, p)
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
 		}
 		if info.Size != p.ByteSize {
+			deleteMismatchedPhoto(ctx, deps, p)
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
@@ -476,7 +517,27 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
 		p.Enabled = true
+		// Audited on Confirm, not on the earlier presign: a presign whose upload
+		// is abandoned never becomes a real photo, so it must not appear in history.
+		audit.Record(ctx, deps.Queries, cal.ID, p.ID, p.PublicID, audit.EntityAlbumPhoto, audit.ActionCreate, userID, p.Caption)
 		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, p)}, nil
+	}
+}
+
+// deleteMismatchedPhoto removes an uploaded object (and its pending row) that
+// failed the Confirm-time size check, so a mismatched upload does not linger
+// as an orphan until the 7-day abandoned-upload sweep. Best-effort: errors are
+// logged, not surfaced, since the caller is already returning the mismatch
+// error to the client.
+func deleteMismatchedPhoto(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
+	if err := deps.Storage.DeleteObject(ctx, p.StorageKey); err != nil {
+		slog.WarnContext(ctx, "failed to delete mismatched album photo object", "key", p.StorageKey, "error", err)
+	}
+	if err := deps.Queries.DeletePendingAlbumPhoto(ctx, generated.DeletePendingAlbumPhotoParams{
+		ID:         p.ID,
+		UploadedBy: p.UploadedBy,
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to delete mismatched album photo row", "photoID", p.ID, "error", err)
 	}
 }
 
@@ -549,6 +610,7 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		audit.Record(ctx, deps.Queries, cal.ID, refreshed.ID, refreshed.PublicID, audit.EntityAlbumPhoto, audit.ActionUpdate, userID, refreshed.Caption)
 		return &UpdatePhotoOutput{Body: mapPhoto(ctx, deps, cal, refreshed)}, nil
 	}
 }
@@ -576,6 +638,7 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 		if err := deps.Queries.SoftDeleteAlbumPhoto(ctx, photo.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		audit.Record(ctx, deps.Queries, cal.ID, photo.ID, photo.PublicID, audit.EntityAlbumPhoto, audit.ActionDelete, userID, photo.Caption)
 		if deps.Storage != nil {
 			if derr := deps.Storage.DeleteObject(ctx, photo.StorageKey); derr != nil {
 				slog.WarnContext(ctx, "failed to delete album photo object", "key", photo.StorageKey, "error", derr)
@@ -608,7 +671,7 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
-		url, err := deps.Storage.PresignDownload(ctx, photo.StorageKey, downloadTTL)
+		url, err := deps.Storage.PresignDownload(ctx, photo.StorageKey, photoDownloadFilename(photo), downloadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

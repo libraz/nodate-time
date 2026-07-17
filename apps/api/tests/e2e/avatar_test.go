@@ -19,9 +19,8 @@ func requireStorage(t *testing.T) {
 }
 
 type avatarPresignResp struct {
-	AvatarID   string `json:"avatarId"`
-	UploadURL  string `json:"uploadUrl"`
-	StorageKey string `json:"storageKey"`
+	AvatarID  string `json:"avatarId"`
+	UploadURL string `json:"uploadUrl"`
 }
 
 type userResp struct {
@@ -104,6 +103,35 @@ func TestAvatarConfirmWithoutUpload(t *testing.T) {
 	assert.Equal(t, 404, status)
 }
 
+// TestAvatarPresignedPutRejectsMismatchedContentLength verifies the presigned
+// PUT itself — not just Confirm — rejects a body whose length disagrees with
+// the byteSize declared (and signed) at presign time, closing the window
+// where a much larger object could land in storage before any size check ran.
+func TestAvatarPresignedPutRejectsMismatchedContentLength(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	png := helpers.TinyPNG()
+
+	var pres avatarPresignResp
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
+		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
+	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "image/png", png)
+	assert.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
+
+	// Nothing was ever stored, so Confirm legitimately finds no object.
+	confirmStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
+		map[string]any{"avatarId": pres.AvatarID})
+	assert.Equal(t, http.StatusNotFound, confirmStatus)
+}
+
+// TestAvatarConfirmRejectsMismatchedActualSizeAndDeletesObject verifies the
+// Confirm-time defense-in-depth: if an object at the presigned key ever
+// disagrees with what was declared (however it got there — the presigned PUT
+// itself now rejects a mismatch, so this exercises the fallback), Confirm
+// rejects it and removes the object rather than leaving an orphan.
 func TestAvatarConfirmRejectsMismatchedActualSizeAndDeletesObject(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -115,14 +143,18 @@ func TestAvatarConfirmRejectsMismatchedActualSizeAndDeletesObject(t *testing.T) 
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	storageKey := helpers.AvatarStorageKey(tt.UserID, pres.AvatarID)
+	// Bypass the presigned URL to place an object whose size disagrees with
+	// what was declared, simulating the object ending up mismatched regardless
+	// of the upload path.
+	helpers.PutRawObject(t, getTestBucket(), storageKey, "image/png", png)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
 		map[string]any{"avatarId": pres.AvatarID})
 	assert.Equal(t, http.StatusBadRequest, status)
 
 	if storageClient := getTestStorage(); storageClient != nil {
-		_, exists, err := storageClient.StatObject(testCtx(), pres.StorageKey)
+		_, exists, err := storageClient.StatObject(testCtx(), storageKey)
 		require.NoError(t, err)
 		assert.False(t, exists, "invalid avatar object should be removed")
 	}
@@ -195,7 +227,7 @@ func TestAvatarReplaceClearsOldKey(t *testing.T) {
 	var pres2 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres2)
-	require.NotEqual(t, pres1.StorageKey, pres2.StorageKey)
+	require.NotEqual(t, pres1.AvatarID, pres2.AvatarID)
 	helpers.UploadToPresignedURL(t, pres2.UploadURL, "image/png", png)
 	var u2 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -204,7 +236,7 @@ func TestAvatarReplaceClearsOldKey(t *testing.T) {
 
 	// The first object should now be gone from MinIO. We assert via StatObject.
 	if testStorageClient := getTestStorage(); testStorageClient != nil {
-		_, exists, err := testStorageClient.StatObject(testCtx(), pres1.StorageKey)
+		_, exists, err := testStorageClient.StatObject(testCtx(), helpers.AvatarStorageKey(tt.UserID, pres1.AvatarID))
 		require.NoError(t, err)
 		assert.False(t, exists, "previous avatar object should be removed")
 	}

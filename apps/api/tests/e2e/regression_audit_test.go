@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -101,6 +103,35 @@ func TestSingleUseInviteCannotBeReused(t *testing.T) {
 	// Second distinct user is rejected — the invite is exhausted.
 	secondStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", second.AccessToken, nil)
 	require.True(t, secondStatus == 404 || secondStatus == 410, "expected exhausted invite to be rejected, got %d", secondStatus)
+}
+
+// TestDeleteInviteRejectsUnknownIDAndDoesNotAudit verifies that deleting a
+// non-existent (or foreign) invite id is reported as a 404 rather than a
+// silent success, and that no revoke is recorded for a delete that did not
+// happen.
+func TestDeleteInviteRejectsUnknownIDAndDoesNotAudit(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/999999999", owner.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status)
+
+	type activityFeedItem struct {
+		EntityType string `json:"entityType"`
+		Action     string `json:"action"`
+	}
+	type activityPage struct {
+		Items []activityFeedItem `json:"items"`
+	}
+	var feed activityPage
+	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=20", owner.AccessToken, nil, &feed)
+	for _, item := range feed.Items {
+		require.False(t, item.EntityType == "invite" && item.Action == "revoke",
+			"a no-op delete must not be audited as a revoke")
+	}
 }
 
 // TestSingleUseInviteConcurrentAccept verifies the invite use-count guard under
@@ -296,6 +327,131 @@ func TestEventHistoryIsCalendarScoped(t *testing.T) {
 	require.Empty(t, history, "foreign event audit history must not be returned through another calendar")
 }
 
+// TestEventHistoryIsNewestFirst verifies the per-entity history endpoint
+// returns the most recent changes first: with no cursor and a fixed page
+// size, an ascending order would truncate to the oldest entries and hide
+// everything since.
+func TestEventHistoryIsNewestFirst(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var evt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
+		map[string]any{
+			"title":   "History order v1",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+		}, &evt)
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
+		map[string]any{
+			"title":              "History order v2",
+			"allDay":             false,
+			"startAt":            "2026-05-12T09:00:00+09:00",
+			"endAt":              "2026-05-12T10:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
+		}, nil)
+
+	var history []struct {
+		Action  string `json:"action"`
+		Summary string `json:"summary"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &history)
+	require.Len(t, history, 2)
+	require.Equal(t, "update", history[0].Action, "the most recent change must come first")
+	require.Contains(t, history[0].Summary, "v2")
+	require.Equal(t, "create", history[1].Action)
+}
+
+// TestAdminRouteRejectsNonAdminWithJSONError verifies a non-admin's request
+// to an admin-only route is rejected with a proper JSON Content-Type (not
+// text/plain from a bare http.Error call) and the expected error code.
+func TestAdminRouteRejectsNonAdminWithJSONError(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	req, err := http.NewRequest(http.MethodGet, testServerURL+"/admin/oauth-providers", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tt.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "AUTH.ADMIN_REQUIRED", body.Code)
+}
+
+// TestEventHistoryAcceptsCompositeRecurrenceID verifies the audit history
+// endpoint works for a recurring instance's composite id ("uuid_YYYYMMDD"),
+// matching the sibling sub-resource endpoints (checklist, attachments) that
+// already resolve through the parent series.
+func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	evts := createWeeklyFriday(t, calURL, owner.AccessToken)
+	target := evts[1] // composite id, e.g. "<parent-uuid>_20260410"
+	require.Contains(t, target.ID, "_")
+	parentID, _, _ := strings.Cut(target.ID, "_")
+
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken,
+		map[string]any{
+			"title":              "Composite history edit",
+			"allDay":             false,
+			"startAt":            "2026-04-10T18:00:00+09:00",
+			"endAt":              "2026-04-10T19:00:00+09:00",
+			"color":              "",
+			"location":           "",
+			"memo":               "",
+			"url":                "",
+			"notificationOffset": nil,
+			"participants":       []string{},
+			"assignedTo":         nil,
+			"recurrenceRule":     nil,
+		}, nil)
+
+	var byComposite []struct {
+		Action  string `json:"action"`
+		Summary string `json:"summary"`
+	}
+	status, _ := helpers.DoJSONStatus(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil)
+	require.Equal(t, 200, status)
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil, &byComposite)
+	require.NotEmpty(t, byComposite)
+	require.Equal(t, "update", byComposite[0].Action)
+
+	// The composite id resolves to the same parent series, so its history
+	// must match fetching by the plain parent id.
+	var byParent []struct {
+		Action  string `json:"action"`
+		Summary string `json:"summary"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+parentID+"/history", owner.AccessToken, nil, &byParent)
+	require.Equal(t, byParent, byComposite)
+}
+
 func TestAttachmentPresignRejectsSVG(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -317,6 +473,92 @@ func TestAttachmentPresignRejectsSVG(t *testing.T) {
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
 		map[string]any{"filename": "active.svg", "contentType": "image/svg+xml", "byteSize": 128})
 	require.Equal(t, http.StatusBadRequest, status)
+}
+
+// TestAttachmentPresignedPutRejectsMismatchedContentLength verifies the
+// presigned PUT rejects a body whose length disagrees with the byteSize bound
+// into its signature, so an upload cannot exceed the size the caller checked
+// against the per-attachment limit before ever being presigned.
+func TestAttachmentPresignedPutRejectsMismatchedContentLength(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var evt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title":   "Attachment host",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+		}, &evt)
+
+	body := []byte("%PDF-1.4 fake contract body")
+	var pres struct {
+		AttachmentID string `json:"attachmentId"`
+		UploadURL    string `json:"uploadUrl"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
+		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1}, &pres)
+
+	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "application/pdf", body)
+	require.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
+}
+
+// TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt verifies the
+// Confirm-time defense-in-depth: an object at the presigned key that
+// disagrees with the declared size is rejected and removed rather than left
+// as an orphan, and the pending row itself is deleted (not just left disabled).
+func TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var evt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title":   "Attachment host",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+		}, &evt)
+
+	body := []byte("%PDF-1.4 fake contract body")
+	var pres struct {
+		AttachmentID string `json:"attachmentId"`
+		UploadURL    string `json:"uploadUrl"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
+		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1}, &pres)
+
+	storageClient := getTestStorage()
+	require.NotNil(t, storageClient)
+	// Reconstruct the key PresignUpload built, bypassing the (now
+	// size-enforcing) presigned URL to place a mismatched object directly.
+	storageKey := helpers.AttachmentStorageKey(tt.CalendarID, evt.ID, pres.AttachmentID)
+	helpers.PutRawObject(t, getTestBucket(), storageKey, "application/pdf", body)
+
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
+	require.Equal(t, http.StatusBadRequest, status)
+
+	_, exists, err := storageClient.StatObject(testCtx(), storageKey)
+	require.NoError(t, err)
+	require.False(t, exists, "mismatched attachment object should be removed")
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodPost,
+		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "the pending row should have been deleted, not just disabled")
 }
 
 func TestViewerListMembersHidesOtherEmails(t *testing.T) {

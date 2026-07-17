@@ -76,7 +76,11 @@ func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uin
 
 // resolveActor builds the actor identity from the joined audit row fields,
 // returning nil when the actor user no longer exists (public ID not valid).
-func resolveActor(ctx context.Context, deps Deps, publicID, name, icon, avatarKey sql.NullString) *ActorBrief {
+// avatarURLs memoizes presigned avatar URLs by storage key for the lifetime of
+// one request: a feed page can list up to 200 rows, and the same handful of
+// actors typically account for most of them, so this avoids re-presigning the
+// same avatar up to 200 times per request.
+func resolveActor(ctx context.Context, deps Deps, publicID, name, icon, avatarKey sql.NullString, avatarURLs map[string]string) *ActorBrief {
 	if !publicID.Valid {
 		return nil
 	}
@@ -86,7 +90,11 @@ func resolveActor(ctx context.Context, deps Deps, publicID, name, icon, avatarKe
 		Icon: icon.String,
 	}
 	if deps.Storage != nil && avatarKey.Valid && avatarKey.String != "" {
-		if url, err := deps.Storage.PresignGet(ctx, avatarKey.String, actorAvatarTTL); err == nil {
+		key := avatarKey.String
+		if cached, ok := avatarURLs[key]; ok {
+			a.AvatarURL = cached
+		} else if url, err := deps.Storage.PresignGet(ctx, key, actorAvatarTTL); err == nil {
+			avatarURLs[key] = url
 			a.AvatarURL = url
 		}
 	}
@@ -105,7 +113,19 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		entityPub, err := parseUUID(in.EventID)
+		// A recurring instance is addressed as "uuid_YYYYMMDD" (see
+		// events.parseCompositeID / checklist.resolveEvent for the sibling
+		// pattern). Every audit entry for an occurrence — whether editing "this"
+		// instance or "all" — is recorded against the parent series' public ID
+		// (see events.UpdateEvent/DeleteEvent), never a per-occurrence id, so the
+		// history for any instance is the parent's history. The parent is not
+		// looked up in the events table: audit_log is intentionally decoupled
+		// from the live row so a deleted series' history remains viewable.
+		eventID := in.EventID
+		if parentUUID, _ := calresolve.SplitCompositeID(eventID); parentUUID != "" {
+			eventID = parentUUID
+		}
+		entityPub, err := parseUUID(eventID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
@@ -120,6 +140,7 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		avatarURLs := make(map[string]string)
 		out := &EventHistoryOutput{Body: make([]HistoryItem, 0, len(rows))}
 		for _, r := range rows {
 			out.Body = append(out.Body, HistoryItem{
@@ -127,7 +148,7 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 				Action:    r.Action,
 				Summary:   r.Summary,
 				CreatedAt: r.CreatedAt,
-				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey),
+				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
 			})
 		}
 		return out, nil
@@ -161,6 +182,7 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		avatarURLs := make(map[string]string)
 		out := &MemoHistoryOutput{Body: make([]HistoryItem, 0, len(rows))}
 		for _, r := range rows {
 			out.Body = append(out.Body, HistoryItem{
@@ -168,7 +190,7 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 				Action:    r.Action,
 				Summary:   r.Summary,
 				CreatedAt: r.CreatedAt,
-				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey),
+				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
 			})
 		}
 		return out, nil
@@ -215,6 +237,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 			rows = rows[:limit]
 		}
 
+		avatarURLs := make(map[string]string)
 		out := &ActivityOutput{
 			Body: ActivityPage{Items: make([]FeedItem, 0, len(rows)), NextCursor: nextCursor},
 		}
@@ -225,7 +248,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 					Action:    r.Action,
 					Summary:   r.Summary,
 					CreatedAt: r.CreatedAt,
-					Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey),
+					Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
 				},
 				EntityType: r.EntityType,
 				EntityID:   pubIDToHex(r.EntityPublicID),
