@@ -215,7 +215,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async addCalendar(cal) {
+    const currentAccountGeneration = accountGeneration;
     const newCal = await api.post<Calendar>('/calendars', cal);
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => {
       const ids = [...s.activeCalendarIds, newCal.id];
       saveJson('activeCalendarIds', ids);
@@ -252,7 +254,17 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async addEvent(calendarId, evt) {
+    const currentAccountGeneration = accountGeneration;
     const newEvt = await api.post<CalendarEvent>(`/calendars/${calendarId}/events`, evt);
+    if (currentAccountGeneration !== accountGeneration) return;
+    if (newEvt.recurrenceRule) {
+      // The POST returns a single un-expanded master row, so appending it would
+      // show only one occurrence. Re-fetch the visible range to pull the fully
+      // expanded instances instead.
+      const { start, end } = get().visibleRange();
+      await get().fetchEvents(start, end);
+      return;
+    }
     set((s) => ({
       events: [...s.events, { ...newEvt, calendarId }],
     }));
@@ -302,12 +314,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async addMemo(calendarId, memo) {
+    const currentAccountGeneration = accountGeneration;
     const existing = get().memos.filter((m) => m.calendarId === calendarId);
     const newMemo = await api.post<Memo>(`/calendars/${calendarId}/memos`, {
       title: memo.title,
       body: memo.body,
       sortOrder: existing.length,
     });
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: [...s.memos, { ...newMemo, calendarId }],
     }));

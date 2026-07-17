@@ -191,6 +191,36 @@ describe('logout', () => {
   });
 });
 
+describe('visibilitychange', () => {
+  it('logs out when the tab refocuses with an expired token', () => {
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      configurable: true,
+    });
+    mockHasToken.mockReturnValue(false);
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(mockClearToken).toHaveBeenCalled();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it('leaves a valid session untouched on refocus', () => {
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      configurable: true,
+    });
+    mockHasToken.mockReturnValue(true);
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(mockClearToken).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+  });
+});
+
 describe('fetchMe', () => {
   it('does nothing when there is no token', async () => {
     mockHasToken.mockReturnValue(false);
@@ -224,6 +254,28 @@ describe('fetchMe', () => {
     expect(s.user).toBeNull();
     expect(s.isAuthenticated).toBe(false);
     expect(s.isInitializing).toBe(false);
+  });
+
+  it('does not restore isAuthenticated when logout lands during an in-flight request', async () => {
+    mockHasToken.mockReturnValue(true);
+    let resolveUser: ((user: typeof sampleUser) => void) | undefined;
+    mockApi.get.mockReturnValue(
+      new Promise<typeof sampleUser>((resolve) => {
+        resolveUser = resolve;
+      }) as never,
+    );
+    useAuthStore.setState({ isAuthenticated: true, isInitializing: true });
+
+    const request = useAuthStore.getState().fetchMe();
+    // Logout clears the token and auth flag mid-flight.
+    mockHasToken.mockReturnValue(false);
+    useAuthStore.setState({ user: null, isAuthenticated: false });
+    resolveUser?.(sampleUser);
+    await request;
+
+    const s = useAuthStore.getState();
+    expect(s.user).toBeNull();
+    expect(s.isAuthenticated).toBe(false);
   });
 
   it('keeps the current session when user hydration fails with a server error', async () => {

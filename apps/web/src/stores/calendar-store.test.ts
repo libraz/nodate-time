@@ -258,6 +258,107 @@ describe('addMemo', () => {
     });
     expect(useCalendarStore.getState().memos.map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
   });
+
+  it('does not inject the memo after session data is reset', async () => {
+    let resolvePost: ((m: Memo) => void) | undefined;
+    mockApi.post.mockReturnValue(
+      new Promise<Memo>((resolve) => {
+        resolvePost = resolve;
+      }) as never,
+    );
+
+    const request = useCalendarStore.getState().addMemo('cal-1', { title: 'stale', body: '' });
+    useCalendarStore.getState().resetSessionData();
+    resolvePost?.(memo('m-stale', 'cal-1'));
+    await request;
+
+    expect(useCalendarStore.getState().memos).toEqual([]);
+  });
+});
+
+describe('addCalendar', () => {
+  it('does not inject the calendar or persist ids after session data is reset', async () => {
+    let resolvePost: ((c: Calendar) => void) | undefined;
+    mockApi.post.mockReturnValue(
+      new Promise<Calendar>((resolve) => {
+        resolvePost = resolve;
+      }) as never,
+    );
+
+    const request = useCalendarStore.getState().addCalendar({ name: 'stale', color: '#000' });
+    useCalendarStore.getState().resetSessionData();
+    resolvePost?.(cal('cal-stale'));
+    await request;
+
+    expect(useCalendarStore.getState().calendars).toEqual([]);
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual([]);
+    expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
+  });
+});
+
+describe('addEvent', () => {
+  it('appends a non-recurring event to the store', async () => {
+    mockApi.post.mockResolvedValue(evt('e-new', 'cal-1') as never);
+
+    await useCalendarStore.getState().addEvent('cal-1', {
+      title: 'One-off',
+      allDay: false,
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+    });
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['e-new']);
+  });
+
+  it('does not inject the event after session data is reset', async () => {
+    let resolvePost: ((e: CalendarEvent) => void) | undefined;
+    mockApi.post.mockReturnValue(
+      new Promise<CalendarEvent>((resolve) => {
+        resolvePost = resolve;
+      }) as never,
+    );
+
+    const request = useCalendarStore.getState().addEvent('cal-1', {
+      title: 'stale',
+      allDay: false,
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+    });
+    useCalendarStore.getState().resetSessionData();
+    resolvePost?.(evt('e-stale', 'cal-1'));
+    await request;
+
+    expect(useCalendarStore.getState().events).toEqual([]);
+  });
+
+  it('re-fetches the visible range for a recurring event instead of appending the master row', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+    const master = 'c'.repeat(32);
+    mockApi.post.mockResolvedValue(
+      evt(master, 'cal-1', {
+        recurrenceRule: { freq: 'weekly', interval: 1 },
+        isRecurrence: false,
+      }) as never,
+    );
+    mockApi.get.mockResolvedValue([
+      evt(`${master}_20260420`, 'cal-1'),
+      evt(`${master}_20260427`, 'cal-1'),
+    ] as never);
+
+    await useCalendarStore.getState().addEvent('cal-1', {
+      title: 'Weekly',
+      allDay: false,
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+      recurrenceRule: { freq: 'weekly', interval: 1 },
+    });
+
+    expect(mockApi.get).toHaveBeenCalled();
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual([
+      `${master}_20260420`,
+      `${master}_20260427`,
+    ]);
+  });
 });
 
 describe('deleteEvent', () => {
