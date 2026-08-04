@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { ROLE_OPTIONS, roleLabelKey } from '@/lib/permissions';
+import { canManage, ROLE_OPTIONS, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -23,8 +23,8 @@ export function MembersPanel() {
   const calendar = calendars.find((c) => c.id === calendarId);
   const members = (calendarId && membersMap[calendarId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
-  const isAdmin = myMembership?.role === 'admin';
-  const adminCount = members.filter((m) => m.role === 'admin').length;
+  const canManageMembers = canManage(myMembership?.role);
+  const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   useEffect(() => {
     if (rightPanel === 'members' && calendarId) {
@@ -35,8 +35,11 @@ export function MembersPanel() {
   if (rightPanel !== 'members') return null;
 
   const handleRoleChange = async (member: Member, role: string) => {
-    if (member.role === 'admin' && role !== 'admin' && adminCount <= 1) {
-      toast.error(t('members.lastAdmin'));
+    // A calendar must keep one owner, or nobody is left who can administer
+    // it. The server enforces this too; refusing here saves a round trip and
+    // gives a better message than a generic rejection.
+    if (member.role === 'owner' && role !== 'owner' && ownerCount <= 1) {
+      toast.error(t('members.lastOwner'));
       return;
     }
     try {
@@ -78,7 +81,7 @@ export function MembersPanel() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {canManageMembers && (
               <button
                 type="button"
                 onClick={() => toggleRightPanel('share')}
@@ -117,10 +120,10 @@ export function MembersPanel() {
             <ul className="divide-y divide-[var(--color-separator)]">
               {members.map((m) => {
                 const isMe = m.email === me?.email;
-                const lastAdmin = m.role === 'admin' && adminCount <= 1;
+                const lastOwner = m.role === 'owner' && ownerCount <= 1;
                 // You manage other members, not yourself: no self role change or self removal.
-                const canChangeRole = isAdmin && !isMe && !lastAdmin;
-                const canRemove = isAdmin && !isMe && !lastAdmin;
+                const canChangeRole = canManageMembers && !isMe && !lastOwner;
+                const canRemove = canManageMembers && !isMe && !lastOwner;
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     <span
@@ -128,7 +131,7 @@ export function MembersPanel() {
                       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
                       style={{ backgroundColor: m.color }}
                     >
-                      {m.icon || m.name.slice(0, 1)}
+                      {m.name.slice(0, 1)}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">

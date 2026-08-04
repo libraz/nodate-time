@@ -26,7 +26,7 @@ export interface EventInput {
   url?: string | undefined;
   notificationOffset?: number | null | undefined;
   participants?: string[] | undefined;
-  assignedTo?: string | null | undefined;
+  ownerId?: string | null | undefined;
   recurrenceRule?: RecurrenceRule | null | undefined;
 }
 

@@ -183,8 +183,8 @@ export function CalendarHeader() {
             className="h-full w-full object-cover"
             draggable={false}
           />
-        ) : user?.icon ? (
-          <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.icon}</span>
+        ) : user?.name ? (
+          <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.name.slice(0, 1)}</span>
         ) : (
           <svg
             width={size === 'sm' ? '20' : '22'}
@@ -210,14 +210,11 @@ export function CalendarHeader() {
       {user && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
-            <div
-              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-lg text-white"
-              style={{ backgroundColor: user.color }}
-            >
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[var(--color-accent)] text-lg text-white">
               {user.avatarUrl ? (
                 <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
               ) : (
-                <span>{user.icon}</span>
+                <span>{user.name.slice(0, 1)}</span>
               )}
             </div>
             <div className="min-w-0 flex-1">

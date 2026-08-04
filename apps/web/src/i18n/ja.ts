@@ -322,11 +322,12 @@ export const ja = {
 
   // Members admin
   'members.role': '権限',
-  'members.roleAdmin': '管理者',
-  'members.roleMember': 'メンバー',
+  'members.roleOwner': 'オーナー',
+  'members.roleManager': '管理者',
+  'members.roleEditor': '編集者',
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このメンバーを削除しますか?',
-  'members.lastAdmin': '最後の管理者は削除できません',
+  'members.lastOwner': 'オーナーは最低 1 人必要です',
   'members.selfModify': '自分自身の権限は変更できません',
 
   // Invites

@@ -32,6 +32,23 @@ interface PresignResult {
   uploadUrl: string;
 }
 
+/**
+ * Hex SHA-256 of the bytes about to be uploaded.
+ *
+ * The server stores blobs content-addressed: the digest is the unique key,
+ * so the same file attached twice is stored once, and it is what the storage
+ * key is built from rather than the filename. The digest has to come from
+ * the client because the server does not see the bytes -- the upload goes
+ * straight to object storage through a presigned URL.
+ */
+export async function sha256Hex(body: ArrayBuffer | Blob): Promise<string> {
+  const buffer = body instanceof Blob ? await body.arrayBuffer() : body;
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 interface UploadViaPresignArgs {
   /** Logical upload kind, used to enforce client-side size/type limits. */
   kind: UploadKind;
@@ -45,6 +62,13 @@ interface UploadViaPresignArgs {
   body: ArrayBuffer | Blob;
   /** Declared byte size for client-side validation. */
   byteSize: number;
+  /**
+   * When true, the digest of `body` is computed and sent as `sha256` in the
+   * presign request. Set for endpoints backed by content-addressed storage
+   * (avatars, event attachments); album photos keep their own key and do not
+   * take one.
+   */
+  contentAddressed?: boolean;
 }
 
 /**
@@ -59,7 +83,10 @@ export async function uploadViaPresign<P extends PresignResult>(
   args: UploadViaPresignArgs,
 ): Promise<P> {
   validateUpload(args.kind, args.contentType, args.byteSize);
-  const presign = await api.post<P>(args.presignPath, args.presignBody);
+  const presignBody = args.contentAddressed
+    ? { ...args.presignBody, sha256: await sha256Hex(args.body) }
+    : args.presignBody;
+  const presign = await api.post<P>(args.presignPath, presignBody);
   const putRes = await fetch(presign.uploadUrl, {
     method: 'PUT',
     headers: { 'Content-Type': args.contentType },

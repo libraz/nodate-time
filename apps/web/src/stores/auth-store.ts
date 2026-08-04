@@ -10,9 +10,10 @@ interface User {
   id: string;
   name: string;
   email: string;
-  icon: string;
-  color: string;
   avatarUrl?: string;
+  locale: string;
+  timezone: string;
+  /** Reflects a live instance-admin grant, not a flag on the account. */
   isAdmin?: boolean;
 }
 
@@ -29,7 +30,7 @@ interface AuthState {
   logout: () => void;
   fetchMe: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  updateProfile: (data: { name: string; icon: string; color: string }) => Promise<void>;
+  updateProfile: (data: { name: string; locale?: string; timezone?: string }) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   removeAvatar: () => Promise<void>;
   clearError: () => void;
@@ -37,6 +38,11 @@ interface AuthState {
 
 interface AuthResponse {
   token: string;
+  // Returned by every sign-in path. The client does not use it yet -- the
+  // access token is checked against its session on each request, so it is
+  // revocable without one -- but discarding it would make a signed-in
+  // browser unrecoverable once the access token expires.
+  refreshToken: string;
   user: User;
 }
 
@@ -153,6 +159,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       contentType: resized.contentType,
       body: resized.bytes,
       byteSize: resized.bytes.byteLength,
+      contentAddressed: true,
     });
     const user = await api.put<User>('/user/avatar', { avatarId: presign.avatarId });
     set({ user });

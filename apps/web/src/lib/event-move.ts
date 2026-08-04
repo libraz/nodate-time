@@ -26,7 +26,7 @@ export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventIn
     url: evt.url,
     notificationOffset: evt.notificationOffset,
     participants: evt.participants,
-    assignedTo: evt.assignedTo,
+    ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
   };
 }
@@ -48,7 +48,7 @@ export function buildResizedEvent(evt: CalendarEvent, newEnd: DateTime): EventIn
     url: evt.url,
     notificationOffset: evt.notificationOffset,
     participants: evt.participants,
-    assignedTo: evt.assignedTo,
+    ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
   };
 }
