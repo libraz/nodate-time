@@ -12,6 +12,9 @@
 --
 --   (task_id IS NULL) = (task_role IS NULL)
 --   task_id IS NULL OR recurrence_rule IS NULL
+--   (recurrence_parent_id IS NULL) = (recurrence_original_start IS NULL)
+--   recurrence_parent_id IS NULL OR recurrence_rule IS NULL
+--   recurrence_parent_id IS NULL OR task_id IS NULL
 --
 -- Ownership of the projection. task_id / task_role and the columns
 -- that mirror a task field (title, start_at, end_at, and the
@@ -50,6 +53,21 @@ BEGIN
   IF NEW.task_id IS NOT NULL AND NEW.recurrence_rule IS NOT NULL THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'a task-projected calendar event may not carry a recurrence rule';
+  END IF;
+
+  IF (NEW.recurrence_parent_id IS NULL) <> (NEW.recurrence_original_start IS NULL) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'calendar_events.recurrence_parent_id and recurrence_original_start must be set or cleared together';
+  END IF;
+
+  IF NEW.recurrence_parent_id IS NOT NULL AND NEW.recurrence_rule IS NOT NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'an occurrence override may not carry a recurrence rule of its own';
+  END IF;
+
+  IF NEW.recurrence_parent_id IS NOT NULL AND NEW.task_id IS NOT NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'a task-projected calendar event may not be an occurrence override';
   END IF;
 
   IF @nf_item_projection_engine IS NULL THEN

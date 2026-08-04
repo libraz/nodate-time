@@ -138,3 +138,23 @@ CALL nf_conformance_assert(
                           'trg_calendar_events_projection_guard_upd',
                           'trg_calendar_events_projection_guard_del')) = 3,
   'all three calendar_events projection guard triggers must be installed');
+
+-- One override per occurrence. Without the unique key two concurrent
+-- edits of the same occurrence both land and the expander has to guess.
+CALL nf_conformance_assert(
+  (SELECT COUNT(*) = 1 FROM information_schema.statistics
+   WHERE table_schema = DATABASE()
+     AND table_name = 'calendar_events'
+     AND index_name = 'uniq_calendar_events_recurrence_override'
+     AND non_unique = 0
+     AND column_name = 'recurrence_parent_id'),
+  'calendar_events must be unique per (recurrence_parent_id, recurrence_original_start)');
+
+-- Cancellation is an entry in recurrence_exceptions, so the column has
+-- to exist for an implementation to have anywhere to put one.
+CALL nf_conformance_assert(
+  (SELECT data_type = 'json'
+   FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'calendar_events' AND column_name = 'recurrence_exceptions'),
+  'calendar_events.recurrence_exceptions must be JSON: cancelling an occurrence is an entry, not a row');

@@ -54,7 +54,24 @@ CREATE TABLE calendar_events (
   -- Recurrence (RFC 5545 subset stored as JSON)
   recurrence_rule JSON NULL COMMENT 'Recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}',
   recurrence_end DATETIME(3) NULL COMMENT 'Computed end date for recurrence expansion queries',
-  recurrence_exceptions JSON DEFAULT NULL COMMENT 'Array of ISO 8601 dates/times to exclude from recurrence',
+  recurrence_exceptions JSON DEFAULT NULL COMMENT 'Array of ISO 8601 occurrence starts to skip when expanding this rule. Cancelling one occurrence is an entry here, never a row.',
+  /**
+   * A recurring series is one row plus two ways of departing from it,
+   * and they are not interchangeable:
+   *
+   *   cancel one occurrence  -> add its start to recurrence_exceptions
+   *   change one occurrence  -> a second row naming this one as parent
+   *
+   * Splitting them this way keeps exactly one representation of each
+   * outcome. Allowing a row to also mean "cancelled" would give a
+   * consumer two places to look before it could say whether an
+   * occurrence happens, and the two would eventually disagree.
+   *
+   * An override row carries the changed occurrence in the ordinary
+   * columns and has no recurrence_rule of its own; it is a leaf.
+   */
+  recurrence_parent_id INT UNSIGNED NULL COMMENT 'Set on an override row: the recurring event whose single occurrence this row replaces. NULL on ordinary and master rows.',
+  recurrence_original_start DATETIME(3) NULL COMMENT 'Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.',
 
   notification_offset INT NULL COMMENT 'Minutes before event to send notification; NULL = no notification',
   notified_at DATETIME(3) NULL DEFAULT NULL COMMENT 'Timestamp when notification was sent; NULL = not yet notified',
@@ -88,12 +105,19 @@ CREATE TABLE calendar_events (
   KEY idx_calendar_events_workspace_range (workspace_id, start_at, end_at),
   KEY idx_calendar_events_task_role (task_id, task_role, enabled),
   UNIQUE KEY uniq_calendar_events_task_role_key (task_id, task_role_key),
+  -- One override per occurrence. Without this, two concurrent edits of
+  -- the same occurrence both insert, and the expander has to pick.
+  UNIQUE KEY uniq_calendar_events_recurrence_override (recurrence_parent_id, recurrence_original_start),
   FULLTEXT KEY ft_calendar_events_title_memo (title, memo),
 
   CONSTRAINT fk_calendar_events_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_calendar_events_calendar FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE,
   CONSTRAINT fk_calendar_events_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_calendar_events_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  -- CASCADE: an override has no meaning once the series it departs from
+  -- is gone, and leaving it behind would surface a stray one-off event
+  -- on someone's calendar long after they deleted the series.
+  CONSTRAINT fk_calendar_events_recurrence_parent FOREIGN KEY (recurrence_parent_id) REFERENCES calendar_events(id) ON DELETE CASCADE,
   -- fk_calendar_events_task (task_id -> tasks.id) is NOT declared here.
   -- task_id is a core column so that every deployment writes rows of the
   -- same shape, but `tasks` belongs to a product layer and a foreign key

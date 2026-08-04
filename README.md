@@ -187,8 +187,14 @@ CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
 
 ## Migrations & code generation
 
-- Table definitions live in `sql/tables/NNN_*.sql`. `sql/build-schema.sh` concatenates
-  them into `sql/schema.sql`, which `make db-apply` applies.
+- The schema is layered. `sql/core/` is a copy of the shared schema contract that
+  lets more than one product write to the same database — it is not edited here and
+  is pinned upstream in `sql/core/UPSTREAM.json`. `sql/time/` holds this
+  application's own tables.
+- `sql/build-schema.sh` concatenates core then time into `sql/schema.sql`, which
+  `make db-apply` applies.
+- `make test-conformance` checks the resulting schema against the contract.
+  `make check-core` checks that the vendored copy is unedited and current.
 - Write queries in `sql/queries/*.sql` and run `make sqlc` to generate Go code into
   `apps/api/internal/db/generated/`.
 

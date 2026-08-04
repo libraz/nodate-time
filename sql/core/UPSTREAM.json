@@ -1,11 +1,11 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "2e8830402d313aefa2e9378658a2c07d0b48757d",
+  "ref": "f768775965d87b76cf91767d66a4908b1b75a061",
   "files": [
     {
       "path": "PROTOCOL.md",
-      "sha256": "036cd120be10787ff7284812ae50376ec4a662f7c40aa20bf6743c328441b5e6"
+      "sha256": "8669f2123b0d48a8d53fb7fef8e20ec08bd9ebde7c60082137bd116d9ff366ba"
     },
     {
       "path": "conformance/data/10-invariants.sql",
@@ -29,15 +29,15 @@
     },
     {
       "path": "conformance/schema/10-structure.sql",
-      "sha256": "a9d7400c5d0c2ac58b92818a283b9cf2441c74d8fd815ba06310d9317c831176"
+      "sha256": "131e6c350060982252d00c704781a08ec1e3a1b69715a821abc801c8b0b54a0f"
     },
     {
       "path": "conformance/schema/20-projection-guard.sql",
-      "sha256": "7937a577450ddb5ed35c456f3e76949ae1b2b46c8708c445f03b2d86c93e64d2"
+      "sha256": "6d12f0739a9ebded830b20a3e3afaf20e286abf5fd48eb5ae322f2ebd78946a9"
     },
     {
       "path": "conformance/schema/30-event-log.sql",
-      "sha256": "866cd103dec4f86f05a8cdc9bb217da89e45df0a0f7acefc65c7544e346139fe"
+      "sha256": "47638c9286a35fe819385725a8853063606d2d220db51343d367f16b53c70ccb"
     },
     {
       "path": "tables/audit_logs.sql",
@@ -65,7 +65,7 @@
     },
     {
       "path": "tables/calendar_events.sql",
-      "sha256": "7ec2b1efaa1275f747f9c29a41e80c10abff861765ef53e249b403a8ab27b249"
+      "sha256": "ebf723734641be67b522b2ec01b69b0d4c4025930cd50c1b2f3f24a641fb05c6"
     },
     {
       "path": "tables/calendar_members.sql",
@@ -93,7 +93,7 @@
     },
     {
       "path": "tables/events.sql",
-      "sha256": "92ef2e79b5c04e390da0b07d2bcd40444f5700a2a372ea6b852aa7bee1f86740"
+      "sha256": "97799857e27633202d2e4e87636e3ef9e8b13e960b20e0c7e7a4d39b97fa3936"
     },
     {
       "path": "tables/identities.sql",
@@ -157,11 +157,11 @@
     },
     {
       "path": "triggers/trg_calendar_events_projection_guard_ins.sql",
-      "sha256": "a852417366a221ae49eb2760f4b4f26abab2f47b3fe6855df72d037a9d6bcb95"
+      "sha256": "3ee8fa0c65b4eb10bc11b5bfd9147d757cf8f0fe7da8481077ea2a0b55f52ccb"
     },
     {
       "path": "triggers/trg_calendar_events_projection_guard_upd.sql",
-      "sha256": "e469bfe9b4c7dd97b9715b7af6011055672b9e543bf8d9d3e19a8f9114bf4d6f"
+      "sha256": "10866c6ef295f038f29d31cb5359cd5d9f1f4ddf2ceef3ebc17b511ab12c0b77"
     }
   ]
 }

@@ -166,7 +166,9 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 
 ## DB マイグレーション / コード生成
 
-- テーブル定義は `sql/tables/NNN_*.sql`。`sql/build-schema.sh` がそれらを結合して `sql/schema.sql` を生成し、`make db-apply` が適用する。
+- スキーマは 2 層構成。`sql/core/` は複数プロダクトが同じ DB に書き合うための共有スキーマ契約のコピー（編集不可、`sql/core/UPSTREAM.json` で上流に固定）、`sql/time/` が本アプリ固有のテーブル。
+- `sql/build-schema.sh` が core → time の順に結合して `sql/schema.sql` を生成し、`make db-apply` が適用する。
+- `make test-conformance` で、生成したスキーマが契約を満たしているかを検証する。`make check-core` は vendor したコピーが未編集かつ最新かを確認する。
 - クエリは `sql/queries/*.sql` に書き、`make sqlc` で `apps/api/internal/db/generated/` に Go コードを生成する。
 
 ## ライセンス

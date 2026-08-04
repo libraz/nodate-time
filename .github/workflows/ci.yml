@@ -93,8 +93,13 @@ jobs:
         working-directory: apps/api
         run: go build ./...
 
-      - name: Test schema upgrade
-        run: bash sql/test-schema-upgrade.sh
+      # The schema claims to implement a shared contract; this is what
+      # checks that it does, rather than only that it loads.
+      - name: Core contract conformance
+        run: |
+          bash sql/core/conformance/run.sh \
+            --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-timetree_clone}" \
+            --mode all
 
       - name: Go vet
         working-directory: apps/api
