@@ -49,6 +49,14 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: apps/api/go.sum
 
+      # sql/core is a copy of the shared schema contract. This asserts
+      # that the copy is unedited here; the other half of the check —
+      # that it still matches the pinned upstream ref — is
+      # scripts/check-vendored-core.sh without --local-only, and needs
+      # that ref to be reachable from CI.
+      - name: Vendored contract unedited
+        run: bash scripts/check-vendored-core.sh --local-only
+
       - name: Build schema
         run: bash sql/build-schema.sh
 
