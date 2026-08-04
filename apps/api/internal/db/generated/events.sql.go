@@ -76,7 +76,7 @@ type ListEventsByCalendarRow struct {
 	OccurredAt       time.Time       `json:"occurredAt"`
 	ActorPublicID    sql.NullString  `json:"actorPublicId"`
 	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
-	ActorAvatarUrl   sql.NullString  `json:"actorAvatarUrl"`
+	ActorAvatarURL   sql.NullString  `json:"actorAvatarUrl"`
 }
 
 // ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
@@ -106,7 +106,7 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 			&i.OccurredAt,
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
-			&i.ActorAvatarUrl,
+			&i.ActorAvatarURL,
 		); err != nil {
 			return nil, err
 		}
@@ -121,7 +121,7 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 	return items, nil
 }
 
-const listEventsByType = `-- name: ListEventsByType :many
+const listEventsBySubject = `-- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url
@@ -129,19 +129,19 @@ FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
-  AND e.type LIKE ?
+  AND e.payload_json->>'$.id' = CAST(? AS CHAR)
 ORDER BY e.id DESC
 LIMIT ?
 `
 
-type ListEventsByTypeParams struct {
+type ListEventsBySubjectParams struct {
 	WorkspaceID uint32        `json:"workspaceId"`
 	CalendarID  sql.NullInt32 `json:"calendarId"`
-	TypePrefix  string        `json:"typePrefix"`
+	SubjectID   interface{}   `json:"subjectId"`
 	Limit       int32         `json:"limit"`
 }
 
-type ListEventsByTypeRow struct {
+type ListEventsBySubjectRow struct {
 	ID               uint64          `json:"id"`
 	PublicID         []byte          `json:"publicId"`
 	Type             string          `json:"type"`
@@ -149,26 +149,33 @@ type ListEventsByTypeRow struct {
 	OccurredAt       time.Time       `json:"occurredAt"`
 	ActorPublicID    sql.NullString  `json:"actorPublicId"`
 	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
-	ActorAvatarUrl   sql.NullString  `json:"actorAvatarUrl"`
+	ActorAvatarURL   sql.NullString  `json:"actorAvatarUrl"`
 }
 
-// ListEventsByType filters the same feed to one entity's history. The type
-// prefix is matched by the caller rather than parsed here, so a new event
-// kind needs no query change.
-func (q *Queries) ListEventsByType(ctx context.Context, arg ListEventsByTypeParams) ([]ListEventsByTypeRow, error) {
-	rows, err := q.db.QueryContext(ctx, listEventsByType,
+// ListEventsBySubject is one entity's history: every log row whose payload
+// names it. The subject is matched inside payload_json rather than through
+// a column, because the log records public ids and the contract gives the
+// payload no fixed schema beyond that.
+//
+// The (workspace_id, calendar_id, occurred_at) index bounds the scan to one
+// calendar's history, which is the same set the activity feed already pages
+// through. There is deliberately no second table keyed by entity: two
+// records of who changed what eventually disagree, and then neither can be
+// trusted.
+func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubjectParams) ([]ListEventsBySubjectRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsBySubject,
 		arg.WorkspaceID,
 		arg.CalendarID,
-		arg.TypePrefix,
+		arg.SubjectID,
 		arg.Limit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListEventsByTypeRow
+	var items []ListEventsBySubjectRow
 	for rows.Next() {
-		var i ListEventsByTypeRow
+		var i ListEventsBySubjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,
@@ -177,7 +184,7 @@ func (q *Queries) ListEventsByType(ctx context.Context, arg ListEventsByTypePara
 			&i.OccurredAt,
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
-			&i.ActorAvatarUrl,
+			&i.ActorAvatarURL,
 		); err != nil {
 			return nil, err
 		}

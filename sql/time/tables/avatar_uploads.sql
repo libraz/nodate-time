@@ -13,7 +13,8 @@ CREATE TABLE avatar_uploads (
   public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible ID',
   user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id',
 
-  storage_key VARCHAR(1000) NOT NULL COMMENT 'Object key the presigned URL was issued for',
+  sha256 BINARY(32) NOT NULL COMMENT 'Digest of the bytes the client is about to upload. Carried through the reservation because storage_objects is keyed on it, and the digest is not knowable server-side until the object has landed.',
+  storage_key VARCHAR(1000) NOT NULL COMMENT 'Object key the presigned URL was issued for; derived from the digest, never from a client-supplied filename',
   content_type VARCHAR(255) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'Declared MIME type',
   byte_size BIGINT UNSIGNED NOT NULL COMMENT 'Declared size in bytes',
   expires_at DATETIME(3) NOT NULL COMMENT 'After this the reservation is abandoned and the object may be swept',

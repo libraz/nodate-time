@@ -1,9 +1,14 @@
 -- Blob metadata. The bytes live in object storage; this table is the
 -- index, and ref_count is what decides when an object may be swept.
 
+-- CreateStorageObject is content-addressed: the unique key is (scope, sha256),
+-- so re-uploading identical bytes finds the existing row instead of writing a
+-- second copy. ref_count stays at whatever it was; the caller increments it
+-- when it attaches the object to something.
 -- name: CreateStorageObject :execresult
-INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, byte_size, content_type, storage_key, ref_count)
-VALUES (?, ?, ?, ?, ?, ?, 0);
+INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+ON DUPLICATE KEY UPDATE id = id;
 
 -- name: GetStorageObjectByID :one
 SELECT * FROM storage_objects WHERE id = ? AND enabled = TRUE;

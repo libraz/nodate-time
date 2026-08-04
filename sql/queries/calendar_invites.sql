@@ -8,11 +8,29 @@ WHERE token_hash = ?
   AND (expires_at IS NULL OR expires_at > NOW(3))
   AND (max_uses IS NULL OR use_count < max_uses);
 
+-- GetInviteByTokenHashWithCalendar backs the page a link opens. It matches
+-- both kinds of link, because a join link has to show what is being joined
+-- -- but it exposes only the calendar's name and colour, never its
+-- contents. Reading those requires GetPublicInviteByTokenHash below.
 -- name: GetInviteByTokenHashWithCalendar :one
 SELECT ci.*, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
 FROM calendar_invites ci
 INNER JOIN calendars c ON c.id = ci.calendar_id AND c.enabled = TRUE
 WHERE ci.token_hash = ?
+  AND ci.enabled = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3));
+
+-- GetPublicInviteByTokenHash matches only a link that publishes the
+-- calendar. A join link grants access on acceptance and grants nothing
+-- before it; serving its events would hand the calendar's contents to
+-- anyone holding the link without them ever joining, which is precisely
+-- the access the link was supposed to be an offer of.
+-- name: GetPublicInviteByTokenHash :one
+SELECT ci.*, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
+FROM calendar_invites ci
+INNER JOIN calendars c ON c.id = ci.calendar_id AND c.enabled = TRUE
+WHERE ci.token_hash = ?
+  AND ci.is_public = TRUE
   AND ci.enabled = TRUE
   AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3));
 
@@ -30,8 +48,11 @@ WHERE id = ? AND enabled = TRUE AND (max_uses IS NULL OR use_count < max_uses);
 -- name: RevokeInvite :exec
 UPDATE calendar_invites SET enabled = FALSE WHERE id = ?;
 
--- name: RevokeInviteByIDAndCalendar :execresult
-UPDATE calendar_invites SET enabled = FALSE WHERE id = ? AND calendar_id = ?;
+-- RevokeInviteByPublicIDAndCalendar takes the public id, which is the only
+-- identifier an API response carries. Scoping to the calendar as well means
+-- a link from another calendar cannot be revoked by whoever guesses its id.
+-- name: RevokeInviteByPublicIDAndCalendar :execresult
+UPDATE calendar_invites SET enabled = FALSE WHERE public_id = ? AND calendar_id = ?;
 
 -- name: ListInvitesByCalendar :many
 SELECT * FROM calendar_invites

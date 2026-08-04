@@ -13,14 +13,16 @@ import (
 
 const createStorageObject = `-- name: CreateStorageObject :execresult
 
-INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, byte_size, content_type, storage_key, ref_count)
-VALUES (?, ?, ?, ?, ?, ?, 0)
+INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+ON DUPLICATE KEY UPDATE id = id
 `
 
 type CreateStorageObjectParams struct {
 	PublicID    []byte        `json:"publicId"`
 	WorkspaceID sql.NullInt32 `json:"workspaceId"`
 	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+	Sha256      []byte        `json:"sha256"`
 	ByteSize    uint64        `json:"byteSize"`
 	ContentType string        `json:"contentType"`
 	StorageKey  string        `json:"storageKey"`
@@ -28,11 +30,16 @@ type CreateStorageObjectParams struct {
 
 // Blob metadata. The bytes live in object storage; this table is the
 // index, and ref_count is what decides when an object may be swept.
+// CreateStorageObject is content-addressed: the unique key is (scope, sha256),
+// so re-uploading identical bytes finds the existing row instead of writing a
+// second copy. ref_count stays at whatever it was; the caller increments it
+// when it attaches the object to something.
 func (q *Queries) CreateStorageObject(ctx context.Context, arg CreateStorageObjectParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createStorageObject,
 		arg.PublicID,
 		arg.WorkspaceID,
 		arg.OwnerUserID,
+		arg.Sha256,
 		arg.ByteSize,
 		arg.ContentType,
 		arg.StorageKey,

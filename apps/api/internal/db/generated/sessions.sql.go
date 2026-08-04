@@ -48,6 +48,40 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt time.Time
 	return err
 }
 
+const getLiveSession = `-- name: GetLiveSession :one
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
+WHERE id = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+  AND expires_at > NOW(3)
+`
+
+// GetLiveSession is the per-request check behind an access token. The
+// token carries the session id, so revoking one device signs out that
+// device and no other -- which a version counter on the user row cannot
+// express, since it can only invalidate all of them at once.
+func (q *Queries) GetLiveSession(ctx context.Context, id uint32) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getLiveSession, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.UserID,
+		&i.RefreshHash,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
 SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
 WHERE refresh_hash = ?

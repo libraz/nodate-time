@@ -228,7 +228,7 @@ type ListAlbumPhotosAfterRow struct {
 	CreatedAt           time.Time      `json:"createdAt"`
 	UploaderPublicID    []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName string         `json:"uploaderDisplayName"`
-	UploaderAvatarUrl   sql.NullString `json:"uploaderAvatarUrl"`
+	UploaderAvatarURL   sql.NullString `json:"uploaderAvatarUrl"`
 	EventPublicID       sql.NullString `json:"eventPublicId"`
 }
 
@@ -268,7 +268,7 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.CreatedAt,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
-			&i.UploaderAvatarUrl,
+			&i.UploaderAvatarURL,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err
@@ -324,7 +324,7 @@ type ListAlbumPhotosFirstPageRow struct {
 	CreatedAt           time.Time      `json:"createdAt"`
 	UploaderPublicID    []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName string         `json:"uploaderDisplayName"`
-	UploaderAvatarUrl   sql.NullString `json:"uploaderAvatarUrl"`
+	UploaderAvatarURL   sql.NullString `json:"uploaderAvatarUrl"`
 	EventPublicID       sql.NullString `json:"eventPublicId"`
 }
 
@@ -358,7 +358,7 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.CreatedAt,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
-			&i.UploaderAvatarUrl,
+			&i.UploaderAvatarURL,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err

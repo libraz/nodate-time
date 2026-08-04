@@ -57,7 +57,7 @@ type GetEventCommentByPublicIDRow struct {
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
 	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarUrl   sql.NullString `json:"userAvatarUrl"`
+	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
 	UserPublicID    []byte         `json:"userPublicId"`
 }
 
@@ -79,7 +79,7 @@ func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte
 		&i.UpdatedAt,
 		&i.CreatedAt,
 		&i.UserDisplayName,
-		&i.UserAvatarUrl,
+		&i.UserAvatarURL,
 		&i.UserPublicID,
 	)
 	return i, err
@@ -113,7 +113,7 @@ type GetEventCommentByPublicIDAndEventRow struct {
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
 	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarUrl   sql.NullString `json:"userAvatarUrl"`
+	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
 	UserPublicID    []byte         `json:"userPublicId"`
 }
 
@@ -135,7 +135,7 @@ func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg Get
 		&i.UpdatedAt,
 		&i.CreatedAt,
 		&i.UserDisplayName,
-		&i.UserAvatarUrl,
+		&i.UserAvatarURL,
 		&i.UserPublicID,
 	)
 	return i, err
@@ -165,7 +165,7 @@ type ListEventCommentsRow struct {
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
 	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarUrl   sql.NullString `json:"userAvatarUrl"`
+	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
 	UserPublicID    []byte         `json:"userPublicId"`
 }
 
@@ -193,7 +193,7 @@ func (q *Queries) ListEventComments(ctx context.Context, eventID sql.NullInt32) 
 			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.UserDisplayName,
-			&i.UserAvatarUrl,
+			&i.UserAvatarURL,
 			&i.UserPublicID,
 		); err != nil {
 			return nil, err

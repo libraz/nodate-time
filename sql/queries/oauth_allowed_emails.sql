@@ -16,5 +16,6 @@ ON DUPLICATE KEY UPDATE
 
 -- WithdrawAllowedEmail disables rather than deletes: the exception was a
 -- deliberate act and the record of who made it outlives its usefulness.
--- name: WithdrawAllowedEmail :exec
-UPDATE oauth_allowed_emails SET enabled = FALSE WHERE id = ?;
+-- It takes the public id, which is the only identifier the API exposes.
+-- name: WithdrawAllowedEmail :execresult
+UPDATE oauth_allowed_emails SET enabled = FALSE WHERE public_id = ? AND enabled = TRUE;

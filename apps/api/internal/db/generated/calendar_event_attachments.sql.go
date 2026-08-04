@@ -53,6 +53,18 @@ func (q *Queries) CreateEventAttachment(ctx context.Context, arg CreateEventAtta
 	)
 }
 
+const deleteAbandonedAttachment = `-- name: DeleteAbandonedAttachment :exec
+DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE
+`
+
+// DeleteAbandonedAttachment removes a reservation whose upload never
+// landed. It re-checks enabled = FALSE so a row confirmed between the
+// sweep listing it and this delete is left alone.
+func (q *Queries) DeleteAbandonedAttachment(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, deleteAbandonedAttachment, id)
+	return err
+}
+
 const deletePendingAttachment = `-- name: DeletePendingAttachment :exec
 DELETE FROM calendar_event_attachments
 WHERE id = ? AND uploader_id = ? AND enabled = FALSE
@@ -96,6 +108,58 @@ type GetAttachmentByPublicIDRow struct {
 func (q *Queries) GetAttachmentByPublicID(ctx context.Context, publicID []byte) (GetAttachmentByPublicIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getAttachmentByPublicID, publicID)
 	var i GetAttachmentByPublicIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.EventID,
+		&i.UploaderID,
+		&i.StorageObjectID,
+		&i.Filename,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.StorageKey,
+		&i.ContentType,
+		&i.ByteSize,
+	)
+	return i, err
+}
+
+const getPendingAttachmentByPublicID = `-- name: GetPendingAttachmentByPublicID :one
+SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size
+FROM calendar_event_attachments a
+INNER JOIN storage_objects so ON so.id = a.storage_object_id
+WHERE a.public_id = ? AND a.enabled = FALSE
+`
+
+type GetPendingAttachmentByPublicIDRow struct {
+	ID              uint32         `json:"id"`
+	PublicID        []byte         `json:"publicId"`
+	WorkspaceID     uint32         `json:"workspaceId"`
+	EventID         sql.NullInt32  `json:"eventId"`
+	UploaderID      uint32         `json:"uploaderId"`
+	StorageObjectID uint32         `json:"storageObjectId"`
+	Filename        string         `json:"filename"`
+	SortWeight      int32          `json:"sortWeight"`
+	Notes           sql.NullString `json:"notes"`
+	Enabled         bool           `json:"enabled"`
+	UpdatedAt       sql.NullTime   `json:"updatedAt"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	StorageKey      string         `json:"storageKey"`
+	ContentType     string         `json:"contentType"`
+	ByteSize        uint64         `json:"byteSize"`
+}
+
+// GetPendingAttachmentByPublicID finds a reservation whose upload has not
+// been confirmed. It is a separate query because the enabled = TRUE filter
+// on the one above is what keeps an unconfirmed row out of every read path
+// -- and confirming is the one operation that has to see it.
+func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID []byte) (GetPendingAttachmentByPublicIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getPendingAttachmentByPublicID, publicID)
+	var i GetPendingAttachmentByPublicIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,

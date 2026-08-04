@@ -25,13 +25,14 @@ func (q *Queries) CountActiveAvatarUploads(ctx context.Context, userID uint32) (
 
 const createAvatarUpload = `-- name: CreateAvatarUpload :execresult
 INSERT INTO avatar_uploads (
-  public_id, user_id, storage_key, content_type, byte_size, expires_at
-) VALUES (?, ?, ?, ?, ?, ?)
+  public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateAvatarUploadParams struct {
 	PublicID    []byte    `json:"publicId"`
 	UserID      uint32    `json:"userId"`
+	Sha256      []byte    `json:"sha256"`
 	StorageKey  string    `json:"storageKey"`
 	ContentType string    `json:"contentType"`
 	ByteSize    uint64    `json:"byteSize"`
@@ -42,6 +43,7 @@ func (q *Queries) CreateAvatarUpload(ctx context.Context, arg CreateAvatarUpload
 	return q.db.ExecContext(ctx, createAvatarUpload,
 		arg.PublicID,
 		arg.UserID,
+		arg.Sha256,
 		arg.StorageKey,
 		arg.ContentType,
 		arg.ByteSize,
@@ -72,7 +74,7 @@ func (q *Queries) DeleteExpiredAvatarUpload(ctx context.Context, arg DeleteExpir
 }
 
 const getAvatarUploadForUser = `-- name: GetAvatarUploadForUser :one
-SELECT id, public_id, user_id, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads
+SELECT id, public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads
 WHERE public_id = ? AND user_id = ? AND expires_at > CURRENT_TIMESTAMP(3)
 LIMIT 1
 `
@@ -89,6 +91,7 @@ func (q *Queries) GetAvatarUploadForUser(ctx context.Context, arg GetAvatarUploa
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
+		&i.Sha256,
 		&i.StorageKey,
 		&i.ContentType,
 		&i.ByteSize,
@@ -103,7 +106,7 @@ func (q *Queries) GetAvatarUploadForUser(ctx context.Context, arg GetAvatarUploa
 }
 
 const getAvatarUploadForUserForUpdate = `-- name: GetAvatarUploadForUserForUpdate :one
-SELECT id, public_id, user_id, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads
+SELECT id, public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads
 WHERE id = ? AND user_id = ? AND expires_at > CURRENT_TIMESTAMP(3)
 LIMIT 1
 FOR UPDATE
@@ -121,6 +124,7 @@ func (q *Queries) GetAvatarUploadForUserForUpdate(ctx context.Context, arg GetAv
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
+		&i.Sha256,
 		&i.StorageKey,
 		&i.ContentType,
 		&i.ByteSize,
@@ -135,7 +139,7 @@ func (q *Queries) GetAvatarUploadForUserForUpdate(ctx context.Context, arg GetAv
 }
 
 const listExpiredAvatarUploads = `-- name: ListExpiredAvatarUploads :many
-SELECT id, public_id, user_id, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads WHERE expires_at <= ? ORDER BY id LIMIT 500
+SELECT id, public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads WHERE expires_at <= ? ORDER BY id LIMIT 500
 `
 
 func (q *Queries) ListExpiredAvatarUploads(ctx context.Context, expiresAt time.Time) ([]AvatarUpload, error) {
@@ -151,6 +155,7 @@ func (q *Queries) ListExpiredAvatarUploads(ctx context.Context, expiresAt time.T
 			&i.ID,
 			&i.PublicID,
 			&i.UserID,
+			&i.Sha256,
 			&i.StorageKey,
 			&i.ContentType,
 			&i.ByteSize,
