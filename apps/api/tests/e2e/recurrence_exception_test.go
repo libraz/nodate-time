@@ -65,13 +65,12 @@ func TestRecurringEditSingleOccurrence(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-10T18:00:00+09:00",
 			"endAt":              "2026-04-10T19:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Equal(t, "Moved standup", updated.Title)
@@ -149,13 +148,12 @@ func TestRecurringDeleteAllPurgesOverrides(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T20:00:00+09:00",
 			"endAt":              "2026-04-17T21:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -189,13 +187,12 @@ func TestRecurringEditAllFromOccurrencePreservesPastInstances(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T18:00:00+09:00",
 			"endAt":              "2026-04-17T19:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,
@@ -238,13 +235,12 @@ func TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-03T16:00:00+09:00",
 			"endAt":              "2026-04-03T17:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,
@@ -290,13 +286,12 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T20:00:00+09:00",
 			"endAt":              "2026-04-17T21:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -307,13 +302,12 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-04T15:00:00+09:00",
 			"endAt":              "2026-04-04T16:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,
@@ -354,13 +348,12 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T20:00:00+09:00",
 			"endAt":              "2026-04-17T21:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -371,13 +364,12 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-03T15:00:00+09:00",
 			"endAt":              "2026-04-03T16:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -399,7 +391,7 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 
 	var master struct {
@@ -446,13 +438,12 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-10T15:00:00+09:00",
 			"endAt":              "2026-04-10T16:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{owner.UserID},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	require.Equal(t, []string{owner.UserID}, updated.Participants)

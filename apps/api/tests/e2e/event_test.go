@@ -31,13 +31,14 @@ func TestEventLifecycle(t *testing.T) {
 			"allDay":   false,
 			"startAt":  "2026-04-20T15:00:00+09:00",
 			"endAt":    "2026-04-20T16:00:00+09:00",
-			"color":    "#F35F8C",
 			"location": "会議室A",
 			"memo":     "議題：Q2計画",
 		}, &evt)
 	require.NotEmpty(t, evt.ID)
 	require.Equal(t, "定例MTG", evt.Title)
-	require.Equal(t, "#F35F8C", evt.Color)
+	// The colour is not stored on the event: it comes from the owner's
+	// membership, which for the calendar's creator is the calendar colour.
+	require.Equal(t, tt.CalendarColor, evt.Color)
 
 	// List events in range
 	var evts []struct {
@@ -68,13 +69,12 @@ func TestEventLifecycle(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-20T15:00:00+09:00",
 			"endAt":              "2026-04-20T17:00:00+09:00",
-			"color":              "#2ECC87",
 			"location":           "会議室B",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	require.Equal(t, "定例MTG（更新）", updated.Title)
@@ -107,7 +107,6 @@ func TestEventAllDay(t *testing.T) {
 			"allDay":  true,
 			"startAt": "2026-04-25T00:00:00+09:00",
 			"endAt":   "2026-04-27T00:00:00+09:00",
-			"color":   "#FDC02D",
 		}, &evt)
 	require.True(t, evt.AllDay)
 }
@@ -296,13 +295,12 @@ func TestRecurringEventUpdate(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-06T10:00:00+09:00",
 			"endAt":              "2026-04-06T11:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,

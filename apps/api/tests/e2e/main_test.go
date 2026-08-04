@@ -16,6 +16,8 @@ var (
 	testMailer    *helpers.CapturingMailer
 	testStorage   *storage.Client
 	testBucket    string
+	// testWorkspacePublicID is the scope object storage keys are built from.
+	testWorkspacePublicID string
 )
 
 func TestMain(m *testing.M) {
@@ -30,6 +32,7 @@ func TestMain(m *testing.M) {
 	}
 	testDB = db
 
+	testWorkspacePublicID = helpers.TestWorkspacePublicID(db)
 	srv := helpers.NewTestServerForMain(db)
 	testServerURL = srv.BaseURL
 	testMailer = srv.Mailer

@@ -80,7 +80,7 @@ func TestCalendarMembers(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/members", tt.AccessToken, nil, &members)
 	require.Len(t, members, 1)
-	require.Equal(t, "admin", members[0].Role)
+	require.Equal(t, "owner", members[0].Role)
 }
 
 func TestCalendarLabels(t *testing.T) {

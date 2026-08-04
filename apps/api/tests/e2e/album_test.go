@@ -128,9 +128,9 @@ func TestAlbumPhotoChangesAppearInActivity(t *testing.T) {
 			seen[item.Action] = true
 		}
 	}
-	require.True(t, seen["create"], "confirming an album photo must be audited")
-	require.True(t, seen["update"], "editing an album photo must be audited")
-	require.True(t, seen["delete"], "deleting an album photo must be audited")
+	require.True(t, seen["calendar.photo.uploaded"], "confirming an album photo must be recorded")
+	require.True(t, seen["calendar.photo.updated"], "editing an album photo must be recorded")
+	require.True(t, seen["calendar.photo.deleted"], "deleting an album photo must be recorded")
 }
 
 func TestAlbumPhotoEventLink(t *testing.T) {

@@ -56,7 +56,7 @@ func TestForceAddMemberEndpointRemoved(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+owner.CalendarID+"/members", owner.AccessToken,
-		map[string]any{"email": victim.Email, "role": "member"})
+		map[string]any{"email": victim.Email, "role": "editor"})
 	require.GreaterOrEqual(t, status, 400, "direct add-member endpoint must no longer exist")
 
 	// The victim must not have been force-joined: only the owner remains.

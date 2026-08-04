@@ -157,9 +157,11 @@ func TestOAuthGoogleFlowRejectsUnverifiedEmail(t *testing.T) {
 
 func newOAuthTestServer(t *testing.T, cfg users.OAuthConfig) *httptest.Server {
 	t.Helper()
+	queries := generated.New(testDB)
 	deps := router.Deps{
 		DB:                   testDB,
-		Queries:              generated.New(testDB),
+		Queries:              queries,
+		WorkspaceID:          helpers.TestWorkspace(queries).ID,
 		JWTSecret:            helpers.TestJWTSecret,
 		Mailer:               &helpers.CapturingMailer{},
 		WebURL:               helpers.TestWebURL,

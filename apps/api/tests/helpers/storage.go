@@ -18,8 +18,11 @@ import (
 // reconstruct the key from the same layout the handlers build it with.
 
 // AvatarStorageKey mirrors users.avatarStorageKey.
-func AvatarStorageKey(userID, avatarID string) string {
-	return fmt.Sprintf("avatars/%s/%s", userID, avatarID)
+// AvatarStorageKey mirrors users.avatarStorageKey. The key is built from the
+// digest of the bytes, not from the reservation id: the blob is
+// content-addressed, so re-uploading the same picture lands on one object.
+func AvatarStorageKey(userID, sha256Hex string) string {
+	return fmt.Sprintf("avatars/%s/%s", userID, sha256Hex)
 }
 
 // AlbumPhotoStorageKey mirrors albums.photoStorageKey.
@@ -28,8 +31,12 @@ func AlbumPhotoStorageKey(calendarID, photoID string) string {
 }
 
 // AttachmentStorageKey mirrors the key events.PresignUpload builds.
-func AttachmentStorageKey(calendarID, eventID, attachmentID string) string {
-	return fmt.Sprintf("attachments/%s/%s/%s", calendarID, eventID, attachmentID)
+// AttachmentStorageKey mirrors events.PresignUpload. The key is scoped by
+// workspace and named by the digest, which is the scope and identity
+// storage_objects is unique on -- so identical bytes anywhere in the
+// workspace resolve to one object.
+func AttachmentStorageKey(workspacePublicID, sha256Hex string) string {
+	return fmt.Sprintf("workspace/%s/%s", workspacePublicID, sha256Hex)
 }
 
 // UploadToPresignedURL performs an HTTP PUT to a presigned URL, mimicking what

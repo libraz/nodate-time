@@ -25,7 +25,7 @@ func TestUpdateCalendarIsAdminOnly(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
 
 	// Member (non-admin) cannot rename the calendar.
@@ -71,7 +71,7 @@ func TestInviteCannotGrantAdmin(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + owner.CalendarID
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "admin"})
+		map[string]any{"role": "owner"})
 	// The admin role is rejected at the schema layer (enum: member,viewer), which
 	// Huma reports as 422; a 400 from the handler is equally acceptable. Either way
 	// an invite must never be able to grant admin.
@@ -94,7 +94,7 @@ func TestSingleUseInviteCannotBeReused(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member", "maxUses": 1}, &inv)
+		map[string]any{"role": "editor", "maxUses": 1}, &inv)
 
 	// First user consumes the single use.
 	firstStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", first.AccessToken, nil)
@@ -129,7 +129,7 @@ func TestDeleteInviteRejectsUnknownIDAndDoesNotAudit(t *testing.T) {
 	var feed activityPage
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=20", owner.AccessToken, nil, &feed)
 	for _, item := range feed.Items {
-		require.False(t, item.EntityType == "invite" && item.Action == "revoke",
+		require.False(t, item.EntityType == "invite" && item.Action == "calendar.invite.revoked",
 			"a no-op delete must not be audited as a revoke")
 	}
 }
@@ -149,7 +149,7 @@ func TestSingleUseInviteConcurrentAccept(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member", "maxUses": 1}, &inv)
+		map[string]any{"role": "editor", "maxUses": 1}, &inv)
 
 	start := make(chan struct{})
 	statuses := make(chan int, 2)
@@ -192,7 +192,7 @@ func TestReacceptInviteIsIdempotent(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member", "maxUses": 2}, &inv)
+		map[string]any{"role": "editor", "maxUses": 2}, &inv)
 
 	s1, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil)
 	require.True(t, s1 >= 200 && s1 < 300)
@@ -226,13 +226,12 @@ func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "not-a-date",
 			"endAt":              "2026-05-12T10:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		})
 	require.Equal(t, 400, status)
@@ -258,9 +257,9 @@ func TestCreateEventRejectsInvalidRecurrence(t *testing.T) {
 	require.Equal(t, 400, status)
 }
 
-// TestAssignedToMustBeMember verifies an event assignee must be a calendar
+// TestOwnerIDMustBeMember verifies an event assignee must be a calendar
 // member, and that a valid assignee round-trips.
-func TestAssignedToMustBeMember(t *testing.T) {
+func TestOwnerIDMustBeMember(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -271,28 +270,28 @@ func TestAssignedToMustBeMember(t *testing.T) {
 	// Assigning a non-member is rejected.
 	badStatus, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":      "Assigned to outsider",
-			"allDay":     false,
-			"startAt":    "2026-05-12T09:00:00+09:00",
-			"endAt":      "2026-05-12T10:00:00+09:00",
-			"assignedTo": outsider.UserID,
+			"title":   "Assigned to outsider",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+			"ownerId": outsider.UserID,
 		})
 	require.Equal(t, 400, badStatus)
 
 	// Assigning the owner (a member) round-trips.
 	var evt struct {
-		AssignedTo *string `json:"assignedTo"`
+		OwnerID *string `json:"ownerId"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":      "Assigned to owner",
-			"allDay":     false,
-			"startAt":    "2026-05-12T09:00:00+09:00",
-			"endAt":      "2026-05-12T10:00:00+09:00",
-			"assignedTo": owner.UserID,
+			"title":   "Assigned to owner",
+			"allDay":  false,
+			"startAt": "2026-05-12T09:00:00+09:00",
+			"endAt":   "2026-05-12T10:00:00+09:00",
+			"ownerId": owner.UserID,
 		}, &evt)
-	require.NotNil(t, evt.AssignedTo)
-	require.Equal(t, owner.UserID, *evt.AssignedTo)
+	require.NotNil(t, evt.OwnerID)
+	require.Equal(t, owner.UserID, *evt.OwnerID)
 }
 
 // TestEventHistoryIsCalendarScoped verifies an event audit history request
@@ -354,13 +353,12 @@ func TestEventHistoryIsNewestFirst(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-05-12T09:00:00+09:00",
 			"endAt":              "2026-05-12T10:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -370,9 +368,9 @@ func TestEventHistoryIsNewestFirst(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &history)
 	require.Len(t, history, 2)
-	require.Equal(t, "update", history[0].Action, "the most recent change must come first")
+	require.Equal(t, "calendar.event.updated", history[0].Action, "the most recent change must come first")
 	require.Contains(t, history[0].Summary, "v2")
-	require.Equal(t, "create", history[1].Action)
+	require.Equal(t, "calendar.event.created", history[1].Action)
 }
 
 // TestAdminRouteRejectsNonAdminWithJSONError verifies a non-admin's request
@@ -422,13 +420,12 @@ func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-10T18:00:00+09:00",
 			"endAt":              "2026-04-10T19:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -440,7 +437,7 @@ func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
 	require.Equal(t, 200, status)
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil, &byComposite)
 	require.NotEmpty(t, byComposite)
-	require.Equal(t, "update", byComposite[0].Action)
+	require.Equal(t, "calendar.event.updated", byComposite[0].Action)
 
 	// The composite id resolves to the same parent series, so its history
 	// must match fetching by the plain parent id.
@@ -471,7 +468,7 @@ func TestAttachmentPresignRejectsSVG(t *testing.T) {
 		}, &evt)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
-		map[string]any{"filename": "active.svg", "contentType": "image/svg+xml", "byteSize": 128})
+		map[string]any{"filename": "active.svg", "contentType": "image/svg+xml", "byteSize": 128, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	require.Equal(t, http.StatusBadRequest, status)
 }
 
@@ -504,7 +501,7 @@ func TestAttachmentPresignedPutRejectsMismatchedContentLength(t *testing.T) {
 		UploadURL    string `json:"uploadUrl"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
-		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1}, &pres)
+		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1, "sha256": helpers.SHA256Hex(body)}, &pres)
 
 	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "application/pdf", body)
 	require.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
@@ -539,22 +536,33 @@ func TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
 		UploadURL    string `json:"uploadUrl"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
-		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1}, &pres)
+		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1, "sha256": helpers.SHA256Hex(body)}, &pres)
 
 	storageClient := getTestStorage()
 	require.NotNil(t, storageClient)
 	// Reconstruct the key PresignUpload built, bypassing the (now
 	// size-enforcing) presigned URL to place a mismatched object directly.
-	storageKey := helpers.AttachmentStorageKey(tt.CalendarID, evt.ID, pres.AttachmentID)
+	storageKey := helpers.AttachmentStorageKey(testWorkspacePublicID, helpers.SHA256Hex(body))
 	helpers.PutRawObject(t, getTestBucket(), storageKey, "application/pdf", body)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
 	require.Equal(t, http.StatusBadRequest, status)
 
+	// The blob is deliberately left alone. It is content-addressed, so the
+	// same bytes may already back a correctly confirmed attachment
+	// elsewhere in the workspace, and deleting it here would break that
+	// one. Nothing points at it from this reservation any more, so the
+	// unreferenced-object sweep is what collects it.
 	_, exists, err := storageClient.StatObject(testCtx(), storageKey)
 	require.NoError(t, err)
-	require.False(t, exists, "mismatched attachment object should be removed")
+	require.True(t, exists, "a shared blob must survive one reservation failing")
+
+	var objectRefs int
+	require.NoError(t, testDB.QueryRow(
+		"SELECT ref_count FROM storage_objects WHERE storage_key = ?", storageKey,
+	).Scan(&objectRefs))
+	require.Zero(t, objectRefs, "a failed confirm must not take a reference on the blob")
 
 	status, _ = helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
@@ -600,15 +608,15 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + owner.CalendarID
 
 	var inv struct {
-		ID    uint32 `json:"id"`
+		ID    string `json:"id"`
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
-		map[string]any{"role": "admin"}, nil)
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+uintToStr(inv.ID), owner.AccessToken, nil)
+		map[string]any{"role": "owner"}, nil)
+	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+inv.ID, owner.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	type activityFeedItem struct {
@@ -631,16 +639,16 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 	for _, item := range feed.Items {
 		key := item.EntityType + ":" + item.Action
 		seen[key] = true
-		if key == "member:role_change" {
-			require.Contains(t, item.Summary, "admin")
+		if key == "member:calendar.member.role_changed" {
+			require.Contains(t, item.Summary, "owner")
 			require.NotNil(t, item.Actor)
 			require.Equal(t, owner.UserID, item.Actor.ID)
 		}
 	}
-	require.True(t, seen["invite:create"], "invite creation must be audited")
-	require.True(t, seen["member:join"], "invite acceptance must be audited")
-	require.True(t, seen["member:role_change"], "member role changes must be audited")
-	require.True(t, seen["invite:revoke"], "invite revocation must be audited")
+	require.True(t, seen["invite:calendar.invite.created"], "invite creation must be recorded")
+	require.True(t, seen["member:calendar.member.joined"], "invite acceptance must be recorded")
+	require.True(t, seen["member:calendar.member.role_changed"], "member role changes must be recorded")
+	require.True(t, seen["invite:calendar.invite.revoked"], "invite revocation must be recorded")
 
 	var firstPage activityPage
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=2", owner.AccessToken, nil, &firstPage)
@@ -688,7 +696,7 @@ func TestAttachmentDownloadIsTenantScoped(t *testing.T) {
 		AttachmentID string `json:"attachmentId"`
 	}
 	helpers.DoJSON(t, http.MethodPost, victimCal+"/events/"+vEvt.ID+"/attachments/presign", victim.AccessToken,
-		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": 1024}, &att)
+		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": 1024, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, &att)
 	require.NotEmpty(t, att.AttachmentID)
 
 	// Attacker creates their own event and tries to download the victim's

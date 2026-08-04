@@ -26,7 +26,6 @@ type avatarPresignResp struct {
 type userResp struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Icon      string `json:"icon"`
 	AvatarURL string `json:"avatarUrl"`
 }
 
@@ -40,7 +39,7 @@ func TestAvatarUploadHappyPath(t *testing.T) {
 
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png)},
+		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)},
 		&pres)
 	require.NotEmpty(t, pres.UploadURL)
 	require.NotEmpty(t, pres.AvatarID)
@@ -70,7 +69,7 @@ func TestAvatarTooLarge(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 	status, body := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 6 * 1024 * 1024})
+		map[string]any{"contentType": "image/png", "byteSize": 6 * 1024 * 1024, "sha256": helpers.SHA256Hex([]byte("oversized"))})
 	assert.Equal(t, 400, status)
 	assert.True(t, strings.Contains(string(body), "5MB") || strings.Contains(string(body), "exceeds"),
 		"expected size-limit message, got %s", string(body))
@@ -83,7 +82,7 @@ func TestAvatarInvalidContentType(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "application/pdf", "byteSize": 100})
+		map[string]any{"contentType": "application/pdf", "byteSize": 100, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	assert.Equal(t, 400, status)
 }
 
@@ -95,7 +94,7 @@ func TestAvatarConfirmWithoutUpload(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 64},
+		map[string]any{"contentType": "image/png", "byteSize": 64, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
 		&pres)
 	// Skip the PUT — confirm should fail because no object exists.
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -117,7 +116,7 @@ func TestAvatarPresignedPutRejectsMismatchedContentLength(t *testing.T) {
 
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
+		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1, "sha256": helpers.SHA256Hex(png)}, &pres)
 	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "image/png", png)
 	assert.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
 
@@ -142,8 +141,8 @@ func TestAvatarConfirmRejectsMismatchedActualSizeAndDeletesObject(t *testing.T) 
 
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
-	storageKey := helpers.AvatarStorageKey(tt.UserID, pres.AvatarID)
+		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1, "sha256": helpers.SHA256Hex(png)}, &pres)
+	storageKey := helpers.AvatarStorageKey(tt.UserID, helpers.SHA256Hex(png))
 	// Bypass the presigned URL to place an object whose size disagrees with
 	// what was declared, simulating the object ending up mismatched regardless
 	// of the upload path.
@@ -172,16 +171,16 @@ func TestAvatarPresignLimitsActiveSessionsPerUser(t *testing.T) {
 	for range 5 {
 		var pres avatarPresignResp
 		helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-			map[string]any{"contentType": "image/png", "byteSize": 64}, &pres)
+			map[string]any{"contentType": "image/png", "byteSize": 64, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, &pres)
 		require.NotEmpty(t, pres.AvatarID)
 	}
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 64})
+		map[string]any{"contentType": "image/png", "byteSize": 64, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	assert.Equal(t, http.StatusTooManyRequests, status)
 }
 
-func TestAvatarDeleteRestoresEmoji(t *testing.T) {
+func TestAvatarDeleteLeavesTheAccountIntact(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
 	t.Parallel()
@@ -191,7 +190,7 @@ func TestAvatarDeleteRestoresEmoji(t *testing.T) {
 
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres)
+		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres)
 	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
 
 	var confirmed userResp
@@ -202,7 +201,10 @@ func TestAvatarDeleteRestoresEmoji(t *testing.T) {
 	var deleted userResp
 	helpers.DoJSON(t, http.MethodDelete, testServerURL+"/user/avatar", tt.AccessToken, nil, &deleted)
 	assert.Empty(t, deleted.AvatarURL)
-	assert.NotEmpty(t, deleted.Icon, "emoji icon should still be present")
+	// Removing a picture removes the picture, not the account: the name is
+	// still there, and so is the reference count on the blob, which the
+	// sweep collects once nothing points at it.
+	assert.NotEmpty(t, deleted.Name, "the account must survive deleting its avatar")
 }
 
 func TestAvatarReplaceClearsOldKey(t *testing.T) {
@@ -216,7 +218,7 @@ func TestAvatarReplaceClearsOldKey(t *testing.T) {
 	// First upload
 	var pres1 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres1)
+		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres1)
 	helpers.UploadToPresignedURL(t, pres1.UploadURL, "image/png", png)
 	var u1 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -226,7 +228,7 @@ func TestAvatarReplaceClearsOldKey(t *testing.T) {
 	// Second upload — should replace and leave only the new object.
 	var pres2 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres2)
+		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres2)
 	require.NotEqual(t, pres1.AvatarID, pres2.AvatarID)
 	helpers.UploadToPresignedURL(t, pres2.UploadURL, "image/png", png)
 	var u2 userResp
@@ -248,7 +250,7 @@ func TestAvatarUnauthorized(t *testing.T) {
 	t.Parallel()
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", "",
-		map[string]any{"contentType": "image/png", "byteSize": 100})
+		map[string]any{"contentType": "image/png", "byteSize": 100, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	assert.Equal(t, 401, status)
 }
 
@@ -261,6 +263,6 @@ func TestAvatarWithoutStorageAvailable(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 100})
+		map[string]any{"contentType": "image/png", "byteSize": 100, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	assert.Equal(t, 503, status)
 }

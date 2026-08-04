@@ -129,13 +129,12 @@ func TestICalExportHonorsRecurrenceExceptions(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T20:00:00+09:00",
 			"endAt":              "2026-04-17T21:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
