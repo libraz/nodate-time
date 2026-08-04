@@ -86,13 +86,13 @@ func (q *Queries) ListAllowedEmails(ctx context.Context) ([]OauthAllowedEmail, e
 	return items, nil
 }
 
-const withdrawAllowedEmail = `-- name: WithdrawAllowedEmail :exec
-UPDATE oauth_allowed_emails SET enabled = FALSE WHERE id = ?
+const withdrawAllowedEmail = `-- name: WithdrawAllowedEmail :execresult
+UPDATE oauth_allowed_emails SET enabled = FALSE WHERE public_id = ? AND enabled = TRUE
 `
 
 // WithdrawAllowedEmail disables rather than deletes: the exception was a
 // deliberate act and the record of who made it outlives its usefulness.
-func (q *Queries) WithdrawAllowedEmail(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, withdrawAllowedEmail, id)
-	return err
+// It takes the public id, which is the only identifier the API exposes.
+func (q *Queries) WithdrawAllowedEmail(ctx context.Context, publicID []byte) (sql.Result, error) {
+	return q.db.ExecContext(ctx, withdrawAllowedEmail, publicID)
 }

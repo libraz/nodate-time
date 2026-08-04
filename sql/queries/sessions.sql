@@ -5,6 +5,17 @@
 INSERT INTO sessions (public_id, user_id, refresh_hash, user_agent, ip_address, expires_at)
 VALUES (?, ?, ?, ?, ?, ?);
 
+-- GetLiveSession is the per-request check behind an access token. The
+-- token carries the session id, so revoking one device signs out that
+-- device and no other -- which a version counter on the user row cannot
+-- express, since it can only invalidate all of them at once.
+-- name: GetLiveSession :one
+SELECT * FROM sessions
+WHERE id = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+  AND expires_at > NOW(3);
+
 -- name: GetSessionByRefreshHash :one
 SELECT * FROM sessions
 WHERE refresh_hash = ?

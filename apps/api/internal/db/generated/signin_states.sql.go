@@ -24,9 +24,11 @@ type ConsumeSigninStateRow struct {
 	ExpiresAt    time.Time            `json:"expiresAt"`
 }
 
-// ConsumeSigninState deletes and reports whether it deleted anything, so a
-// replayed callback finds nothing. Reading first and deleting after would
-// let two concurrent callbacks both pass.
+// ConsumeSigninState only reads. The caller must follow it with
+// DeleteSigninState and proceed only when that reports one affected row:
+// the delete is what makes the state single-use, so two concurrent
+// callbacks race on it and exactly one wins. Reading alone would let both
+// through.
 func (q *Queries) ConsumeSigninState(ctx context.Context, stateHash string) (ConsumeSigninStateRow, error) {
 	row := q.db.QueryRowContext(ctx, consumeSigninState, stateHash)
 	var i ConsumeSigninStateRow

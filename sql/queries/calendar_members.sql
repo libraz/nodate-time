@@ -12,19 +12,18 @@ SELECT cm.*, u.public_id AS user_public_id, u.display_name AS user_display_name,
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
-ORDER BY cm.joined_at;
+ORDER BY cm.created_at;
 
 -- AddCalendarMember revives a revoked grant rather than inserting beside
 -- it: the unique key spans revoked rows precisely so a re-add cannot leave
 -- an older grant behind for an access check to find.
 -- name: AddCalendarMember :execresult
-INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, joined_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))
+INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   role = VALUES(role),
   member_color = VALUES(member_color),
   invited_by_user_id = VALUES(invited_by_user_id),
-  joined_at = NOW(3),
   enabled = TRUE;
 
 -- name: UpdateCalendarMemberRole :exec

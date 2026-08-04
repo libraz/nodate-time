@@ -17,6 +17,23 @@ sql:
         emit_json_tags: true
         json_tags_case_style: "camel"
         overrides:
+          # MySQL TIME columns arrive as raw bytes: the driver's parseTime
+          # only converts DATE/DATETIME/TIMESTAMP, so a time.Time target
+          # fails to scan at runtime with no compile-time warning. These are
+          # wall-clock times of day rather than instants, and a string is
+          # what they actually are.
+          - column: "workspaces.working_hours_start"
+            go_type: "string"
+          - column: "workspaces.working_hours_end"
+            go_type: "string"
+          - column: "users.working_hours_start"
+            go_type:
+              type: "NullString"
+              import: "database/sql"
+          - column: "users.working_hours_end"
+            go_type:
+              type: "NullString"
+              import: "database/sql"
           - column: "calendar_events.recurrence_rule"
             go_type:
               type: "RawMessage"
@@ -66,6 +83,9 @@ sql:
           task_role_key: "TaskRoleKey"
           url: "URL"
           avatar_url: "AvatarURL"
+          actor_avatar_url: "ActorAvatarURL"
+          user_avatar_url: "UserAvatarURL"
+          uploader_avatar_url: "UploaderAvatarURL"
           cover_url: "CoverURL"
           icon_url: "IconURL"
           system_slug: "SystemSlug"

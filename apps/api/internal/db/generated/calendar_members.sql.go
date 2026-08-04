@@ -12,13 +12,12 @@ import (
 )
 
 const addCalendarMember = `-- name: AddCalendarMember :execresult
-INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, joined_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))
+INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   role = VALUES(role),
   member_color = VALUES(member_color),
   invited_by_user_id = VALUES(invited_by_user_id),
-  joined_at = NOW(3),
   enabled = TRUE
 `
 
@@ -142,7 +141,7 @@ SELECT cm.id, cm.public_id, cm.workspace_id, cm.calendar_id, cm.user_id, cm.role
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
-ORDER BY cm.joined_at
+ORDER BY cm.created_at
 `
 
 type ListCalendarMembersRow struct {
@@ -162,7 +161,7 @@ type ListCalendarMembersRow struct {
 	UserPublicID    []byte              `json:"userPublicId"`
 	UserDisplayName string              `json:"userDisplayName"`
 	UserEmail       string              `json:"userEmail"`
-	UserAvatarUrl   sql.NullString      `json:"userAvatarUrl"`
+	UserAvatarURL   sql.NullString      `json:"userAvatarUrl"`
 }
 
 func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([]ListCalendarMembersRow, error) {
@@ -191,7 +190,7 @@ func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([
 			&i.UserPublicID,
 			&i.UserDisplayName,
 			&i.UserEmail,
-			&i.UserAvatarUrl,
+			&i.UserAvatarURL,
 		); err != nil {
 			return nil, err
 		}

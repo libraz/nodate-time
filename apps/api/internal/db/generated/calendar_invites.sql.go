@@ -135,9 +135,77 @@ type GetInviteByTokenHashWithCalendarRow struct {
 	CalendarColor    string              `json:"calendarColor"`
 }
 
+// GetInviteByTokenHashWithCalendar backs the page a link opens. It matches
+// both kinds of link, because a join link has to show what is being joined
+// -- but it exposes only the calendar's name and colour, never its
+// contents. Reading those requires GetPublicInviteByTokenHash below.
 func (q *Queries) GetInviteByTokenHashWithCalendar(ctx context.Context, tokenHash string) (GetInviteByTokenHashWithCalendarRow, error) {
 	row := q.db.QueryRowContext(ctx, getInviteByTokenHashWithCalendar, tokenHash)
 	var i GetInviteByTokenHashWithCalendarRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CreatedByUserID,
+		&i.TokenHash,
+		&i.Role,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.IsPublic,
+		&i.ExpiresAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.CalendarPublicID,
+		&i.CalendarName,
+		&i.CalendarColor,
+	)
+	return i, err
+}
+
+const getPublicInviteByTokenHash = `-- name: GetPublicInviteByTokenHash :one
+SELECT ci.id, ci.public_id, ci.workspace_id, ci.calendar_id, ci.created_by_user_id, ci.token_hash, ci.role, ci.max_uses, ci.use_count, ci.is_public, ci.expires_at, ci.sort_weight, ci.notes, ci.enabled, ci.updated_at, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
+FROM calendar_invites ci
+INNER JOIN calendars c ON c.id = ci.calendar_id AND c.enabled = TRUE
+WHERE ci.token_hash = ?
+  AND ci.is_public = TRUE
+  AND ci.enabled = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3))
+`
+
+type GetPublicInviteByTokenHashRow struct {
+	ID               uint32              `json:"id"`
+	PublicID         []byte              `json:"publicId"`
+	WorkspaceID      uint32              `json:"workspaceId"`
+	CalendarID       uint32              `json:"calendarId"`
+	CreatedByUserID  uint32              `json:"createdByUserId"`
+	TokenHash        string              `json:"tokenHash"`
+	Role             CalendarInvitesRole `json:"role"`
+	MaxUses          sql.NullInt32       `json:"maxUses"`
+	UseCount         uint32              `json:"useCount"`
+	IsPublic         bool                `json:"isPublic"`
+	ExpiresAt        sql.NullTime        `json:"expiresAt"`
+	SortWeight       int32               `json:"sortWeight"`
+	Notes            sql.NullString      `json:"notes"`
+	Enabled          bool                `json:"enabled"`
+	UpdatedAt        sql.NullTime        `json:"updatedAt"`
+	CreatedAt        time.Time           `json:"createdAt"`
+	CalendarPublicID []byte              `json:"calendarPublicId"`
+	CalendarName     string              `json:"calendarName"`
+	CalendarColor    string              `json:"calendarColor"`
+}
+
+// GetPublicInviteByTokenHash matches only a link that publishes the
+// calendar. A join link grants access on acceptance and grants nothing
+// before it; serving its events would hand the calendar's contents to
+// anyone holding the link without them ever joining, which is precisely
+// the access the link was supposed to be an offer of.
+func (q *Queries) GetPublicInviteByTokenHash(ctx context.Context, tokenHash string) (GetPublicInviteByTokenHashRow, error) {
+	row := q.db.QueryRowContext(ctx, getPublicInviteByTokenHash, tokenHash)
+	var i GetPublicInviteByTokenHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
@@ -250,15 +318,18 @@ func (q *Queries) RevokeInvite(ctx context.Context, id uint32) error {
 	return err
 }
 
-const revokeInviteByIDAndCalendar = `-- name: RevokeInviteByIDAndCalendar :execresult
-UPDATE calendar_invites SET enabled = FALSE WHERE id = ? AND calendar_id = ?
+const revokeInviteByPublicIDAndCalendar = `-- name: RevokeInviteByPublicIDAndCalendar :execresult
+UPDATE calendar_invites SET enabled = FALSE WHERE public_id = ? AND calendar_id = ?
 `
 
-type RevokeInviteByIDAndCalendarParams struct {
-	ID         uint32 `json:"id"`
+type RevokeInviteByPublicIDAndCalendarParams struct {
+	PublicID   []byte `json:"publicId"`
 	CalendarID uint32 `json:"calendarId"`
 }
 
-func (q *Queries) RevokeInviteByIDAndCalendar(ctx context.Context, arg RevokeInviteByIDAndCalendarParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, revokeInviteByIDAndCalendar, arg.ID, arg.CalendarID)
+// RevokeInviteByPublicIDAndCalendar takes the public id, which is the only
+// identifier an API response carries. Scoping to the calendar as well means
+// a link from another calendar cannot be revoked by whoever guesses its id.
+func (q *Queries) RevokeInviteByPublicIDAndCalendar(ctx context.Context, arg RevokeInviteByPublicIDAndCalendarParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeInviteByPublicIDAndCalendar, arg.PublicID, arg.CalendarID)
 }

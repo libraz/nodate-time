@@ -1,7 +1,7 @@
 -- name: CreateAvatarUpload :execresult
 INSERT INTO avatar_uploads (
-  public_id, user_id, storage_key, content_type, byte_size, expires_at
-) VALUES (?, ?, ?, ?, ?, ?);
+  public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at
+) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: CountActiveAvatarUploads :one
 SELECT COUNT(*) FROM avatar_uploads

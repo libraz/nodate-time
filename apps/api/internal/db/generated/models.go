@@ -926,7 +926,9 @@ type AvatarUpload struct {
 	PublicID []byte `json:"publicId"`
 	// Internal FK to users.id
 	UserID uint32 `json:"userId"`
-	// Object key the presigned URL was issued for
+	// Digest of the bytes the client is about to upload. Carried through the reservation because storage_objects is keyed on it, and the digest is not knowable server-side until the object has landed.
+	Sha256 []byte `json:"sha256"`
+	// Object key the presigned URL was issued for; derived from the digest, never from a client-supplied filename
 	StorageKey string `json:"storageKey"`
 	// Declared MIME type
 	ContentType string `json:"contentType"`
@@ -1777,9 +1779,9 @@ type User struct {
 	// User override of workspace working_days; NULL = inherit
 	WorkingDays sql.NullString `json:"workingDays"`
 	// User override of workspace working_hours_start; NULL = inherit
-	WorkingHoursStart sql.NullTime `json:"workingHoursStart"`
+	WorkingHoursStart sql.NullString `json:"workingHoursStart"`
 	// User override of workspace working_hours_end; NULL = inherit
-	WorkingHoursEnd sql.NullTime `json:"workingHoursEnd"`
+	WorkingHoursEnd sql.NullString `json:"workingHoursEnd"`
 	// What happens when a task/event lands on a non-working day: off=accept silently, warn=save with badge, auto=itemkit snaps forward to next working day
 	SnapToWorkingDay UsersSnapToWorkingDay `json:"snapToWorkingDay"`
 	// If true, subscribed system (holiday) calendar events count as non-working days
@@ -1845,9 +1847,9 @@ type Workspace struct {
 	// Per-day flag string Mon..Sun; letter = working, underscore = off. Default MTWTF__ = Mon-Fri.
 	WorkingDays string `json:"workingDays"`
 	// Start of workspace working day (local tz)
-	WorkingHoursStart time.Time `json:"workingHoursStart"`
+	WorkingHoursStart string `json:"workingHoursStart"`
 	// End of workspace working day (local tz)
-	WorkingHoursEnd time.Time `json:"workingHoursEnd"`
+	WorkingHoursEnd string `json:"workingHoursEnd"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`
 	// Admin notes

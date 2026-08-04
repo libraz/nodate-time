@@ -14,6 +14,16 @@ FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.public_id = ? AND a.enabled = TRUE;
 
+-- GetPendingAttachmentByPublicID finds a reservation whose upload has not
+-- been confirmed. It is a separate query because the enabled = TRUE filter
+-- on the one above is what keeps an unconfirmed row out of every read path
+-- -- and confirming is the one operation that has to see it.
+-- name: GetPendingAttachmentByPublicID :one
+SELECT a.*, so.storage_key, so.content_type, so.byte_size
+FROM calendar_event_attachments a
+INNER JOIN storage_objects so ON so.id = a.storage_object_id
+WHERE a.public_id = ? AND a.enabled = FALSE;
+
 -- CreateEventAttachment starts disabled. The row only becomes visible once
 -- the upload has actually landed, so a presigned URL that is never used
 -- leaves nothing pointing at an object that does not exist.
@@ -40,6 +50,12 @@ SELECT a.storage_object_id
 FROM calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
 WHERE e.calendar_id = ?;
+
+-- DeleteAbandonedAttachment removes a reservation whose upload never
+-- landed. It re-checks enabled = FALSE so a row confirmed between the
+-- sweep listing it and this delete is left alone.
+-- name: DeleteAbandonedAttachment :exec
+DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE;
 
 -- name: ListAbandonedAttachments :many
 SELECT a.id, a.storage_object_id
