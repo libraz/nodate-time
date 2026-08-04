@@ -28,11 +28,20 @@ type Deps struct {
 	DB        *sql.DB
 	Queries   *generated.Queries
 	JWTSecret string
-	Storage   *storage.Client
-	Mailer    mailer.Mailer
-	WebURL    string
-	OAuth     users.OAuthConfig
-	Cipher    *secrets.Cipher
+	// WorkspaceID is the single workspace this deployment serves. It is
+	// resolved at startup and threaded into every handler, because the
+	// shared schema scopes rows by it and a query that leaves it at zero
+	// matches nothing rather than failing loudly.
+	WorkspaceID uint32
+	// WorkspacePublicID is the workspace's external id. Object storage keys
+	// are built from it, so it has to be the same scope the storage_objects
+	// unique key uses -- see events.PresignUpload.
+	WorkspacePublicID []byte
+	Storage           *storage.Client
+	Mailer            mailer.Mailer
+	WebURL            string
+	OAuth             users.OAuthConfig
+	Cipher            *secrets.Cipher
 	// GoogleAllowedDomains restricts Google sign-in to these email domains.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	GoogleAllowedDomains []string
@@ -75,7 +84,7 @@ func Build(deps Deps) http.Handler {
 		}
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains}
 
 		// Email+password auth (register, login, password reset) is registered
 		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
@@ -96,6 +105,17 @@ func Build(deps Deps) http.Handler {
 				Tags:        []string{"Auth"},
 			}, users.Login(userDeps))
 		}
+
+		// Refresh is registered whichever sign-in method is enabled: a
+		// session opened through a provider needs renewing just as much as
+		// one opened with a password.
+		huma.Register(api, huma.Operation{
+			OperationID: "refresh-session",
+			Method:      http.MethodPost,
+			Path:        "/auth/refresh",
+			Summary:     "Exchange a refresh token for a new session",
+			Tags:        []string{"Auth"},
+		}, users.Refresh(userDeps))
 
 		// Development-only: password-less login for seeded sample accounts.
 		// Gated by DevMode alone, so it survives even when password login is
@@ -134,6 +154,7 @@ func Build(deps Deps) http.Handler {
 		oauthDeps := users.OAuthDeps{
 			DB:                   deps.DB,
 			Queries:              deps.Queries,
+			WorkspaceID:          deps.WorkspaceID,
 			JWTSecret:            deps.JWTSecret,
 			WebURL:               deps.WebURL,
 			Config:               deps.OAuth,
@@ -167,7 +188,7 @@ func Build(deps Deps) http.Handler {
 		}, users.OAuthCallback(oauthDeps))
 
 		// Public share (no auth)
-		invPubDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
+		invPubDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "public-calendar",
@@ -191,13 +212,13 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, AllowedDomains: deps.GoogleAllowedDomains}
-		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
-		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
-		memoDeps := memos.Deps{Queries: deps.Queries}
-		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries}
-		albumDeps := albums.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
-		auditDeps := audit.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains}
+		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
+		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, WorkspacePublicID: deps.WorkspacePublicID}
+		memoDeps := memos.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
+		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
+		albumDeps := albums.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
+		auditDeps := audit.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
 
 		// User
 		huma.Register(api, huma.Operation{
@@ -215,6 +236,14 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Update current user",
 			Tags:        []string{"User"},
 		}, users.UpdateMe(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "logout",
+			Method:      http.MethodPost,
+			Path:        "/auth/logout",
+			Summary:     "Revoke the session this request authenticated with",
+			Tags:        []string{"Auth"},
+		}, users.Logout(userDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "change-password",

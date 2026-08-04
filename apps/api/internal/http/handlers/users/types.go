@@ -3,15 +3,34 @@ package users
 import "time"
 
 type UserResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Icon      string    `json:"icon"`
-	Color     string    `json:"color"`
-	AvatarURL string    `json:"avatarUrl,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Locale    string `json:"locale"`
+	Timezone  string `json:"timezone"`
+	// IsAdmin reflects a live grant in instance_admins, not a column on the
+	// user: revoking it leaves the record that it was ever held.
 	IsAdmin   bool      `json:"isAdmin"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+
+// RefreshInput trades a refresh token for a new pair.
+type RefreshInput struct {
+	Body struct {
+		RefreshToken string `json:"refreshToken" minLength:"1"`
+	}
+}
+type RefreshOutput struct {
+	Body struct {
+		Token        string       `json:"token"`
+		RefreshToken string       `json:"refreshToken"`
+		User         UserResponse `json:"user"`
+	}
+}
+
+type LogoutInput struct{}
+type LogoutOutput struct{}
 
 type RegisterInput struct {
 	Body struct {
@@ -23,8 +42,9 @@ type RegisterInput struct {
 
 type RegisterOutput struct {
 	Body struct {
-		Token string       `json:"token"`
-		User  UserResponse `json:"user"`
+		Token        string       `json:"token"`
+		RefreshToken string       `json:"refreshToken"`
+		User         UserResponse `json:"user"`
 	}
 }
 
@@ -37,8 +57,9 @@ type LoginInput struct {
 
 type LoginOutput struct {
 	Body struct {
-		Token string       `json:"token"`
-		User  UserResponse `json:"user"`
+		Token        string       `json:"token"`
+		RefreshToken string       `json:"refreshToken"`
+		User         UserResponse `json:"user"`
 	}
 }
 
@@ -50,8 +71,9 @@ type DevLoginInput struct {
 
 type DevLoginOutput struct {
 	Body struct {
-		Token string       `json:"token"`
-		User  UserResponse `json:"user"`
+		Token        string       `json:"token"`
+		RefreshToken string       `json:"refreshToken"`
+		User         UserResponse `json:"user"`
 	}
 }
 
@@ -62,9 +84,11 @@ type GetMeOutput struct {
 
 type UpdateMeInput struct {
 	Body struct {
-		Name  string `json:"name" minLength:"1" maxLength:"100"`
-		Icon  string `json:"icon" maxLength:"10"`
-		Color string `json:"color" maxLength:"7"`
+		Name string `json:"name" minLength:"1" maxLength:"100"`
+		// Locale and Timezone are optional; an empty value keeps the current
+		// setting rather than clearing a column that cannot be null.
+		Locale   string `json:"locale,omitempty" maxLength:"35" required:"false"`
+		Timezone string `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone"`
 	}
 }
 
@@ -81,10 +105,11 @@ type ChangePasswordInput struct {
 
 type ChangePasswordOutput struct {
 	Body struct {
-		// Token is a freshly signed JWT carrying the bumped token_version, so the
-		// device that changed the password stays signed in. Every other device
-		// holding an older token is invalidated, as before.
-		Token string `json:"token"`
+		// Changing the credential revokes every session opened with the old
+		// one. This pair belongs to a fresh session for the device that made
+		// the change, so it stays signed in while the others do not.
+		Token        string `json:"token"`
+		RefreshToken string `json:"refreshToken"`
 	}
 }
 
@@ -168,6 +193,11 @@ type PresignAvatarInput struct {
 	Body struct {
 		ContentType string `json:"contentType" doc:"MIME type, e.g. image/jpeg"`
 		ByteSize    int64  `json:"byteSize" minimum:"1" doc:"File size in bytes"`
+		// SHA256 is the digest of the bytes about to be uploaded. The blob is
+		// content-addressed, so the same picture is stored once no matter how
+		// many people set it; the digest is also what the storage key is
+		// built from.
+		SHA256 string `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-fA-F]{64}$" doc:"lowercase hex SHA-256 of the file contents"`
 	}
 }
 

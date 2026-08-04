@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 )
 
@@ -34,13 +33,15 @@ func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		token, err := auth.GenerateToken(user.ID, user.TokenVersion, deps.JWTSecret)
+		userAgent, ipAddress := requestOrigin(ctx)
+		creds, err := startSession(ctx, deps, user.ID, userAgent, ipAddress)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &DevLoginOutput{}
-		out.Body.Token = token
+		out.Body.Token = creds.Token
+		out.Body.RefreshToken = creds.RefreshToken
 		out.Body.User = mapUserWithAvatar(ctx, deps, user)
 		return out, nil
 	}

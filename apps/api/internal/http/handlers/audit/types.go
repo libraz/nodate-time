@@ -4,9 +4,9 @@ import "time"
 
 // ActorBrief identifies the user who performed an audited action.
 type ActorBrief struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Icon      string `json:"icon"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+
 	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 

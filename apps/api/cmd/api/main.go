@@ -23,6 +23,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
+	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 func main() {
@@ -52,6 +53,18 @@ func main() {
 	slog.Info("database connected")
 
 	queries := generated.New(db)
+
+	// Resolve the workspace before anything can serve a request: every
+	// handler scopes its queries by it, and a zero id would quietly match
+	// nothing instead of failing.
+	bootstrapCtx, cancelBootstrap := context.WithTimeout(context.Background(), 10*time.Second)
+	ws, err := workspace.Ensure(bootstrapCtx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, cfg.WorkspaceCountry)
+	cancelBootstrap()
+	if err != nil {
+		slog.Error("failed to resolve workspace", "slug", cfg.WorkspaceSlug, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("workspace ready", "slug", ws.Slug, "timezone", ws.Timezone)
 
 	// Storage (MinIO)
 	var storageClient *storage.Client
@@ -115,6 +128,8 @@ func main() {
 		DB:                   db,
 		Queries:              queries,
 		JWTSecret:            cfg.JWTSecret,
+		WorkspaceID:          ws.ID,
+		WorkspacePublicID:    ws.PublicID,
 		Storage:              storageClient,
 		Mailer:               mailerClient,
 		WebURL:               cfg.WebURL,

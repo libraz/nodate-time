@@ -3,7 +3,9 @@ package invites
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -11,18 +13,24 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
 type Deps struct {
-	DB      *sql.DB
-	Queries *generated.Queries
+	DB          *sql.DB
+	Queries     *generated.Queries
+	WorkspaceID uint32
 }
+
+// defaultMemberColor is the colour a member joining through a link starts
+// with; they can change it afterwards.
+const defaultMemberColor = "#42A5F5"
 
 func isDuplicateKey(err error) bool {
 	var mysqlErr *mysql.MySQLError
@@ -41,9 +49,27 @@ func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
 
-func inviteAuditPublicID(inviteID uint32) []byte {
-	u := uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("nodate-time:invite:%d", inviteID)))
-	return u[:]
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
+	}
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
+}
+
+func nullStringValue(n sql.NullString) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.String
+}
+
+// hashToken is what the database stores. The plaintext exists only in the
+// link shown once at creation, so reading every row of this table yields no
+// working invite.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // tokenAlphabet is base62 (0-9, A-Z, a-z): URL-safe, fully alphanumeric, and
@@ -57,13 +83,15 @@ const tokenLength = 22
 // generateToken returns a random base62 invite token. crypto/rand drives the
 // choice, and rejecting byte values >= 248 (the largest multiple of 62 below
 // 256) removes the modulo bias a plain b%62 would introduce.
-func generateToken() string {
+func generateToken() (string, error) {
 	out := make([]byte, tokenLength)
 	buf := make([]byte, tokenLength*2)
 	bi := len(buf)
 	for i := 0; i < tokenLength; {
 		if bi >= len(buf) {
-			rand.Read(buf)
+			if _, err := rand.Read(buf); err != nil {
+				return "", err
+			}
 			bi = 0
 		}
 		b := buf[bi]
@@ -74,19 +102,21 @@ func generateToken() string {
 		out[i] = tokenAlphabet[b%62]
 		i++
 	}
-	return string(out)
+	return string(out), nil
 }
 
-// resolveCalendarAdmin resolves a calendar by public ID and verifies admin role.
-func resolveCalendarAdmin(ctx context.Context, deps Deps, calPubID string) (generated.Calendar, error) {
+// resolveCalendarManage resolves a calendar and admits only the roles that
+// may hand out access to it.
+func resolveCalendarManage(ctx context.Context, deps Deps, calPubID string) (generated.Calendar, error) {
 	userID, _ := middleware.ActorFromContext(ctx)
-	return calresolve.Admin(ctx, deps.Queries, calPubID, userID)
+	return calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
+// mapInvite renders a stored invite. It cannot include the token: only the
+// hash is stored, and that is the point.
 func mapInvite(inv generated.CalendarInvite) InviteResponse {
 	resp := InviteResponse{
-		ID:        inv.ID,
-		Token:     inv.Token,
+		ID:        pubIDToHex(inv.PublicID),
 		Role:      string(inv.Role),
 		UseCount:  inv.UseCount,
 		IsPublic:  inv.IsPublic,
@@ -104,30 +134,35 @@ func mapInvite(inv generated.CalendarInvite) InviteResponse {
 
 func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateInviteOutput, error) {
 	return func(ctx context.Context, in *CreateInviteInput) (*CreateInviteOutput, error) {
-		cal, err := resolveCalendarAdmin(ctx, deps, in.CalendarID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		userID, _ := middleware.ActorFromContext(ctx)
-		token := generateToken()
+		token, err := generateToken()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		role := in.Body.Role
 		if role == "" {
-			role = "member"
+			role = string(generated.CalendarInvitesRoleEditor)
 		}
-		// Invite links may not grant admin; admin promotion goes through UpdateMemberRole.
-		if role == "admin" {
+		// A link may not grant a role that can hand out further access;
+		// promotion to manager or owner goes through UpdateMemberRole, which
+		// requires somebody who already holds it.
+		switch generated.CalendarInvitesRole(role) {
+		case generated.CalendarInvitesRoleEditor, generated.CalendarInvitesRoleViewer:
+		default:
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
 		isPublic := in.Body.IsPublic != nil && *in.Body.IsPublic
-		// A public link is a read-only embed link: force viewer role and unlimited
-		// uses so it never grants membership and never expires through use.
+		// A public link publishes the calendar read-only: it never grants
+		// membership, so the role it nominally carries is forced to the
+		// least privilege and its use is not counted against a limit.
 		if isPublic {
-			role = "viewer"
+			role = string(generated.CalendarInvitesRoleViewer)
 		}
 
 		var maxUses sql.NullInt32
@@ -140,72 +175,63 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			expiresAt = sql.NullTime{Time: time.Now().Add(time.Duration(*in.Body.ExpiresInHours) * time.Hour), Valid: true}
 		}
 
-		params := generated.CreateInviteParams{
-			CalendarID: cal.ID,
-			Token:      token,
-			Role:       generated.CalendarInvitesRole(role),
-			MaxUses:    maxUses,
-			ExpiresAt:  expiresAt,
-			CreatedBy:  userID,
-			IsPublic:   isPublic,
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		var result sql.Result
-		if isPublic {
-			tx, err := deps.DB.BeginTx(ctx, nil)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		var created generated.CalendarInvite
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if isPublic {
+				// Lock the calendar row so two concurrent requests cannot both
+				// find no public link and both create one.
+				if _, err := q.GetCalendarByIDForUpdate(ctx, cal.ID); err != nil {
+					return err
+				}
+				count, err := q.CountActivePublicInvites(ctx, cal.ID)
+				if err != nil {
+					return err
+				}
+				if count > 0 {
+					return apierrors.InvitePublicAlreadyExists
+				}
 			}
-			defer tx.Rollback()
-			qtx := deps.Queries.WithTx(tx)
-			if _, err := qtx.GetCalendarByIDForUpdate(ctx, cal.ID); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			if _, err := q.CreateInvite(ctx, generated.CreateInviteParams{
+				PublicID:        pubID[:],
+				WorkspaceID:     deps.WorkspaceID,
+				CalendarID:      cal.ID,
+				CreatedByUserID: userID,
+				TokenHash:       hashToken(token),
+				Role:            generated.CalendarInvitesRole(role),
+				MaxUses:         maxUses,
+				ExpiresAt:       expiresAt,
+				IsPublic:        isPublic,
+			}); err != nil {
+				return err
 			}
-			count, err := qtx.CountActivePublicInvites(ctx, cal.ID)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			if count > 0 {
-				return nil, apierrors.ToHuma(apierrors.InvitePublicAlreadyExists)
-			}
-			result, err = qtx.CreateInvite(ctx, params)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			if err := tx.Commit(); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-		} else {
 			var err error
-			result, err = deps.Queries.CreateInvite(ctx, params)
+			created, err = q.GetInviteByTokenHash(ctx, hashToken(token))
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return err
 			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeInviteCreated,
+				Summary:     role,
+				Subject:     pubID[:],
+				Extra:       map[string]any{"public": isPublic},
+			})
+		})
+		if err != nil {
+			return nil, toAPIError(err)
 		}
-
-		inviteID, _ := result.LastInsertId()
-		action := audit.ActionCreate
-		if isPublic {
-			action = audit.ActionPublish
-		}
-		audit.Record(ctx, deps.Queries, cal.ID, uint32(inviteID), inviteAuditPublicID(uint32(inviteID)), audit.EntityInvite, action, userID, role)
 
 		out := &CreateInviteOutput{}
-		out.Body = InviteResponse{
-			ID:        uint32(inviteID),
-			Token:     token,
-			Role:      role,
-			UseCount:  0,
-			IsPublic:  isPublic,
-			CreatedAt: time.Now(),
-		}
-		if maxUses.Valid {
-			v := uint32(maxUses.Int32)
-			out.Body.MaxUses = &v
-		}
-		if expiresAt.Valid {
-			out.Body.ExpiresAt = &expiresAt.Time
-		}
+		out.Body = mapInvite(created)
+		// The only moment the plaintext is ever returned.
+		out.Body.Token = token
 		return out, nil
 	}
 }
@@ -214,7 +240,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 	return func(ctx context.Context, in *AcceptInviteInput) (*AcceptInviteOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 
-		invite, err := deps.Queries.GetInviteByToken(ctx, in.Token)
+		invite, err := deps.Queries.GetInviteByTokenHash(ctx, hashToken(in.Token))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
@@ -243,56 +269,80 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// A public link is for read-only embedding only; it must never grant
-		// membership. Block non-members from joining through it.
+		// A public link publishes the calendar for reading; it must never
+		// grant membership.
 		if invite.IsPublic {
 			return nil, apierrors.ToHuma(apierrors.InvitePublicViewOnly)
 		}
 
-		tx, err := deps.DB.BeginTx(ctx, nil)
+		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		defer tx.Rollback()
-		qtx := deps.Queries.WithTx(tx)
-
-		// Atomically claim a use; 0 rows means the invite is exhausted (race-safe).
-		res, err := qtx.ConsumeInviteUse(ctx, invite.ID)
+		memberPubID, err := uuid.NewV7()
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if affected, _ := res.RowsAffected(); affected != 1 {
-			return nil, apierrors.ToHuma(apierrors.InviteExpired)
-		}
 
-		_, err = qtx.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
-			CalendarID: invite.CalendarID,
-			UserID:     userID,
-			Role:       generated.CalendarMembersRole(invite.Role),
-			Color:      "#42A5F5",
+		alreadyMember := false
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Claim a use atomically; zero rows means the link is exhausted.
+			// Checking the limit inside the UPDATE is what makes two
+			// concurrent acceptances of a single-use link race safely.
+			res, err := q.ConsumeInviteUse(ctx, invite.ID)
+			if err != nil {
+				return err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				return apierrors.InviteExpired
+			}
+
+			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
+				PublicID:        memberPubID[:],
+				WorkspaceID:     deps.WorkspaceID,
+				CalendarID:      invite.CalendarID,
+				UserID:          userID,
+				Role:            generated.CalendarMembersRole(invite.Role),
+				MemberColor:     defaultMemberColor,
+				InvitedByUserID: sql.NullInt32{Int32: int32(invite.CreatedByUserID), Valid: true},
+			}); err != nil {
+				if isDuplicateKey(err) {
+					alreadyMember = true
+					return nil
+				}
+				return err
+			}
+
+			summary := string(invite.Role)
+			if user.DisplayName != "" {
+				summary = user.DisplayName + " -> " + string(invite.Role)
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  invite.CalendarID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeMemberJoined,
+				Summary:     summary,
+				Subject:     user.PublicID,
+			})
 		})
 		if err != nil {
-			if isDuplicateKey(err) {
-				if existing, existingErr := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-					CalendarID: invite.CalendarID,
-					UserID:     userID,
-				}); existingErr == nil {
-					out.Body.Role = string(existing.Role)
-					return out, nil
-				}
+			return nil, toAPIError(err)
+		}
+		if alreadyMember {
+			if current, cerr := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+				CalendarID: invite.CalendarID,
+				UserID:     userID,
+			}); cerr == nil {
+				out.Body.Role = string(current.Role)
+				return out, nil
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		user, _ := deps.Queries.GetUserByID(ctx, userID)
-		summary := string(invite.Role)
-		if user.Name != "" {
-			summary = user.Name + " -> " + string(invite.Role)
-		}
-		audit.Record(ctx, deps.Queries, invite.CalendarID, userID, user.PublicID, audit.EntityMember, audit.ActionJoin, userID, summary)
 
 		out.Body.Role = string(invite.Role)
 		return out, nil
@@ -301,12 +351,9 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 
 func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvitesOutput, error) {
 	return func(ctx context.Context, in *ListInvitesInput) (*ListInvitesOutput, error) {
-		cal, err := resolveCalendarAdmin(ctx, deps, in.CalendarID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		rows, err := deps.Queries.ListInvitesByCalendar(ctx, cal.ID)
@@ -325,32 +372,46 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*DeleteInviteOutput, error) {
 	return func(ctx context.Context, in *DeleteInviteInput) (*DeleteInviteOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarAdmin(ctx, deps, in.CalendarID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		res, err := deps.Queries.DeleteInviteByIDAndCalendar(ctx, generated.DeleteInviteByIDAndCalendarParams{
-			ID:         in.InviteID,
-			CalendarID: cal.ID,
-		})
+		invitePub, err := parseUUID(in.InviteID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if affected == 0 {
-			// No-op: the invite id does not exist (or already belongs to another
-			// calendar, which resolveCalendarAdmin already scoped out). Do not
-			// audit a revoke that did not happen.
 			return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 		}
-		audit.Record(ctx, deps.Queries, cal.ID, in.InviteID, inviteAuditPublicID(in.InviteID), audit.EntityInvite, audit.ActionRevoke, userID, "")
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			res, err := q.RevokeInviteByPublicIDAndCalendar(ctx, generated.RevokeInviteByPublicIDAndCalendarParams{
+				PublicID:   invitePub,
+				CalendarID: cal.ID,
+			})
+			if err != nil {
+				return err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected == 0 {
+				// The id does not exist, or belongs to a calendar the caller
+				// did not resolve. Either way nothing was revoked, so nothing
+				// is logged: an entry here would record a change that never
+				// happened.
+				return apierrors.InviteNotFound
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeInviteRevoked,
+				Subject:     invitePub,
+			})
+		})
+		if err != nil {
+			return nil, toAPIError(err)
+		}
 		return &DeleteInviteOutput{}, nil
 	}
 }
@@ -359,7 +420,7 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 
 func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*PublicCalendarOutput, error) {
 	return func(ctx context.Context, in *PublicCalendarInput) (*PublicCalendarOutput, error) {
-		row, err := deps.Queries.GetInviteByTokenPublic(ctx, in.Token)
+		row, err := deps.Queries.GetInviteByTokenHashWithCalendar(ctx, hashToken(in.Token))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
@@ -376,16 +437,33 @@ func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*Pub
 	}
 }
 
+// publicEventFields decides what a link holder may see of an event. A
+// calendar published read-only still contains events whose visibility says
+// their details are not for everyone, and the link does not override that:
+// those show as taken time with no title.
+func publicEventFields(e generated.CalendarEvent) (title, location string, private bool) {
+	switch e.Visibility {
+	case generated.CalendarEventsVisibilityPrivate, generated.CalendarEventsVisibilityConfidential:
+		return "", "", true
+	default:
+		return e.Title, nullStringValue(e.Location), false
+	}
+}
+
 func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicEventsOutput, error) {
 	return func(ctx context.Context, in *PublicEventsInput) (*PublicEventsOutput, error) {
-		// Validate token exists
-		_, err := deps.Queries.GetInviteByTokenPublic(ctx, in.Token)
+		// Only a link that publishes the calendar may serve its events. A
+		// join link is an offer of access, not access: it grants membership
+		// on acceptance and nothing before it.
+		row, err := deps.Queries.GetPublicInviteByTokenHash(ctx, hashToken(in.Token))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		calendarID := row.CalendarID
+		calendarColor := row.CalendarColor
 
 		var startTime, endTime time.Time
 		if in.StartDate != "" && in.EndDate != "" {
@@ -403,11 +481,25 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			endTime = time.Now().AddDate(0, 0, in.Days)
 		}
 
-		// Fetch non-recurring events
-		rows, err := deps.Queries.ListEventsByInviteCalendar(ctx, generated.ListEventsByInviteCalendarParams{
-			Token:   in.Token,
-			StartAt: endTime,
-			EndAt:   startTime,
+		render := func(e generated.CalendarEvent, id string, startAt, endAt time.Time) PublicEventResponse {
+			title, location, private := publicEventFields(e)
+			return PublicEventResponse{
+				ID:       id,
+				Title:    title,
+				AllDay:   e.AllDay,
+				StartAt:  startAt,
+				EndAt:    endAt,
+				Timezone: e.Timezone,
+				Color:    calendarColor,
+				Location: location,
+				Private:  private,
+			}
+		}
+
+		rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
+			CalendarID: calendarID,
+			RangeEnd:   sql.NullTime{Time: endTime, Valid: true},
+			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -415,23 +507,16 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 
 		var results []PublicEventResponse
 		for _, e := range rows {
-			results = append(results, PublicEventResponse{
-				ID:       pubIDToHex(e.PublicID),
-				Title:    e.Title,
-				AllDay:   e.AllDay,
-				StartAt:  e.StartAt,
-				EndAt:    e.EndAt,
-				Timezone: e.Timezone,
-				Color:    e.Color,
-				Location: e.Location,
-			})
+			if !e.StartAt.Valid || !e.EndAt.Valid {
+				continue
+			}
+			results = append(results, render(e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time))
 		}
 
-		// Fetch and expand recurring events
-		recurringRows, err := deps.Queries.ListRecurringEventsByInviteCalendar(ctx, generated.ListRecurringEventsByInviteCalendarParams{
-			Token:         in.Token,
-			StartAt:       endTime,
-			RecurrenceEnd: sql.NullTime{Time: startTime, Valid: true},
+		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
+			CalendarID: calendarID,
+			RangeEnd:   sql.NullTime{Time: endTime, Valid: true},
+			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -440,31 +525,16 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		for _, e := range recurringRows {
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
-				if inst.IsException {
-					dateStr := inst.OriginalStart.Format("20060102")
-					results = append(results, PublicEventResponse{
-						ID:       fmt.Sprintf("%s_%s", parentID, dateStr),
-						Title:    inst.Event.Title,
-						AllDay:   inst.Event.AllDay,
-						StartAt:  inst.Event.StartAt,
-						EndAt:    inst.Event.EndAt,
-						Timezone: inst.Event.Timezone,
-						Color:    inst.Event.Color,
-						Location: inst.Event.Location,
-					})
+				dateStr := inst.OriginalStart.Format("20060102")
+				id := fmt.Sprintf("%s_%s", parentID, dateStr)
+				if inst.IsOverride {
+					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
+						continue
+					}
+					results = append(results, render(inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time))
 					continue
 				}
-				dateStr := inst.OriginalStart.Format("20060102")
-				results = append(results, PublicEventResponse{
-					ID:       fmt.Sprintf("%s_%s", parentID, dateStr),
-					Title:    e.Title,
-					AllDay:   e.AllDay,
-					StartAt:  inst.Occurrence.StartAt,
-					EndAt:    inst.Occurrence.EndAt,
-					Timezone: e.Timezone,
-					Color:    e.Color,
-					Location: e.Location,
-				})
+				results = append(results, render(e, id, inst.Occurrence.StartAt, inst.Occurrence.EndAt))
 			}
 		}
 

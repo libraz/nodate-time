@@ -3,8 +3,11 @@ package invites
 import "time"
 
 type InviteResponse struct {
-	ID        uint32     `json:"id"`
-	Token     string     `json:"token"`
+	ID string `json:"id"`
+	// Token is the plaintext share link, returned only by the request that
+	// created it. Only its hash is stored, so listing invites cannot hand
+	// the link back -- a database read must not yield a working capability.
+	Token     string     `json:"token,omitempty"`
 	Role      string     `json:"role"`
 	MaxUses   *uint32    `json:"maxUses,omitempty"`
 	UseCount  uint32     `json:"useCount"`
@@ -16,7 +19,10 @@ type InviteResponse struct {
 type CreateInviteInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
-		Role           string `json:"role" enum:"member,viewer" default:"member"`
+		// An invite link may grant editing or reading, never administration:
+		// a link that could hand out management would let whoever holds it
+		// grant themselves the power to hand out more.
+		Role           string `json:"role" enum:"editor,viewer" default:"editor"`
 		MaxUses        *int32 `json:"maxUses,omitempty" required:"false" minimum:"1"`
 		ExpiresInHours *int   `json:"expiresInHours,omitempty" required:"false" minimum:"1" maximum:"8760"`
 		// IsPublic marks a read-only embed link that cannot be joined.
@@ -48,7 +54,7 @@ type ListInvitesOutput struct {
 
 type DeleteInviteInput struct {
 	CalendarID string `path:"calendarId"`
-	InviteID   uint32 `path:"inviteId"`
+	InviteID   string `path:"inviteId"`
 }
 type DeleteInviteOutput struct{}
 
@@ -87,4 +93,8 @@ type PublicEventResponse struct {
 	Timezone string    `json:"timezone"`
 	Color    string    `json:"color"`
 	Location string    `json:"location,omitempty"`
+	// Private is true when the event's visibility keeps its details from a
+	// public viewer. Title and location are withheld in that case, so the
+	// page shows that the time is taken without saying by what.
+	Private bool `json:"private"`
 }

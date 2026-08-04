@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -97,7 +98,12 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 		}
 		expiresAt := time.Now().Add(1 * time.Hour)
 
+		resetPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		if _, err := deps.Queries.CreatePasswordReset(ctx, generated.CreatePasswordResetParams{
+			PublicID:  resetPubID[:],
 			UserID:    user.ID,
 			TokenHash: hash,
 			ExpiresAt: expiresAt,
@@ -109,7 +115,7 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 		body := fmt.Sprintf(
 			"Hello %s,\n\nA password reset was requested for your account. "+
 				"This link expires in 1 hour:\n\n%s\n\nIf you did not request this, ignore this email.",
-			user.Name, resetURL,
+			user.DisplayName, resetURL,
 		)
 		// The response is always {ok:true} regardless of delivery so the
 		// endpoint cannot be used to probe which emails exist. A delivery
@@ -148,10 +154,16 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if err := q.UpdateUserPassword(ctx, generated.UpdateUserPasswordParams{
-			PasswordHash: newHash,
-			ID:           row.UserID,
+		if err := q.UpdatePasswordHash(ctx, generated.UpdatePasswordHashParams{
+			PasswordHash: sql.NullString{String: newHash, Valid: true},
+			UserID:       row.UserID,
 		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Completing a reset ends every session opened with the old password.
+		// Whoever knew it -- which is the reason a reset was requested --
+		// must not keep the access it already bought them.
+		if err := q.RevokeAllUserSessions(ctx, row.UserID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		consumeResult, err := q.MarkPasswordResetUsed(ctx, row.ID)

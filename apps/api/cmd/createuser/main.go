@@ -24,25 +24,27 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
+	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 func main() {
 	email := flag.String("email", "", "email address (required)")
 	password := flag.String("password", "", "plaintext password (required, min 8 chars)")
 	name := flag.String("name", "", "display name (defaults to the email local part)")
-	icon := flag.String("icon", "👤", "emoji icon")
-	color := flag.String("color", "#42A5F5", "hex color")
-	admin := flag.Bool("admin", false, "grant platform admin rights (is_admin = 1)")
+	locale := flag.String("locale", "ja", "BCP 47 locale tag")
+	timezone := flag.String("timezone", "Asia/Tokyo", "IANA timezone")
+	admin := flag.Bool("admin", false, "grant instance admin rights")
 	skipExisting := flag.Bool("skip-existing", false, "exit successfully if the email already exists (for seeding)")
 	flag.Parse()
 
-	if err := run(*email, *password, *name, *icon, *color, *admin, *skipExisting); err != nil {
+	if err := run(*email, *password, *name, *locale, *timezone, *admin, *skipExisting); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(email, password, name, icon, color string, admin, skipExisting bool) error {
+func run(email, password, name, locale, timezone string, admin, skipExisting bool) error {
 	if email == "" || password == "" {
 		return errors.New("-email and -password are required")
 	}
@@ -94,24 +96,83 @@ func run(email, password, name, icon, color string, admin, skipExisting bool) er
 		}
 	}
 
-	res, err := queries.CreateUserWithRole(ctx, generated.CreateUserWithRoleParams{
-		PublicID:     pubID[:],
-		Name:         name,
-		Email:        email,
-		Icon:         icon,
-		Color:        color,
-		PasswordHash: hash,
-		IsAdmin:      admin,
-	})
+	// The account is spread across four tables and only makes sense as a
+	// whole: a user with no identity cannot sign in, one outside the
+	// workspace can reach no calendar, and an admin grant without a user is
+	// an orphan. One transaction is what keeps a half-created account from
+	// existing.
+	ws, err := workspace.Ensure(ctx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, "")
 	if err != nil {
-		return fmt.Errorf("create user (email may already exist): %w", err)
+		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	id, _ := res.LastInsertId()
+	var userID uint32
+	err = dbtx.Run(ctx, db, func(q *generated.Queries) error {
+		res, err := q.CreateUser(ctx, generated.CreateUserParams{
+			PublicID:    pubID[:],
+			Email:       email,
+			DisplayName: name,
+			Locale:      locale,
+			Timezone:    timezone,
+		})
+		if err != nil {
+			return fmt.Errorf("create user (email may already exist): %w", err)
+		}
+		insertID, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		userID = uint32(insertID)
+
+		identityPubID, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
+			PublicID:     identityPubID[:],
+			UserID:       userID,
+			Provider:     generated.IdentitiesProviderLocal,
+			Subject:      email,
+			PasswordHash: sql.NullString{String: hash, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("create identity: %w", err)
+		}
+
+		memberPubID, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
+			PublicID:    memberPubID[:],
+			WorkspaceID: ws.ID,
+			UserID:      userID,
+			Role:        generated.WorkspaceMembersRoleMember,
+		}); err != nil {
+			return fmt.Errorf("add workspace member: %w", err)
+		}
+
+		if admin {
+			grantPubID, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			if err := q.GrantInstanceAdmin(ctx, generated.GrantInstanceAdminParams{
+				PublicID: grantPubID[:],
+				UserID:   userID,
+			}); err != nil {
+				return fmt.Errorf("grant instance admin: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
 	role := "user"
 	if admin {
 		role = "admin"
 	}
-	fmt.Printf("created %s (id=%d, public_id=%s, role=%s)\n", email, id, pubID.String(), role)
+	fmt.Printf("created %s (id=%d, public_id=%s, role=%s)\n", email, userID, pubID.String(), role)
 	return nil
 }

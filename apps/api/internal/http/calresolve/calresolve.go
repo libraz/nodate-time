@@ -1,3 +1,12 @@
+// Package calresolve turns a calendar's public id into an internal id and
+// checks the caller's grant, in one step.
+//
+// The two halves stay in the same function on purpose. Splitting them --
+// a lookup here, a permission check there -- is how an authorization check
+// goes missing: not because someone decides to skip it, but because the
+// call sites drift apart and one of them ends up doing only the lookup.
+// Every handler resolves through these functions, so there is no path that
+// reaches a calendar id without having proved access to it.
 package calresolve
 
 import (
@@ -12,7 +21,7 @@ import (
 )
 
 type Querier interface {
-	GetCalendarByPublicID(ctx context.Context, publicID []byte) (generated.Calendar, error)
+	GetCalendarByPublicID(ctx context.Context, arg generated.GetCalendarByPublicIDParams) (generated.Calendar, error)
 	GetCalendarMember(ctx context.Context, arg generated.GetCalendarMemberParams) (generated.CalendarMember, error)
 }
 
@@ -24,12 +33,18 @@ func PublicIDString(b []byte) string {
 	return u.String()
 }
 
-func Member(ctx context.Context, q Querier, calendarPublicID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
+// Member resolves the calendar and the caller's grant on it. Membership is
+// read from calendar_members, which is the access axis; a display
+// preference row grants nothing and is never consulted here.
+func Member(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calendarPublicID)
 	if err != nil {
 		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 	}
-	cal, err := q.GetCalendarByPublicID(ctx, pubBytes)
+	cal, err := q.GetCalendarByPublicID(ctx, generated.GetCalendarByPublicIDParams{
+		WorkspaceID: workspaceID,
+		PublicID:    pubBytes,
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
@@ -49,31 +64,58 @@ func Member(ctx context.Context, q Querier, calendarPublicID string, userID uint
 	return cal, member, nil
 }
 
-func Read(ctx context.Context, q Querier, calendarPublicID string, userID uint32) (generated.Calendar, error) {
-	cal, _, err := Member(ctx, q, calendarPublicID, userID)
+// Read admits any member.
+func Read(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
 	return cal, err
 }
 
-func Write(ctx context.Context, q Querier, calendarPublicID string, userID uint32) (generated.Calendar, error) {
-	cal, member, err := Member(ctx, q, calendarPublicID, userID)
+// Write admits everyone above viewer: editor, manager and owner may change
+// calendar contents.
+func Write(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
 	if err != nil {
 		return generated.Calendar{}, err
 	}
-	if member.Role == generated.CalendarMembersRoleViewer {
+	if !CanWrite(member.Role) {
 		return generated.Calendar{}, apierrors.CalendarRoleRequired
 	}
 	return cal, nil
 }
 
-func Admin(ctx context.Context, q Querier, calendarPublicID string, userID uint32) (generated.Calendar, error) {
-	cal, member, err := Member(ctx, q, calendarPublicID, userID)
+// Manage admits manager and owner, who may change membership and calendar
+// settings rather than just its contents.
+func Manage(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
 	if err != nil {
 		return generated.Calendar{}, err
 	}
-	if member.Role != generated.CalendarMembersRoleAdmin {
+	if !CanManage(member.Role) {
 		return generated.Calendar{}, apierrors.CalendarRoleRequired
 	}
 	return cal, nil
+}
+
+// CanWrite reports whether a role may change calendar contents.
+func CanWrite(role generated.CalendarMembersRole) bool {
+	switch role {
+	case generated.CalendarMembersRoleOwner,
+		generated.CalendarMembersRoleManager,
+		generated.CalendarMembersRoleEditor:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanManage reports whether a role may change membership and settings.
+func CanManage(role generated.CalendarMembersRole) bool {
+	switch role {
+	case generated.CalendarMembersRoleOwner, generated.CalendarMembersRoleManager:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseUUID(s string) ([]byte, error) {

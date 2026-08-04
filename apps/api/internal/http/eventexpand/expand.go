@@ -1,3 +1,18 @@
+// Package eventexpand turns a stored recurring series into the occurrences
+// that fall inside a window.
+//
+// A series is one row carrying the rule, and the contract allows exactly
+// two ways to depart from it:
+//
+//   - a cancelled occurrence is listed in the parent's recurrence_exceptions
+//   - a changed occurrence is a second row naming the parent in
+//     recurrence_parent_id and the occurrence it replaces in
+//     recurrence_original_start
+//
+// Neither substitutes for the other. In particular a cancellation is never
+// a row: a tombstone row would make "does this occurrence happen" a
+// question with two sources, and the answers diverge the moment a writer
+// updates one and not the other.
 package eventexpand
 
 import (
@@ -9,66 +24,50 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
-type ExceptionLoader interface {
-	ListRecurrenceExceptionsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]generated.Event, error)
+// OverrideLoader reads the rows that replace individual occurrences.
+type OverrideLoader interface {
+	ListRecurrenceOverridesByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]generated.CalendarEvent, error)
 }
 
 type Instance struct {
-	Event         generated.Event
-	Occurrence    recurrence.Occurrence
+	Event      generated.CalendarEvent
+	Occurrence recurrence.Occurrence
+	// OriginalStart is the start the occurrence has under the parent rule.
+	// It is what the composite id is built from, so an override stays
+	// addressable at the same id after it has been moved.
 	OriginalStart time.Time
-	IsException   bool
+	IsOverride    bool
 }
 
-type exceptionInfo struct {
-	child         generated.Event
-	cancelled     bool
-	originalStart time.Time
+type overrideSet struct {
+	byInstant map[int64]generated.CalendarEvent
 }
 
-type exceptionSet struct {
-	byInstant map[int64]exceptionInfo
-	byDate    map[string]exceptionInfo
-}
-
-func loadExceptions(ctx context.Context, loader ExceptionLoader, parentID uint32) exceptionSet {
-	rows, err := loader.ListRecurrenceExceptionsByParent(ctx, sql.NullInt32{Int32: int32(parentID), Valid: true})
+func loadOverrides(ctx context.Context, loader OverrideLoader, parentID uint32) overrideSet {
+	rows, err := loader.ListRecurrenceOverridesByParent(ctx, sql.NullInt32{Int32: int32(parentID), Valid: true})
 	if err != nil || len(rows) == 0 {
-		return exceptionSet{}
+		return overrideSet{}
 	}
-	exceptions := exceptionSet{
-		byInstant: make(map[int64]exceptionInfo, len(rows)),
-		byDate:    make(map[string]exceptionInfo, len(rows)),
-	}
+	set := overrideSet{byInstant: make(map[int64]generated.CalendarEvent, len(rows))}
 	for _, r := range rows {
 		if !r.RecurrenceOriginalStart.Valid {
 			continue
 		}
-		originalStart := r.RecurrenceOriginalStart.Time.UTC()
-		ex := exceptionInfo{child: r, cancelled: r.RecurrenceCancelled, originalStart: originalStart}
-		exceptions.byInstant[originalStart.UnixMilli()] = ex
-		exceptions.byDate[originalStart.Format("20060102")] = ex
+		set.byInstant[r.RecurrenceOriginalStart.Time.UTC().UnixMilli()] = r
 	}
-	return exceptions
+	return set
 }
 
-func (s exceptionSet) find(occ recurrence.Occurrence) (exceptionInfo, bool) {
-	key := occ.StartAt.UTC().UnixMilli()
-	if ex, ok := s.byInstant[key]; ok {
-		return ex, true
-	}
-	ex, ok := s.byDate[occ.StartAt.UTC().Format("20060102")]
-	return ex, ok
-}
-
+// ExpandRecurringEvent returns the occurrences of event between windowStart
+// and windowEnd, with cancellations removed and overrides substituted in.
 func ExpandRecurringEvent(
 	ctx context.Context,
-	loader ExceptionLoader,
-	event generated.Event,
+	loader OverrideLoader,
+	event generated.CalendarEvent,
 	windowStart time.Time,
 	windowEnd time.Time,
 ) []Instance {
-	if event.RecurrenceRule == nil {
+	if event.RecurrenceRule == nil || !event.StartAt.Valid || !event.EndAt.Valid {
 		return nil
 	}
 	rule := recurrence.ParseRule(*event.RecurrenceRule)
@@ -76,22 +75,29 @@ func ExpandRecurringEvent(
 		return nil
 	}
 
-	exceptions := loadExceptions(ctx, loader, event.ID)
-	consumed := make(map[int64]bool, len(exceptions.byInstant))
-	occurrences := recurrence.ExpandInZone(rule, event.StartAt, event.EndAt, windowStart, windowEnd, event.Timezone)
+	cancelled := recurrence.ParseExceptions(event.RecurrenceExceptions)
+	overrides := loadOverrides(ctx, loader, event.ID)
+	consumed := make(map[int64]bool, len(overrides.byInstant))
+
+	occurrences := recurrence.ExpandInZone(rule, event.StartAt.Time, event.EndAt.Time, windowStart, windowEnd, event.Timezone)
 	instances := make([]Instance, 0, len(occurrences))
 
 	for _, occ := range occurrences {
-		if ex, ok := exceptions.find(occ); ok {
-			consumed[ex.originalStart.UnixMilli()] = true
-			if ex.cancelled {
-				continue
-			}
+		key := occ.StartAt.UTC().UnixMilli()
+		if cancelled.Contains(occ.StartAt) {
+			// A cancelled occurrence is gone even if an override row still
+			// names it. Marking it consumed stops the pass below from
+			// resurrecting that row as a free-standing instance.
+			consumed[key] = true
+			continue
+		}
+		if child, ok := overrides.byInstant[key]; ok {
+			consumed[key] = true
 			instances = append(instances, Instance{
-				Event:         ex.child,
+				Event:         child,
 				Occurrence:    occ,
-				OriginalStart: ex.originalStart,
-				IsException:   true,
+				OriginalStart: occ.StartAt.UTC(),
+				IsOverride:    true,
 			})
 			continue
 		}
@@ -102,17 +108,24 @@ func ExpandRecurringEvent(
 		})
 	}
 
-	for key, ex := range exceptions.byInstant {
-		if consumed[key] || ex.cancelled {
+	// An override moved outside the window its original occurrence falls in
+	// would otherwise vanish: the rule no longer produces a start inside the
+	// window, but the row itself is here and dated.
+	for key, child := range overrides.byInstant {
+		if consumed[key] || !child.StartAt.Valid {
 			continue
 		}
-		if ex.child.StartAt.Before(windowStart) || !ex.child.StartAt.Before(windowEnd) {
+		original := time.UnixMilli(key).UTC()
+		if cancelled.Contains(original) {
+			continue
+		}
+		if child.StartAt.Time.Before(windowStart) || !child.StartAt.Time.Before(windowEnd) {
 			continue
 		}
 		instances = append(instances, Instance{
-			Event:         ex.child,
-			OriginalStart: ex.originalStart,
-			IsException:   true,
+			Event:         child,
+			OriginalStart: original,
+			IsOverride:    true,
 		})
 	}
 	return instances

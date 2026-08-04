@@ -44,12 +44,13 @@ type OAuthConfig struct {
 }
 
 type OAuthDeps struct {
-	DB        *sql.DB
-	Queries   *generated.Queries
-	JWTSecret string
-	WebURL    string
-	Config    OAuthConfig
-	Cipher    *secrets.Cipher
+	DB          *sql.DB
+	Queries     *generated.Queries
+	JWTSecret   string
+	WorkspaceID uint32
+	WebURL      string
+	Config      OAuthConfig
+	Cipher      *secrets.Cipher
 	// AllowedDomains restricts which email domains may sign in via Google.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	AllowedDomains []string
@@ -63,7 +64,7 @@ type OAuthDeps struct {
 // or has no client_id available from any source.
 func resolveProvider(ctx context.Context, deps OAuthDeps, name string) (OAuthProviderConfig, bool) {
 	envCfg, _ := providerConfig(deps.Config, name)
-	row, err := deps.Queries.GetOAuthProviderConfig(ctx, name)
+	row, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(name))
 	if errors.Is(err, sql.ErrNoRows) {
 		// No DB override configured; fall back to env-based defaults.
 		return envCfg, envCfg.ClientID != ""
@@ -80,8 +81,8 @@ func resolveProvider(ctx context.Context, deps OAuthDeps, name string) (OAuthPro
 	if row.ClientID != "" {
 		merged.ClientID = row.ClientID
 	}
-	if len(row.ClientSecretEnc) > 0 && deps.Cipher.Available() {
-		if plain, err := deps.Cipher.Decrypt(row.ClientSecretEnc); err == nil {
+	if len(row.ClientSecretCiphertext) > 0 && deps.Cipher.Available() {
+		if plain, err := deps.Cipher.Decrypt(row.ClientSecretCiphertext); err == nil {
 			merged.ClientSecret = string(plain)
 		}
 	}
@@ -234,10 +235,15 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 			}
 		}
 
-		if err := deps.Queries.CreateOAuthState(ctx, generated.CreateOAuthStateParams{
+		statePubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := deps.Queries.CreateSigninState(ctx, generated.CreateSigninStateParams{
+			PublicID:     statePubID[:],
 			StateHash:    hashState(state),
-			Provider:     generated.OauthStatesProvider(in.Provider),
-			Redirect:     safeRedirect(in.Redirect),
+			Provider:     generated.SigninStatesProvider(in.Provider),
+			RedirectTo:   nullString(safeRedirect(in.Redirect)),
 			CodeVerifier: verifier,
 			Nonce:        nonce,
 			ExpiresAt:    time.Now().Add(oauthStateTTL),
@@ -348,14 +354,14 @@ type consumedState struct {
 
 func consumeState(ctx context.Context, q *generated.Queries, state, provider string) (consumedState, error) {
 	hash := hashState(state)
-	row, err := q.ConsumeOAuthState(ctx, hash)
+	row, err := q.ConsumeSigninState(ctx, hash)
 	if err != nil {
 		return consumedState{}, err
 	}
 	// Atomically claim the state by deleting it: exactly one concurrent caller
 	// observes RowsAffected == 1, so a replayed or duplicated callback cannot
 	// consume the same state twice (CSRF replay window).
-	res, derr := q.DeleteOAuthState(ctx, hash)
+	res, derr := q.DeleteSigninState(ctx, hash)
 	if derr != nil {
 		return consumedState{}, derr
 	}
@@ -366,7 +372,7 @@ func consumeState(ctx context.Context, q *generated.Queries, state, provider str
 		return consumedState{}, errors.New("oauth: state mismatch or expired")
 	}
 	return consumedState{
-		Redirect:     safeRedirect(row.Redirect),
+		Redirect:     safeRedirect(nullStringValue(row.RedirectTo)),
 		CodeVerifier: row.CodeVerifier,
 		Nonce:        row.Nonce,
 	}, nil
@@ -484,15 +490,11 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		}
 		email = strings.ToLower(strings.TrimSpace(email))
 
-		userID, err := upsertOAuthUser(ctx, deps.DB, in.Provider, subject, email, name, emailVerified)
+		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		user, err := deps.Queries.GetUserByID(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		token, err := auth.GenerateToken(userID, user.TokenVersion, deps.JWTSecret)
+		token, err := startOAuthSession(ctx, deps, userID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -512,7 +514,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 // upsertOAuthUser links an OAuth identity to a user, creating one if needed.
 // Wrapped in a transaction so concurrent callbacks for the same subject cannot
 // produce duplicate users or orphan oauth_account rows.
-func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, name string, emailVerified bool) (uint32, error) {
+func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name string, emailVerified bool) (uint32, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -521,9 +523,9 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 
 	q := generated.New(tx)
 
-	if existing, err := q.GetOAuthAccount(ctx, generated.GetOAuthAccountParams{
-		Provider:        generated.OauthAccountsProvider(provider),
-		ProviderSubject: subject,
+	if existing, err := q.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
+		Provider: generated.IdentitiesProvider(provider),
+		Subject:  subject,
 	}); err == nil {
 		if err := tx.Commit(); err != nil {
 			return 0, err
@@ -539,11 +541,15 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 	// over the victim's account.
 	if emailVerified && email != "" {
 		if u, err := q.GetUserByEmail(ctx, email); err == nil {
-			if _, err := q.CreateOAuthAccount(ctx, generated.CreateOAuthAccountParams{
-				UserID:          u.ID,
-				Provider:        generated.OauthAccountsProvider(provider),
-				ProviderSubject: subject,
-				Email:           email,
+			identityPubID, err := uuid.NewV7()
+			if err != nil {
+				return 0, err
+			}
+			if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
+				PublicID: identityPubID[:],
+				UserID:   u.ID,
+				Provider: generated.IdentitiesProvider(provider),
+				Subject:  subject,
 			}); err != nil {
 				return 0, err
 			}
@@ -567,17 +573,17 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 	if !emailVerified || userEmail == "" {
 		userEmail = subject + "@oauth." + provider + ".local"
 	}
-	accountEmail := email
-	if accountEmail == "" {
-		accountEmail = userEmail
-	}
+	// No password_hash is written. An account created through a provider has
+	// no local credential at all, which is different from having one nobody
+	// knows: the local identity row simply does not exist, so a password
+	// login for this address finds nothing rather than comparing against a
+	// placeholder that could never match.
 	res, err := q.CreateUser(ctx, generated.CreateUserParams{
-		PublicID:     pubID[:],
-		Name:         name,
-		Email:        userEmail,
-		Icon:         "👤",
-		Color:        "#42A5F5",
-		PasswordHash: "!", // placeholder — user has no password, must use OAuth
+		PublicID:    pubID[:],
+		Email:       userEmail,
+		DisplayName: name,
+		Locale:      defaultLocale,
+		Timezone:    defaultTimezone,
 	})
 	if err != nil {
 		return 0, err
@@ -588,16 +594,49 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, provider, subject, email, 
 	}
 	uid := uint32(insertID)
 
-	if _, err := q.CreateOAuthAccount(ctx, generated.CreateOAuthAccountParams{
-		UserID:          uid,
-		Provider:        generated.OauthAccountsProvider(provider),
-		ProviderSubject: subject,
-		Email:           accountEmail,
+	identityPubID, err := uuid.NewV7()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
+		PublicID: identityPubID[:],
+		UserID:   uid,
+		Provider: generated.IdentitiesProvider(provider),
+		Subject:  subject,
 	}); err != nil {
 		return 0, err
 	}
+
+	memberPubID, err := uuid.NewV7()
+	if err != nil {
+		return 0, err
+	}
+	if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
+		PublicID:    memberPubID[:],
+		WorkspaceID: workspaceID,
+		UserID:      uid,
+		Role:        generated.WorkspaceMembersRoleMember,
+	}); err != nil {
+		return 0, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return uid, nil
+}
+
+// startOAuthSession records the sign-in and returns the access token. It
+// mirrors what the password path does, so a provider sign-in is revocable
+// through the same session row rather than being a token nothing tracks.
+func startOAuthSession(ctx context.Context, deps OAuthDeps, userID uint32) (string, error) {
+	creds, err := startSession(ctx, Deps{
+		DB:        deps.DB,
+		Queries:   deps.Queries,
+		JWTSecret: deps.JWTSecret,
+	}, userID, "", "")
+	if err != nil {
+		return "", err
+	}
+	return creds.Token, nil
 }

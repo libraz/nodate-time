@@ -22,6 +22,19 @@ type Config struct {
 	DbDsn     string `env:"TC_DB_DSN" envDefault:"ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true"`
 	JWTSecret string `env:"TC_JWT_SECRET" envDefault:"dev-secret-change-me-in-production"`
 
+	// The single workspace this deployment runs in. The shared schema scopes
+	// every row by workspace because a second product on the same database
+	// will not be single-tenant; this application is, so it names one at
+	// startup and creates it if it is not there.
+	//
+	// The slug is the identity: pointing a deployment at a different slug
+	// gives it a different (initially empty) workspace rather than renaming
+	// this one.
+	WorkspaceSlug     string `env:"TC_WORKSPACE_SLUG" envDefault:"default"`
+	WorkspaceName     string `env:"TC_WORKSPACE_NAME" envDefault:"Nodate Time"`
+	WorkspaceTimezone string `env:"TC_WORKSPACE_TIMEZONE" envDefault:"Asia/Tokyo"`
+	WorkspaceCountry  string `env:"TC_WORKSPACE_COUNTRY" envDefault:"JP"`
+
 	// PasswordLoginEnabled controls whether email+password authentication
 	// (register, login, password reset) is available. Set to false to allow
 	// only OAuth/OIDC sign-in — e.g. Google-only deployments. The development

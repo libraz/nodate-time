@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
@@ -30,38 +33,57 @@ func isRejectedAttachmentContentType(contentType string) bool {
 	return strings.EqualFold(mediaType, "image/svg+xml")
 }
 
-func mapAttachment(att generated.EventAttachment) AttachmentResponse {
+// parseSHA256 accepts the digest the client computed over the bytes it is
+// about to upload. It is what makes the blob content-addressed: the same
+// file attached to two events is stored once and referred to twice.
+func parseSHA256(s string) ([]byte, bool) {
+	if len(s) != 64 {
+		return nil, false
+	}
+	raw, err := hex.DecodeString(strings.ToLower(s))
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+func mapAttachment(publicID []byte, filename, contentType string, byteSize uint64, createdAt time.Time) AttachmentResponse {
 	return AttachmentResponse{
-		ID:          pubIDToHex(att.PublicID),
-		Filename:    att.Filename,
-		ContentType: att.ContentType,
-		ByteSize:    att.ByteSize,
-		CreatedAt:   att.CreatedAt,
+		ID:          pubIDToHex(publicID),
+		Filename:    filename,
+		ContentType: contentType,
+		ByteSize:    int64(byteSize),
+		CreatedAt:   createdAt,
 	}
 }
 
-// PresignUpload generates a presigned URL for uploading a file attachment.
+// PresignUpload reserves an attachment and returns a URL to upload to.
+//
+// Two rows are written: a storage_objects row for the blob, keyed on its
+// digest so identical bytes reuse one object, and an attachment row that
+// starts disabled. The attachment takes no reference on the object until
+// the upload is confirmed, so a presign nobody ever uses leaves the object
+// at zero references for the sweep to collect.
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		if in.Body.ByteSize > maxAttachmentSize {
+		if in.Body.ByteSize > maxAttachmentSize || in.Body.ByteSize < 0 {
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
+		}
+
+		digest, ok := parseSHA256(in.Body.SHA256)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
 		contentType := in.Body.ContentType
@@ -76,26 +98,58 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
-		attachPubID, _ := uuid.NewV7()
-		calPubHex := pubIDToHex(cal.PublicID)
-		evtPubHex := pubIDToHex(evt.PublicID)
-		attachPubHex := attachPubID.String()
-		// The storage key is composed only of server-generated identifiers. The
-		// client-supplied filename is persisted in the DB (and surfaced via
-		// Content-Disposition on download) but never concatenated into the key,
-		// which would otherwise allow "../" path traversal into other namespaces.
-		storageKey := fmt.Sprintf("attachments/%s/%s/%s", calPubHex, evtPubHex, attachPubHex)
+		attachPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		objectPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
-		_, err = deps.Queries.CreateEventAttachment(ctx, generated.CreateEventAttachmentParams{
-			PublicID:    attachPubID[:],
-			EventID:     evt.ID,
-			UploadedBy:  userID,
-			Filename:    in.Body.Filename,
-			ContentType: contentType,
-			ByteSize:    in.Body.ByteSize,
-			StorageKey:  storageKey,
+		// The key is scoped by workspace, not by calendar, because that is
+		// the scope storage_objects is unique on: two calendars in one
+		// workspace uploading identical bytes must resolve to the same row,
+		// and a per-calendar key would leave the second one looking up a key
+		// the deduplicated row does not carry.
+		//
+		// It is composed only of server-side values and the digest. The
+		// client-supplied filename is stored on the attachment row (and
+		// surfaced via Content-Disposition on download) but never
+		// concatenated into the key, which would allow "../" traversal into
+		// another namespace.
+		storageKey := fmt.Sprintf("workspace/%s/%s", pubIDToHex(deps.WorkspacePublicID), hex.EncodeToString(digest))
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.CreateStorageObject(ctx, generated.CreateStorageObjectParams{
+				PublicID:    objectPubID[:],
+				WorkspaceID: sql.NullInt32{Int32: int32(deps.WorkspaceID), Valid: true},
+				Sha256:      digest,
+				ByteSize:    uint64(in.Body.ByteSize),
+				ContentType: contentType,
+				StorageKey:  storageKey,
+			}); err != nil {
+				return err
+			}
+			// Read the object back rather than using LastInsertId: on the
+			// dedup path the upsert inserted nothing and the id that matters
+			// belongs to the row that was already there.
+			object, err := q.GetStorageObjectByKey(ctx, storageKey)
+			if err != nil {
+				return err
+			}
+			_, err = q.CreateEventAttachment(ctx, generated.CreateEventAttachmentParams{
+				PublicID:        attachPubID[:],
+				WorkspaceID:     deps.WorkspaceID,
+				EventID:         sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+				UploaderID:      userID,
+				StorageObjectID: object.ID,
+				Filename:        in.Body.Filename,
+			})
+			return err
 		})
 		if err != nil {
+			slog.ErrorContext(ctx, "failed to reserve attachment", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -105,7 +159,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		}
 
 		out := &PresignUploadOutput{}
-		out.Body.AttachmentID = attachPubHex
+		out.Body.AttachmentID = attachPubID.String()
 		out.Body.UploadURL = url
 		return out, nil
 	}
@@ -117,47 +171,41 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListEventAttachments(ctx, evt.ID)
+		rows, err := deps.Queries.ListEventAttachments(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &ListAttachmentsOutput{Body: make([]AttachmentResponse, 0, len(rows))}
 		for _, att := range rows {
-			out.Body = append(out.Body, mapAttachment(att))
+			out.Body = append(out.Body, mapAttachment(att.PublicID, att.Filename, att.ContentType, att.ByteSize, att.CreatedAt))
 		}
 		return out, nil
 	}
 }
 
-// deleteMismatchedAttachment removes an uploaded object (and its pending row)
-// that failed the Confirm-time size check, so a mismatched upload does not
-// linger as an orphan until the 7-day abandoned-upload sweep. Best-effort:
-// errors are logged, not surfaced, since the caller is already returning the
-// mismatch error to the client.
-func deleteMismatchedAttachment(ctx context.Context, deps Deps, att generated.EventAttachment) {
-	if err := deps.Storage.DeleteObject(ctx, att.StorageKey); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched attachment object", "key", att.StorageKey, "error", err)
-	}
+// discardReservation removes a reservation whose upload did not match what
+// was declared. Only the attachment row is dropped: the object it points at
+// may be shared with an attachment that uploaded the same bytes correctly,
+// so deleting the blob here could break somebody else's file. An object
+// nothing refers to is collected by the sweep instead.
+//
+// Best-effort: errors are logged rather than surfaced, since the caller is
+// already returning the mismatch to the client.
+func discardReservation(ctx context.Context, deps Deps, attachmentID, uploaderID uint32) {
 	if err := deps.Queries.DeletePendingAttachment(ctx, generated.DeletePendingAttachmentParams{
-		ID:         att.ID,
-		UploadedBy: att.UploadedBy,
+		ID:         attachmentID,
+		UploaderID: uploaderID,
 	}); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", att.ID, "error", err)
+		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", attachmentID, "error", err)
 	}
 }
 
@@ -167,21 +215,15 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		// The attachment must belong to an event in the resolved calendar.
 		// Without this scoping check any member could download another tenant's
 		// files by passing a foreign attachment UUID (cross-tenant IDOR).
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		attPub, err := parseUUID(in.AttachmentID)
@@ -192,7 +234,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
-		if att.EventID != evt.ID || !att.Enabled {
+		if !att.EventID.Valid || uint32(att.EventID.Int32) != evt.ID {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
@@ -217,18 +259,12 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		attPub, err := parseUUID(in.AttachmentID)
@@ -239,23 +275,22 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
-		if att.EventID != evt.ID {
-			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
-		}
-		if !att.Enabled {
+		if !att.EventID.Valid || uint32(att.EventID.Int32) != evt.ID {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
-		err = deps.Queries.SoftDeleteAttachment(ctx, att.ID)
+		// Release the reference and leave the blob alone. Objects are
+		// content-addressed, so the same bytes may back another attachment
+		// entirely; deleting the object here would break that one. The sweep
+		// removes it once nothing refers to it.
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.SoftDeleteAttachment(ctx, att.ID); err != nil {
+				return err
+			}
+			return q.DecrementStorageObjectRefs(ctx, att.StorageObjectID)
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Remove the underlying object best-effort so deleted attachments are no
-		// longer retrievable and do not accumulate as orphaned storage.
-		if deps.Storage != nil {
-			if derr := deps.Storage.DeleteObject(ctx, att.StorageKey); derr != nil {
-				slog.WarnContext(ctx, "failed to delete attachment object", "key", att.StorageKey, "error", derr)
-			}
 		}
 
 		return &DeleteAttachmentOutput{}, nil
@@ -263,25 +298,20 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 }
 
 // ConfirmAttachment finalizes a presigned attachment upload: it verifies the
-// object actually landed in storage, then enables the row. An abandoned presign
-// never enables, so it leaves no attachment pointing at a missing object.
+// object actually landed in storage, then enables the row and takes a
+// reference on the blob. An abandoned presign never enables, so it leaves no
+// attachment pointing at a missing object.
 func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		if deps.Storage == nil {
@@ -292,11 +322,14 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
-		att, err := deps.Queries.GetAttachmentByPublicID(ctx, attPub)
-		if err != nil || att.EventID != evt.ID {
+		att, err := deps.Queries.GetPendingAttachmentByPublicID(ctx, attPub)
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
-		if att.Enabled || att.UploadedBy != userID {
+		if !att.EventID.Valid || uint32(att.EventID.Int32) != evt.ID {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+		if att.UploaderID != userID {
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
@@ -308,25 +341,40 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 		if info.Size > maxAttachmentSize {
-			deleteMismatchedAttachment(ctx, deps, att)
+			discardReservation(ctx, deps, att.ID, att.UploaderID)
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
 		}
-		if info.Size != att.ByteSize {
-			deleteMismatchedAttachment(ctx, deps, att)
+		if uint64(info.Size) != att.ByteSize {
+			discardReservation(ctx, deps, att.ID, att.UploaderID)
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
-		res, err := deps.Queries.ConfirmEventAttachment(ctx, generated.ConfirmEventAttachmentParams{
-			ID:         att.ID,
-			UploadedBy: userID,
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			res, err := q.ConfirmEventAttachment(ctx, generated.ConfirmEventAttachmentParams{
+				ID:         att.ID,
+				UploaderID: userID,
+			})
+			if err != nil {
+				return err
+			}
+			// The update re-checks enabled = FALSE, so a second confirm of the
+			// same reservation affects no rows -- which is what stops it from
+			// taking a second reference on the blob and pinning it forever.
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				return apierrors.AttachmentNotFound
+			}
+			return q.IncrementStorageObjectRefs(ctx, att.StorageObjectID)
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
-		if affected, _ := res.RowsAffected(); affected != 1 {
-			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
-		}
-		att.Enabled = true
-		return &ConfirmAttachmentOutput{Body: mapAttachment(att)}, nil
+
+		return &ConfirmAttachmentOutput{
+			Body: mapAttachment(att.PublicID, att.Filename, att.ContentType, att.ByteSize, att.CreatedAt),
+		}, nil
 	}
 }

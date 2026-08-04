@@ -1,17 +1,23 @@
-// Package audit exposes read endpoints for the calendar audit log: per-entity
-// history and a calendar-wide activity feed.
+// Package audit exposes read endpoints over the shared event log: one
+// entity's history and a calendar-wide activity feed.
+//
+// There is no separate history table. Every writer already appends to the
+// log in the same transaction as its change, so reading the log is the only
+// way to get an account of what happened that cannot disagree with the rows
+// it describes.
 package audit
 
 import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/google/uuid"
-	auditlog "github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
@@ -21,14 +27,11 @@ import (
 
 // Deps holds the dependencies shared by the audit read handlers.
 type Deps struct {
-	DB      *sql.DB
-	Queries *generated.Queries
-	Storage *storage.Client
+	DB          *sql.DB
+	Queries     *generated.Queries
+	Storage     *storage.Client
+	WorkspaceID uint32
 }
-
-// actorAvatarTTL bounds the presigned avatar URL lifetime; feed responses are
-// short-lived in the client, so an hour comfortably outlives a render.
-const actorAvatarTTL = time.Hour
 
 // defaultActivityLimit and maxActivityLimit bound the activity feed page size.
 const (
@@ -60,141 +63,144 @@ func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
 
-func parseUUID(s string) ([]byte, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return nil, err
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
 	}
-	return u[:], nil
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
 }
 
 // resolveCalendar resolves the calendar by public ID and verifies the caller is
 // a member, returning the calendar on success.
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Read(ctx, deps.Queries, calPubID, userID)
+	return calresolve.Read(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
-// resolveActor builds the actor identity from the joined audit row fields,
-// returning nil when the actor user no longer exists (public ID not valid).
-// avatarURLs memoizes presigned avatar URLs by storage key for the lifetime of
-// one request: a feed page can list up to 200 rows, and the same handful of
-// actors typically account for most of them, so this avoids re-presigning the
-// same avatar up to 200 times per request.
-func resolveActor(ctx context.Context, deps Deps, publicID, name, icon, avatarKey sql.NullString, avatarURLs map[string]string) *ActorBrief {
+// resolveActor builds the actor identity from the joined log row fields,
+// returning nil for a system action or an actor who no longer exists. The
+// avatar is whatever URL the user row carries: presigning an uploaded one
+// per row would mean up to 200 signatures for a single feed page.
+func resolveActor(publicID, name, avatarURL sql.NullString) *ActorBrief {
 	if !publicID.Valid {
 		return nil
 	}
 	a := &ActorBrief{
 		ID:   pubIDToHex([]byte(publicID.String)),
 		Name: name.String,
-		Icon: icon.String,
 	}
-	if deps.Storage != nil && avatarKey.Valid && avatarKey.String != "" {
-		key := avatarKey.String
-		if cached, ok := avatarURLs[key]; ok {
-			a.AvatarURL = cached
-		} else if url, err := deps.Storage.PresignGet(ctx, key, actorAvatarTTL); err == nil {
-			avatarURLs[key] = url
-			a.AvatarURL = url
-		}
+	if avatarURL.Valid && avatarURL.String != "" {
+		a.AvatarURL = avatarURL.String
 	}
 	return a
 }
 
-// EventHistory returns the audit history for a single event.
+// payloadFields pulls the summary and subject id back out of a log row.
+// Unknown keys are left alone: the contract requires anything that
+// round-trips a row to preserve them, and this only reads.
+type payloadFields struct {
+	ID      string `json:"id"`
+	Summary string `json:"summary"`
+}
+
+func readPayload(raw json.RawMessage) payloadFields {
+	var f payloadFields
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &f)
+	}
+	return f
+}
+
+// entityTypeOf reads the entity out of a dotted event type:
+// "calendar.event.created" is about an event, "calendar.memo.deleted" about
+// a memo. Matching on the segment rather than the whole string keeps a new
+// verb from needing a change here.
+func entityTypeOf(eventType string) string {
+	parts := strings.Split(eventType, ".")
+	if len(parts) >= 3 {
+		return parts[1]
+	}
+	if len(parts) == 2 {
+		return parts[0]
+	}
+	return eventType
+}
+
+// EventHistory returns the log entries for a single event.
 func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHistoryOutput, error) {
 	return func(ctx context.Context, in *EventHistoryInput) (*EventHistoryOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		// A recurring instance is addressed as "uuid_YYYYMMDD" (see
-		// events.parseCompositeID / checklist.resolveEvent for the sibling
-		// pattern). Every audit entry for an occurrence — whether editing "this"
-		// instance or "all" — is recorded against the parent series' public ID
-		// (see events.UpdateEvent/DeleteEvent), never a per-occurrence id, so the
-		// history for any instance is the parent's history. The parent is not
-		// looked up in the events table: audit_log is intentionally decoupled
-		// from the live row so a deleted series' history remains viewable.
+		// A recurring instance is addressed as "uuid_YYYYMMDD". Every entry
+		// for an occurrence -- whether the edit was to "this" instance or to
+		// "all" -- is recorded against the parent series' public id, with the
+		// occurrence carried in the payload, so the history of any instance
+		// is the parent's history. The parent is not looked up in
+		// calendar_events: the log is deliberately independent of the live
+		// row, so a deleted series' history stays readable.
 		eventID := in.EventID
 		if parentUUID, _ := calresolve.SplitCompositeID(eventID); parentUUID != "" {
 			eventID = parentUUID
 		}
-		entityPub, err := parseUUID(eventID)
-		if err != nil {
+		if _, err := uuid.Parse(eventID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 
-		rows, err := deps.Queries.ListAuditByEntity(ctx, generated.ListAuditByEntityParams{
-			EntityType:     auditlog.EntityEvent,
-			EntityPublicID: entityPub,
-			CalendarID:     cal.ID,
-			Limit:          perEntityHistoryLimit,
-		})
+		items, err := subjectHistory(ctx, deps, cal.ID, eventID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		avatarURLs := make(map[string]string)
-		out := &EventHistoryOutput{Body: make([]HistoryItem, 0, len(rows))}
-		for _, r := range rows {
-			out.Body = append(out.Body, HistoryItem{
-				ID:        r.ID,
-				Action:    r.Action,
-				Summary:   r.Summary,
-				CreatedAt: r.CreatedAt,
-				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
-			})
-		}
-		return out, nil
+		return &EventHistoryOutput{Body: items}, nil
 	}
 }
 
-// MemoHistory returns the audit history for a single memo.
+// MemoHistory returns the log entries for a single memo.
 func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHistoryOutput, error) {
 	return func(ctx context.Context, in *MemoHistoryInput) (*MemoHistoryOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		entityPub, err := parseUUID(in.MemoID)
-		if err != nil {
+		if _, err := uuid.Parse(in.MemoID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemoNotFound)
 		}
 
-		rows, err := deps.Queries.ListAuditByEntity(ctx, generated.ListAuditByEntityParams{
-			EntityType:     auditlog.EntityMemo,
-			EntityPublicID: entityPub,
-			CalendarID:     cal.ID,
-			Limit:          perEntityHistoryLimit,
-		})
+		items, err := subjectHistory(ctx, deps, cal.ID, in.MemoID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		avatarURLs := make(map[string]string)
-		out := &MemoHistoryOutput{Body: make([]HistoryItem, 0, len(rows))}
-		for _, r := range rows {
-			out.Body = append(out.Body, HistoryItem{
-				ID:        r.ID,
-				Action:    r.Action,
-				Summary:   r.Summary,
-				CreatedAt: r.CreatedAt,
-				Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
-			})
-		}
-		return out, nil
+		return &MemoHistoryOutput{Body: items}, nil
 	}
+}
+
+func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID string) ([]HistoryItem, error) {
+	rows, err := deps.Queries.ListEventsBySubject(ctx, generated.ListEventsBySubjectParams{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  sql.NullInt32{Int32: int32(calendarID), Valid: true},
+		SubjectID:   subjectID,
+		Limit:       perEntityHistoryLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]HistoryItem, 0, len(rows))
+	for _, r := range rows {
+		payload := readPayload(r.PayloadJSON)
+		items = append(items, HistoryItem{
+			ID:        r.ID,
+			Action:    r.Type,
+			Summary:   payload.Summary,
+			CreatedAt: r.OccurredAt,
+			Actor:     resolveActor(r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarURL),
+		})
+	}
+	return items, nil
 }
 
 // Activity returns the calendar-wide activity feed, newest first.
@@ -203,10 +209,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		limit := in.Limit
@@ -222,10 +225,11 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		}
 		fetchLimit := limit + 1
 
-		rows, err := deps.Queries.ListAuditByCalendar(ctx, generated.ListAuditByCalendarParams{
-			CalendarID: cal.ID,
-			AfterID:    afterID,
-			Limit:      int32(fetchLimit),
+		rows, err := deps.Queries.ListEventsByCalendar(ctx, generated.ListEventsByCalendarParams{
+			WorkspaceID: deps.WorkspaceID,
+			CalendarID:  sql.NullInt32{Int32: int32(cal.ID), Valid: true},
+			AfterID:     afterID,
+			Limit:       int32(fetchLimit),
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -237,21 +241,21 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 			rows = rows[:limit]
 		}
 
-		avatarURLs := make(map[string]string)
 		out := &ActivityOutput{
 			Body: ActivityPage{Items: make([]FeedItem, 0, len(rows)), NextCursor: nextCursor},
 		}
 		for _, r := range rows {
+			payload := readPayload(r.PayloadJSON)
 			out.Body.Items = append(out.Body.Items, FeedItem{
 				HistoryItem: HistoryItem{
 					ID:        r.ID,
-					Action:    r.Action,
-					Summary:   r.Summary,
-					CreatedAt: r.CreatedAt,
-					Actor:     resolveActor(ctx, deps, r.ActorPublicID, r.ActorName, r.ActorIcon, r.ActorAvatarKey, avatarURLs),
+					Action:    r.Type,
+					Summary:   payload.Summary,
+					CreatedAt: r.OccurredAt,
+					Actor:     resolveActor(r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarURL),
 				},
-				EntityType: r.EntityType,
-				EntityID:   pubIDToHex(r.EntityPublicID),
+				EntityType: entityTypeOf(r.Type),
+				EntityID:   payload.ID,
 			})
 		}
 		return out, nil

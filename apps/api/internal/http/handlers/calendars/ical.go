@@ -12,7 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
@@ -41,7 +43,7 @@ const (
 // mirrors the stored row; for recurring masters it carries one expanded
 // occurrence's start/end plus a uidSuffix to keep the UID unique per instance.
 type exportEvent struct {
-	event     generated.Event
+	event     generated.CalendarEvent
 	startAt   time.Time
 	endAt     time.Time
 	uidSuffix string
@@ -52,24 +54,17 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		now := time.Now()
 		windowStart := now.Add(exportWindowPast)
 		windowEnd := now.Add(exportWindowFuture)
 
-		// sqlc generates StartAt/EndAt for the bound params, but the underlying SQL is
-		//   `start_at < ? AND end_at > ?`
-		// so StartAt actually receives the upper bound (windowEnd) and EndAt the lower
-		// bound (windowStart). See sql/queries/events.sql.
-		rows, err := deps.Queries.ListEventsByCalendarAndRange(ctx, generated.ListEventsByCalendarAndRangeParams{
+		rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
-			StartAt:    windowEnd,
-			EndAt:      windowStart,
+			RangeEnd:   sql.NullTime{Time: windowEnd, Valid: true},
+			RangeStart: sql.NullTime{Time: windowStart, Valid: true},
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -77,33 +72,43 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 
 		exports := make([]exportEvent, 0, len(rows))
 		for _, e := range rows {
-			exports = append(exports, exportEvent{event: e, startAt: e.StartAt, endAt: e.EndAt})
+			// An undated row has nothing to render as DTSTART. The shared
+			// schema allows one; this product does not create them, but the
+			// export must not invent a zero time if another writer has.
+			if !e.StartAt.Valid || !e.EndAt.Valid {
+				continue
+			}
+			exports = append(exports, exportEvent{event: e, startAt: e.StartAt.Time, endAt: e.EndAt.Time})
 		}
 
 		// Recurring masters are stored once; expand each into its occurrences
 		// within the export window so they are not silently dropped.
-		recurringRows, err := deps.Queries.ListRecurringEventsByCalendarAndRange(ctx, generated.ListRecurringEventsByCalendarAndRangeParams{
-			CalendarID:    cal.ID,
-			StartAt:       windowEnd,
-			RecurrenceEnd: sql.NullTime{Time: windowStart, Valid: true},
+		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
+			CalendarID: cal.ID,
+			RangeEnd:   sql.NullTime{Time: windowEnd, Valid: true},
+			RangeStart: sql.NullTime{Time: windowStart, Valid: true},
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		// Expansion goes through eventexpand so recurrence exceptions are
-		// honored: cancelled occurrences stay out of the export and edited
-		// ones carry their overridden values, matching what the app displays.
+		// Expansion goes through eventexpand so both departures from the rule
+		// are honored: cancelled occurrences stay out of the export and
+		// changed ones carry their override's values, matching what the app
+		// displays.
 		for _, e := range recurringRows {
 			if e.RecurrenceRule == nil {
 				continue
 			}
 			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, windowStart, windowEnd) {
 				uidSuffix := "-" + inst.OriginalStart.UTC().Format("20060102T150405")
-				if inst.IsException {
+				if inst.IsOverride {
+					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
+						continue
+					}
 					exports = append(exports, exportEvent{
 						event:     inst.Event,
-						startAt:   inst.Event.StartAt,
-						endAt:     inst.Event.EndAt,
+						startAt:   inst.Event.StartAt.Time,
+						endAt:     inst.Event.EndAt.Time,
 						uidSuffix: uidSuffix,
 					})
 					continue
@@ -240,14 +245,14 @@ func buildICS(calName string, rows []exportEvent) string {
 			writeFolded(&b, "DTEND:"+icsTime(x.endAt))
 		}
 		writeFolded(&b, "SUMMARY:"+icsEscape(e.Title))
-		if e.Location != "" {
-			writeFolded(&b, "LOCATION:"+icsEscape(e.Location))
+		if e.Location.Valid && e.Location.String != "" {
+			writeFolded(&b, "LOCATION:"+icsEscape(e.Location.String))
 		}
-		if e.Memo != "" {
-			writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Memo))
+		if e.Memo.Valid && e.Memo.String != "" {
+			writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Memo.String))
 		}
-		if e.Url != "" {
-			writeFolded(&b, "URL:"+icsURI(e.Url))
+		if e.URL.Valid && e.URL.String != "" {
+			writeFolded(&b, "URL:"+icsURI(e.URL.String))
 		}
 		writeFolded(&b, "END:VEVENT")
 	}
@@ -286,9 +291,9 @@ func buildCSV(rows []exportEvent) string {
 			endDate,
 			end.Format("15:04:05"),
 			fmt.Sprintf("%t", e.AllDay),
-			csvEscape(e.Location),
-			csvEscape(e.Memo),
-			csvEscape(e.Url),
+			csvEscape(nullStringValue(e.Location)),
+			csvEscape(nullStringValue(e.Memo)),
+			csvEscape(nullStringValue(e.URL)),
 		}
 		b.WriteString(strings.Join(fields, ","))
 		b.WriteString("\r\n")
@@ -552,10 +557,7 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		events := parseICS(in.Body.ICS)
@@ -607,22 +609,49 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 				failed++
 				continue
 			}
-			if _, err := deps.Queries.CreateEvent(ctx, generated.CreateEventParams{
-				PublicID:       pubID[:],
-				CalendarID:     cal.ID,
-				Title:          e.summary,
-				AllDay:         e.allDay,
-				StartAt:        e.start,
-				EndAt:          endAt,
-				Timezone:       tz,
-				Color:          "#47B2F7",
-				Location:       e.location,
-				Memo:           e.desc,
-				Url:            e.url,
-				CreatedBy:      userID,
-				RecurrenceRule: ruleData,
-				RecurrenceEnd:  recEnd,
-			}); err != nil {
+			// Each event is its own transaction so one bad row does not
+			// discard the whole file, and each carries its own log entry:
+			// an import is a state change like any other, and a feed that
+			// skipped it would be missing however many events landed.
+			//
+			// The importing user is recorded as the owner. A .ics file has
+			// no notion of one, and filing the events under whoever ran the
+			// import is the honest answer -- they are who put them there.
+			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+				if _, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
+					PublicID:        pubID[:],
+					WorkspaceID:     deps.WorkspaceID,
+					CalendarID:      cal.ID,
+					Kind:            generated.CalendarEventsKindEvent,
+					Visibility:      generated.CalendarEventsVisibilityDefault,
+					ShowAs:          generated.CalendarEventsShowAsBusy,
+					Flexibility:     generated.CalendarEventsFlexibilityFixed,
+					Title:           e.summary,
+					AllDay:          e.allDay,
+					StartAt:         sql.NullTime{Time: e.start, Valid: true},
+					EndAt:           sql.NullTime{Time: endAt, Valid: true},
+					Timezone:        tz,
+					Location:        nullString(e.location),
+					Memo:            nullString(e.desc),
+					URL:             nullString(e.url),
+					OwnerUserID:     userID,
+					CreatedByUserID: userID,
+					RecurrenceRule:  ruleData,
+					RecurrenceEnd:   recEnd,
+				}); err != nil {
+					return err
+				}
+				return eventlog.Append(ctx, q, eventlog.Entry{
+					WorkspaceID: deps.WorkspaceID,
+					CalendarID:  cal.ID,
+					ActorUserID: userID,
+					Type:        eventlog.TypeEventCreated,
+					Summary:     e.summary,
+					Subject:     pubID[:],
+					Extra:       map[string]any{"source": "ics-import"},
+				})
+			})
+			if err != nil {
 				failed++
 				continue
 			}

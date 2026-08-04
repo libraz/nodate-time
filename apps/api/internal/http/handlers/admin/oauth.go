@@ -77,12 +77,12 @@ func ListOAuthProviders(deps Deps) func(context.Context, *ListProvidersInput) (*
 		out.Body.Providers = make([]ProviderInfo, 0, len(supportedProviders))
 		for _, p := range supportedProviders {
 			info := ProviderInfo{Provider: p, Source: "none"}
-			row, err := deps.Queries.GetOAuthProviderConfig(ctx, p)
+			row, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(p))
 			if err == nil {
 				info.ClientID = row.ClientID
-				info.HasSecret = len(row.ClientSecretEnc) > 0
+				info.HasSecret = len(row.ClientSecretCiphertext) > 0
 				info.Enabled = row.Enabled
-				info.UpdatedAt = row.UpdatedAt
+				info.UpdatedAt = nullTimeValue(row.UpdatedAt)
 				info.Source = "db"
 			} else if !errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -105,7 +105,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		userID, _ := middleware.ActorFromContext(ctx)
 
 		// Look up existing row to decide whether to keep / clear / replace secret.
-		existing, err := deps.Queries.GetOAuthProviderConfig(ctx, in.Provider)
+		existing, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
 		hadRow := err == nil
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -114,7 +114,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		var encSecret []byte
 		switch {
 		case in.Body.ClientSecret == "" && hadRow:
-			encSecret = existing.ClientSecretEnc
+			encSecret = existing.ClientSecretCiphertext
 		case in.Body.ClientSecret == "":
 			// New row but no secret provided. Allow it only when the environment
 			// supplies the secret for this provider (resolveProvider merges the
@@ -137,33 +137,40 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		_ = hadRow
 		updatedBy := sql.NullInt32{Int32: int32(userID), Valid: userID > 0}
 		if err := deps.Queries.UpsertOAuthProviderConfig(ctx, generated.UpsertOAuthProviderConfigParams{
-			Provider:        in.Provider,
-			ClientID:        in.Body.ClientID,
-			ClientSecretEnc: encSecret,
-			Enabled:         in.Body.Enabled,
-			UpdatedBy:       updatedBy,
+			Provider:               generated.OauthProviderConfigsProvider(in.Provider),
+			ClientID:               in.Body.ClientID,
+			ClientSecretCiphertext: encSecret,
+			Enabled:                in.Body.Enabled,
+			UpdatedByUserID:        updatedBy,
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		row, err := deps.Queries.GetOAuthProviderConfig(ctx, in.Provider)
+		row, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &UpdateProviderOutput{Body: ProviderInfo{
 			Provider:  string(row.Provider),
 			ClientID:  row.ClientID,
-			HasSecret: len(row.ClientSecretEnc) > 0,
+			HasSecret: len(row.ClientSecretCiphertext) > 0,
 			Enabled:   row.Enabled,
 			Source:    "db",
-			UpdatedAt: row.UpdatedAt,
+			UpdatedAt: nullTimeValue(row.UpdatedAt),
 		}}, nil
 	}
 }
 
+func nullTimeValue(n sql.NullTime) time.Time {
+	if !n.Valid {
+		return time.Time{}
+	}
+	return n.Time
+}
+
 func DeleteOAuthProvider(deps Deps) func(context.Context, *DeleteProviderInput) (*DeleteProviderOutput, error) {
 	return func(ctx context.Context, in *DeleteProviderInput) (*DeleteProviderOutput, error) {
-		if err := deps.Queries.DeleteOAuthProviderConfig(ctx, in.Provider); err != nil {
+		if err := deps.Queries.DeleteOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider)); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &DeleteProviderOutput{}, nil

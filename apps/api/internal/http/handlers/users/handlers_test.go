@@ -2,6 +2,7 @@ package users
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
@@ -17,18 +18,18 @@ func TestIsDuplicateKey(t *testing.T) {
 	}
 }
 
-func TestPasswordHashForLoginKeepsBcryptHash(t *testing.T) {
-	hash, err := auth.HashPassword("secret")
-	if err != nil {
-		t.Fatalf("hash password: %v", err)
+// The timing equalizer must be a hash the checker will actually work
+// through. If it were a value CheckPassword rejects on sight, the
+// no-such-account path would return measurably faster than the wrong-password
+// one, which is the enumeration side channel it exists to close.
+func TestDummyPasswordHashIsRealWork(t *testing.T) {
+	if dummyPasswordHash == "" {
+		t.Fatal("dummy hash is empty; the login timing paths would diverge")
 	}
-	if got := passwordHashForLogin(hash); got != hash {
-		t.Fatal("valid bcrypt hash was not preserved")
+	if !strings.HasPrefix(dummyPasswordHash, "$argon2id$") {
+		t.Fatalf("dummy hash is not argon2id: %q", dummyPasswordHash)
 	}
-}
-
-func TestPasswordHashForLoginUsesDummyHashForPlaceholder(t *testing.T) {
-	if got := passwordHashForLogin("!"); got != dummyPasswordHash {
-		t.Fatal("placeholder hash did not use dummy bcrypt hash")
+	if auth.CheckPassword("anything at all", dummyPasswordHash) {
+		t.Fatal("the timing equalizer accepted a password")
 	}
 }
