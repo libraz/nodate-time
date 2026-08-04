@@ -12,50 +12,71 @@ import (
 )
 
 const addCalendarMember = `-- name: AddCalendarMember :execresult
-INSERT INTO calendar_members (calendar_id, user_id, role, color)
-VALUES (?, ?, ?, ?)
+INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, joined_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, NOW(3))
+ON DUPLICATE KEY UPDATE
+  role = VALUES(role),
+  member_color = VALUES(member_color),
+  invited_by_user_id = VALUES(invited_by_user_id),
+  joined_at = NOW(3),
+  enabled = TRUE
 `
 
 type AddCalendarMemberParams struct {
-	CalendarID uint32              `json:"calendarId"`
-	UserID     uint32              `json:"userId"`
-	Role       CalendarMembersRole `json:"role"`
-	Color      string              `json:"color"`
+	PublicID        []byte              `json:"publicId"`
+	WorkspaceID     uint32              `json:"workspaceId"`
+	CalendarID      uint32              `json:"calendarId"`
+	UserID          uint32              `json:"userId"`
+	Role            CalendarMembersRole `json:"role"`
+	MemberColor     string              `json:"memberColor"`
+	InvitedByUserID sql.NullInt32       `json:"invitedByUserId"`
 }
 
+// AddCalendarMember revives a revoked grant rather than inserting beside
+// it: the unique key spans revoked rows precisely so a re-add cannot leave
+// an older grant behind for an access check to find.
 func (q *Queries) AddCalendarMember(ctx context.Context, arg AddCalendarMemberParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, addCalendarMember,
+		arg.PublicID,
+		arg.WorkspaceID,
 		arg.CalendarID,
 		arg.UserID,
 		arg.Role,
-		arg.Color,
+		arg.MemberColor,
+		arg.InvitedByUserID,
 	)
 }
 
-const countCalendarAdmins = `-- name: CountCalendarAdmins :one
-SELECT COUNT(*) FROM calendar_members WHERE calendar_id = ? AND role = 'admin'
+const countCalendarOwners = `-- name: CountCalendarOwners :one
+SELECT COUNT(*) FROM calendar_members
+WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
 `
 
-func (q *Queries) CountCalendarAdmins(ctx context.Context, calendarID uint32) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countCalendarAdmins, calendarID)
+// CountCalendarOwners guards the last-owner case. Roles above editor can
+// change membership, so losing the final owner would leave a calendar
+// nobody can administer.
+func (q *Queries) CountCalendarOwners(ctx context.Context, calendarID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countCalendarOwners, calendarID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const countCalendarAdminsForUpdate = `-- name: CountCalendarAdminsForUpdate :one
-SELECT COUNT(*) FROM calendar_members WHERE calendar_id = ? AND role = 'admin' FOR UPDATE
+const countCalendarOwnersForUpdate = `-- name: CountCalendarOwnersForUpdate :one
+SELECT COUNT(*) FROM calendar_members
+WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE FOR UPDATE
 `
 
-func (q *Queries) CountCalendarAdminsForUpdate(ctx context.Context, calendarID uint32) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countCalendarAdminsForUpdate, calendarID)
+func (q *Queries) CountCalendarOwnersForUpdate(ctx context.Context, calendarID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countCalendarOwnersForUpdate, calendarID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const getCalendarMember = `-- name: GetCalendarMember :one
-SELECT id, calendar_id, user_id, role, color, joined_at FROM calendar_members WHERE calendar_id = ? AND user_id = ?
+SELECT id, public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM calendar_members
+WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE
 `
 
 type GetCalendarMemberParams struct {
@@ -68,17 +89,25 @@ func (q *Queries) GetCalendarMember(ctx context.Context, arg GetCalendarMemberPa
 	var i CalendarMember
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
 		&i.CalendarID,
 		&i.UserID,
 		&i.Role,
-		&i.Color,
-		&i.JoinedAt,
+		&i.MemberColor,
+		&i.InvitedByUserID,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getCalendarMemberForUpdate = `-- name: GetCalendarMemberForUpdate :one
-SELECT id, calendar_id, user_id, role, color, joined_at FROM calendar_members WHERE calendar_id = ? AND user_id = ? FOR UPDATE
+SELECT id, public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM calendar_members
+WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE FOR UPDATE
 `
 
 type GetCalendarMemberForUpdateParams struct {
@@ -91,34 +120,49 @@ func (q *Queries) GetCalendarMemberForUpdate(ctx context.Context, arg GetCalenda
 	var i CalendarMember
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
 		&i.CalendarID,
 		&i.UserID,
 		&i.Role,
-		&i.Color,
-		&i.JoinedAt,
+		&i.MemberColor,
+		&i.InvitedByUserID,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listCalendarMembers = `-- name: ListCalendarMembers :many
-SELECT cm.id, cm.calendar_id, cm.user_id, cm.role, cm.color, cm.joined_at, u.public_id AS user_public_id, u.name AS user_name, u.email AS user_email, u.icon AS user_icon
+SELECT cm.id, cm.public_id, cm.workspace_id, cm.calendar_id, cm.user_id, cm.role, cm.member_color, cm.invited_by_user_id, cm.sort_weight, cm.notes, cm.enabled, cm.updated_at, cm.created_at, u.public_id AS user_public_id, u.display_name AS user_display_name,
+       u.email AS user_email, u.avatar_url AS user_avatar_url
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
-WHERE cm.calendar_id = ?
+WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.joined_at
 `
 
 type ListCalendarMembersRow struct {
-	ID           uint32              `json:"id"`
-	CalendarID   uint32              `json:"calendarId"`
-	UserID       uint32              `json:"userId"`
-	Role         CalendarMembersRole `json:"role"`
-	Color        string              `json:"color"`
-	JoinedAt     time.Time           `json:"joinedAt"`
-	UserPublicID []byte              `json:"userPublicId"`
-	UserName     string              `json:"userName"`
-	UserEmail    string              `json:"userEmail"`
-	UserIcon     string              `json:"userIcon"`
+	ID              uint32              `json:"id"`
+	PublicID        []byte              `json:"publicId"`
+	WorkspaceID     uint32              `json:"workspaceId"`
+	CalendarID      uint32              `json:"calendarId"`
+	UserID          uint32              `json:"userId"`
+	Role            CalendarMembersRole `json:"role"`
+	MemberColor     string              `json:"memberColor"`
+	InvitedByUserID sql.NullInt32       `json:"invitedByUserId"`
+	SortWeight      int32               `json:"sortWeight"`
+	Notes           sql.NullString      `json:"notes"`
+	Enabled         bool                `json:"enabled"`
+	UpdatedAt       sql.NullTime        `json:"updatedAt"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	UserPublicID    []byte              `json:"userPublicId"`
+	UserDisplayName string              `json:"userDisplayName"`
+	UserEmail       string              `json:"userEmail"`
+	UserAvatarUrl   sql.NullString      `json:"userAvatarUrl"`
 }
 
 func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([]ListCalendarMembersRow, error) {
@@ -132,15 +176,22 @@ func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([
 		var i ListCalendarMembersRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
 			&i.CalendarID,
 			&i.UserID,
 			&i.Role,
-			&i.Color,
-			&i.JoinedAt,
+			&i.MemberColor,
+			&i.InvitedByUserID,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
 			&i.UserPublicID,
-			&i.UserName,
+			&i.UserDisplayName,
 			&i.UserEmail,
-			&i.UserIcon,
+			&i.UserAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -155,17 +206,32 @@ func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([
 	return items, nil
 }
 
-const removeCalendarMember = `-- name: RemoveCalendarMember :exec
-DELETE FROM calendar_members WHERE calendar_id = ? AND user_id = ?
+const revokeCalendarMember = `-- name: RevokeCalendarMember :exec
+UPDATE calendar_members SET enabled = FALSE WHERE calendar_id = ? AND user_id = ?
 `
 
-type RemoveCalendarMemberParams struct {
+type RevokeCalendarMemberParams struct {
 	CalendarID uint32 `json:"calendarId"`
 	UserID     uint32 `json:"userId"`
 }
 
-func (q *Queries) RemoveCalendarMember(ctx context.Context, arg RemoveCalendarMemberParams) error {
-	_, err := q.db.ExecContext(ctx, removeCalendarMember, arg.CalendarID, arg.UserID)
+func (q *Queries) RevokeCalendarMember(ctx context.Context, arg RevokeCalendarMemberParams) error {
+	_, err := q.db.ExecContext(ctx, revokeCalendarMember, arg.CalendarID, arg.UserID)
+	return err
+}
+
+const updateCalendarMemberColor = `-- name: UpdateCalendarMemberColor :exec
+UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id = ?
+`
+
+type UpdateCalendarMemberColorParams struct {
+	MemberColor string `json:"memberColor"`
+	CalendarID  uint32 `json:"calendarId"`
+	UserID      uint32 `json:"userId"`
+}
+
+func (q *Queries) UpdateCalendarMemberColor(ctx context.Context, arg UpdateCalendarMemberColorParams) error {
+	_, err := q.db.ExecContext(ctx, updateCalendarMemberColor, arg.MemberColor, arg.CalendarID, arg.UserID)
 	return err
 }
 

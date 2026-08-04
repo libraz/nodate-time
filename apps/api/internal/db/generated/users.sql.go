@@ -11,7 +11,7 @@ import (
 )
 
 const clearUserAvatar = `-- name: ClearUserAvatar :exec
-UPDATE users SET avatar_storage_key = NULL, avatar_content_type = NULL WHERE id = ?
+UPDATE users SET avatar_storage_object_id = NULL, avatar_url = NULL WHERE id = ?
 `
 
 func (q *Queries) ClearUserAvatar(ctx context.Context, id uint32) error {
@@ -20,59 +20,32 @@ func (q *Queries) ClearUserAvatar(ctx context.Context, id uint32) error {
 }
 
 const createUser = `-- name: CreateUser :execresult
-INSERT INTO users (public_id, name, email, icon, color, password_hash)
+INSERT INTO users (public_id, email, display_name, avatar_url, locale, timezone)
 VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateUserParams struct {
-	PublicID     []byte `json:"publicId"`
-	Name         string `json:"name"`
-	Email        string `json:"email"`
-	Icon         string `json:"icon"`
-	Color        string `json:"color"`
-	PasswordHash string `json:"passwordHash"`
+	PublicID    []byte         `json:"publicId"`
+	Email       string         `json:"email"`
+	DisplayName string         `json:"displayName"`
+	AvatarURL   sql.NullString `json:"avatarUrl"`
+	Locale      string         `json:"locale"`
+	Timezone    string         `json:"timezone"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createUser,
 		arg.PublicID,
-		arg.Name,
 		arg.Email,
-		arg.Icon,
-		arg.Color,
-		arg.PasswordHash,
-	)
-}
-
-const createUserWithRole = `-- name: CreateUserWithRole :execresult
-INSERT INTO users (public_id, name, email, icon, color, password_hash, is_admin)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateUserWithRoleParams struct {
-	PublicID     []byte `json:"publicId"`
-	Name         string `json:"name"`
-	Email        string `json:"email"`
-	Icon         string `json:"icon"`
-	Color        string `json:"color"`
-	PasswordHash string `json:"passwordHash"`
-	IsAdmin      bool   `json:"isAdmin"`
-}
-
-func (q *Queries) CreateUserWithRole(ctx context.Context, arg CreateUserWithRoleParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createUserWithRole,
-		arg.PublicID,
-		arg.Name,
-		arg.Email,
-		arg.Icon,
-		arg.Color,
-		arg.PasswordHash,
-		arg.IsAdmin,
+		arg.DisplayName,
+		arg.AvatarURL,
+		arg.Locale,
+		arg.Timezone,
 	)
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE email = ?
+SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE email = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -81,50 +54,87 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.Name,
 		&i.Email,
-		&i.Icon,
-		&i.Color,
-		&i.AvatarStorageKey,
-		&i.AvatarContentType,
-		&i.PasswordHash,
-		&i.TokenVersion,
-		&i.PasswordChangedAt,
-		&i.IsAdmin,
-		&i.CreatedAt,
+		&i.EmailVerifiedAt,
+		&i.DisplayName,
+		&i.AvatarURL,
+		&i.AvatarStorageObjectID,
+		&i.Locale,
+		&i.Timezone,
+		&i.Country,
+		&i.WeekStart,
+		&i.WorkingDays,
+		&i.WorkingHoursStart,
+		&i.WorkingHoursEnd,
+		&i.SnapToWorkingDay,
+		&i.TreatHolidaysAsNonWorking,
+		&i.ThemePreference,
+		&i.CalendarShiftDefault,
+		&i.LastLoginAt,
+		&i.NotifEmailDigestEnabled,
+		&i.NotifEmailMentionEnabled,
+		&i.NotifEmailAssignmentEnabled,
+		&i.NotifEmailDueSoonEnabled,
+		&i.NotifWebPushEnabled,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE id = ?
+
+SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE id = ? AND enabled = TRUE
 `
 
+// Users and their credentials.
+//
+// The password lives in identities, not on the user: a user may hold a
+// local identity plus any number of provider identities, and the contract
+// keeps them in one table so signing in through a second provider does not
+// silently create a second account.
 func (q *Queries) GetUserByID(ctx context.Context, id uint32) (User, error) {
 	row := q.db.QueryRowContext(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.Name,
 		&i.Email,
-		&i.Icon,
-		&i.Color,
-		&i.AvatarStorageKey,
-		&i.AvatarContentType,
-		&i.PasswordHash,
-		&i.TokenVersion,
-		&i.PasswordChangedAt,
-		&i.IsAdmin,
-		&i.CreatedAt,
+		&i.EmailVerifiedAt,
+		&i.DisplayName,
+		&i.AvatarURL,
+		&i.AvatarStorageObjectID,
+		&i.Locale,
+		&i.Timezone,
+		&i.Country,
+		&i.WeekStart,
+		&i.WorkingDays,
+		&i.WorkingHoursStart,
+		&i.WorkingHoursEnd,
+		&i.SnapToWorkingDay,
+		&i.TreatHolidaysAsNonWorking,
+		&i.ThemePreference,
+		&i.CalendarShiftDefault,
+		&i.LastLoginAt,
+		&i.NotifEmailDigestEnabled,
+		&i.NotifEmailMentionEnabled,
+		&i.NotifEmailAssignmentEnabled,
+		&i.NotifEmailDueSoonEnabled,
+		&i.NotifWebPushEnabled,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByIDForUpdate = `-- name: GetUserByIDForUpdate :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE id = ? FOR UPDATE
+SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE id = ? FOR UPDATE
 `
 
 func (q *Queries) GetUserByIDForUpdate(ctx context.Context, id uint32) (User, error) {
@@ -133,24 +143,39 @@ func (q *Queries) GetUserByIDForUpdate(ctx context.Context, id uint32) (User, er
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.Name,
 		&i.Email,
-		&i.Icon,
-		&i.Color,
-		&i.AvatarStorageKey,
-		&i.AvatarContentType,
-		&i.PasswordHash,
-		&i.TokenVersion,
-		&i.PasswordChangedAt,
-		&i.IsAdmin,
-		&i.CreatedAt,
+		&i.EmailVerifiedAt,
+		&i.DisplayName,
+		&i.AvatarURL,
+		&i.AvatarStorageObjectID,
+		&i.Locale,
+		&i.Timezone,
+		&i.Country,
+		&i.WeekStart,
+		&i.WorkingDays,
+		&i.WorkingHoursStart,
+		&i.WorkingHoursEnd,
+		&i.SnapToWorkingDay,
+		&i.TreatHolidaysAsNonWorking,
+		&i.ThemePreference,
+		&i.CalendarShiftDefault,
+		&i.LastLoginAt,
+		&i.NotifEmailDigestEnabled,
+		&i.NotifEmailMentionEnabled,
+		&i.NotifEmailAssignmentEnabled,
+		&i.NotifEmailDueSoonEnabled,
+		&i.NotifWebPushEnabled,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, name, email, icon, color, avatar_storage_key, avatar_content_type, password_hash, token_version, password_changed_at, is_admin, created_at, updated_at FROM users WHERE public_id = ?
+SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE public_id = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User, error) {
@@ -159,84 +184,79 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User,
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
-		&i.Name,
 		&i.Email,
-		&i.Icon,
-		&i.Color,
-		&i.AvatarStorageKey,
-		&i.AvatarContentType,
-		&i.PasswordHash,
-		&i.TokenVersion,
-		&i.PasswordChangedAt,
-		&i.IsAdmin,
-		&i.CreatedAt,
+		&i.EmailVerifiedAt,
+		&i.DisplayName,
+		&i.AvatarURL,
+		&i.AvatarStorageObjectID,
+		&i.Locale,
+		&i.Timezone,
+		&i.Country,
+		&i.WeekStart,
+		&i.WorkingDays,
+		&i.WorkingHoursStart,
+		&i.WorkingHoursEnd,
+		&i.SnapToWorkingDay,
+		&i.TreatHolidaysAsNonWorking,
+		&i.ThemePreference,
+		&i.CalendarShiftDefault,
+		&i.LastLoginAt,
+		&i.NotifEmailDigestEnabled,
+		&i.NotifEmailMentionEnabled,
+		&i.NotifEmailAssignmentEnabled,
+		&i.NotifEmailDueSoonEnabled,
+		&i.NotifWebPushEnabled,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const setUserAdmin = `-- name: SetUserAdmin :exec
-UPDATE users SET is_admin = ? WHERE id = ?
+const setUserAvatarObject = `-- name: SetUserAvatarObject :exec
+UPDATE users SET avatar_storage_object_id = ?, avatar_url = NULL WHERE id = ?
 `
 
-type SetUserAdminParams struct {
-	IsAdmin bool   `json:"isAdmin"`
-	ID      uint32 `json:"id"`
+type SetUserAvatarObjectParams struct {
+	AvatarStorageObjectID sql.NullInt32 `json:"avatarStorageObjectId"`
+	ID                    uint32        `json:"id"`
 }
 
-func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) error {
-	_, err := q.db.ExecContext(ctx, setUserAdmin, arg.IsAdmin, arg.ID)
+func (q *Queries) SetUserAvatarObject(ctx context.Context, arg SetUserAvatarObjectParams) error {
+	_, err := q.db.ExecContext(ctx, setUserAvatarObject, arg.AvatarStorageObjectID, arg.ID)
+	return err
+}
+
+const touchUserLastLogin = `-- name: TouchUserLastLogin :exec
+UPDATE users SET last_login_at = NOW(3) WHERE id = ?
+`
+
+func (q *Queries) TouchUserLastLogin(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, touchUserLastLogin, id)
 	return err
 }
 
 const updateUser = `-- name: UpdateUser :exec
-UPDATE users SET name = ?, icon = ?, color = ? WHERE id = ?
+UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ? WHERE id = ?
 `
 
 type UpdateUserParams struct {
-	Name  string `json:"name"`
-	Icon  string `json:"icon"`
-	Color string `json:"color"`
-	ID    uint32 `json:"id"`
+	DisplayName string         `json:"displayName"`
+	AvatarURL   sql.NullString `json:"avatarUrl"`
+	Timezone    string         `json:"timezone"`
+	Locale      string         `json:"locale"`
+	ID          uint32         `json:"id"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 	_, err := q.db.ExecContext(ctx, updateUser,
-		arg.Name,
-		arg.Icon,
-		arg.Color,
+		arg.DisplayName,
+		arg.AvatarURL,
+		arg.Timezone,
+		arg.Locale,
 		arg.ID,
 	)
-	return err
-}
-
-const updateUserAvatar = `-- name: UpdateUserAvatar :exec
-UPDATE users SET avatar_storage_key = ?, avatar_content_type = ? WHERE id = ?
-`
-
-type UpdateUserAvatarParams struct {
-	AvatarStorageKey  sql.NullString `json:"avatarStorageKey"`
-	AvatarContentType sql.NullString `json:"avatarContentType"`
-	ID                uint32         `json:"id"`
-}
-
-func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserAvatar, arg.AvatarStorageKey, arg.AvatarContentType, arg.ID)
-	return err
-}
-
-const updateUserPassword = `-- name: UpdateUserPassword :exec
-UPDATE users
-SET password_hash = ?, token_version = token_version + 1, password_changed_at = NOW(3)
-WHERE id = ?
-`
-
-type UpdateUserPasswordParams struct {
-	PasswordHash string `json:"passwordHash"`
-	ID           uint32 `json:"id"`
-}
-
-func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.ID)
 	return err
 }

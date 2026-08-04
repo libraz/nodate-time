@@ -17,6 +17,7 @@ CREATE TABLE calendar_invites (
   role ENUM('owner','manager','editor','viewer') NOT NULL DEFAULT 'viewer' COMMENT 'Role granted on acceptance. Matches calendar_members.role, and defaults to the least privilege so a link created without naming one cannot hand out more than reading.',
   max_uses INT UNSIGNED NULL COMMENT 'Acceptance limit; NULL = unlimited',
   use_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Acceptances so far',
+  is_public BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'TRUE publishes the calendar read-only: the link can be viewed but not joined, and role is ignored. FALSE grants membership at role on acceptance.',
   expires_at DATETIME(3) NULL COMMENT 'Expiry; NULL = does not expire',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',

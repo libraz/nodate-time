@@ -8,40 +8,35 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const createCalendar = `-- name: CreateCalendar :execresult
-INSERT INTO calendars (public_id, name, color, created_by)
-VALUES (?, ?, ?, ?)
+INSERT INTO calendars (public_id, workspace_id, kind, name, color)
+VALUES (?, ?, 'personal', ?, ?)
 `
 
 type CreateCalendarParams struct {
-	PublicID  []byte `json:"publicId"`
-	Name      string `json:"name"`
-	Color     string `json:"color"`
-	CreatedBy uint32 `json:"createdBy"`
+	PublicID    []byte `json:"publicId"`
+	WorkspaceID uint32 `json:"workspaceId"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
 }
 
+// CreateCalendar leaves owner_user_id NULL: these are calendars a group
+// shares, and the owner key cascades, so naming one would mean that
+// person's removal deletes everyone else's history.
 func (q *Queries) CreateCalendar(ctx context.Context, arg CreateCalendarParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createCalendar,
 		arg.PublicID,
+		arg.WorkspaceID,
 		arg.Name,
 		arg.Color,
-		arg.CreatedBy,
 	)
 }
 
-const deleteCalendar = `-- name: DeleteCalendar :exec
-DELETE FROM calendars WHERE id = ?
-`
-
-func (q *Queries) DeleteCalendar(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, deleteCalendar, id)
-	return err
-}
-
 const getCalendarByID = `-- name: GetCalendarByID :one
-SELECT id, public_id, name, color, cover_url, created_by, created_at, updated_at FROM calendars WHERE id = ?
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, error) {
@@ -50,18 +45,25 @@ func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, err
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
+		&i.WorkspaceID,
+		&i.Kind,
 		&i.Name,
+		&i.Description,
 		&i.Color,
-		&i.CoverUrl,
-		&i.CreatedBy,
-		&i.CreatedAt,
+		&i.CoverURL,
+		&i.OwnerUserID,
+		&i.SystemSlug,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getCalendarByIDForUpdate = `-- name: GetCalendarByIDForUpdate :one
-SELECT id, public_id, name, color, cover_url, created_by, created_at, updated_at FROM calendars WHERE id = ? FOR UPDATE
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? FOR UPDATE
 `
 
 func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Calendar, error) {
@@ -70,61 +72,118 @@ func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Cale
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
+		&i.WorkspaceID,
+		&i.Kind,
 		&i.Name,
+		&i.Description,
 		&i.Color,
-		&i.CoverUrl,
-		&i.CreatedBy,
-		&i.CreatedAt,
+		&i.CoverURL,
+		&i.OwnerUserID,
+		&i.SystemSlug,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getCalendarByPublicID = `-- name: GetCalendarByPublicID :one
-SELECT id, public_id, name, color, cover_url, created_by, created_at, updated_at FROM calendars WHERE public_id = ?
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
 `
 
-func (q *Queries) GetCalendarByPublicID(ctx context.Context, publicID []byte) (Calendar, error) {
-	row := q.db.QueryRowContext(ctx, getCalendarByPublicID, publicID)
+type GetCalendarByPublicIDParams struct {
+	WorkspaceID uint32 `json:"workspaceId"`
+	PublicID    []byte `json:"publicId"`
+}
+
+func (q *Queries) GetCalendarByPublicID(ctx context.Context, arg GetCalendarByPublicIDParams) (Calendar, error) {
+	row := q.db.QueryRowContext(ctx, getCalendarByPublicID, arg.WorkspaceID, arg.PublicID)
 	var i Calendar
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
+		&i.WorkspaceID,
+		&i.Kind,
 		&i.Name,
+		&i.Description,
 		&i.Color,
-		&i.CoverUrl,
-		&i.CreatedBy,
-		&i.CreatedAt,
+		&i.CoverURL,
+		&i.OwnerUserID,
+		&i.SystemSlug,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
 		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listCalendarsByUser = `-- name: ListCalendarsByUser :many
-SELECT c.id, c.public_id, c.name, c.color, c.cover_url, c.created_by, c.created_at, c.updated_at FROM calendars c
-INNER JOIN calendar_members cm ON cm.calendar_id = c.id
-WHERE cm.user_id = ?
+SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color, c.cover_url, c.owner_user_id, c.system_slug, c.sort_weight, c.notes, c.enabled, c.updated_at, c.created_at, cm.role AS member_role, cm.member_color
+FROM calendars c
+INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
+WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
 ORDER BY c.created_at DESC
 `
 
-func (q *Queries) ListCalendarsByUser(ctx context.Context, userID uint32) ([]Calendar, error) {
-	rows, err := q.db.QueryContext(ctx, listCalendarsByUser, userID)
+type ListCalendarsByUserParams struct {
+	UserID      uint32 `json:"userId"`
+	WorkspaceID uint32 `json:"workspaceId"`
+}
+
+type ListCalendarsByUserRow struct {
+	ID          uint32              `json:"id"`
+	PublicID    []byte              `json:"publicId"`
+	WorkspaceID uint32              `json:"workspaceId"`
+	Kind        CalendarsKind       `json:"kind"`
+	Name        string              `json:"name"`
+	Description sql.NullString      `json:"description"`
+	Color       string              `json:"color"`
+	CoverURL    sql.NullString      `json:"coverUrl"`
+	OwnerUserID sql.NullInt32       `json:"ownerUserId"`
+	SystemSlug  sql.NullString      `json:"systemSlug"`
+	SortWeight  int32               `json:"sortWeight"`
+	Notes       sql.NullString      `json:"notes"`
+	Enabled     bool                `json:"enabled"`
+	UpdatedAt   sql.NullTime        `json:"updatedAt"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	MemberRole  CalendarMembersRole `json:"memberRole"`
+	MemberColor string              `json:"memberColor"`
+}
+
+// ListCalendarsByUser joins through calendar_members, which is the access
+// grant. A calendar the user cannot reach must not appear, so this is the
+// same table every authorization check resolves through.
+func (q *Queries) ListCalendarsByUser(ctx context.Context, arg ListCalendarsByUserParams) ([]ListCalendarsByUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCalendarsByUser, arg.UserID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Calendar
+	var items []ListCalendarsByUserRow
 	for rows.Next() {
-		var i Calendar
+		var i ListCalendarsByUserRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,
+			&i.WorkspaceID,
+			&i.Kind,
 			&i.Name,
+			&i.Description,
 			&i.Color,
-			&i.CoverUrl,
-			&i.CreatedBy,
-			&i.CreatedAt,
+			&i.CoverURL,
+			&i.OwnerUserID,
+			&i.SystemSlug,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
 			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.MemberRole,
+			&i.MemberColor,
 		); err != nil {
 			return nil, err
 		}
@@ -139,22 +198,31 @@ func (q *Queries) ListCalendarsByUser(ctx context.Context, userID uint32) ([]Cal
 	return items, nil
 }
 
+const softDeleteCalendar = `-- name: SoftDeleteCalendar :exec
+UPDATE calendars SET enabled = FALSE WHERE id = ?
+`
+
+func (q *Queries) SoftDeleteCalendar(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, softDeleteCalendar, id)
+	return err
+}
+
 const updateCalendar = `-- name: UpdateCalendar :exec
 UPDATE calendars SET name = ?, color = ?, cover_url = ? WHERE id = ?
 `
 
 type UpdateCalendarParams struct {
-	Name     string `json:"name"`
-	Color    string `json:"color"`
-	CoverUrl string `json:"coverUrl"`
-	ID       uint32 `json:"id"`
+	Name     string         `json:"name"`
+	Color    string         `json:"color"`
+	CoverURL sql.NullString `json:"coverUrl"`
+	ID       uint32         `json:"id"`
 }
 
 func (q *Queries) UpdateCalendar(ctx context.Context, arg UpdateCalendarParams) error {
 	_, err := q.db.ExecContext(ctx, updateCalendar,
 		arg.Name,
 		arg.Color,
-		arg.CoverUrl,
+		arg.CoverURL,
 		arg.ID,
 	)
 	return err

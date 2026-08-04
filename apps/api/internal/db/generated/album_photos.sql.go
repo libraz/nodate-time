@@ -12,37 +12,38 @@ import (
 )
 
 const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
-UPDATE album_photos SET enabled = 1 WHERE id = ? AND uploaded_by = ? AND enabled = 0
+UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
 `
 
 type ConfirmAlbumPhotoParams struct {
-	ID         uint32 `json:"id"`
-	UploadedBy uint32 `json:"uploadedBy"`
+	ID               uint32 `json:"id"`
+	UploadedByUserID uint32 `json:"uploadedByUserId"`
 }
 
 func (q *Queries) ConfirmAlbumPhoto(ctx context.Context, arg ConfirmAlbumPhotoParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, confirmAlbumPhoto, arg.ID, arg.UploadedBy)
+	return q.db.ExecContext(ctx, confirmAlbumPhoto, arg.ID, arg.UploadedByUserID)
 }
 
 const createAlbumPhoto = `-- name: CreateAlbumPhoto :execresult
 INSERT INTO album_photos (
-  public_id, calendar_id, uploaded_by, event_id, caption, content_type, byte_size,
+  public_id, workspace_id, calendar_id, uploaded_by_user_id, calendar_event_id, caption, content_type, byte_size,
   width, height, storage_key, taken_at, enabled
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 `
 
 type CreateAlbumPhotoParams struct {
-	PublicID    []byte        `json:"publicId"`
-	CalendarID  uint32        `json:"calendarId"`
-	UploadedBy  uint32        `json:"uploadedBy"`
-	EventID     sql.NullInt32 `json:"eventId"`
-	Caption     string        `json:"caption"`
-	ContentType string        `json:"contentType"`
-	ByteSize    int64         `json:"byteSize"`
-	Width       sql.NullInt32 `json:"width"`
-	Height      sql.NullInt32 `json:"height"`
-	StorageKey  string        `json:"storageKey"`
-	TakenAt     time.Time     `json:"takenAt"`
+	PublicID         []byte        `json:"publicId"`
+	WorkspaceID      uint32        `json:"workspaceId"`
+	CalendarID       uint32        `json:"calendarId"`
+	UploadedByUserID uint32        `json:"uploadedByUserId"`
+	CalendarEventID  sql.NullInt32 `json:"calendarEventId"`
+	Caption          string        `json:"caption"`
+	ContentType      string        `json:"contentType"`
+	ByteSize         uint64        `json:"byteSize"`
+	Width            sql.NullInt32 `json:"width"`
+	Height           sql.NullInt32 `json:"height"`
+	StorageKey       string        `json:"storageKey"`
+	TakenAt          time.Time     `json:"takenAt"`
 }
 
 // Rows are created disabled and only become visible once ConfirmAlbumPhoto runs
@@ -51,9 +52,10 @@ type CreateAlbumPhotoParams struct {
 func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createAlbumPhoto,
 		arg.PublicID,
+		arg.WorkspaceID,
 		arg.CalendarID,
-		arg.UploadedBy,
-		arg.EventID,
+		arg.UploadedByUserID,
+		arg.CalendarEventID,
 		arg.Caption,
 		arg.ContentType,
 		arg.ByteSize,
@@ -66,7 +68,7 @@ func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoPara
 
 const deleteAbandonedAlbumPhotoByStorageKey = `-- name: DeleteAbandonedAlbumPhotoByStorageKey :execresult
 DELETE FROM album_photos
-WHERE storage_key = ? AND enabled = 0 AND created_at < ?
+WHERE storage_key = ? AND enabled = FALSE AND created_at < ?
 `
 
 type DeleteAbandonedAlbumPhotoByStorageKeyParams struct {
@@ -79,24 +81,24 @@ func (q *Queries) DeleteAbandonedAlbumPhotoByStorageKey(ctx context.Context, arg
 }
 
 const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :exec
-DELETE FROM album_photos WHERE id = ? AND uploaded_by = ? AND enabled = 0
+DELETE FROM album_photos WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
 `
 
 type DeletePendingAlbumPhotoParams struct {
-	ID         uint32 `json:"id"`
-	UploadedBy uint32 `json:"uploadedBy"`
+	ID               uint32 `json:"id"`
+	UploadedByUserID uint32 `json:"uploadedByUserId"`
 }
 
-// Removes an unconfirmed (enabled = 0) row whose uploaded object failed the
+// Removes an unconfirmed (enabled = FALSE) row whose uploaded object failed the
 // Confirm-time size/type check, so it is not left as an orphan pointing at a
 // deleted object.
 func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePendingAlbumPhotoParams) error {
-	_, err := q.db.ExecContext(ctx, deletePendingAlbumPhoto, arg.ID, arg.UploadedBy)
+	_, err := q.db.ExecContext(ctx, deletePendingAlbumPhoto, arg.ID, arg.UploadedByUserID)
 	return err
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
-SELECT id, public_id, calendar_id, uploaded_by, event_id, caption, content_type, byte_size, width, height, storage_key, enabled, taken_at, created_at FROM album_photos WHERE public_id = ?
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at FROM album_photos WHERE public_id = ?
 `
 
 func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) (AlbumPhoto, error) {
@@ -105,24 +107,28 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
+		&i.WorkspaceID,
 		&i.CalendarID,
-		&i.UploadedBy,
-		&i.EventID,
+		&i.CalendarEventID,
+		&i.UploadedByUserID,
 		&i.Caption,
 		&i.ContentType,
 		&i.ByteSize,
 		&i.Width,
 		&i.Height,
 		&i.StorageKey,
-		&i.Enabled,
 		&i.TakenAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listAbandonedAlbumPhotoStorageKeys = `-- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT storage_key FROM album_photos WHERE enabled = 0 AND created_at < ?
+SELECT storage_key FROM album_photos WHERE enabled = FALSE AND created_at < ?
 `
 
 func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, createdAt time.Time) ([]string, error) {
@@ -176,16 +182,16 @@ func (q *Queries) ListAlbumPhotoStorageKeysByCalendar(ctx context.Context, calen
 }
 
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
-SELECT ap.id, ap.public_id, ap.calendar_id, ap.uploaded_by, ap.event_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.enabled, ap.taken_at, ap.created_at,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at,
        u.public_id AS uploader_public_id,
-       u.name AS uploader_name,
-       u.avatar_storage_key AS uploader_avatar_key,
+       u.display_name AS uploader_display_name,
+       u.avatar_url AS uploader_avatar_url,
        e.public_id AS event_public_id
 FROM album_photos ap
-INNER JOIN users u ON u.id = ap.uploaded_by
-LEFT JOIN events e ON e.id = ap.event_id
+INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
-  AND ap.enabled = 1
+  AND ap.enabled = TRUE
   AND (
     ap.taken_at < ?
     OR (ap.taken_at = ? AND ap.id < ?)
@@ -202,24 +208,28 @@ type ListAlbumPhotosAfterParams struct {
 }
 
 type ListAlbumPhotosAfterRow struct {
-	ID                uint32         `json:"id"`
-	PublicID          []byte         `json:"publicId"`
-	CalendarID        uint32         `json:"calendarId"`
-	UploadedBy        uint32         `json:"uploadedBy"`
-	EventID           sql.NullInt32  `json:"eventId"`
-	Caption           string         `json:"caption"`
-	ContentType       string         `json:"contentType"`
-	ByteSize          int64          `json:"byteSize"`
-	Width             sql.NullInt32  `json:"width"`
-	Height            sql.NullInt32  `json:"height"`
-	StorageKey        string         `json:"storageKey"`
-	Enabled           bool           `json:"enabled"`
-	TakenAt           time.Time      `json:"takenAt"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UploaderPublicID  []byte         `json:"uploaderPublicId"`
-	UploaderName      string         `json:"uploaderName"`
-	UploaderAvatarKey sql.NullString `json:"uploaderAvatarKey"`
-	EventPublicID     sql.NullString `json:"eventPublicId"`
+	ID                  uint32         `json:"id"`
+	PublicID            []byte         `json:"publicId"`
+	WorkspaceID         uint32         `json:"workspaceId"`
+	CalendarID          uint32         `json:"calendarId"`
+	CalendarEventID     sql.NullInt32  `json:"calendarEventId"`
+	UploadedByUserID    uint32         `json:"uploadedByUserId"`
+	Caption             string         `json:"caption"`
+	ContentType         string         `json:"contentType"`
+	ByteSize            uint64         `json:"byteSize"`
+	Width               sql.NullInt32  `json:"width"`
+	Height              sql.NullInt32  `json:"height"`
+	StorageKey          string         `json:"storageKey"`
+	TakenAt             time.Time      `json:"takenAt"`
+	SortWeight          int32          `json:"sortWeight"`
+	Notes               sql.NullString `json:"notes"`
+	Enabled             bool           `json:"enabled"`
+	UpdatedAt           sql.NullTime   `json:"updatedAt"`
+	CreatedAt           time.Time      `json:"createdAt"`
+	UploaderPublicID    []byte         `json:"uploaderPublicId"`
+	UploaderDisplayName string         `json:"uploaderDisplayName"`
+	UploaderAvatarUrl   sql.NullString `json:"uploaderAvatarUrl"`
+	EventPublicID       sql.NullString `json:"eventPublicId"`
 }
 
 func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosAfterParams) ([]ListAlbumPhotosAfterRow, error) {
@@ -240,21 +250,25 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,
+			&i.WorkspaceID,
 			&i.CalendarID,
-			&i.UploadedBy,
-			&i.EventID,
+			&i.CalendarEventID,
+			&i.UploadedByUserID,
 			&i.Caption,
 			&i.ContentType,
 			&i.ByteSize,
 			&i.Width,
 			&i.Height,
 			&i.StorageKey,
-			&i.Enabled,
 			&i.TakenAt,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.UploaderPublicID,
-			&i.UploaderName,
-			&i.UploaderAvatarKey,
+			&i.UploaderDisplayName,
+			&i.UploaderAvatarUrl,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err
@@ -271,15 +285,15 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 }
 
 const listAlbumPhotosFirstPage = `-- name: ListAlbumPhotosFirstPage :many
-SELECT ap.id, ap.public_id, ap.calendar_id, ap.uploaded_by, ap.event_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.enabled, ap.taken_at, ap.created_at,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at,
        u.public_id AS uploader_public_id,
-       u.name AS uploader_name,
-       u.avatar_storage_key AS uploader_avatar_key,
+       u.display_name AS uploader_display_name,
+       u.avatar_url AS uploader_avatar_url,
        e.public_id AS event_public_id
 FROM album_photos ap
-INNER JOIN users u ON u.id = ap.uploaded_by
-LEFT JOIN events e ON e.id = ap.event_id
-WHERE ap.calendar_id = ? AND ap.enabled = 1
+INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
+WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?
 `
@@ -290,24 +304,28 @@ type ListAlbumPhotosFirstPageParams struct {
 }
 
 type ListAlbumPhotosFirstPageRow struct {
-	ID                uint32         `json:"id"`
-	PublicID          []byte         `json:"publicId"`
-	CalendarID        uint32         `json:"calendarId"`
-	UploadedBy        uint32         `json:"uploadedBy"`
-	EventID           sql.NullInt32  `json:"eventId"`
-	Caption           string         `json:"caption"`
-	ContentType       string         `json:"contentType"`
-	ByteSize          int64          `json:"byteSize"`
-	Width             sql.NullInt32  `json:"width"`
-	Height            sql.NullInt32  `json:"height"`
-	StorageKey        string         `json:"storageKey"`
-	Enabled           bool           `json:"enabled"`
-	TakenAt           time.Time      `json:"takenAt"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UploaderPublicID  []byte         `json:"uploaderPublicId"`
-	UploaderName      string         `json:"uploaderName"`
-	UploaderAvatarKey sql.NullString `json:"uploaderAvatarKey"`
-	EventPublicID     sql.NullString `json:"eventPublicId"`
+	ID                  uint32         `json:"id"`
+	PublicID            []byte         `json:"publicId"`
+	WorkspaceID         uint32         `json:"workspaceId"`
+	CalendarID          uint32         `json:"calendarId"`
+	CalendarEventID     sql.NullInt32  `json:"calendarEventId"`
+	UploadedByUserID    uint32         `json:"uploadedByUserId"`
+	Caption             string         `json:"caption"`
+	ContentType         string         `json:"contentType"`
+	ByteSize            uint64         `json:"byteSize"`
+	Width               sql.NullInt32  `json:"width"`
+	Height              sql.NullInt32  `json:"height"`
+	StorageKey          string         `json:"storageKey"`
+	TakenAt             time.Time      `json:"takenAt"`
+	SortWeight          int32          `json:"sortWeight"`
+	Notes               sql.NullString `json:"notes"`
+	Enabled             bool           `json:"enabled"`
+	UpdatedAt           sql.NullTime   `json:"updatedAt"`
+	CreatedAt           time.Time      `json:"createdAt"`
+	UploaderPublicID    []byte         `json:"uploaderPublicId"`
+	UploaderDisplayName string         `json:"uploaderDisplayName"`
+	UploaderAvatarUrl   sql.NullString `json:"uploaderAvatarUrl"`
+	EventPublicID       sql.NullString `json:"eventPublicId"`
 }
 
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
@@ -322,21 +340,25 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,
+			&i.WorkspaceID,
 			&i.CalendarID,
-			&i.UploadedBy,
-			&i.EventID,
+			&i.CalendarEventID,
+			&i.UploadedByUserID,
 			&i.Caption,
 			&i.ContentType,
 			&i.ByteSize,
 			&i.Width,
 			&i.Height,
 			&i.StorageKey,
-			&i.Enabled,
 			&i.TakenAt,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.UploaderPublicID,
-			&i.UploaderName,
-			&i.UploaderAvatarKey,
+			&i.UploaderDisplayName,
+			&i.UploaderAvatarUrl,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err
@@ -353,7 +375,7 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 }
 
 const softDeleteAlbumPhoto = `-- name: SoftDeleteAlbumPhoto :exec
-UPDATE album_photos SET enabled = 0 WHERE id = ?
+UPDATE album_photos SET enabled = FALSE WHERE id = ?
 `
 
 func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
@@ -362,16 +384,16 @@ func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
 }
 
 const updateAlbumPhotoMeta = `-- name: UpdateAlbumPhotoMeta :exec
-UPDATE album_photos SET caption = ?, event_id = ? WHERE id = ?
+UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ?
 `
 
 type UpdateAlbumPhotoMetaParams struct {
-	Caption string        `json:"caption"`
-	EventID sql.NullInt32 `json:"eventId"`
-	ID      uint32        `json:"id"`
+	Caption         string        `json:"caption"`
+	CalendarEventID sql.NullInt32 `json:"calendarEventId"`
+	ID              uint32        `json:"id"`
 }
 
 func (q *Queries) UpdateAlbumPhotoMeta(ctx context.Context, arg UpdateAlbumPhotoMetaParams) error {
-	_, err := q.db.ExecContext(ctx, updateAlbumPhotoMeta, arg.Caption, arg.EventID, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateAlbumPhotoMeta, arg.Caption, arg.CalendarEventID, arg.ID)
 	return err
 }

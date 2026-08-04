@@ -1,0 +1,35 @@
+-- Refresh-token sessions. Only the hash is stored, so a database read
+-- cannot yield a usable token.
+
+-- name: CreateSession :execresult
+INSERT INTO sessions (public_id, user_id, refresh_hash, user_agent, ip_address, expires_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: GetSessionByRefreshHash :one
+SELECT * FROM sessions
+WHERE refresh_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+  AND expires_at > NOW(3);
+
+-- name: RotateSession :exec
+UPDATE sessions
+SET refresh_hash = ?, expires_at = ?, last_used_at = NOW(3)
+WHERE id = ?;
+
+-- name: RevokeSession :exec
+UPDATE sessions SET revoked_at = NOW(3) WHERE id = ?;
+
+-- RevokeAllUserSessions is what a password change calls. Replacing the
+-- credential has to invalidate every session opened with the old one, or
+-- whoever knew it keeps their access.
+-- name: RevokeAllUserSessions :exec
+UPDATE sessions SET revoked_at = NOW(3) WHERE user_id = ? AND revoked_at IS NULL;
+
+-- name: ListSessionsForUser :many
+SELECT * FROM sessions
+WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
+ORDER BY created_at DESC;
+
+-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions WHERE expires_at < ?;

@@ -1,58 +1,49 @@
--- name: GetEventByPublicID :one
-SELECT * FROM events WHERE public_id = ?;
+-- The append-only event log.
+--
+-- Obligation 2 of the shared contract: every state change appends exactly
+-- one row here, in the same transaction as the rows it describes. This is
+-- also what the activity feed reads -- there is no second history table,
+-- because two records of who changed what eventually disagree.
+--
+-- Nothing updates or deletes a row. A correction is a new row.
 
--- name: GetEventByID :one
-SELECT * FROM events WHERE id = ?;
+-- name: AppendEvent :execresult
+INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, type, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
--- name: ListEventsByCalendarAndRange :many
+-- ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
+-- id alone: id is strictly monotonic in insertion order, so it already
+-- orders by time, and using one column keeps the ORDER BY and the cursor
+-- from ever disagreeing about ties.
+-- name: ListEventsByCalendar :many
+SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       u.public_id AS actor_public_id, u.display_name AS actor_display_name,
+       u.avatar_url AS actor_avatar_url
+FROM events e
+LEFT JOIN users u ON u.id = e.actor_user_id
+WHERE e.workspace_id = ?
+  AND e.calendar_id = ?
+  AND (sqlc.arg(after_id) = 0 OR e.id < sqlc.arg(after_id))
+ORDER BY e.id DESC
+LIMIT ?;
+
+-- ListEventsByType filters the same feed to one entity's history. The type
+-- prefix is matched by the caller rather than parsed here, so a new event
+-- kind needs no query change.
+-- name: ListEventsByType :many
+SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       u.public_id AS actor_public_id, u.display_name AS actor_display_name,
+       u.avatar_url AS actor_avatar_url
+FROM events e
+LEFT JOIN users u ON u.id = e.actor_user_id
+WHERE e.workspace_id = ?
+  AND e.calendar_id = ?
+  AND e.type LIKE sqlc.arg(type_prefix)
+ORDER BY e.id DESC
+LIMIT ?;
+
+-- name: ListEventsSince :many
 SELECT * FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NULL AND recurrence_parent_id IS NULL
-  AND start_at < ? AND end_at > ?
-ORDER BY start_at;
-
--- name: ListRecurringEventsByCalendarAndRange :many
-SELECT * FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NOT NULL AND recurrence_parent_id IS NULL
-  AND start_at < ? AND recurrence_end > ?
-ORDER BY start_at;
-
--- name: ListRecurrenceExceptionsByParent :many
-SELECT * FROM events WHERE recurrence_parent_id = ? ORDER BY recurrence_original_start;
-
--- name: GetRecurrenceException :one
-SELECT * FROM events
-WHERE recurrence_parent_id = ? AND recurrence_original_start = ?;
-
--- name: UpsertRecurrenceException :execresult
-INSERT INTO events (
-  public_id, calendar_id, title, all_day, start_at, end_at, timezone, color,
-  location, memo, url, created_by, assigned_to, notification_offset,
-  recurrence_parent_id, recurrence_original_start, recurrence_cancelled
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE
-  title = VALUES(title), all_day = VALUES(all_day), start_at = VALUES(start_at),
-  end_at = VALUES(end_at), timezone = VALUES(timezone), color = VALUES(color),
-  location = VALUES(location), memo = VALUES(memo), url = VALUES(url),
-  assigned_to = VALUES(assigned_to), notification_offset = VALUES(notification_offset),
-  recurrence_cancelled = VALUES(recurrence_cancelled);
-
--- name: DeleteRecurrenceExceptionsByParent :exec
-DELETE FROM events WHERE recurrence_parent_id = ?;
-
--- name: ShiftRecurrenceExceptions :exec
-UPDATE events
-SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), recurrence_original_start),
-    start_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), start_at),
-    end_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), end_at)
-WHERE recurrence_parent_id = sqlc.arg(recurrence_parent_id);
-
--- name: CreateEvent :execresult
-INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: UpdateEvent :exec
-UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, timezone = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
-WHERE id = ?;
-
--- name: DeleteEvent :exec
-DELETE FROM events WHERE id = ?;
+WHERE id > sqlc.arg(after_id)
+ORDER BY id
+LIMIT ?;

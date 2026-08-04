@@ -12,464 +12,236 @@ import (
 	"time"
 )
 
-const createEvent = `-- name: CreateEvent :execresult
-INSERT INTO events (public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const appendEvent = `-- name: AppendEvent :execresult
+
+INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, type, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
-type CreateEventParams struct {
-	PublicID           []byte           `json:"publicId"`
-	CalendarID         uint32           `json:"calendarId"`
-	Title              string           `json:"title"`
-	AllDay             bool             `json:"allDay"`
-	StartAt            time.Time        `json:"startAt"`
-	EndAt              time.Time        `json:"endAt"`
-	Timezone           string           `json:"timezone"`
-	Color              string           `json:"color"`
-	Location           string           `json:"location"`
-	Memo               string           `json:"memo"`
-	Url                string           `json:"url"`
-	CreatedBy          uint32           `json:"createdBy"`
-	AssignedTo         sql.NullInt32    `json:"assignedTo"`
-	NotificationOffset sql.NullInt32    `json:"notificationOffset"`
-	RecurrenceRule     *json.RawMessage `json:"recurrenceRule"`
-	RecurrenceEnd      sql.NullTime     `json:"recurrenceEnd"`
+type AppendEventParams struct {
+	PublicID    []byte          `json:"publicId"`
+	WorkspaceID uint32          `json:"workspaceId"`
+	CalendarID  sql.NullInt32   `json:"calendarId"`
+	ActorUserID sql.NullInt32   `json:"actorUserId"`
+	Type        string          `json:"type"`
+	PayloadJSON json.RawMessage `json:"payloadJson"`
+	OccurredAt  time.Time       `json:"occurredAt"`
 }
 
-func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createEvent,
+// The append-only event log.
+//
+// Obligation 2 of the shared contract: every state change appends exactly
+// one row here, in the same transaction as the rows it describes. This is
+// also what the activity feed reads -- there is no second history table,
+// because two records of who changed what eventually disagree.
+//
+// Nothing updates or deletes a row. A correction is a new row.
+func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, appendEvent,
 		arg.PublicID,
+		arg.WorkspaceID,
 		arg.CalendarID,
-		arg.Title,
-		arg.AllDay,
-		arg.StartAt,
-		arg.EndAt,
-		arg.Timezone,
-		arg.Color,
-		arg.Location,
-		arg.Memo,
-		arg.Url,
-		arg.CreatedBy,
-		arg.AssignedTo,
-		arg.NotificationOffset,
-		arg.RecurrenceRule,
-		arg.RecurrenceEnd,
+		arg.ActorUserID,
+		arg.Type,
+		arg.PayloadJSON,
+		arg.OccurredAt,
 	)
 }
 
-const deleteEvent = `-- name: DeleteEvent :exec
-DELETE FROM events WHERE id = ?
+const listEventsByCalendar = `-- name: ListEventsByCalendar :many
+SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       u.public_id AS actor_public_id, u.display_name AS actor_display_name,
+       u.avatar_url AS actor_avatar_url
+FROM events e
+LEFT JOIN users u ON u.id = e.actor_user_id
+WHERE e.workspace_id = ?
+  AND e.calendar_id = ?
+  AND (? = 0 OR e.id < ?)
+ORDER BY e.id DESC
+LIMIT ?
 `
 
-func (q *Queries) DeleteEvent(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, deleteEvent, id)
-	return err
+type ListEventsByCalendarParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	CalendarID  sql.NullInt32 `json:"calendarId"`
+	AfterID     uint64        `json:"afterId"`
+	Limit       int32         `json:"limit"`
 }
 
-const deleteRecurrenceExceptionsByParent = `-- name: DeleteRecurrenceExceptionsByParent :exec
-DELETE FROM events WHERE recurrence_parent_id = ?
-`
-
-func (q *Queries) DeleteRecurrenceExceptionsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) error {
-	_, err := q.db.ExecContext(ctx, deleteRecurrenceExceptionsByParent, recurrenceParentID)
-	return err
+type ListEventsByCalendarRow struct {
+	ID               uint64          `json:"id"`
+	PublicID         []byte          `json:"publicId"`
+	Type             string          `json:"type"`
+	PayloadJSON      json.RawMessage `json:"payloadJson"`
+	OccurredAt       time.Time       `json:"occurredAt"`
+	ActorPublicID    sql.NullString  `json:"actorPublicId"`
+	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
+	ActorAvatarUrl   sql.NullString  `json:"actorAvatarUrl"`
 }
 
-const getEventByID = `-- name: GetEventByID :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE id = ?
-`
-
-func (q *Queries) GetEventByID(ctx context.Context, id uint32) (Event, error) {
-	row := q.db.QueryRowContext(ctx, getEventByID, id)
-	var i Event
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.CalendarID,
-		&i.Title,
-		&i.AllDay,
-		&i.StartAt,
-		&i.EndAt,
-		&i.Timezone,
-		&i.Color,
-		&i.Location,
-		&i.Memo,
-		&i.Url,
-		&i.CreatedBy,
-		&i.AssignedTo,
-		&i.NotificationOffset,
-		&i.RecurrenceRule,
-		&i.RecurrenceEnd,
-		&i.RecurrenceParentID,
-		&i.RecurrenceOriginalStart,
-		&i.RecurrenceCancelled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getEventByPublicID = `-- name: GetEventByPublicID :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE public_id = ?
-`
-
-func (q *Queries) GetEventByPublicID(ctx context.Context, publicID []byte) (Event, error) {
-	row := q.db.QueryRowContext(ctx, getEventByPublicID, publicID)
-	var i Event
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.CalendarID,
-		&i.Title,
-		&i.AllDay,
-		&i.StartAt,
-		&i.EndAt,
-		&i.Timezone,
-		&i.Color,
-		&i.Location,
-		&i.Memo,
-		&i.Url,
-		&i.CreatedBy,
-		&i.AssignedTo,
-		&i.NotificationOffset,
-		&i.RecurrenceRule,
-		&i.RecurrenceEnd,
-		&i.RecurrenceParentID,
-		&i.RecurrenceOriginalStart,
-		&i.RecurrenceCancelled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getRecurrenceException = `-- name: GetRecurrenceException :one
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
-WHERE recurrence_parent_id = ? AND recurrence_original_start = ?
-`
-
-type GetRecurrenceExceptionParams struct {
-	RecurrenceParentID      sql.NullInt32 `json:"recurrenceParentId"`
-	RecurrenceOriginalStart sql.NullTime  `json:"recurrenceOriginalStart"`
-}
-
-func (q *Queries) GetRecurrenceException(ctx context.Context, arg GetRecurrenceExceptionParams) (Event, error) {
-	row := q.db.QueryRowContext(ctx, getRecurrenceException, arg.RecurrenceParentID, arg.RecurrenceOriginalStart)
-	var i Event
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.CalendarID,
-		&i.Title,
-		&i.AllDay,
-		&i.StartAt,
-		&i.EndAt,
-		&i.Timezone,
-		&i.Color,
-		&i.Location,
-		&i.Memo,
-		&i.Url,
-		&i.CreatedBy,
-		&i.AssignedTo,
-		&i.NotificationOffset,
-		&i.RecurrenceRule,
-		&i.RecurrenceEnd,
-		&i.RecurrenceParentID,
-		&i.RecurrenceOriginalStart,
-		&i.RecurrenceCancelled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const listEventsByCalendarAndRange = `-- name: ListEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NULL AND recurrence_parent_id IS NULL
-  AND start_at < ? AND end_at > ?
-ORDER BY start_at
-`
-
-type ListEventsByCalendarAndRangeParams struct {
-	CalendarID uint32    `json:"calendarId"`
-	StartAt    time.Time `json:"startAt"`
-	EndAt      time.Time `json:"endAt"`
-}
-
-func (q *Queries) ListEventsByCalendarAndRange(ctx context.Context, arg ListEventsByCalendarAndRangeParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listEventsByCalendarAndRange, arg.CalendarID, arg.StartAt, arg.EndAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRecurrenceExceptionsByParent = `-- name: ListRecurrenceExceptionsByParent :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events WHERE recurrence_parent_id = ? ORDER BY recurrence_original_start
-`
-
-func (q *Queries) ListRecurrenceExceptionsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listRecurrenceExceptionsByParent, recurrenceParentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRecurringEventsByCalendarAndRange = `-- name: ListRecurringEventsByCalendarAndRange :many
-SELECT id, public_id, calendar_id, title, all_day, start_at, end_at, timezone, color, location, memo, url, created_by, assigned_to, notification_offset, recurrence_rule, recurrence_end, recurrence_parent_id, recurrence_original_start, recurrence_cancelled, created_at, updated_at FROM events
-WHERE calendar_id = ? AND recurrence_rule IS NOT NULL AND recurrence_parent_id IS NULL
-  AND start_at < ? AND recurrence_end > ?
-ORDER BY start_at
-`
-
-type ListRecurringEventsByCalendarAndRangeParams struct {
-	CalendarID    uint32       `json:"calendarId"`
-	StartAt       time.Time    `json:"startAt"`
-	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
-}
-
-func (q *Queries) ListRecurringEventsByCalendarAndRange(ctx context.Context, arg ListRecurringEventsByCalendarAndRangeParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listRecurringEventsByCalendarAndRange, arg.CalendarID, arg.StartAt, arg.RecurrenceEnd)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const shiftRecurrenceExceptions = `-- name: ShiftRecurrenceExceptions :exec
-UPDATE events
-SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), recurrence_original_start),
-    start_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), start_at),
-    end_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), end_at)
-WHERE recurrence_parent_id = ?
-`
-
-type ShiftRecurrenceExceptionsParams struct {
-	DeltaUs            int64         `json:"deltaUs"`
-	DeltaUs_2          int64         `json:"deltaUs2"`
-	DeltaUs_3          int64         `json:"deltaUs3"`
-	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
-}
-
-func (q *Queries) ShiftRecurrenceExceptions(ctx context.Context, arg ShiftRecurrenceExceptionsParams) error {
-	_, err := q.db.ExecContext(ctx, shiftRecurrenceExceptions,
-		arg.DeltaUs,
-		arg.DeltaUs_2,
-		arg.DeltaUs_3,
-		arg.RecurrenceParentID,
-	)
-	return err
-}
-
-const updateEvent = `-- name: UpdateEvent :exec
-UPDATE events SET title = ?, all_day = ?, start_at = ?, end_at = ?, timezone = ?, color = ?, location = ?, memo = ?, url = ?, assigned_to = ?, notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
-WHERE id = ?
-`
-
-type UpdateEventParams struct {
-	Title              string           `json:"title"`
-	AllDay             bool             `json:"allDay"`
-	StartAt            time.Time        `json:"startAt"`
-	EndAt              time.Time        `json:"endAt"`
-	Timezone           string           `json:"timezone"`
-	Color              string           `json:"color"`
-	Location           string           `json:"location"`
-	Memo               string           `json:"memo"`
-	Url                string           `json:"url"`
-	AssignedTo         sql.NullInt32    `json:"assignedTo"`
-	NotificationOffset sql.NullInt32    `json:"notificationOffset"`
-	RecurrenceRule     *json.RawMessage `json:"recurrenceRule"`
-	RecurrenceEnd      sql.NullTime     `json:"recurrenceEnd"`
-	ID                 uint32           `json:"id"`
-}
-
-func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) error {
-	_, err := q.db.ExecContext(ctx, updateEvent,
-		arg.Title,
-		arg.AllDay,
-		arg.StartAt,
-		arg.EndAt,
-		arg.Timezone,
-		arg.Color,
-		arg.Location,
-		arg.Memo,
-		arg.Url,
-		arg.AssignedTo,
-		arg.NotificationOffset,
-		arg.RecurrenceRule,
-		arg.RecurrenceEnd,
-		arg.ID,
-	)
-	return err
-}
-
-const upsertRecurrenceException = `-- name: UpsertRecurrenceException :execresult
-INSERT INTO events (
-  public_id, calendar_id, title, all_day, start_at, end_at, timezone, color,
-  location, memo, url, created_by, assigned_to, notification_offset,
-  recurrence_parent_id, recurrence_original_start, recurrence_cancelled
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE
-  title = VALUES(title), all_day = VALUES(all_day), start_at = VALUES(start_at),
-  end_at = VALUES(end_at), timezone = VALUES(timezone), color = VALUES(color),
-  location = VALUES(location), memo = VALUES(memo), url = VALUES(url),
-  assigned_to = VALUES(assigned_to), notification_offset = VALUES(notification_offset),
-  recurrence_cancelled = VALUES(recurrence_cancelled)
-`
-
-type UpsertRecurrenceExceptionParams struct {
-	PublicID                []byte        `json:"publicId"`
-	CalendarID              uint32        `json:"calendarId"`
-	Title                   string        `json:"title"`
-	AllDay                  bool          `json:"allDay"`
-	StartAt                 time.Time     `json:"startAt"`
-	EndAt                   time.Time     `json:"endAt"`
-	Timezone                string        `json:"timezone"`
-	Color                   string        `json:"color"`
-	Location                string        `json:"location"`
-	Memo                    string        `json:"memo"`
-	Url                     string        `json:"url"`
-	CreatedBy               uint32        `json:"createdBy"`
-	AssignedTo              sql.NullInt32 `json:"assignedTo"`
-	NotificationOffset      sql.NullInt32 `json:"notificationOffset"`
-	RecurrenceParentID      sql.NullInt32 `json:"recurrenceParentId"`
-	RecurrenceOriginalStart sql.NullTime  `json:"recurrenceOriginalStart"`
-	RecurrenceCancelled     bool          `json:"recurrenceCancelled"`
-}
-
-func (q *Queries) UpsertRecurrenceException(ctx context.Context, arg UpsertRecurrenceExceptionParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, upsertRecurrenceException,
-		arg.PublicID,
+// ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
+// id alone: id is strictly monotonic in insertion order, so it already
+// orders by time, and using one column keeps the ORDER BY and the cursor
+// from ever disagreeing about ties.
+func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCalendarParams) ([]ListEventsByCalendarRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsByCalendar,
+		arg.WorkspaceID,
 		arg.CalendarID,
-		arg.Title,
-		arg.AllDay,
-		arg.StartAt,
-		arg.EndAt,
-		arg.Timezone,
-		arg.Color,
-		arg.Location,
-		arg.Memo,
-		arg.Url,
-		arg.CreatedBy,
-		arg.AssignedTo,
-		arg.NotificationOffset,
-		arg.RecurrenceParentID,
-		arg.RecurrenceOriginalStart,
-		arg.RecurrenceCancelled,
+		arg.AfterID,
+		arg.AfterID,
+		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsByCalendarRow
+	for rows.Next() {
+		var i ListEventsByCalendarRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Type,
+			&i.PayloadJSON,
+			&i.OccurredAt,
+			&i.ActorPublicID,
+			&i.ActorDisplayName,
+			&i.ActorAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsByType = `-- name: ListEventsByType :many
+SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       u.public_id AS actor_public_id, u.display_name AS actor_display_name,
+       u.avatar_url AS actor_avatar_url
+FROM events e
+LEFT JOIN users u ON u.id = e.actor_user_id
+WHERE e.workspace_id = ?
+  AND e.calendar_id = ?
+  AND e.type LIKE ?
+ORDER BY e.id DESC
+LIMIT ?
+`
+
+type ListEventsByTypeParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	CalendarID  sql.NullInt32 `json:"calendarId"`
+	TypePrefix  string        `json:"typePrefix"`
+	Limit       int32         `json:"limit"`
+}
+
+type ListEventsByTypeRow struct {
+	ID               uint64          `json:"id"`
+	PublicID         []byte          `json:"publicId"`
+	Type             string          `json:"type"`
+	PayloadJSON      json.RawMessage `json:"payloadJson"`
+	OccurredAt       time.Time       `json:"occurredAt"`
+	ActorPublicID    sql.NullString  `json:"actorPublicId"`
+	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
+	ActorAvatarUrl   sql.NullString  `json:"actorAvatarUrl"`
+}
+
+// ListEventsByType filters the same feed to one entity's history. The type
+// prefix is matched by the caller rather than parsed here, so a new event
+// kind needs no query change.
+func (q *Queries) ListEventsByType(ctx context.Context, arg ListEventsByTypeParams) ([]ListEventsByTypeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsByType,
+		arg.WorkspaceID,
+		arg.CalendarID,
+		arg.TypePrefix,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventsByTypeRow
+	for rows.Next() {
+		var i ListEventsByTypeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Type,
+			&i.PayloadJSON,
+			&i.OccurredAt,
+			&i.ActorPublicID,
+			&i.ActorDisplayName,
+			&i.ActorAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsSince = `-- name: ListEventsSince :many
+SELECT id, public_id, workspace_id, task_id, calendar_id, triggered_by_signal_id, actor_user_id, actor_agent_id, actor_system_source, reverses_event_id, type, payload_json, occurred_at, sort_weight, notes, enabled, updated_at, created_at FROM events
+WHERE id > ?
+ORDER BY id
+LIMIT ?
+`
+
+type ListEventsSinceParams struct {
+	AfterID uint64 `json:"afterId"`
+	Limit   int32  `json:"limit"`
+}
+
+func (q *Queries) ListEventsSince(ctx context.Context, arg ListEventsSinceParams) ([]Event, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsSince, arg.AfterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.TaskID,
+			&i.CalendarID,
+			&i.TriggeredBySignalID,
+			&i.ActorUserID,
+			&i.ActorAgentID,
+			&i.ActorSystemSource,
+			&i.ReversesEventID,
+			&i.Type,
+			&i.PayloadJSON,
+			&i.OccurredAt,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

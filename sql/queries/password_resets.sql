@@ -1,6 +1,6 @@
 -- name: CreatePasswordReset :execresult
-INSERT INTO password_resets (user_id, token_hash, expires_at)
-VALUES (?, ?, ?);
+INSERT INTO password_resets (public_id, user_id, token_hash, expires_at)
+VALUES (?, ?, ?, ?);
 
 -- name: GetPasswordResetByTokenHash :one
 SELECT * FROM password_resets

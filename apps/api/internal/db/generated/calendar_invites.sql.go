@@ -13,9 +13,12 @@ import (
 
 const consumeInviteUse = `-- name: ConsumeInviteUse :execresult
 UPDATE calendar_invites SET use_count = use_count + 1
-WHERE id = ? AND (max_uses IS NULL OR use_count < max_uses)
+WHERE id = ? AND enabled = TRUE AND (max_uses IS NULL OR use_count < max_uses)
 `
 
+// ConsumeInviteUse increments and reports whether it did. The limit is
+// checked in the UPDATE rather than by reading first, so two concurrent
+// acceptances of a single-use link cannot both pass.
 func (q *Queries) ConsumeInviteUse(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, consumeInviteUse, id)
 }
@@ -24,7 +27,8 @@ const countActivePublicInvites = `-- name: CountActivePublicInvites :one
 SELECT COUNT(*) FROM calendar_invites
 WHERE calendar_id = ?
   AND is_public = TRUE
-  AND (expires_at IS NULL OR expires_at > NOW())
+  AND enabled = TRUE
+  AND (expires_at IS NULL OR expires_at > NOW(3))
 `
 
 func (q *Queries) CountActivePublicInvites(ctx context.Context, calendarID uint32) (int64, error) {
@@ -35,115 +39,121 @@ func (q *Queries) CountActivePublicInvites(ctx context.Context, calendarID uint3
 }
 
 const createInvite = `-- name: CreateInvite :execresult
-INSERT INTO calendar_invites (calendar_id, token, role, max_uses, expires_at, created_by, is_public)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO calendar_invites (public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, expires_at, is_public)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateInviteParams struct {
-	CalendarID uint32              `json:"calendarId"`
-	Token      string              `json:"token"`
-	Role       CalendarInvitesRole `json:"role"`
-	MaxUses    sql.NullInt32       `json:"maxUses"`
-	ExpiresAt  sql.NullTime        `json:"expiresAt"`
-	CreatedBy  uint32              `json:"createdBy"`
-	IsPublic   bool                `json:"isPublic"`
+	PublicID        []byte              `json:"publicId"`
+	WorkspaceID     uint32              `json:"workspaceId"`
+	CalendarID      uint32              `json:"calendarId"`
+	CreatedByUserID uint32              `json:"createdByUserId"`
+	TokenHash       string              `json:"tokenHash"`
+	Role            CalendarInvitesRole `json:"role"`
+	MaxUses         sql.NullInt32       `json:"maxUses"`
+	ExpiresAt       sql.NullTime        `json:"expiresAt"`
+	IsPublic        bool                `json:"isPublic"`
 }
 
 func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createInvite,
+		arg.PublicID,
+		arg.WorkspaceID,
 		arg.CalendarID,
-		arg.Token,
+		arg.CreatedByUserID,
+		arg.TokenHash,
 		arg.Role,
 		arg.MaxUses,
 		arg.ExpiresAt,
-		arg.CreatedBy,
 		arg.IsPublic,
 	)
 }
 
-const deleteInvite = `-- name: DeleteInvite :exec
-DELETE FROM calendar_invites WHERE id = ?
-`
+const getInviteByTokenHash = `-- name: GetInviteByTokenHash :one
 
-func (q *Queries) DeleteInvite(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, deleteInvite, id)
-	return err
-}
-
-const deleteInviteByIDAndCalendar = `-- name: DeleteInviteByIDAndCalendar :execresult
-DELETE FROM calendar_invites WHERE id = ? AND calendar_id = ?
-`
-
-type DeleteInviteByIDAndCalendarParams struct {
-	ID         uint32 `json:"id"`
-	CalendarID uint32 `json:"calendarId"`
-}
-
-func (q *Queries) DeleteInviteByIDAndCalendar(ctx context.Context, arg DeleteInviteByIDAndCalendarParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, deleteInviteByIDAndCalendar, arg.ID, arg.CalendarID)
-}
-
-const getInviteByToken = `-- name: GetInviteByToken :one
-SELECT id, calendar_id, token, role, max_uses, use_count, is_public, expires_at, created_by, created_at FROM calendar_invites
-WHERE token = ? AND (expires_at IS NULL OR expires_at > NOW())
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites
+WHERE token_hash = ?
+  AND enabled = TRUE
+  AND (expires_at IS NULL OR expires_at > NOW(3))
   AND (max_uses IS NULL OR use_count < max_uses)
 `
 
-func (q *Queries) GetInviteByToken(ctx context.Context, token string) (CalendarInvite, error) {
-	row := q.db.QueryRowContext(ctx, getInviteByToken, token)
+// Share links. Tokens are stored hashed, so the plaintext exists only in
+// the link the creator was shown once.
+func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash string) (CalendarInvite, error) {
+	row := q.db.QueryRowContext(ctx, getInviteByTokenHash, tokenHash)
 	var i CalendarInvite
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
 		&i.CalendarID,
-		&i.Token,
+		&i.CreatedByUserID,
+		&i.TokenHash,
 		&i.Role,
 		&i.MaxUses,
 		&i.UseCount,
 		&i.IsPublic,
 		&i.ExpiresAt,
-		&i.CreatedBy,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const getInviteByTokenPublic = `-- name: GetInviteByTokenPublic :one
-SELECT ci.id, ci.calendar_id, ci.token, ci.role, ci.max_uses, ci.use_count, ci.is_public, ci.expires_at, ci.created_by, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
+const getInviteByTokenHashWithCalendar = `-- name: GetInviteByTokenHashWithCalendar :one
+SELECT ci.id, ci.public_id, ci.workspace_id, ci.calendar_id, ci.created_by_user_id, ci.token_hash, ci.role, ci.max_uses, ci.use_count, ci.is_public, ci.expires_at, ci.sort_weight, ci.notes, ci.enabled, ci.updated_at, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
 FROM calendar_invites ci
-INNER JOIN calendars c ON c.id = ci.calendar_id
-WHERE ci.token = ? AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
-  AND (ci.max_uses IS NULL OR ci.use_count < ci.max_uses)
+INNER JOIN calendars c ON c.id = ci.calendar_id AND c.enabled = TRUE
+WHERE ci.token_hash = ?
+  AND ci.enabled = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3))
 `
 
-type GetInviteByTokenPublicRow struct {
+type GetInviteByTokenHashWithCalendarRow struct {
 	ID               uint32              `json:"id"`
+	PublicID         []byte              `json:"publicId"`
+	WorkspaceID      uint32              `json:"workspaceId"`
 	CalendarID       uint32              `json:"calendarId"`
-	Token            string              `json:"token"`
+	CreatedByUserID  uint32              `json:"createdByUserId"`
+	TokenHash        string              `json:"tokenHash"`
 	Role             CalendarInvitesRole `json:"role"`
 	MaxUses          sql.NullInt32       `json:"maxUses"`
 	UseCount         uint32              `json:"useCount"`
 	IsPublic         bool                `json:"isPublic"`
 	ExpiresAt        sql.NullTime        `json:"expiresAt"`
-	CreatedBy        uint32              `json:"createdBy"`
+	SortWeight       int32               `json:"sortWeight"`
+	Notes            sql.NullString      `json:"notes"`
+	Enabled          bool                `json:"enabled"`
+	UpdatedAt        sql.NullTime        `json:"updatedAt"`
 	CreatedAt        time.Time           `json:"createdAt"`
 	CalendarPublicID []byte              `json:"calendarPublicId"`
 	CalendarName     string              `json:"calendarName"`
 	CalendarColor    string              `json:"calendarColor"`
 }
 
-func (q *Queries) GetInviteByTokenPublic(ctx context.Context, token string) (GetInviteByTokenPublicRow, error) {
-	row := q.db.QueryRowContext(ctx, getInviteByTokenPublic, token)
-	var i GetInviteByTokenPublicRow
+func (q *Queries) GetInviteByTokenHashWithCalendar(ctx context.Context, tokenHash string) (GetInviteByTokenHashWithCalendarRow, error) {
+	row := q.db.QueryRowContext(ctx, getInviteByTokenHashWithCalendar, tokenHash)
+	var i GetInviteByTokenHashWithCalendarRow
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
 		&i.CalendarID,
-		&i.Token,
+		&i.CreatedByUserID,
+		&i.TokenHash,
 		&i.Role,
 		&i.MaxUses,
 		&i.UseCount,
 		&i.IsPublic,
 		&i.ExpiresAt,
-		&i.CreatedBy,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
 		&i.CreatedAt,
 		&i.CalendarPublicID,
 		&i.CalendarName,
@@ -152,83 +162,9 @@ func (q *Queries) GetInviteByTokenPublic(ctx context.Context, token string) (Get
 	return i, err
 }
 
-const incrementInviteUseCount = `-- name: IncrementInviteUseCount :exec
-UPDATE calendar_invites SET use_count = use_count + 1 WHERE id = ?
-`
-
-func (q *Queries) IncrementInviteUseCount(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, incrementInviteUseCount, id)
-	return err
-}
-
-const listEventsByInviteCalendar = `-- name: ListEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
-INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NULL AND e.recurrence_parent_id IS NULL
-  AND ci.is_public = TRUE
-  AND e.start_at < ? AND e.end_at > ?
-ORDER BY e.start_at
-`
-
-type ListEventsByInviteCalendarParams struct {
-	Token   string    `json:"token"`
-	StartAt time.Time `json:"startAt"`
-	EndAt   time.Time `json:"endAt"`
-}
-
-// recurrence_parent_id IS NULL excludes single-occurrence override rows: they
-// are surfaced only through ListRecurringEventsByInviteCalendar's expansion,
-// keyed off the master's own recurrence rule, so an override row must never
-// appear here as if it were its own independent event.
-func (q *Queries) ListEventsByInviteCalendar(ctx context.Context, arg ListEventsByInviteCalendarParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listEventsByInviteCalendar, arg.Token, arg.StartAt, arg.EndAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listInvitesByCalendar = `-- name: ListInvitesByCalendar :many
-SELECT id, calendar_id, token, role, max_uses, use_count, is_public, expires_at, created_by, created_at FROM calendar_invites
-WHERE calendar_id = ?
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites
+WHERE calendar_id = ? AND enabled = TRUE
 ORDER BY created_at DESC
 `
 
@@ -243,14 +179,20 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 		var i CalendarInvite
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
 			&i.CalendarID,
-			&i.Token,
+			&i.CreatedByUserID,
+			&i.TokenHash,
 			&i.Role,
 			&i.MaxUses,
 			&i.UseCount,
 			&i.IsPublic,
 			&i.ExpiresAt,
-			&i.CreatedBy,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -269,10 +211,11 @@ func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) 
 const listPublicSharedCalendarIDs = `-- name: ListPublicSharedCalendarIDs :many
 SELECT DISTINCT ci.calendar_id
 FROM calendar_invites ci
-INNER JOIN calendar_members cm ON cm.calendar_id = ci.calendar_id
+INNER JOIN calendar_members cm ON cm.calendar_id = ci.calendar_id AND cm.enabled = TRUE
 WHERE cm.user_id = ?
   AND ci.is_public = TRUE
-  AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
+  AND ci.enabled = TRUE
+  AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3))
 `
 
 func (q *Queries) ListPublicSharedCalendarIDs(ctx context.Context, userID uint32) ([]uint32, error) {
@@ -298,67 +241,24 @@ func (q *Queries) ListPublicSharedCalendarIDs(ctx context.Context, userID uint32
 	return items, nil
 }
 
-const listRecurringEventsByInviteCalendar = `-- name: ListRecurringEventsByInviteCalendar :many
-SELECT e.id, e.public_id, e.calendar_id, e.title, e.all_day, e.start_at, e.end_at, e.timezone, e.color, e.location, e.memo, e.url, e.created_by, e.assigned_to, e.notification_offset, e.recurrence_rule, e.recurrence_end, e.recurrence_parent_id, e.recurrence_original_start, e.recurrence_cancelled, e.created_at, e.updated_at FROM events e
-INNER JOIN calendar_invites ci ON ci.calendar_id = e.calendar_id
-WHERE ci.token = ? AND e.recurrence_rule IS NOT NULL AND e.recurrence_parent_id IS NULL
-  AND ci.is_public = TRUE
-  AND e.start_at < ? AND e.recurrence_end > ?
-ORDER BY e.start_at
+const revokeInvite = `-- name: RevokeInvite :exec
+UPDATE calendar_invites SET enabled = FALSE WHERE id = ?
 `
 
-type ListRecurringEventsByInviteCalendarParams struct {
-	Token         string       `json:"token"`
-	StartAt       time.Time    `json:"startAt"`
-	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
+func (q *Queries) RevokeInvite(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, revokeInvite, id)
+	return err
 }
 
-// recurrence_parent_id IS NULL keeps this to master recurring events only, so
-// an override row (which also carries a copy of the rule) is expanded once
-// through its own master rather than surfacing a second time as if it were an
-// independent recurring series.
-func (q *Queries) ListRecurringEventsByInviteCalendar(ctx context.Context, arg ListRecurringEventsByInviteCalendarParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listRecurringEventsByInviteCalendar, arg.Token, arg.StartAt, arg.RecurrenceEnd)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Event
-	for rows.Next() {
-		var i Event
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.CalendarID,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Color,
-			&i.Location,
-			&i.Memo,
-			&i.Url,
-			&i.CreatedBy,
-			&i.AssignedTo,
-			&i.NotificationOffset,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.RecurrenceCancelled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+const revokeInviteByIDAndCalendar = `-- name: RevokeInviteByIDAndCalendar :execresult
+UPDATE calendar_invites SET enabled = FALSE WHERE id = ? AND calendar_id = ?
+`
+
+type RevokeInviteByIDAndCalendarParams struct {
+	ID         uint32 `json:"id"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+func (q *Queries) RevokeInviteByIDAndCalendar(ctx context.Context, arg RevokeInviteByIDAndCalendarParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeInviteByIDAndCalendar, arg.ID, arg.CalendarID)
 }
