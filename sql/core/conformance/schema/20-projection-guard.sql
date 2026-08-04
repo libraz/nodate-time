@@ -94,3 +94,33 @@ CALL nf_conformance_expect_rejected(
   CONCAT('UPDATE calendar_events SET task_role = NULL WHERE id = ', @projected_event),
   'the shape invariants must hold for the projection engine too');
 SET @nf_item_projection_engine = NULL;
+
+-- Obligation 1: a recurring series has one representation per outcome.
+-- An override row replaces a single occurrence and carries no rule; a
+-- cancellation is an entry in recurrence_exceptions and never a row.
+-- Both halves of the override link are required, or the row names an
+-- occurrence it cannot identify.
+CALL nf_conformance_expect_rejected(
+  CONCAT('INSERT INTO calendar_events
+            (public_id, workspace_id, calendar_id, title, timezone,
+             owner_user_id, created_by_user_id, recurrence_parent_id)
+          VALUES (UUID_TO_BIN(UUID(), 0), ', @ws, ', ', @cal, ', ''half override'', ''UTC'', ',
+          @usr, ', ', @usr, ', ', @plain_event, ')'),
+  'an override naming a parent but no original start must be rejected');
+
+CALL nf_conformance_expect_rejected(
+  CONCAT('INSERT INTO calendar_events
+            (public_id, workspace_id, calendar_id, title, timezone,
+             owner_user_id, created_by_user_id, start_at, end_at,
+             recurrence_parent_id, recurrence_original_start, recurrence_rule)
+          VALUES (UUID_TO_BIN(UUID(), 0), ', @ws, ', ', @cal, ', ''nested series'', ''UTC'', ',
+          @usr, ', ', @usr, ', ''2031-03-01 09:00:00'', ''2031-03-01 10:00:00'', ',
+          @plain_event, ', ''2031-03-01 09:00:00'', ''{"freq":"weekly"}'')'),
+  'an override carrying its own recurrence rule must be rejected');
+
+-- A projected row mirrors a single task date; it cannot also be one
+-- occurrence of somebody else's series.
+CALL nf_conformance_expect_rejected(
+  CONCAT('UPDATE calendar_events SET recurrence_parent_id = ', @plain_event,
+         ', recurrence_original_start = ''2031-03-01 09:00:00'' WHERE id = ', @projected_event),
+  'making a task-projected event an occurrence override must be rejected');

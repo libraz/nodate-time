@@ -23,6 +23,7 @@ CREATE TABLE events (
   public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible ID',
   workspace_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to workspaces.id',
   task_id INT UNSIGNED NULL COMMENT 'Internal FK to tasks.id when the event targets a task',
+  calendar_id INT UNSIGNED NULL COMMENT 'Internal FK to calendars.id when the event targets a calendar or something inside one. The symmetric counterpart of task_id, and the reason a per-calendar activity feed can read the log directly instead of keeping a second history table that would drift from it.',
   triggered_by_signal_id INT UNSIGNED NULL COMMENT 'Internal FK to signals.id; set when this event was emitted by the Applier in response to a judged signal. Provides full traceability from external input to task event. Belongs to a product layer: NULL in a deployment without one.',
   actor_user_id INT UNSIGNED NULL COMMENT 'Acting user.id (null for system/bot actions). Mutually exclusive with actor_agent_id and actor_system_source: exactly one of the three actor sources is set per row (both NULL is also legal for legacy "system actor"). The mutual-exclusion rule is enforced by query design and handler validation, not a CHECK constraint, because all three FK referential actions use ON DELETE SET NULL and MySQL 8.4 forbids CHECK constraints referencing columns used in FK referential actions. Every INSERT must therefore bind exactly one of the three, chosen by who is acting: a person, an agent, or a background process.',
   actor_agent_id INT UNSIGNED NULL COMMENT 'Acting ai_agents.id when the event was produced by an AI agent (judge / task agent). See actor_user_id comment for the three-way exclusion rule.',
@@ -43,6 +44,7 @@ CREATE TABLE events (
   UNIQUE KEY uniq_events_workspace_public_id (workspace_id, public_id),
   KEY idx_events_workspace_id_occurred_at (workspace_id, occurred_at),
   KEY idx_events_workspace_id_task_id_occurred_at (workspace_id, task_id, occurred_at),
+  KEY idx_events_workspace_id_calendar_id_occurred_at (workspace_id, calendar_id, occurred_at),
   KEY idx_events_workspace_id_type (workspace_id, type),
   KEY idx_events_workspace_id_actor_agent_id (workspace_id, actor_agent_id),
   KEY idx_events_triggered_by_signal (triggered_by_signal_id),
@@ -61,5 +63,10 @@ CREATE TABLE events (
   -- its own constraints/ directory; elsewhere the columns are always NULL.
   CONSTRAINT fk_events_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_events_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  -- Unlike task_id this key can be declared here: calendars is core, so
+  -- it exists in every deployment. SET NULL keeps the history of a
+  -- deleted calendar readable — who removed it is the part worth
+  -- keeping — while the log stays append-only.
+  CONSTRAINT fk_events_calendar FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE SET NULL,
   CONSTRAINT fk_events_reverses FOREIGN KEY (reverses_event_id) REFERENCES events(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Append-only event log';

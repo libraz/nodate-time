@@ -49,3 +49,14 @@ CALL nf_conformance_assert(
      AND referenced_table_name = 'workspaces'
      AND delete_rule = 'CASCADE') = 1,
   'events must cascade away with its workspace');
+
+-- The log carries an entity pointer per domain so a feed scoped to one
+-- calendar can read it directly. An implementation lacking the column
+-- would keep a second history table beside the log, and the two would
+-- disagree the first time a writer updated one and not the other.
+CALL nf_conformance_assert(
+  (SELECT is_nullable = 'YES' AND column_type = 'int unsigned'
+   FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'events' AND column_name = 'calendar_id'),
+  'events.calendar_id must exist and be nullable so a per-calendar feed reads the log itself');

@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage test-schema-upgrade minio-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage test-conformance check-core minio-up format lint
 
 # Local dev defaults: enable dev-login (admin rights come from the users.is_admin
 # flag, seeded for admin@example.com). Respects values already set in the shell.
@@ -19,7 +19,7 @@ db-down:
 	docker compose down
 
 db-schema:
-	bash sql/build-schema.sh
+	bash sql/build-schema.sh > sql/schema.sql
 
 db-apply: db-schema
 	docker run --rm -i --network host mysql:8.4 \
@@ -63,8 +63,16 @@ test-e2e:
 test-e2e-storage:
 	cd apps/api && TC_TEST_INTEGRATION=1 TC_TEST_MINIO=1 go test ./tests/e2e/ -v -count=1
 
-test-schema-upgrade:
-	bash sql/test-schema-upgrade.sh
+# Check this application's schema against the shared contract it claims to
+# implement. Runs on a scratch database so it never touches dev data.
+test-conformance: db-schema
+	bash sql/core/conformance/run.sh \
+		--dsn root:$${TC_DB_ROOT_PASSWORD:-rootpw}@127.0.0.1:$${TC_DB_PORT:-33306}/$${TC_DB_NAME:-timetree_clone} \
+		--mode all
+
+# Verify sql/core is still the upstream text, unedited and current.
+check-core:
+	bash scripts/check-vendored-core.sh
 
 minio-up:
 	docker compose up -d minio
