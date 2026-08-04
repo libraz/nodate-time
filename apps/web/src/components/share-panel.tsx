@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { DEFAULT_INVITE_ROLE, isAdmin, roleForCalendar, roleLabelKey } from '@/lib/permissions';
+import { canManage, DEFAULT_INVITE_ROLE, roleForCalendar, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
@@ -43,7 +43,8 @@ export function SharePanel() {
     () =>
       calendars.filter(
         (c) =>
-          activeCalendarIds.includes(c.id) && isAdmin(roleForCalendar(membersMap[c.id], me?.email)),
+          activeCalendarIds.includes(c.id) &&
+          canManage(roleForCalendar(membersMap[c.id], me?.email)),
       ),
     [calendars, activeCalendarIds, membersMap, me?.email],
   );

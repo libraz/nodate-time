@@ -6,8 +6,9 @@ import { useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { HOLIDAY_COUNTRIES } from '@/lib/holidays';
 import {
+  canManage as canManageRole,
   DEFAULT_INVITE_ROLE,
-  isAdmin as isAdminRole,
+  INVITE_ROLE_OPTIONS,
   ROLE_OPTIONS,
   roleLabelKey,
 } from '@/lib/permissions';
@@ -48,17 +49,6 @@ const TIMEZONE_OPTIONS = [
   'America/Chicago',
   'America/Los_Angeles',
   'Australia/Sydney',
-];
-
-const PROFILE_COLORS = [
-  '#42A5F5',
-  '#5C6BC0',
-  '#26A69A',
-  '#66BB6A',
-  '#FFCA28',
-  '#FF7043',
-  '#EC407A',
-  '#AB47BC',
 ];
 
 interface TabDef {
@@ -309,8 +299,6 @@ function ProfileSection() {
   const removeAvatar = useAuthStore((s) => s.removeAvatar);
   const changePasswordAction = useAuthStore((s) => s.changePassword);
   const [name, setName] = useState(user?.name ?? '');
-  const [icon, setIcon] = useState(user?.icon ?? '');
-  const [color, setColor] = useState(user?.color ?? '#42A5F5');
   const [saving, setSaving] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -322,12 +310,10 @@ function ProfileSection() {
   useEffect(() => {
     if (user) {
       setName(user.name);
-      setIcon(user.icon);
-      setColor(user.color);
     }
   }, [user]);
 
-  const dirty = !!user && (name !== user.name || icon !== user.icon || color !== user.color);
+  const dirty = !!user && name !== user.name;
 
   const handleAvatarFile = useCallback(
     async (file: File) => {
@@ -358,7 +344,7 @@ function ProfileSection() {
   const save = async () => {
     setSaving(true);
     try {
-      await updateProfile({ name, icon, color });
+      await updateProfile({ name });
       toast.success(t('panel.updated'));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.detail : 'Error');
@@ -393,14 +379,13 @@ function ProfileSection() {
             type="button"
             onClick={() => avatarInputRef.current?.click()}
             disabled={avatarBusy}
-            className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-hero font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-            style={{ backgroundColor: color }}
+            className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[var(--color-accent)] text-hero font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
             aria-label={t('profile.avatar')}
           >
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <span>{icon || (name ? name.slice(0, 1) : '👤')}</span>
+              <span>{name ? name.slice(0, 1) : '\u{1F464}'}</span>
             )}
           </button>
           <input
@@ -442,51 +427,14 @@ function ProfileSection() {
           </div>
         </div>
 
-        <FieldRow label={t('profile.name')} hint={t('profile.icon')}>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={icon}
-              maxLength={4}
-              onChange={(e) => setIcon(e.target.value)}
-              aria-label={t('profile.icon')}
-              placeholder="🙂"
-              className="input-modern shrink-0 text-center text-title"
-              style={{ width: '3rem', paddingLeft: 0, paddingRight: 0 }}
-            />
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="input-modern w-full"
-              autoComplete="name"
-            />
-          </div>
-        </FieldRow>
-        <FieldRow label={t('profile.color')}>
-          <div className="flex flex-wrap items-center gap-2">
-            {PROFILE_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setColor(c)}
-                aria-label={c}
-                aria-pressed={color === c}
-                className="relative h-9 w-9 rounded-full transition hover:scale-110"
-                style={{
-                  backgroundColor: c,
-                  boxShadow: color === c ? `0 0 0 3px ${c}55` : undefined,
-                }}
-              />
-            ))}
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              aria-label={t('profile.color')}
-              className="h-9 w-9 cursor-pointer rounded-full border-2 border-[var(--color-border)] bg-transparent"
-            />
-          </div>
+        <FieldRow label={t('profile.name')}>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="input-modern w-full"
+            autoComplete="name"
+          />
         </FieldRow>
         <div className="mt-5 flex items-center gap-3">
           <button
@@ -818,12 +766,12 @@ function CalendarsSection() {
 
   const members = (selectedId && membersMap[selectedId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
-  const isAdmin = isAdminRole(myMembership?.role);
-  const adminCount = members.filter((m) => m.role === 'admin').length;
+  const isAdmin = canManageRole(myMembership?.role);
+  const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   const handleRoleChange = async (member: Member, role: string) => {
-    if (member.role === 'admin' && role !== 'admin' && adminCount <= 1) {
-      toast.error(t('members.lastAdmin'));
+    if (member.role === 'owner' && role !== 'owner' && ownerCount <= 1) {
+      toast.error(t('members.lastOwner'));
       return;
     }
     try {
@@ -908,7 +856,7 @@ function CalendarsSection() {
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
             {members.map((m) => {
               const isMe = m.email === me?.email;
-              const cannotChange = m.role === 'admin' && adminCount <= 1;
+              const cannotChange = m.role === 'owner' && ownerCount <= 1;
               return (
                 <li key={m.id} className="flex items-center gap-3 py-3">
                   <span
@@ -916,7 +864,7 @@ function CalendarsSection() {
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
                     style={{ backgroundColor: m.color }}
                   >
-                    {m.icon || m.name.slice(0, 1)}
+                    {m.name.slice(0, 1)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
@@ -981,7 +929,7 @@ function CalendarsSection() {
         <CustomSelect
           value={inviteRole}
           onChange={(role) => setInviteRole(role as typeof inviteRole)}
-          options={ROLE_OPTIONS.filter((role) => role !== 'admin').map((role) => ({
+          options={INVITE_ROLE_OPTIONS.map((role) => ({
             value: role,
             label: t(roleLabelKey(role)),
           }))}

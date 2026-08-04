@@ -45,8 +45,8 @@ const sampleUser = {
   id: 'u1',
   name: 'Alice',
   email: 'alice@example.com',
-  icon: 'A',
-  color: '#000',
+  locale: 'ja',
+  timezone: 'Asia/Tokyo',
 };
 
 beforeEach(() => {

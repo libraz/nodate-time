@@ -13,8 +13,11 @@ export interface Member {
   name: string;
   email: string;
   role: string;
+  /** The colour this member is identified by on the calendar. Agreed by the
+   *  calendar rather than chosen per viewer, and what an event on their
+   *  layer is drawn in. */
   color: string;
-  icon: string;
+  avatar?: string;
 }
 
 export interface RecurrenceRule {
@@ -58,7 +61,7 @@ export interface EventComment {
   id: string;
   body: string;
   userName: string;
-  userIcon: string;
+  userAvatar?: string;
   userPublicId: string;
   createdAt: string;
 }
@@ -87,6 +90,15 @@ export function normalizeNotificationOffset(offset: number | null | undefined): 
   return ALLOWED_NOTIFICATION_OFFSETS.has(offset) ? offset : null;
 }
 
+/** Whether the time reads as taken. The iCalendar TRANSP axis, and what an
+ *  external free/busy consumer sees. */
+export type ShowAs = 'busy' | 'free' | 'tentative' | 'oof';
+
+/** Whether the commitment could move. A separate question from whether the
+ *  time is taken: a meeting its owner would gladly reschedule and one that
+ *  cannot move are both busy, which is why this is its own axis. */
+export type Flexibility = 'fixed' | 'negotiable' | 'conditional';
+
 export interface CalendarEvent {
   id: string;
   calendarId: string;
@@ -95,11 +107,16 @@ export interface CalendarEvent {
   startAt: string;
   endAt: string;
   timezone?: string;
+  /** Read-only. Derived from the owner's colour on the calendar; an event
+   *  sits on a person's layer and the layer carries the colour. */
   color: string;
-  assignedTo: string | null;
+  /** The member whose layer this event sits on. */
+  ownerId: string | null;
   location: string;
   memo: string;
   url: string;
+  showAs: ShowAs;
+  flexibility: Flexibility;
   notificationOffset: number | null;
   participants: string[];
   recurrenceRule: RecurrenceRule | null;
@@ -107,7 +124,6 @@ export interface CalendarEvent {
   recurrenceDate: string | null;
   createdBy?: string;
   creatorName?: string;
-  creatorIcon?: string;
   creatorAvatarUrl?: string;
   createdAt: string;
   updatedAt: string;

@@ -305,11 +305,12 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminAllowedEmailsRemove': 'Remove',
 
   'members.role': 'Role',
-  'members.roleAdmin': 'Admin',
-  'members.roleMember': 'Member',
+  'members.roleOwner': 'Owner',
+  'members.roleManager': 'Manager',
+  'members.roleEditor': 'Editor',
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'Remove this member?',
-  'members.lastAdmin': 'Cannot remove the last admin',
+  'members.lastOwner': 'A calendar must keep at least one owner',
   'members.selfModify': 'You cannot change your own membership',
 
   'label.1': 'Sky',

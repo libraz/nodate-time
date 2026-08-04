@@ -285,7 +285,7 @@ function CommentsSection({
                 className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-surface-inset)] text-default"
                 style={{ borderRadius: 'var(--radius-sm)' }}
               >
-                {c.userIcon || '\uD83D\uDC64'}
+                {c.userAvatar || '\uD83D\uDC64'}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
@@ -621,6 +621,7 @@ function AttachmentsSection({
         kind: 'attachment',
         presignPath: `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
         presignBody: { filename: file.name, contentType, byteSize: file.size },
+        contentAddressed: true,
         contentType,
         body: file,
         byteSize: file.size,
@@ -782,7 +783,7 @@ interface FormState {
   url: string;
   notificationOffset: number | null;
   participants: string[];
-  assignedTo: string | null;
+  ownerId: string | null;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
 }
@@ -894,7 +895,7 @@ export function EventModal() {
     url: '',
     notificationOffset: null,
     participants: [],
-    assignedTo: null,
+    ownerId: null,
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
@@ -940,7 +941,7 @@ export function EventModal() {
         url: editingEvent.url ?? '',
         notificationOffset: editingEvent.notificationOffset ?? null,
         participants: editingEvent.participants ?? [],
-        assignedTo: editingEvent.assignedTo ?? null,
+        ownerId: editingEvent.ownerId ?? null,
         recurrenceRule: rule,
         recurrencePreset: preset,
       });
@@ -951,7 +952,7 @@ export function EventModal() {
           editingEvent.memo ||
           (editingEvent.participants?.length ?? 0) > 0 ||
           editingEvent.notificationOffset != null ||
-          editingEvent.assignedTo
+          editingEvent.ownerId
         ),
       );
     } else {
@@ -976,7 +977,7 @@ export function EventModal() {
         url: '',
         notificationOffset: null,
         participants: [],
-        assignedTo: null,
+        ownerId: null,
         recurrencePreset: 'none',
         recurrenceRule: null,
       });
@@ -1035,7 +1036,7 @@ export function EventModal() {
         url: form.url,
         notificationOffset: normalizeNotificationOffset(form.notificationOffset),
         participants: form.participants,
-        assignedTo: form.assignedTo,
+        ownerId: form.ownerId,
         recurrenceRule: normalizeRuleForApi(form.recurrenceRule, timezone),
       };
       setSaving(true);
@@ -1232,8 +1233,11 @@ export function EventModal() {
             (m) => m.id === editingEvent.createdBy,
           );
           const name = editingEvent.creatorName || member?.name;
-          const icon = editingEvent.creatorIcon || member?.icon;
           const avatarUrl = editingEvent.creatorAvatarUrl;
+          // There is no per-member emoji any more: a member is a name, a
+          // colour and possibly an uploaded picture. The initial stands in
+          // when there is no picture.
+          const icon = name?.slice(0, 1);
           if (!name) return null;
           return (
             <div className="flex items-center gap-2 px-6 pb-3 text-caption text-[var(--color-text-secondary)]">
@@ -1856,7 +1860,7 @@ export function EventModal() {
                           outlineOffset: '2px',
                         }}
                       >
-                        {m.icon || m.name[0]}
+                        {m.name[0]}
                       </button>
                     );
                   })}
@@ -1918,7 +1922,7 @@ export function EventModal() {
                   <path d="M22 11l-3 3-1.5-1.5" />
                 </svg>
                 <CustomSelect
-                  value={form.assignedTo ?? 'none'}
+                  value={form.ownerId ?? 'none'}
                   options={[
                     { value: 'none', label: t('event.assigneeNone') },
                     ...(membersMap[form.calendarId] ?? []).map((m) => ({
@@ -1927,7 +1931,7 @@ export function EventModal() {
                     })),
                   ]}
                   onChange={(v) => {
-                    setForm((f) => ({ ...f, assignedTo: v === 'none' ? null : v }));
+                    setForm((f) => ({ ...f, ownerId: v === 'none' ? null : v }));
                   }}
                   className="flex-1"
                 />
