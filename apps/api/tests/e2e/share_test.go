@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ func TestShareLifecycle(t *testing.T) {
 
 	// Create invite link
 	var invite struct {
-		ID       uint32 `json:"id"`
+		ID       string `json:"id"`
 		Token    string `json:"token"`
 		Role     string `json:"role"`
 		UseCount uint32 `json:"useCount"`
@@ -28,17 +27,21 @@ func TestShareLifecycle(t *testing.T) {
 		map[string]any{"role": "viewer", "isPublic": true}, &invite)
 	require.NotEmpty(t, invite.Token)
 	require.Equal(t, "viewer", invite.Role)
-	require.NotZero(t, invite.ID)
+	require.NotEmpty(t, invite.ID)
 
 	// List invites
 	var invites []struct {
-		ID    uint32 `json:"id"`
+		ID    string `json:"id"`
 		Token string `json:"token"`
 		Role  string `json:"role"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/invites", tt.AccessToken, nil, &invites)
 	require.Len(t, invites, 1)
-	require.Equal(t, invite.Token, invites[0].Token)
+	require.Equal(t, invite.ID, invites[0].ID)
+	// The plaintext link is returned once, by the request that created it.
+	// Only its hash is stored, so listing invites cannot hand it back --
+	// a database read must not yield a working capability.
+	require.Empty(t, invites[0].Token)
 
 	// Public calendar view (no auth)
 	var pubCal struct {
@@ -72,7 +75,7 @@ func TestShareLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status)
 
 	// Delete invite
-	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+uintToStr(invite.ID), tt.AccessToken, nil)
+	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/"+invite.ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Public view should fail after deletion
@@ -110,7 +113,7 @@ func TestShareAcceptInvite(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 
 	// tt2 accepts invite
 	var accepted struct {
@@ -119,7 +122,7 @@ func TestShareAcceptInvite(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken, nil, &accepted)
 	require.Equal(t, tt1.CalendarID, accepted.CalendarID)
-	require.Equal(t, "member", accepted.Role)
+	require.Equal(t, "editor", accepted.Role)
 
 	// tt2 can now access tt1's calendar
 	var cal struct {
@@ -143,12 +146,12 @@ func TestShareNonAdminCannotCreateInvite(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken, nil, nil)
 
 	// tt2 (member) tries to create invite — should fail
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/invites", tt2.AccessToken,
-		map[string]any{"role": "member"})
+		map[string]any{"role": "editor"})
 	require.Equal(t, 403, status)
 }
 
@@ -213,7 +216,7 @@ func TestSharePublicLinkNotJoinable(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member", "maxUses": 1}, &memberInvite)
+		map[string]any{"role": "editor", "maxUses": 1}, &memberInvite)
 	var pubCal2 struct {
 		Joinable bool `json:"joinable"`
 	}
@@ -239,7 +242,7 @@ func TestShareOnlyOneActivePublicLinkPerCalendar(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
-		map[string]any{"role": "member", "maxUses": 1}, &invite)
+		map[string]any{"role": "editor", "maxUses": 1}, &invite)
 	require.NotEmpty(t, invite.Token)
 }
 
@@ -270,11 +273,12 @@ func TestShareEventsRequirePublicInvite(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token, "", nil, &pubCal)
 	require.True(t, pubCal.Joinable)
 
-	var pubEvents []struct {
-		Title string `json:"title"`
-	}
-	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
-	require.Empty(t, pubEvents)
+	// A join link is an offer of access, not access. Serving its events
+	// would hand the calendar's contents to whoever holds the link without
+	// them ever joining.
+	status, _ := helpers.DoJSONStatus(t, http.MethodGet,
+		testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil)
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 func TestShareRecurringEventsHonorExceptions(t *testing.T) {
@@ -301,13 +305,12 @@ func TestShareRecurringEventsHonorExceptions(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-17T18:00:00+09:00",
 			"endAt":              "2026-04-17T19:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
 
@@ -366,10 +369,4 @@ func TestShareRecurringEventsExpandInEventTimezone(t *testing.T) {
 	require.True(t, strings.Contains(pubEvents[0].StartAt, "2026-03-01T14:00:00Z"), pubEvents[0].StartAt)
 	require.True(t, strings.Contains(pubEvents[1].StartAt, "2026-03-08T13:00:00Z"), pubEvents[1].StartAt)
 	require.True(t, strings.Contains(pubEvents[2].StartAt, "2026-03-15T13:00:00Z"), pubEvents[2].StartAt)
-}
-
-// helper
-func uintToStr(n uint32) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }

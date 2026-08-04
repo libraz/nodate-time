@@ -168,12 +168,12 @@ func TestUpdateMemberRole(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 
 	// Promote guest to admin
 	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
-		map[string]any{"role": "admin"}, nil)
+		map[string]any{"role": "owner"}, nil)
 
 	var members []struct {
 		ID   string `json:"id"`
@@ -184,7 +184,7 @@ func TestUpdateMemberRole(t *testing.T) {
 	for _, m := range members {
 		roles[m.ID] = m.Role
 	}
-	assert.Equal(t, "admin", roles[guest.UserID])
+	assert.Equal(t, "owner", roles[guest.UserID])
 }
 
 func TestRemoveMemberLastAdmin(t *testing.T) {
@@ -212,7 +212,7 @@ func TestRemoveMember(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 
 	// Owner removes guest
@@ -242,7 +242,7 @@ func TestMemberCanLeaveCalendar(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+member.UserID, member.AccessToken, nil)
@@ -265,7 +265,7 @@ func TestNonAdminRemoveMemberDoesNotProbeTarget(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/00000000-0000-4000-8000-000000000000", member.AccessToken, nil)
@@ -286,14 +286,14 @@ func TestUpdateOwnRoleForbidden(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 	// Promote guest so the calendar has two admins; self-demotion still must fail.
 	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
-		map[string]any{"role": "admin"}, nil)
+		map[string]any{"role": "owner"}, nil)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/members/"+owner.UserID+"/role",
-		owner.AccessToken, map[string]any{"role": "member"})
+		owner.AccessToken, map[string]any{"role": "editor"})
 	assert.Equal(t, 400, status)
 }
 
@@ -311,10 +311,10 @@ func TestAdminCanLeaveWhenAnotherAdminExists(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &inv)
+		map[string]any{"role": "editor"}, &inv)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", guest.AccessToken, nil, nil)
 	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+guest.UserID+"/role", owner.AccessToken,
-		map[string]any{"role": "admin"}, nil)
+		map[string]any{"role": "owner"}, nil)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+owner.UserID,
 		owner.AccessToken, nil)

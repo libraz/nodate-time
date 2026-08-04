@@ -49,13 +49,12 @@ func TestEventURLField(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-20T15:00:00+09:00",
 			"endAt":              "2026-04-20T16:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "https://zoom.us/j/123",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Equal(t, "https://zoom.us/j/123", updated.URL)
@@ -110,13 +109,12 @@ func TestEventNotificationOffset(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-21T10:00:00+09:00",
 			"endAt":              "2026-04-21T11:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Nil(t, updated.NotificationOffset)
@@ -142,7 +140,7 @@ func TestEventParticipants(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 
 	// tt2 accepts the invite
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken,
@@ -183,13 +181,12 @@ func TestEventParticipants(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-04-22T12:00:00+09:00",
 			"endAt":              "2026-04-22T13:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
 	assert.Empty(t, updated.Participants)
@@ -214,7 +211,7 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", guest.AccessToken, nil, nil)
 
 	var event struct {
@@ -235,13 +232,12 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 			"allDay":             false,
 			"startAt":            "2026-05-01T12:00:00+09:00",
 			"endAt":              "2026-05-01T13:00:00+09:00",
-			"color":              "",
 			"location":           "",
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
 			"participants":       []string{"not-a-uuid"},
-			"assignedTo":         nil,
+			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		})
 	require.Equal(t, http.StatusBadRequest, status)
@@ -440,7 +436,7 @@ func TestCommentEditDenied(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken, nil, nil)
 
 	// tt1 creates event + comment
@@ -608,7 +604,7 @@ func TestNewFieldsInListEvents(t *testing.T) {
 		Token string `json:"token"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt1.AccessToken,
-		map[string]any{"role": "member"}, &invite)
+		map[string]any{"role": "editor"}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", tt2.AccessToken, nil, nil)
 
 	// Create event with all new fields
@@ -657,7 +653,7 @@ func TestAttachmentWithoutStorage(t *testing.T) {
 
 	// Presign upload should fail with 503 (no storage configured)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
-		map[string]any{"filename": "test.txt", "byteSize": 100})
+		map[string]any{"filename": "test.txt", "byteSize": 100, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
 	assert.Equal(t, 503, status)
 
 	// List attachments should still work (empty list)

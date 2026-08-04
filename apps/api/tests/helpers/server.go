@@ -11,14 +11,20 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
+	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 const (
 	TestJWTSecret = "test-jwt-secret-for-e2e"
 	TestWebURL    = "http://web.test.local"
+	// The suite runs every tenant inside one workspace, the same way the
+	// application does. Tenant isolation is a calendar-membership property
+	// here, not a workspace one, and the isolation tests assert exactly that.
+	TestWorkspaceSlug = "test"
 )
 
 // MinIO defaults — must match compose.yml.
@@ -73,15 +79,41 @@ func newTestStorage(ctx context.Context) (*storage.Client, string, error) {
 	return c, bucket, nil
 }
 
+// TestWorkspace resolves the workspace every test server runs in. It is
+// separate from buildHandler so a test that assembles its own router.Deps
+// (the OAuth suite does) cannot forget it: a zero id does not fail, it just
+// matches nothing, which surfaces as a pile of confusing not-founds.
+func TestWorkspace(queries *generated.Queries) workspace.Scope {
+	ws, err := workspace.Ensure(context.Background(), queries, TestWorkspaceSlug, "Nodate Time (test)", "Asia/Tokyo", "JP")
+	if err != nil {
+		panic(fmt.Sprintf("test setup: resolve workspace: %v", err))
+	}
+	return ws
+}
+
+// TestWorkspacePublicID returns the workspace's external id as a string, for
+// tests that need to reconstruct an object storage key.
+func TestWorkspacePublicID(db *sql.DB) string {
+	ws := TestWorkspace(generated.New(db))
+	u, err := uuid.FromBytes(ws.PublicID)
+	if err != nil {
+		panic(fmt.Sprintf("test setup: workspace public id: %v", err))
+	}
+	return u.String()
+}
+
 func buildHandler(db *sql.DB, mc *CapturingMailer, sc *storage.Client) *router.Deps {
 	queries := generated.New(db)
+	ws := TestWorkspace(queries)
 	return &router.Deps{
-		DB:        db,
-		Queries:   queries,
-		JWTSecret: TestJWTSecret,
-		Mailer:    mc,
-		WebURL:    TestWebURL,
-		Storage:   sc,
+		DB:                db,
+		Queries:           queries,
+		WorkspaceID:       ws.ID,
+		WorkspacePublicID: ws.PublicID,
+		JWTSecret:         TestJWTSecret,
+		Mailer:            mc,
+		WebURL:            TestWebURL,
+		Storage:           sc,
 		// Tests register tenants over the email+password flow.
 		PasswordLoginEnabled: true,
 		// Parallel tenants register from one loopback IP; the per-IP limiter would
