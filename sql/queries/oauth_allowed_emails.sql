@@ -1,16 +1,20 @@
 -- name: ListAllowedEmails :many
-SELECT id, email, note, created_by, created_at
-FROM oauth_allowed_emails
-ORDER BY email;
+SELECT * FROM oauth_allowed_emails WHERE enabled = TRUE ORDER BY email;
 
 -- name: IsEmailAllowed :one
 SELECT EXISTS (
-  SELECT 1 FROM oauth_allowed_emails WHERE email = ?
+  SELECT 1 FROM oauth_allowed_emails WHERE email = ? AND enabled = TRUE
 ) AS allowed;
 
 -- name: CreateAllowedEmail :execresult
-INSERT INTO oauth_allowed_emails (email, note, created_by)
-VALUES (?, ?, ?);
+INSERT INTO oauth_allowed_emails (public_id, email, reason, created_by_user_id)
+VALUES (?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  reason = VALUES(reason),
+  created_by_user_id = VALUES(created_by_user_id),
+  enabled = TRUE;
 
--- name: DeleteAllowedEmail :exec
-DELETE FROM oauth_allowed_emails WHERE id = ?;
+-- WithdrawAllowedEmail disables rather than deletes: the exception was a
+-- deliberate act and the record of who made it outlives its usefulness.
+-- name: WithdrawAllowedEmail :exec
+UPDATE oauth_allowed_emails SET enabled = FALSE WHERE id = ?;

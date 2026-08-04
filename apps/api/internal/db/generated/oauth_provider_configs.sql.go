@@ -8,52 +8,59 @@ package generated
 import (
 	"context"
 	"database/sql"
-	"time"
 )
 
 const deleteOAuthProviderConfig = `-- name: DeleteOAuthProviderConfig :exec
 DELETE FROM oauth_provider_configs WHERE provider = ?
 `
 
-func (q *Queries) DeleteOAuthProviderConfig(ctx context.Context, provider string) error {
+func (q *Queries) DeleteOAuthProviderConfig(ctx context.Context, provider OauthProviderConfigsProvider) error {
 	_, err := q.db.ExecContext(ctx, deleteOAuthProviderConfig, provider)
 	return err
 }
 
 const getOAuthProviderConfig = `-- name: GetOAuthProviderConfig :one
-SELECT provider, client_id, client_secret_enc, enabled, updated_at, updated_by
-FROM oauth_provider_configs
-WHERE provider = ? LIMIT 1
+SELECT id, public_id, provider, client_id, client_secret_ciphertext, updated_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM oauth_provider_configs WHERE provider = ?
 `
 
-func (q *Queries) GetOAuthProviderConfig(ctx context.Context, provider string) (OauthProviderConfig, error) {
+func (q *Queries) GetOAuthProviderConfig(ctx context.Context, provider OauthProviderConfigsProvider) (OauthProviderConfig, error) {
 	row := q.db.QueryRowContext(ctx, getOAuthProviderConfig, provider)
 	var i OauthProviderConfig
 	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
 		&i.Provider,
 		&i.ClientID,
-		&i.ClientSecretEnc,
+		&i.ClientSecretCiphertext,
+		&i.UpdatedByUserID,
+		&i.SortWeight,
+		&i.Notes,
 		&i.Enabled,
 		&i.UpdatedAt,
-		&i.UpdatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listOAuthProviderConfigs = `-- name: ListOAuthProviderConfigs :many
-SELECT provider, client_id, enabled, updated_at, updated_by
+SELECT id, public_id, provider, client_id, enabled, updated_at, updated_by_user_id
 FROM oauth_provider_configs
 ORDER BY provider
 `
 
 type ListOAuthProviderConfigsRow struct {
-	Provider  string        `json:"provider"`
-	ClientID  string        `json:"clientId"`
-	Enabled   bool          `json:"enabled"`
-	UpdatedAt time.Time     `json:"updatedAt"`
-	UpdatedBy sql.NullInt32 `json:"updatedBy"`
+	ID              uint32                       `json:"id"`
+	PublicID        []byte                       `json:"publicId"`
+	Provider        OauthProviderConfigsProvider `json:"provider"`
+	ClientID        string                       `json:"clientId"`
+	Enabled         bool                         `json:"enabled"`
+	UpdatedAt       sql.NullTime                 `json:"updatedAt"`
+	UpdatedByUserID sql.NullInt32                `json:"updatedByUserId"`
 }
 
+// ListOAuthProviderConfigs never selects the ciphertext. The admin screen
+// shows which providers are configured, not their secrets, and a query
+// that returns one by habit is how a secret reaches a response body.
 func (q *Queries) ListOAuthProviderConfigs(ctx context.Context) ([]ListOAuthProviderConfigsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listOAuthProviderConfigs)
 	if err != nil {
@@ -64,11 +71,13 @@ func (q *Queries) ListOAuthProviderConfigs(ctx context.Context) ([]ListOAuthProv
 	for rows.Next() {
 		var i ListOAuthProviderConfigsRow
 		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
 			&i.Provider,
 			&i.ClientID,
 			&i.Enabled,
 			&i.UpdatedAt,
-			&i.UpdatedBy,
+			&i.UpdatedByUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -84,45 +93,47 @@ func (q *Queries) ListOAuthProviderConfigs(ctx context.Context) ([]ListOAuthProv
 }
 
 const setOAuthProviderEnabled = `-- name: SetOAuthProviderEnabled :exec
-UPDATE oauth_provider_configs SET enabled = ?, updated_by = ? WHERE provider = ?
+UPDATE oauth_provider_configs SET enabled = ?, updated_by_user_id = ? WHERE provider = ?
 `
 
 type SetOAuthProviderEnabledParams struct {
-	Enabled   bool          `json:"enabled"`
-	UpdatedBy sql.NullInt32 `json:"updatedBy"`
-	Provider  string        `json:"provider"`
+	Enabled         bool                         `json:"enabled"`
+	UpdatedByUserID sql.NullInt32                `json:"updatedByUserId"`
+	Provider        OauthProviderConfigsProvider `json:"provider"`
 }
 
 func (q *Queries) SetOAuthProviderEnabled(ctx context.Context, arg SetOAuthProviderEnabledParams) error {
-	_, err := q.db.ExecContext(ctx, setOAuthProviderEnabled, arg.Enabled, arg.UpdatedBy, arg.Provider)
+	_, err := q.db.ExecContext(ctx, setOAuthProviderEnabled, arg.Enabled, arg.UpdatedByUserID, arg.Provider)
 	return err
 }
 
 const upsertOAuthProviderConfig = `-- name: UpsertOAuthProviderConfig :exec
-INSERT INTO oauth_provider_configs (provider, client_id, client_secret_enc, enabled, updated_by)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO oauth_provider_configs (public_id, provider, client_id, client_secret_ciphertext, enabled, updated_by_user_id)
+VALUES (?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   client_id = VALUES(client_id),
-  client_secret_enc = VALUES(client_secret_enc),
+  client_secret_ciphertext = VALUES(client_secret_ciphertext),
   enabled = VALUES(enabled),
-  updated_by = VALUES(updated_by)
+  updated_by_user_id = VALUES(updated_by_user_id)
 `
 
 type UpsertOAuthProviderConfigParams struct {
-	Provider        string        `json:"provider"`
-	ClientID        string        `json:"clientId"`
-	ClientSecretEnc []byte        `json:"clientSecretEnc"`
-	Enabled         bool          `json:"enabled"`
-	UpdatedBy       sql.NullInt32 `json:"updatedBy"`
+	PublicID               []byte                       `json:"publicId"`
+	Provider               OauthProviderConfigsProvider `json:"provider"`
+	ClientID               string                       `json:"clientId"`
+	ClientSecretCiphertext []byte                       `json:"clientSecretCiphertext"`
+	Enabled                bool                         `json:"enabled"`
+	UpdatedByUserID        sql.NullInt32                `json:"updatedByUserId"`
 }
 
 func (q *Queries) UpsertOAuthProviderConfig(ctx context.Context, arg UpsertOAuthProviderConfigParams) error {
 	_, err := q.db.ExecContext(ctx, upsertOAuthProviderConfig,
+		arg.PublicID,
 		arg.Provider,
 		arg.ClientID,
-		arg.ClientSecretEnc,
+		arg.ClientSecretCiphertext,
 		arg.Enabled,
-		arg.UpdatedBy,
+		arg.UpdatedByUserID,
 	)
 	return err
 }

@@ -12,18 +12,24 @@ import (
 )
 
 const createPasswordReset = `-- name: CreatePasswordReset :execresult
-INSERT INTO password_resets (user_id, token_hash, expires_at)
-VALUES (?, ?, ?)
+INSERT INTO password_resets (public_id, user_id, token_hash, expires_at)
+VALUES (?, ?, ?, ?)
 `
 
 type CreatePasswordResetParams struct {
+	PublicID  []byte    `json:"publicId"`
 	UserID    uint32    `json:"userId"`
 	TokenHash string    `json:"tokenHash"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 func (q *Queries) CreatePasswordReset(ctx context.Context, arg CreatePasswordResetParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createPasswordReset, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	return q.db.ExecContext(ctx, createPasswordReset,
+		arg.PublicID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
 }
 
 const deleteExpiredPasswordResets = `-- name: DeleteExpiredPasswordResets :exec
@@ -36,7 +42,7 @@ func (q *Queries) DeleteExpiredPasswordResets(ctx context.Context, expiresAt tim
 }
 
 const getPasswordResetByTokenHash = `-- name: GetPasswordResetByTokenHash :one
-SELECT id, user_id, token_hash, expires_at, used_at, created_at FROM password_resets
+SELECT id, public_id, user_id, token_hash, expires_at, used_at, sort_weight, notes, enabled, updated_at, created_at FROM password_resets
 WHERE token_hash = ?
   AND used_at IS NULL
   AND expires_at > CURRENT_TIMESTAMP(3)
@@ -49,10 +55,15 @@ func (q *Queries) GetPasswordResetByTokenHash(ctx context.Context, tokenHash str
 	var i PasswordReset
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.TokenHash,
 		&i.ExpiresAt,
 		&i.UsedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
 		&i.CreatedAt,
 	)
 	return i, err

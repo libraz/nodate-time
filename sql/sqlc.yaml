@@ -2,7 +2,13 @@ version: "2"
 sql:
   - engine: "mysql"
     queries: "queries/"
-    schema: "tables/"
+    # The layered table directories rather than the generated schema.sql:
+    # that file also carries trigger bodies wrapped in DELIMITER, which the
+    # MySQL parser here does not accept. Both layers must be listed;
+    # foreign keys are resolved across the whole set.
+    schema:
+      - "core/tables/"
+      - "time/tables/"
     gen:
       go:
         package: "generated"
@@ -11,21 +17,55 @@ sql:
         emit_json_tags: true
         json_tags_case_style: "camel"
         overrides:
-          - column: "events.recurrence_rule"
+          - column: "calendar_events.recurrence_rule"
             go_type:
               type: "RawMessage"
               import: "encoding/json"
               pointer: true
+          - column: "calendar_events.recurrence_exceptions"
+            go_type:
+              type: "RawMessage"
+              import: "encoding/json"
+              pointer: true
+          - column: "calendar_events.flags"
+            go_type:
+              type: "RawMessage"
+              import: "encoding/json"
+              pointer: true
+          - column: "events.payload_json"
+            go_type:
+              type: "RawMessage"
+              import: "encoding/json"
         rename:
           public_id: "PublicID"
           calendar_id: "CalendarID"
+          calendar_event_id: "CalendarEventID"
+          workspace_id: "WorkspaceID"
           user_id: "UserID"
-          event_id: "EventID"
-          uploaded_by: "UploadedBy"
+          owner_user_id: "OwnerUserID"
+          created_by_user_id: "CreatedByUserID"
+          uploaded_by_user_id: "UploadedByUserID"
+          updated_by_user_id: "UpdatedByUserID"
+          actor_user_id: "ActorUserID"
+          invited_by_user_id: "InvitedByUserID"
+          recurrence_parent_id: "RecurrenceParentID"
           storage_key: "StorageKey"
+          storage_object_id: "StorageObjectID"
+          avatar_storage_object_id: "AvatarStorageObjectID"
           byte_size: "ByteSize"
           content_type: "ContentType"
           notification_offset: "NotificationOffset"
-          sort_order: "SortOrder"
-          created_by: "CreatedBy"
+          sort_weight: "SortWeight"
           user_public_id: "UserPublicID"
+          token_hash: "TokenHash"
+          client_id: "ClientID"
+          client_secret_ciphertext: "ClientSecretCiphertext"
+          payload_json: "PayloadJSON"
+          task_id: "TaskID"
+          task_role: "TaskRole"
+          task_role_key: "TaskRoleKey"
+          url: "URL"
+          avatar_url: "AvatarURL"
+          cover_url: "CoverURL"
+          icon_url: "IconURL"
+          system_slug: "SystemSlug"

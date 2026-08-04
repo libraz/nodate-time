@@ -11,32 +11,33 @@ import (
 )
 
 const createAllowedEmail = `-- name: CreateAllowedEmail :execresult
-INSERT INTO oauth_allowed_emails (email, note, created_by)
-VALUES (?, ?, ?)
+INSERT INTO oauth_allowed_emails (public_id, email, reason, created_by_user_id)
+VALUES (?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  reason = VALUES(reason),
+  created_by_user_id = VALUES(created_by_user_id),
+  enabled = TRUE
 `
 
 type CreateAllowedEmailParams struct {
-	Email     string        `json:"email"`
-	Note      string        `json:"note"`
-	CreatedBy sql.NullInt32 `json:"createdBy"`
+	PublicID        []byte        `json:"publicId"`
+	Email           string        `json:"email"`
+	Reason          string        `json:"reason"`
+	CreatedByUserID sql.NullInt32 `json:"createdByUserId"`
 }
 
 func (q *Queries) CreateAllowedEmail(ctx context.Context, arg CreateAllowedEmailParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, createAllowedEmail, arg.Email, arg.Note, arg.CreatedBy)
-}
-
-const deleteAllowedEmail = `-- name: DeleteAllowedEmail :exec
-DELETE FROM oauth_allowed_emails WHERE id = ?
-`
-
-func (q *Queries) DeleteAllowedEmail(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, deleteAllowedEmail, id)
-	return err
+	return q.db.ExecContext(ctx, createAllowedEmail,
+		arg.PublicID,
+		arg.Email,
+		arg.Reason,
+		arg.CreatedByUserID,
+	)
 }
 
 const isEmailAllowed = `-- name: IsEmailAllowed :one
 SELECT EXISTS (
-  SELECT 1 FROM oauth_allowed_emails WHERE email = ?
+  SELECT 1 FROM oauth_allowed_emails WHERE email = ? AND enabled = TRUE
 ) AS allowed
 `
 
@@ -48,9 +49,7 @@ func (q *Queries) IsEmailAllowed(ctx context.Context, email string) (bool, error
 }
 
 const listAllowedEmails = `-- name: ListAllowedEmails :many
-SELECT id, email, note, created_by, created_at
-FROM oauth_allowed_emails
-ORDER BY email
+SELECT id, public_id, email, reason, created_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM oauth_allowed_emails WHERE enabled = TRUE ORDER BY email
 `
 
 func (q *Queries) ListAllowedEmails(ctx context.Context) ([]OauthAllowedEmail, error) {
@@ -64,9 +63,14 @@ func (q *Queries) ListAllowedEmails(ctx context.Context) ([]OauthAllowedEmail, e
 		var i OauthAllowedEmail
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.Email,
-			&i.Note,
-			&i.CreatedBy,
+			&i.Reason,
+			&i.CreatedByUserID,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -80,4 +84,15 @@ func (q *Queries) ListAllowedEmails(ctx context.Context) ([]OauthAllowedEmail, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const withdrawAllowedEmail = `-- name: WithdrawAllowedEmail :exec
+UPDATE oauth_allowed_emails SET enabled = FALSE WHERE id = ?
+`
+
+// WithdrawAllowedEmail disables rather than deletes: the exception was a
+// deliberate act and the record of who made it outlives its usefulness.
+func (q *Queries) WithdrawAllowedEmail(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, withdrawAllowedEmail, id)
+	return err
 }

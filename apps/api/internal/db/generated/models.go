@@ -12,12 +12,274 @@ import (
 	"time"
 )
 
+type CalendarEventAttendeesRsvp string
+
+const (
+	CalendarEventAttendeesRsvpPending   CalendarEventAttendeesRsvp = "pending"
+	CalendarEventAttendeesRsvpAccepted  CalendarEventAttendeesRsvp = "accepted"
+	CalendarEventAttendeesRsvpDeclined  CalendarEventAttendeesRsvp = "declined"
+	CalendarEventAttendeesRsvpTentative CalendarEventAttendeesRsvp = "tentative"
+)
+
+func (e *CalendarEventAttendeesRsvp) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventAttendeesRsvp(s)
+	case string:
+		*e = CalendarEventAttendeesRsvp(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventAttendeesRsvp: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventAttendeesRsvp struct {
+	CalendarEventAttendeesRsvp CalendarEventAttendeesRsvp `json:"calendarEventAttendeesRsvp"`
+	Valid                      bool                       `json:"valid"` // Valid is true if CalendarEventAttendeesRsvp is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventAttendeesRsvp) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventAttendeesRsvp, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventAttendeesRsvp.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventAttendeesRsvp) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventAttendeesRsvp), nil
+}
+
+type CalendarEventsFlexibility string
+
+const (
+	CalendarEventsFlexibilityFixed       CalendarEventsFlexibility = "fixed"
+	CalendarEventsFlexibilityNegotiable  CalendarEventsFlexibility = "negotiable"
+	CalendarEventsFlexibilityConditional CalendarEventsFlexibility = "conditional"
+)
+
+func (e *CalendarEventsFlexibility) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventsFlexibility(s)
+	case string:
+		*e = CalendarEventsFlexibility(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventsFlexibility: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventsFlexibility struct {
+	CalendarEventsFlexibility CalendarEventsFlexibility `json:"calendarEventsFlexibility"`
+	Valid                     bool                      `json:"valid"` // Valid is true if CalendarEventsFlexibility is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventsFlexibility) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventsFlexibility, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventsFlexibility.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventsFlexibility) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventsFlexibility), nil
+}
+
+type CalendarEventsKind string
+
+const (
+	CalendarEventsKindEvent     CalendarEventsKind = "event"
+	CalendarEventsKindBlock     CalendarEventsKind = "block"
+	CalendarEventsKindFree      CalendarEventsKind = "free"
+	CalendarEventsKindMilestone CalendarEventsKind = "milestone"
+)
+
+func (e *CalendarEventsKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventsKind(s)
+	case string:
+		*e = CalendarEventsKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventsKind: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventsKind struct {
+	CalendarEventsKind CalendarEventsKind `json:"calendarEventsKind"`
+	Valid              bool               `json:"valid"` // Valid is true if CalendarEventsKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventsKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventsKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventsKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventsKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventsKind), nil
+}
+
+type CalendarEventsShowAs string
+
+const (
+	CalendarEventsShowAsBusy      CalendarEventsShowAs = "busy"
+	CalendarEventsShowAsFree      CalendarEventsShowAs = "free"
+	CalendarEventsShowAsTentative CalendarEventsShowAs = "tentative"
+	CalendarEventsShowAsOof       CalendarEventsShowAs = "oof"
+)
+
+func (e *CalendarEventsShowAs) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventsShowAs(s)
+	case string:
+		*e = CalendarEventsShowAs(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventsShowAs: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventsShowAs struct {
+	CalendarEventsShowAs CalendarEventsShowAs `json:"calendarEventsShowAs"`
+	Valid                bool                 `json:"valid"` // Valid is true if CalendarEventsShowAs is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventsShowAs) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventsShowAs, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventsShowAs.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventsShowAs) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventsShowAs), nil
+}
+
+type CalendarEventsTaskRole string
+
+const (
+	CalendarEventsTaskRoleDue       CalendarEventsTaskRole = "due"
+	CalendarEventsTaskRoleScheduled CalendarEventsTaskRole = "scheduled"
+)
+
+func (e *CalendarEventsTaskRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventsTaskRole(s)
+	case string:
+		*e = CalendarEventsTaskRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventsTaskRole: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventsTaskRole struct {
+	CalendarEventsTaskRole CalendarEventsTaskRole `json:"calendarEventsTaskRole"`
+	Valid                  bool                   `json:"valid"` // Valid is true if CalendarEventsTaskRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventsTaskRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventsTaskRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventsTaskRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventsTaskRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventsTaskRole), nil
+}
+
+type CalendarEventsVisibility string
+
+const (
+	CalendarEventsVisibilityDefault      CalendarEventsVisibility = "default"
+	CalendarEventsVisibilityPublic       CalendarEventsVisibility = "public"
+	CalendarEventsVisibilityPrivate      CalendarEventsVisibility = "private"
+	CalendarEventsVisibilityConfidential CalendarEventsVisibility = "confidential"
+)
+
+func (e *CalendarEventsVisibility) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarEventsVisibility(s)
+	case string:
+		*e = CalendarEventsVisibility(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarEventsVisibility: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarEventsVisibility struct {
+	CalendarEventsVisibility CalendarEventsVisibility `json:"calendarEventsVisibility"`
+	Valid                    bool                     `json:"valid"` // Valid is true if CalendarEventsVisibility is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarEventsVisibility) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarEventsVisibility, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarEventsVisibility.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarEventsVisibility) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarEventsVisibility), nil
+}
+
 type CalendarInvitesRole string
 
 const (
-	CalendarInvitesRoleAdmin  CalendarInvitesRole = "admin"
-	CalendarInvitesRoleMember CalendarInvitesRole = "member"
-	CalendarInvitesRoleViewer CalendarInvitesRole = "viewer"
+	CalendarInvitesRoleOwner   CalendarInvitesRole = "owner"
+	CalendarInvitesRoleManager CalendarInvitesRole = "manager"
+	CalendarInvitesRoleEditor  CalendarInvitesRole = "editor"
+	CalendarInvitesRoleViewer  CalendarInvitesRole = "viewer"
 )
 
 func (e *CalendarInvitesRole) Scan(src interface{}) error {
@@ -58,9 +320,10 @@ func (ns NullCalendarInvitesRole) Value() (driver.Value, error) {
 type CalendarMembersRole string
 
 const (
-	CalendarMembersRoleAdmin  CalendarMembersRole = "admin"
-	CalendarMembersRoleMember CalendarMembersRole = "member"
-	CalendarMembersRoleViewer CalendarMembersRole = "viewer"
+	CalendarMembersRoleOwner   CalendarMembersRole = "owner"
+	CalendarMembersRoleManager CalendarMembersRole = "manager"
+	CalendarMembersRoleEditor  CalendarMembersRole = "editor"
+	CalendarMembersRoleViewer  CalendarMembersRole = "viewer"
 )
 
 func (e *CalendarMembersRole) Scan(src interface{}) error {
@@ -98,53 +361,145 @@ func (ns NullCalendarMembersRole) Value() (driver.Value, error) {
 	return string(ns.CalendarMembersRole), nil
 }
 
-type OauthAccountsProvider string
+type CalendarsKind string
 
 const (
-	OauthAccountsProviderGoogle OauthAccountsProvider = "google"
-	OauthAccountsProviderLine   OauthAccountsProvider = "line"
+	CalendarsKindPersonal CalendarsKind = "personal"
+	CalendarsKindSystem   CalendarsKind = "system"
 )
 
-func (e *OauthAccountsProvider) Scan(src interface{}) error {
+func (e *CalendarsKind) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = OauthAccountsProvider(s)
+		*e = CalendarsKind(s)
 	case string:
-		*e = OauthAccountsProvider(s)
+		*e = CalendarsKind(s)
 	default:
-		return fmt.Errorf("unsupported scan type for OauthAccountsProvider: %T", src)
+		return fmt.Errorf("unsupported scan type for CalendarsKind: %T", src)
 	}
 	return nil
 }
 
-type NullOauthAccountsProvider struct {
-	OauthAccountsProvider OauthAccountsProvider `json:"oauthAccountsProvider"`
-	Valid                 bool                  `json:"valid"` // Valid is true if OauthAccountsProvider is not NULL
+type NullCalendarsKind struct {
+	CalendarsKind CalendarsKind `json:"calendarsKind"`
+	Valid         bool          `json:"valid"` // Valid is true if CalendarsKind is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullOauthAccountsProvider) Scan(value interface{}) error {
+func (ns *NullCalendarsKind) Scan(value interface{}) error {
 	if value == nil {
-		ns.OauthAccountsProvider, ns.Valid = "", false
+		ns.CalendarsKind, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.OauthAccountsProvider.Scan(value)
+	return ns.CalendarsKind.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullOauthAccountsProvider) Value() (driver.Value, error) {
+func (ns NullCalendarsKind) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.OauthAccountsProvider), nil
+	return string(ns.CalendarsKind), nil
+}
+
+type IdentitiesProvider string
+
+const (
+	IdentitiesProviderLocal       IdentitiesProvider = "local"
+	IdentitiesProviderGoogle      IdentitiesProvider = "google"
+	IdentitiesProviderGithub      IdentitiesProvider = "github"
+	IdentitiesProviderMicrosoft   IdentitiesProvider = "microsoft"
+	IdentitiesProviderGenericOidc IdentitiesProvider = "generic_oidc"
+)
+
+func (e *IdentitiesProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = IdentitiesProvider(s)
+	case string:
+		*e = IdentitiesProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for IdentitiesProvider: %T", src)
+	}
+	return nil
+}
+
+type NullIdentitiesProvider struct {
+	IdentitiesProvider IdentitiesProvider `json:"identitiesProvider"`
+	Valid              bool               `json:"valid"` // Valid is true if IdentitiesProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullIdentitiesProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.IdentitiesProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.IdentitiesProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullIdentitiesProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.IdentitiesProvider), nil
+}
+
+type OauthProviderConfigsProvider string
+
+const (
+	OauthProviderConfigsProviderGoogle      OauthProviderConfigsProvider = "google"
+	OauthProviderConfigsProviderGithub      OauthProviderConfigsProvider = "github"
+	OauthProviderConfigsProviderMicrosoft   OauthProviderConfigsProvider = "microsoft"
+	OauthProviderConfigsProviderGenericOidc OauthProviderConfigsProvider = "generic_oidc"
+	OauthProviderConfigsProviderLine        OauthProviderConfigsProvider = "line"
+)
+
+func (e *OauthProviderConfigsProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OauthProviderConfigsProvider(s)
+	case string:
+		*e = OauthProviderConfigsProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OauthProviderConfigsProvider: %T", src)
+	}
+	return nil
+}
+
+type NullOauthProviderConfigsProvider struct {
+	OauthProviderConfigsProvider OauthProviderConfigsProvider `json:"oauthProviderConfigsProvider"`
+	Valid                        bool                         `json:"valid"` // Valid is true if OauthProviderConfigsProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOauthProviderConfigsProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.OauthProviderConfigsProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OauthProviderConfigsProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOauthProviderConfigsProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OauthProviderConfigsProvider), nil
 }
 
 type OauthStatesProvider string
 
 const (
-	OauthStatesProviderGoogle OauthStatesProvider = "google"
-	OauthStatesProviderLine   OauthStatesProvider = "line"
+	OauthStatesProviderGithub         OauthStatesProvider = "github"
+	OauthStatesProviderSlack          OauthStatesProvider = "slack"
+	OauthStatesProviderGoogleCalendar OauthStatesProvider = "google_calendar"
+	OauthStatesProviderDiscord        OauthStatesProvider = "discord"
 )
 
 func (e *OauthStatesProvider) Scan(src interface{}) error {
@@ -182,244 +537,1383 @@ func (ns NullOauthStatesProvider) Value() (driver.Value, error) {
 	return string(ns.OauthStatesProvider), nil
 }
 
+type SigninStatesProvider string
+
+const (
+	SigninStatesProviderGoogle      SigninStatesProvider = "google"
+	SigninStatesProviderGithub      SigninStatesProvider = "github"
+	SigninStatesProviderMicrosoft   SigninStatesProvider = "microsoft"
+	SigninStatesProviderGenericOidc SigninStatesProvider = "generic_oidc"
+	SigninStatesProviderLine        SigninStatesProvider = "line"
+)
+
+func (e *SigninStatesProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SigninStatesProvider(s)
+	case string:
+		*e = SigninStatesProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SigninStatesProvider: %T", src)
+	}
+	return nil
+}
+
+type NullSigninStatesProvider struct {
+	SigninStatesProvider SigninStatesProvider `json:"signinStatesProvider"`
+	Valid                bool                 `json:"valid"` // Valid is true if SigninStatesProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSigninStatesProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.SigninStatesProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SigninStatesProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSigninStatesProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SigninStatesProvider), nil
+}
+
+type UsersCalendarShiftDefault string
+
+const (
+	UsersCalendarShiftDefaultAsk            UsersCalendarShiftDefault = "ask"
+	UsersCalendarShiftDefaultSyncAlways     UsersCalendarShiftDefault = "sync_always"
+	UsersCalendarShiftDefaultTaskOnlyAlways UsersCalendarShiftDefault = "task_only_always"
+)
+
+func (e *UsersCalendarShiftDefault) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UsersCalendarShiftDefault(s)
+	case string:
+		*e = UsersCalendarShiftDefault(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UsersCalendarShiftDefault: %T", src)
+	}
+	return nil
+}
+
+type NullUsersCalendarShiftDefault struct {
+	UsersCalendarShiftDefault UsersCalendarShiftDefault `json:"usersCalendarShiftDefault"`
+	Valid                     bool                      `json:"valid"` // Valid is true if UsersCalendarShiftDefault is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUsersCalendarShiftDefault) Scan(value interface{}) error {
+	if value == nil {
+		ns.UsersCalendarShiftDefault, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UsersCalendarShiftDefault.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUsersCalendarShiftDefault) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UsersCalendarShiftDefault), nil
+}
+
+type UsersSnapToWorkingDay string
+
+const (
+	UsersSnapToWorkingDayOff  UsersSnapToWorkingDay = "off"
+	UsersSnapToWorkingDayWarn UsersSnapToWorkingDay = "warn"
+	UsersSnapToWorkingDayAuto UsersSnapToWorkingDay = "auto"
+)
+
+func (e *UsersSnapToWorkingDay) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UsersSnapToWorkingDay(s)
+	case string:
+		*e = UsersSnapToWorkingDay(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UsersSnapToWorkingDay: %T", src)
+	}
+	return nil
+}
+
+type NullUsersSnapToWorkingDay struct {
+	UsersSnapToWorkingDay UsersSnapToWorkingDay `json:"usersSnapToWorkingDay"`
+	Valid                 bool                  `json:"valid"` // Valid is true if UsersSnapToWorkingDay is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUsersSnapToWorkingDay) Scan(value interface{}) error {
+	if value == nil {
+		ns.UsersSnapToWorkingDay, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UsersSnapToWorkingDay.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUsersSnapToWorkingDay) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UsersSnapToWorkingDay), nil
+}
+
+type UsersThemePreference string
+
+const (
+	UsersThemePreferenceAuroraLight  UsersThemePreference = "aurora-light"
+	UsersThemePreferenceAuroraDark   UsersThemePreference = "aurora-dark"
+	UsersThemePreferenceDotlineLight UsersThemePreference = "dotline-light"
+	UsersThemePreferenceDotlineDark  UsersThemePreference = "dotline-dark"
+	UsersThemePreferenceGlassLight   UsersThemePreference = "glass-light"
+	UsersThemePreferenceGlassDark    UsersThemePreference = "glass-dark"
+	UsersThemePreferenceSystem       UsersThemePreference = "system"
+)
+
+func (e *UsersThemePreference) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UsersThemePreference(s)
+	case string:
+		*e = UsersThemePreference(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UsersThemePreference: %T", src)
+	}
+	return nil
+}
+
+type NullUsersThemePreference struct {
+	UsersThemePreference UsersThemePreference `json:"usersThemePreference"`
+	Valid                bool                 `json:"valid"` // Valid is true if UsersThemePreference is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUsersThemePreference) Scan(value interface{}) error {
+	if value == nil {
+		ns.UsersThemePreference, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UsersThemePreference.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUsersThemePreference) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UsersThemePreference), nil
+}
+
+type UsersWeekStart string
+
+const (
+	UsersWeekStartMon UsersWeekStart = "mon"
+	UsersWeekStartSun UsersWeekStart = "sun"
+	UsersWeekStartSat UsersWeekStart = "sat"
+)
+
+func (e *UsersWeekStart) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UsersWeekStart(s)
+	case string:
+		*e = UsersWeekStart(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UsersWeekStart: %T", src)
+	}
+	return nil
+}
+
+type NullUsersWeekStart struct {
+	UsersWeekStart UsersWeekStart `json:"usersWeekStart"`
+	Valid          bool           `json:"valid"` // Valid is true if UsersWeekStart is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUsersWeekStart) Scan(value interface{}) error {
+	if value == nil {
+		ns.UsersWeekStart, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UsersWeekStart.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUsersWeekStart) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UsersWeekStart), nil
+}
+
+type WorkspaceInvitesRole string
+
+const (
+	WorkspaceInvitesRoleOwner  WorkspaceInvitesRole = "owner"
+	WorkspaceInvitesRoleAdmin  WorkspaceInvitesRole = "admin"
+	WorkspaceInvitesRoleMember WorkspaceInvitesRole = "member"
+	WorkspaceInvitesRoleGuest  WorkspaceInvitesRole = "guest"
+)
+
+func (e *WorkspaceInvitesRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WorkspaceInvitesRole(s)
+	case string:
+		*e = WorkspaceInvitesRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WorkspaceInvitesRole: %T", src)
+	}
+	return nil
+}
+
+type NullWorkspaceInvitesRole struct {
+	WorkspaceInvitesRole WorkspaceInvitesRole `json:"workspaceInvitesRole"`
+	Valid                bool                 `json:"valid"` // Valid is true if WorkspaceInvitesRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWorkspaceInvitesRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.WorkspaceInvitesRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WorkspaceInvitesRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWorkspaceInvitesRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WorkspaceInvitesRole), nil
+}
+
+type WorkspaceMembersRole string
+
+const (
+	WorkspaceMembersRoleOwner  WorkspaceMembersRole = "owner"
+	WorkspaceMembersRoleAdmin  WorkspaceMembersRole = "admin"
+	WorkspaceMembersRoleMember WorkspaceMembersRole = "member"
+	WorkspaceMembersRoleGuest  WorkspaceMembersRole = "guest"
+)
+
+func (e *WorkspaceMembersRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WorkspaceMembersRole(s)
+	case string:
+		*e = WorkspaceMembersRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WorkspaceMembersRole: %T", src)
+	}
+	return nil
+}
+
+type NullWorkspaceMembersRole struct {
+	WorkspaceMembersRole WorkspaceMembersRole `json:"workspaceMembersRole"`
+	Valid                bool                 `json:"valid"` // Valid is true if WorkspaceMembersRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWorkspaceMembersRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.WorkspaceMembersRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WorkspaceMembersRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWorkspaceMembersRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WorkspaceMembersRole), nil
+}
+
+// Shared calendar photo album
 type AlbumPhoto struct {
-	ID          uint32        `json:"id"`
-	PublicID    []byte        `json:"publicId"`
-	CalendarID  uint32        `json:"calendarId"`
-	UploadedBy  uint32        `json:"uploadedBy"`
-	EventID     sql.NullInt32 `json:"eventId"`
-	Caption     string        `json:"caption"`
-	ContentType string        `json:"contentType"`
-	ByteSize    int64         `json:"byteSize"`
-	Width       sql.NullInt32 `json:"width"`
-	Height      sql.NullInt32 `json:"height"`
-	StorageKey  string        `json:"storageKey"`
-	// soft delete flag
-	Enabled bool `json:"enabled"`
-	// EXIF or upload time
-	TakenAt   time.Time `json:"takenAt"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type AuditLog struct {
-	ID         uint64 `json:"id"`
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
 	CalendarID uint32 `json:"calendarId"`
-	// event | memo | member | invite | album_photo
-	EntityType string `json:"entityType"`
-	// internal id of the target row (may no longer exist)
-	EntityID uint32 `json:"entityId"`
-	// public id of the target, stable across deletion
-	EntityPublicID []byte `json:"entityPublicId"`
-	// create | update | delete
-	Action string `json:"action"`
-	// user who performed the action
-	ActorID sql.NullInt32 `json:"actorId"`
-	// snapshot of the target title at action time
-	Summary   string    `json:"summary"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type AvatarUpload struct {
-	ID          uint32    `json:"id"`
-	PublicID    []byte    `json:"publicId"`
-	UserID      uint32    `json:"userId"`
-	StorageKey  string    `json:"storageKey"`
-	ContentType string    `json:"contentType"`
-	ByteSize    int64     `json:"byteSize"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-type Calendar struct {
-	ID        uint32    `json:"id"`
-	PublicID  []byte    `json:"publicId"`
-	Name      string    `json:"name"`
-	Color     string    `json:"color"`
-	CoverUrl  string    `json:"coverUrl"`
-	CreatedBy uint32    `json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-type CalendarInvite struct {
-	ID         uint32 `json:"id"`
-	CalendarID uint32 `json:"calendarId"`
-	// unique invite token
-	Token string              `json:"token"`
-	Role  CalendarInvitesRole `json:"role"`
-	// null = unlimited
-	MaxUses  sql.NullInt32 `json:"maxUses"`
-	UseCount uint32        `json:"useCount"`
-	// public read-only embed link; cannot be joined
-	IsPublic  bool         `json:"isPublic"`
-	ExpiresAt sql.NullTime `json:"expiresAt"`
-	CreatedBy uint32       `json:"createdBy"`
-	CreatedAt time.Time    `json:"createdAt"`
-}
-
-type CalendarMember struct {
-	ID         uint32              `json:"id"`
-	CalendarID uint32              `json:"calendarId"`
-	UserID     uint32              `json:"userId"`
-	Role       CalendarMembersRole `json:"role"`
-	// member color within this calendar
-	Color    string    `json:"color"`
-	JoinedAt time.Time `json:"joinedAt"`
-}
-
-type Event struct {
-	ID         uint32    `json:"id"`
-	PublicID   []byte    `json:"publicId"`
-	CalendarID uint32    `json:"calendarId"`
-	Title      string    `json:"title"`
-	AllDay     bool      `json:"allDay"`
-	StartAt    time.Time `json:"startAt"`
-	EndAt      time.Time `json:"endAt"`
-	// IANA timezone name (e.g. Asia/Tokyo)
-	Timezone string `json:"timezone"`
-	Color    string `json:"color"`
-	Location string `json:"location"`
-	Memo     string `json:"memo"`
-	// optional URL or meeting link
-	Url       string `json:"url"`
-	CreatedBy uint32 `json:"createdBy"`
-	// member responsible for this event
-	AssignedTo sql.NullInt32 `json:"assignedTo"`
-	// minutes before event to notify; NULL = none
-	NotificationOffset sql.NullInt32 `json:"notificationOffset"`
-	// recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}
-	RecurrenceRule *json.RawMessage `json:"recurrenceRule"`
-	// effective end date for recurrence expansion queries
-	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
-	// set on exception rows: the master recurring event this occurrence overrides
-	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
-	// original occurrence start (UTC) this exception replaces
-	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
-	// tombstone: this single occurrence was deleted from the series
-	RecurrenceCancelled bool      `json:"recurrenceCancelled"`
-	CreatedAt           time.Time `json:"createdAt"`
-	UpdatedAt           time.Time `json:"updatedAt"`
-}
-
-type EventAttachment struct {
-	ID          uint32 `json:"id"`
-	PublicID    []byte `json:"publicId"`
-	EventID     uint32 `json:"eventId"`
-	UploadedBy  uint32 `json:"uploadedBy"`
-	Filename    string `json:"filename"`
+	// Internal FK to calendar_events.id when the photo was attached to a specific event
+	CalendarEventID sql.NullInt32 `json:"calendarEventId"`
+	// Internal FK to users.id
+	UploadedByUserID uint32 `json:"uploadedByUserId"`
+	// Free-form caption
+	Caption string `json:"caption"`
+	// MIME type as uploaded
 	ContentType string `json:"contentType"`
-	ByteSize    int64  `json:"byteSize"`
-	// MinIO object key
+	// Size in bytes
+	ByteSize uint64 `json:"byteSize"`
+	// Pixel width when known
+	Width sql.NullInt32 `json:"width"`
+	// Pixel height when known
+	Height sql.NullInt32 `json:"height"`
+	// Object key in the blob store
 	StorageKey string `json:"storageKey"`
-	// soft delete flag
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type EventChecklistItem struct {
-	ID        uint32    `json:"id"`
-	PublicID  []byte    `json:"publicId"`
-	EventID   uint32    `json:"eventId"`
-	Title     string    `json:"title"`
-	Done      bool      `json:"done"`
-	SortOrder int32     `json:"sortOrder"`
-	CreatedBy uint32    `json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-type EventComment struct {
-	ID        uint32    `json:"id"`
-	PublicID  []byte    `json:"publicId"`
-	EventID   uint32    `json:"eventId"`
-	UserID    uint32    `json:"userId"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-type EventParticipant struct {
-	ID        uint32    `json:"id"`
-	EventID   uint32    `json:"eventId"`
-	UserID    uint32    `json:"userId"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type Memo struct {
-	ID         uint32    `json:"id"`
-	PublicID   []byte    `json:"publicId"`
-	CalendarID uint32    `json:"calendarId"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	Done       bool      `json:"done"`
-	SortOrder  int32     `json:"sortOrder"`
-	CreatedBy  uint32    `json:"createdBy"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
-}
-
-type OauthAccount struct {
-	ID       uint32                `json:"id"`
-	UserID   uint32                `json:"userId"`
-	Provider OauthAccountsProvider `json:"provider"`
-	// sub claim or LINE userId
-	ProviderSubject string    `json:"providerSubject"`
-	Email           string    `json:"email"`
-	CreatedAt       time.Time `json:"createdAt"`
-}
-
-type OauthAllowedEmail struct {
-	ID        uint32        `json:"id"`
-	Email     string        `json:"email"`
-	Note      string        `json:"note"`
-	CreatedBy sql.NullInt32 `json:"createdBy"`
-	CreatedAt time.Time     `json:"createdAt"`
-}
-
-type OauthProviderConfig struct {
-	Provider        string        `json:"provider"`
-	ClientID        string        `json:"clientId"`
-	ClientSecretEnc []byte        `json:"clientSecretEnc"`
-	Enabled         bool          `json:"enabled"`
-	UpdatedAt       time.Time     `json:"updatedAt"`
-	UpdatedBy       sql.NullInt32 `json:"updatedBy"`
-}
-
-type OauthState struct {
-	ID        uint32              `json:"id"`
-	StateHash string              `json:"stateHash"`
-	Provider  OauthStatesProvider `json:"provider"`
-	Redirect  string              `json:"redirect"`
-	// PKCE code_verifier bound to this auth request
-	CodeVerifier string `json:"codeVerifier"`
-	// OIDC nonce, verified against the returned id_token
-	Nonce     string    `json:"nonce"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type PasswordReset struct {
-	ID        uint32       `json:"id"`
-	UserID    uint32       `json:"userId"`
-	TokenHash string       `json:"tokenHash"`
-	ExpiresAt time.Time    `json:"expiresAt"`
-	UsedAt    sql.NullTime `json:"usedAt"`
+	// EXIF capture time, falling back to upload time; the album orders by this rather than by upload order
+	TakenAt time.Time `json:"takenAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Soft-delete flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Workspace audit log
+type AuditLog struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Actor user.id (null for system)
+	ActorUserID sql.NullInt32 `json:"actorUserId"`
+	// Action identifier (e.g., ai_provider.create)
+	Action string `json:"action"`
+	// Target resource type
+	ResourceType string `json:"resourceType"`
+	// Target resource public_id when available
+	ResourcePublicID sql.NullString `json:"resourcePublicId"`
+	// Packed IPv4/IPv6 address
+	IpAddress sql.NullString `json:"ipAddress"`
+	// Client user agent
+	UserAgent sql.NullString `json:"userAgent"`
+	// Redacted metadata (no secrets, no raw keys)
+	MetadataJson json.RawMessage `json:"metadataJson"`
+	// Logical occurrence time (millisecond precision; ties broken by id)
+	OccurredAt time.Time `json:"occurredAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// In-flight avatar upload reservations
+type AvatarUpload struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Object key the presigned URL was issued for
+	StorageKey string `json:"storageKey"`
+	// Declared MIME type
+	ContentType string `json:"contentType"`
+	// Declared size in bytes
+	ByteSize uint64 `json:"byteSize"`
+	// After this the reservation is abandoned and the object may be swept
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar containers. Access is calendar_members; kind is the source of the contents, not the audience. owner_user_id NULL means the calendar outlives any single member.
+type Calendar struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Where the contents come from: personal (written by people through the API) or system (populated from a provider feed identified by system_slug, and read-only to users). Not an audience: see the table comment.
+	Kind CalendarsKind `json:"kind"`
+	// Display name
+	Name string `json:"name"`
+	// Optional description
+	Description sql.NullString `json:"description"`
+	// Default hex color
+	Color string `json:"color"`
+	// Cover image URL
+	CoverURL sql.NullString `json:"coverUrl"`
+	// The user this calendar belongs to, or NULL when it belongs to no one in particular: a system feed, or a calendar shared by a group that outlives any single member. NULL is not cosmetic — the FK cascades, so naming an owner means deleting that user deletes the calendar and every event in it. A group calendar must leave this NULL or one departure takes everyone else's history with it.
+	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+	// For system calendars: provider identifier (e.g., holidays.jp)
+	SystemSlug sql.NullString `json:"systemSlug"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar events with kind/visibility/show_as classification; nullable start/end for planning-stage placeholders; task_role links to task projection. Soft-delete is signalled solely by enabled=FALSE (no deleted_at column); consumer views must propagate enabled=TRUE on every JOIN to honour soft-delete.
+type CalendarEvent struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// event=regular, block=declarative time frame (work hours, focus), free=available slot, milestone=umbrella/milestone, has no duration semantics
+	Kind CalendarEventsKind `json:"kind"`
+	// Who can see event details: default (calendar setting), public (all), private (time only), confidential (owner only)
+	Visibility CalendarEventsVisibility `json:"visibility"`
+	// Availability display: busy, free, tentative, out-of-office. The iCalendar TRANSP axis — whether the time reads as taken — and nothing more.
+	ShowAs CalendarEventsShowAs `json:"showAs"`
+	// Whether the commitment can be moved, independent of whether the time reads as busy. Combined with show_as to derive a displayed availability mark.
+	Flexibility CalendarEventsFlexibility `json:"flexibility"`
+	// Event title
+	Title string `json:"title"`
+	// All-day event flag
+	AllDay bool `json:"allDay"`
+	// Start time (UTC or with timezone context); NULL = undated (planning-stage placeholder)
+	StartAt sql.NullTime `json:"startAt"`
+	// End time; NULL = undated (planning-stage placeholder)
+	EndAt sql.NullTime `json:"endAt"`
+	// IANA timezone identifier; resolved from event > user > workspace > UTC
+	Timezone string `json:"timezone"`
+	// Location text
+	Location sql.NullString `json:"location"`
+	// Free-form notes (markdown)
+	Memo sql.NullString `json:"memo"`
+	// Meeting link or related URL
+	URL sql.NullString `json:"url"`
+	// Event owner (whose color/layer). Only owner, managers, or can_edit attendees may edit
+	OwnerUserID uint32 `json:"ownerUserId"`
+	// Actual creator (may differ from owner for manager delegation)
+	CreatedByUserID uint32 `json:"createdByUserId"`
+	// Label for block-kind events (e.g., Working, Focus Time, Out of Office)
+	BlockLabel sql.NullString `json:"blockLabel"`
+	// Recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}
+	RecurrenceRule *json.RawMessage `json:"recurrenceRule"`
+	// Computed end date for recurrence expansion queries
+	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
+	// Array of ISO 8601 occurrence starts to skip when expanding this rule. Cancelling one occurrence is an entry here, never a row.
+	RecurrenceExceptions *json.RawMessage `json:"recurrenceExceptions"`
+	// Set on an override row: the recurring event whose single occurrence this row replaces. NULL on ordinary and master rows.
+	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
+	// Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.
+	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
+	// Minutes before event to send notification; NULL = no notification
+	NotificationOffset sql.NullInt32 `json:"notificationOffset"`
+	// Timestamp when notification was sent; NULL = not yet notified
+	NotifiedAt sql.NullTime `json:"notifiedAt"`
+	// Linked task (optional, for task-calendar sync)
+	TaskID sql.NullInt32 `json:"taskId"`
+	// When task_id IS NOT NULL: which task field this event represents. due=task.due_on, scheduled=time-blocked (multi-link allowed).
+	TaskRole NullCalendarEventsTaskRole `json:"taskRole"`
+	// De-NULLed surrogate for task_role; empty string when task_role IS NULL. Exists solely to power uniq_calendar_events_task_role_key over (task_id, task_role_key).
+	TaskRoleKey string `json:"taskRoleKey"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Structured per-event markers (non_working_day, auto_snapped, etc.); unknown keys preserved.
+	Flags *json.RawMessage `json:"flags"`
+	// Soft-delete flag; FALSE excludes the row from LIST/GET. The single soft-delete signal for this table — propagate via INNER/LEFT JOIN ... AND ce.enabled = TRUE in every consumer view, so a soft-deleted row cannot reappear through a join.
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar event file attachments
+type CalendarEventAttachment struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_events.id; nullable so audit-trail attachments survive event hard-delete (FK SET NULL)
+	EventID sql.NullInt32 `json:"eventId"`
+	// Internal FK to users.id (uploader)
+	UploaderID uint32 `json:"uploaderId"`
+	// FK to storage_objects.id; holds the actual blob metadata (sha256, byte_size, content_type, storage_key)
+	StorageObjectID uint32 `json:"storageObjectId"`
+	// Original filename as supplied by the uploader; widened to 512 to safely hold multibyte paths
+	Filename string `json:"filename"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag (soft delete)
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar event attendees with RSVP and edit permission
+type CalendarEventAttendee struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_events.id; nullable so audit-trail attendee rows survive event hard-delete (FK SET NULL); active rows for live events are NOT NULL via app constraint
+	EventID sql.NullInt32 `json:"eventId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// De-NULLed surrogate for event_id; 0 when event_id IS NULL. Exists solely to power uniq_calendar_event_attendees_event_user over (event_id_key, user_id). VIRTUAL (not STORED) so the FK ON DELETE SET NULL on event_id can be created — STORED + NOT NULL would fail the FK precondition check at table creation time.
+	EventIDKey uint32 `json:"eventIdKey"`
+	// Attendance response
+	Rsvp CalendarEventAttendeesRsvp `json:"rsvp"`
+	// Whether this attendee can edit the event (granted by owner)
+	CanEdit bool `json:"canEdit"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar event checklist items
+type CalendarEventChecklistItem struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_events.id
+	EventID uint32 `json:"eventId"`
+	// Internal FK to users.id
+	CreatedByUserID uint32 `json:"createdByUserId"`
+	// Checklist item text
+	Title string `json:"title"`
+	// Completion flag
+	Done bool `json:"done"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar event discussion comments
+type CalendarEventComment struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_events.id; nullable so audit-trail comments survive event hard-delete (FK SET NULL)
+	EventID sql.NullInt32 `json:"eventId"`
+	// Internal FK to users.id
+	AuthorID uint32 `json:"authorId"`
+	// Comment text (markdown)
+	Body string `json:"body"`
+	// Last edit time (null = never edited)
+	EditedAt sql.NullTime `json:"editedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled bool `json:"enabled"`
+	// Soft-delete timestamp; rows with deleted_at IS NOT NULL are excluded from LIST/GET
+	DeletedAt sql.NullTime `json:"deletedAt"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Magic-link invite rows for calendar event attendees
+type CalendarEventInvite struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// Internal FK to calendar_events.id; nullable so revoked invites survive event hard-delete (FK SET NULL)
+	EventID sql.NullInt32 `json:"eventId"`
+	// Internal FK to calendar_event_attendees.id; nullable to mirror parent attendee being detached on event hard-delete
+	AttendeeID sql.NullInt32 `json:"attendeeId"`
+	// Recipient email, denormalized from attendee for inbox queries
+	Email string `json:"email"`
+	// SHA-256 digest of the plaintext magic-link token
+	TokenHash []byte `json:"tokenHash"`
+	// Magic-link expiry
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Set when the recipient clicks the link
+	AcceptedAt sql.NullTime `json:"acceptedAt"`
+	// Set when the invite email is dispatched
+	SentAt sql.NullTime `json:"sentAt"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag; disabled rows are revoked invites
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Join-by-link calendar invitations
+type CalendarInvite struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// Internal FK to users.id
+	CreatedByUserID uint32 `json:"createdByUserId"`
+	// SHA-256 hex of the invite token. The plaintext is shown once at creation and never stored, so a database read cannot yield a working link.
+	TokenHash string `json:"tokenHash"`
+	// Role granted on acceptance. Matches calendar_members.role, and defaults to the least privilege so a link created without naming one cannot hand out more than reading.
+	Role CalendarInvitesRole `json:"role"`
+	// Acceptance limit; NULL = unlimited
+	MaxUses sql.NullInt32 `json:"maxUses"`
+	// Acceptances so far
+	UseCount uint32 `json:"useCount"`
+	// TRUE publishes the calendar read-only: the link can be viewed but not joined, and role is ignored. FALSE grants membership at role on acceptance.
+	IsPublic bool `json:"isPublic"`
+	// Expiry; NULL = does not expire
+	ExpiresAt sql.NullTime `json:"expiresAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Revocation flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Per-calendar access grants: which users may use a calendar and at what role. The ACL axis, unlike calendar_subscriptions, which holds private display preferences and grants nothing.
+type CalendarMember struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// What this member may do with the calendar. Defaults to the least privilege so a writer that omits it cannot accidentally grant access.
+	Role CalendarMembersRole `json:"role"`
+	// Shared colour identifying this member on the calendar; agreed rather than per-viewer, unlike calendar_subscriptions.display_color
+	MemberColor string `json:"memberColor"`
+	// Internal FK to users.id; who granted this membership. NULL for the owner row created with the calendar.
+	InvitedByUserID sql.NullInt32 `json:"invitedByUserId"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Soft-delete flag; FALSE means the membership was revoked. Every access check must filter on enabled = TRUE.
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Calendar-level shared memos / to-do items
+type CalendarMemo struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// Internal FK to users.id
+	CreatedByUserID uint32 `json:"createdByUserId"`
+	// Memo text
+	Title string `json:"title"`
+	// User-authored multi-line memo body, distinct from admin notes
+	Body sql.NullString `json:"body"`
+	// Completion flag
+	Done bool `json:"done"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Workspace-owned publishable read-only share pages
+type CalendarPublicShare struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Audit trail; ownership is workspace-level so shares survive creator removal
+	CreatedByUserID sql.NullInt32 `json:"createdByUserId"`
+	// SHA-256 hex of URL token; plaintext returned once at create/rotate
+	TokenHash string `json:"tokenHash"`
+	// Public-facing page title
+	Title string `json:"title"`
+	// Public-facing description (markdown)
+	Description sql.NullString `json:"description"`
+	// Public-facing icon image URL
+	IconURL sql.NullString `json:"iconUrl"`
+	// Public-facing cover image URL
+	CoverURL sql.NullString `json:"coverUrl"`
+	// Display tz for the public page; defaults to workspace tz at create
+	Timezone string `json:"timezone"`
+	// ISO 3166-1 alpha-2; NULL = no holiday overlay
+	ShowHolidaysCountry sql.NullString `json:"showHolidaysCountry"`
+	// NULL = never expires
+	ExpiresAt sql.NullTime `json:"expiresAt"`
+	// Display order within workspace admin UI
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag (soft-disable)
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// M:N: which events appear on which public share pages
+type CalendarPublicShareEvent struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id; denormalized from share for tenant isolation
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_public_shares.id
+	ShareID uint32 `json:"shareId"`
+	// Internal FK to calendar_events.id
+	EventID uint32 `json:"eventId"`
+	// Override display order on the share page
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag (soft-disable)
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Per-user display preferences for a calendar (color, visibility). Not an ACL axis — event-level visibility is the only ws-internal ACL.
+type CalendarSubscription struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendars.id
+	CalendarID uint32 `json:"calendarId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Per-subscriber private display color
+	DisplayColor string `json:"displayColor"`
+	// Whether this calendar layer is shown in UI
+	Visible bool `json:"visible"`
+	// Display order in sidebar
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Append-only event log
+type Event struct {
+	// Internal PK, never exposed; BIGINT UNSIGNED for unbounded append-only growth
+	ID uint64 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to tasks.id when the event targets a task
+	TaskID sql.NullInt32 `json:"taskId"`
+	// Internal FK to calendars.id when the event targets a calendar or something inside one. The symmetric counterpart of task_id, and the reason a per-calendar activity feed can read the log directly instead of keeping a second history table that would drift from it.
+	CalendarID sql.NullInt32 `json:"calendarId"`
+	// Internal FK to signals.id; set when this event was emitted by the Applier in response to a judged signal. Provides full traceability from external input to task event. Belongs to a product layer: NULL in a deployment without one.
+	TriggeredBySignalID sql.NullInt32 `json:"triggeredBySignalId"`
+	// Acting user.id (null for system/bot actions). Mutually exclusive with actor_agent_id and actor_system_source: exactly one of the three actor sources is set per row (both NULL is also legal for legacy "system actor"). The mutual-exclusion rule is enforced by query design and handler validation, not a CHECK constraint, because all three FK referential actions use ON DELETE SET NULL and MySQL 8.4 forbids CHECK constraints referencing columns used in FK referential actions. Every INSERT must therefore bind exactly one of the three, chosen by who is acting: a person, an agent, or a background process.
+	ActorUserID sql.NullInt32 `json:"actorUserId"`
+	// Acting ai_agents.id when the event was produced by an AI agent (judge / task agent). See actor_user_id comment for the three-way exclusion rule.
+	ActorAgentID sql.NullInt32 `json:"actorAgentId"`
+	// Third actor source, for events emitted by a background process rather than a person or an agent. Free-form and namespaced by the writer, e.g. `worker:scheduler` or `worker:retention`. Not an FK because such a process has no row in the database. See actor_user_id comment for the three-way exclusion rule.
+	ActorSystemSource sql.NullString `json:"actorSystemSource"`
+	// Internal FK to events.id. Non-NULL means this event is a compensating reverse of another event (e.g., user undoing an auto-completion). A projection reading the log cancels both events out. The log is immutable: a reversal is a new row, never an UPDATE or DELETE of the original.
+	ReversesEventID sql.NullInt64 `json:"reversesEventId"`
+	// Event type (e.g., task.created, signal.attached, signal.judged)
+	Type string `json:"type"`
+	// Event payload
+	PayloadJSON json.RawMessage `json:"payloadJson"`
+	// Logical time of the event (millisecond precision; ties broken by id)
+	OccurredAt time.Time `json:"occurredAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// User authentication identities
+type Identity struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Identity provider kind
+	Provider IdentitiesProvider `json:"provider"`
+	// Provider subject / external ID (ASCII)
+	Subject string `json:"subject"`
+	// Argon2id encoded hash, only for provider=local
+	PasswordHash sql.NullString `json:"passwordHash"`
+	// Encrypted TOTP secret (AES-256-GCM)
+	MfaSecretCiphertext sql.NullString `json:"mfaSecretCiphertext"`
+	// When the TOTP enrollment was confirmed by submitting a valid code
+	MfaConfirmedAt sql.NullTime `json:"mfaConfirmedAt"`
+	// Last accepted TOTP time-step (unix/period). RFC 6238 5.2 one-time-use: a code whose step is <= this value is rejected as a replay
+	MfaLastStep sql.NullInt64 `json:"mfaLastStep"`
+	// Consecutive failed login attempts
+	FailedAttempts uint32 `json:"failedAttempts"`
+	// Lockout expiry timestamp
+	LockedUntilAt sql.NullTime `json:"lockedUntilAt"`
+	// Last successful authentication time
+	LastUsedAt sql.NullTime `json:"lastUsedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Instance-wide admin grants
+type InstanceAdmin struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Internal FK to users.id (granter, null for bootstrap)
+	GrantedByUserID sql.NullInt32 `json:"grantedByUserId"`
+	// Time the grant was created
+	GrantedAt time.Time `json:"grantedAt"`
+	// Explicit revocation time
+	RevokedAt sql.NullTime `json:"revokedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Instance-wide audit log
+type InstanceAuditLog struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Actor user.id (null for system)
+	ActorUserID sql.NullInt32 `json:"actorUserId"`
+	// Action identifier (e.g., instance_admin.grant)
+	Action string `json:"action"`
+	// Affected workspace.id when applicable
+	TargetWorkspaceID sql.NullInt32 `json:"targetWorkspaceId"`
+	// Target resource type
+	TargetResourceType sql.NullString `json:"targetResourceType"`
+	// Target resource public_id when available
+	TargetResourcePublicID sql.NullString `json:"targetResourcePublicId"`
+	// Packed IPv4/IPv6 address
+	IpAddress sql.NullString `json:"ipAddress"`
+	// Client user agent
+	UserAgent sql.NullString `json:"userAgent"`
+	// Redacted payload (no secrets)
+	PayloadJSON json.RawMessage `json:"payloadJson"`
+	// Logical occurrence time (millisecond precision; ties broken by id)
+	OccurredAt time.Time `json:"occurredAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Instance-level dynamic settings
+type InstanceSetting struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Setting identifier
+	SettingKey string `json:"settingKey"`
+	// Current value as text
+	SettingValue string `json:"settingValue"`
+	// Last modifier user.id
+	UpdatedByUserID sql.NullInt32 `json:"updatedByUserId"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Passwordless magic-link tokens
+type MagicLinkToken struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// SHA-256 hex of the token
+	TokenHash string `json:"tokenHash"`
+	// Token expiry time
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Time the token was consumed
+	UsedAt sql.NullTime `json:"usedAt"`
+	// Packed IPv4/IPv6 address at creation
+	IpAddress sql.NullString `json:"ipAddress"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Per-address exceptions to the OAuth domain restriction
+type OauthAllowedEmail struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Allowed address, ASCII only to match users.email
+	Email string `json:"email"`
+	// Why this address is excepted; the list is unreadable a year later without it
+	Reason string `json:"reason"`
+	// Operator who added it
+	CreatedByUserID sql.NullInt32 `json:"createdByUserId"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag; FALSE withdraws the exception without losing the record of it
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Per-provider OAuth client configuration
+type OauthProviderConfig struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Provider this configuration is for. Overlaps identities.provider but is not a subset of it: a provider can be configured before anyone has signed in with it, and local has no configuration.
+	Provider OauthProviderConfigsProvider `json:"provider"`
+	// OAuth client identifier
+	ClientID string `json:"clientId"`
+	// Encrypted client secret (AES-256-GCM). Never returned by the API.
+	ClientSecretCiphertext []byte `json:"clientSecretCiphertext"`
+	// Last operator to change it
+	UpdatedByUserID sql.NullInt32 `json:"updatedByUserId"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Whether this provider is offered at sign-in
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Short-lived OAuth CSRF state tokens for personal integrations
+type OauthState struct {
+	// Random 32-byte token, hex-encoded
+	State string `json:"state"`
+	// Internal FK to users.id — the user who started the connect flow
+	UserID uint32 `json:"userId"`
+	// Which provider this state belongs to. 'discord' is required for the personal Discord presence-binding flow (Phase 8 presence-discord gateway).
+	Provider OauthStatesProvider `json:"provider"`
+	// Optional client-supplied return URL to send the user to after the callback completes
+	RedirectTo sql.NullString `json:"redirectTo"`
+	// Hard expiry; callback handler rejects rows past this timestamp
+	ExpiresAt time.Time    `json:"expiresAt"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Single-use password reset tokens
+type PasswordReset struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// SHA-256 hex of the token; the plaintext is emailed once and never stored
+	TokenHash string `json:"tokenHash"`
+	// Expiry
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Redemption time; a non-NULL value makes the token spent
+	UsedAt sql.NullTime `json:"usedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// User personal access tokens for REST/CLI
+type PersonalAccessToken struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to users.id (token owner)
+	UserID uint32 `json:"userId"`
+	// Human-readable label
+	Name string `json:"name"`
+	// SHA-256 hex of the bearer token
+	TokenHash string `json:"tokenHash"`
+	// Leading chars shown as hint
+	TokenPrefix string `json:"tokenPrefix"`
+	// Array of granted API scopes
+	ScopesJson json.RawMessage `json:"scopesJson"`
+	// Expiry time (null = never)
+	ExpiresAt sql.NullTime `json:"expiresAt"`
+	// Last successful use
+	LastUsedAt sql.NullTime `json:"lastUsedAt"`
+	// Explicit revocation time
+	RevokedAt sql.NullTime `json:"revokedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Refresh-token backed sessions
+type Session struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// SHA-256 hex of refresh token
+	RefreshHash string `json:"refreshHash"`
+	// Client user agent at issue time
+	UserAgent sql.NullString `json:"userAgent"`
+	// Packed IPv4/IPv6 address at issue time
+	IpAddress sql.NullString `json:"ipAddress"`
+	// Refresh token expiry
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Explicit revocation time
+	RevokedAt sql.NullTime `json:"revokedAt"`
+	// Last refresh time
+	LastUsedAt sql.NullTime `json:"lastUsedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// In-flight OAuth sign-in state
+type SigninState struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// SHA-256 hex of the state parameter. Hashed like every other bearer value here, so a database read cannot be replayed against the provider.
+	StateHash string `json:"stateHash"`
+	// Provider the round trip is with
+	Provider SigninStatesProvider `json:"provider"`
+	// Where to send the browser after a successful sign-in. Validated against an allow-list before use: an unchecked value here is an open redirect.
+	RedirectTo sql.NullString `json:"redirectTo"`
+	// PKCE verifier, exchanged for the code
+	CodeVerifier string `json:"codeVerifier"`
+	// OIDC nonce, checked against the id_token claim to bind the token to this request
+	Nonce string `json:"nonce"`
+	// After this the round trip is abandoned
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Content-addressed object storage references; rows shared across attachments via storage_object_id with ref_count GC.
+type StorageObject struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id; non-null for workspace-scoped blobs (task/calendar attachments). Mutually exclusive with owner_user_id.
+	WorkspaceID sql.NullInt32 `json:"workspaceId"`
+	// Internal FK to users.id; non-null for user-scoped blobs (avatar). Mutually exclusive with workspace_id.
+	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+	// SHA-256 of the raw blob; basis for content addressing and dedup within a scope
+	Sha256 []byte `json:"sha256"`
+	// Size in bytes of the underlying blob
+	ByteSize uint64 `json:"byteSize"`
+	// MIME type recorded at upload time
+	ContentType string `json:"contentType"`
+	// Computed object key in MinIO (e.g. workspace/{wsPublicId}/{sha256_hex} or user/{userPublicId}/{sha256_hex})
+	StorageKey string `json:"storageKey"`
+	// Number of referencing rows (attachments / users.avatar_storage_object_id); GC eligible when 0
+	RefCount uint32 `json:"refCount"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Global user accounts
 type User struct {
-	ID                uint32         `json:"id"`
-	PublicID          []byte         `json:"publicId"`
-	Name              string         `json:"name"`
-	Email             string         `json:"email"`
-	Icon              string         `json:"icon"`
-	Color             string         `json:"color"`
-	AvatarStorageKey  sql.NullString `json:"avatarStorageKey"`
-	AvatarContentType sql.NullString `json:"avatarContentType"`
-	PasswordHash      string         `json:"passwordHash"`
-	TokenVersion      uint32         `json:"tokenVersion"`
-	PasswordChangedAt sql.NullTime   `json:"passwordChangedAt"`
-	IsAdmin           bool           `json:"isAdmin"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UpdatedAt         time.Time      `json:"updatedAt"`
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Primary email, ASCII only
+	Email string `json:"email"`
+	// Email verification timestamp
+	EmailVerifiedAt sql.NullTime `json:"emailVerifiedAt"`
+	// Human-readable name
+	DisplayName string `json:"displayName"`
+	// Avatar image URL; used when the avatar is hosted externally (e.g. OIDC provider)
+	AvatarURL sql.NullString `json:"avatarUrl"`
+	// FK to storage_objects.id when the user uploaded their own avatar; NULL when avatar_url (external) is used or no avatar is set
+	AvatarStorageObjectID sql.NullInt32 `json:"avatarStorageObjectId"`
+	// Preferred locale tag (BCP 47)
+	Locale string `json:"locale"`
+	// Preferred IANA timezone (independent of locale)
+	Timezone string `json:"timezone"`
+	// ISO 3166-1 alpha-2 country (independent of locale); drives default holiday subscription
+	Country sql.NullString `json:"country"`
+	// Preferred first day of the week for calendar grids
+	WeekStart UsersWeekStart `json:"weekStart"`
+	// User override of workspace working_days; NULL = inherit
+	WorkingDays sql.NullString `json:"workingDays"`
+	// User override of workspace working_hours_start; NULL = inherit
+	WorkingHoursStart sql.NullTime `json:"workingHoursStart"`
+	// User override of workspace working_hours_end; NULL = inherit
+	WorkingHoursEnd sql.NullTime `json:"workingHoursEnd"`
+	// What happens when a task/event lands on a non-working day: off=accept silently, warn=save with badge, auto=itemkit snaps forward to next working day
+	SnapToWorkingDay UsersSnapToWorkingDay `json:"snapToWorkingDay"`
+	// If true, subscribed system (holiday) calendar events count as non-working days
+	TreatHolidaysAsNonWorking bool `json:"treatHolidaysAsNonWorking"`
+	// UI theme preference
+	ThemePreference UsersThemePreference `json:"themePreference"`
+	// Default behaviour when an event linked to safe tasks is shifted: ask=prompt the user every time (current behaviour), sync_always=also shift every linked safe task by the same delta, task_only_always=shift only the event and leave linked tasks alone
+	CalendarShiftDefault UsersCalendarShiftDefault `json:"calendarShiftDefault"`
+	// Last successful login
+	LastLoginAt sql.NullTime `json:"lastLoginAt"`
+	// Weekly digest email
+	NotifEmailDigestEnabled bool `json:"notifEmailDigestEnabled"`
+	// Email when mentioned in comments
+	NotifEmailMentionEnabled bool `json:"notifEmailMentionEnabled"`
+	// Email when assigned to a task
+	NotifEmailAssignmentEnabled bool `json:"notifEmailAssignmentEnabled"`
+	// Email when owned task is due within 24h
+	NotifEmailDueSoonEnabled bool `json:"notifEmailDueSoonEnabled"`
+	// Browser push notifications
+	NotifWebPushEnabled bool `json:"notifWebPushEnabled"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// TOTP recovery codes
+type UserRecoveryCode struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// SHA-256 of the normalized recovery code
+	CodeHash []byte `json:"codeHash"`
+	// Set when the code is consumed at login
+	UsedAt    sql.NullTime `json:"usedAt"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Tenant boundary
+type Workspace struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// DNS-label slug (RFC 1035)
+	Slug string `json:"slug"`
+	// Display name
+	Name string `json:"name"`
+	// Optional description
+	Description sql.NullString `json:"description"`
+	// Icon image URL
+	IconURL sql.NullString `json:"iconUrl"`
+	// Default IANA timezone for the workspace; user tz overrides per-user
+	Timezone string `json:"timezone"`
+	// ISO 3166-1 alpha-2 country; drives default holiday subscription
+	Country sql.NullString `json:"country"`
+	// Per-day flag string Mon..Sun; letter = working, underscore = off. Default MTWTF__ = Mon-Fri.
+	WorkingDays string `json:"workingDays"`
+	// Start of workspace working day (local tz)
+	WorkingHoursStart time.Time `json:"workingHoursStart"`
+	// End of workspace working day (local tz)
+	WorkingHoursEnd time.Time `json:"workingHoursEnd"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Token-based workspace invite links
+type WorkspaceInvite struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to users.id who created the invite
+	CreatedByUserID sql.NullInt32 `json:"createdByUserId"`
+	// SHA-256 hex of invite token plaintext
+	TokenHash string `json:"tokenHash"`
+	// Role granted on accept
+	Role WorkspaceInvitesRole `json:"role"`
+	// NULL = unlimited
+	MaxUses sql.NullInt32 `json:"maxUses"`
+	// Number of times this invite has been used
+	UseCount uint32 `json:"useCount"`
+	// NULL = never expires
+	ExpiresAt sql.NullTime `json:"expiresAt"`
+	// Optional human label for the invite link
+	Label sql.NullString `json:"label"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// Workspace membership
+type WorkspaceMember struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Workspace-level role
+	Role WorkspaceMembersRole `json:"role"`
+	// Inviter user.id
+	InvitedByUserID sql.NullInt32 `json:"invitedByUserId"`
+	// Invitation time
+	InvitedAt sql.NullTime `json:"invitedAt"`
+	// Acceptance time
+	JoinedAt sql.NullTime `json:"joinedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
 }
