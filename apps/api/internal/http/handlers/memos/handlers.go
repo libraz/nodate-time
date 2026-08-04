@@ -7,15 +7,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
 type Deps struct {
-	Queries *generated.Queries
+	DB          *sql.DB
+	Queries     *generated.Queries
+	WorkspaceID uint32
 }
 
 func pubIDToHex(b []byte) string {
@@ -30,41 +33,81 @@ func parseUUID(s string) ([]byte, error) {
 	return u[:], nil
 }
 
-func resolveCalendar(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Read(ctx, q, calPubID, userID)
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
+	}
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
+}
+
+func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	return calresolve.Read(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
-func resolveCalendarWrite(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Write(ctx, q, calPubID, userID)
+func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
+	return calresolve.Write(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
-func resolveCalendarMember(ctx context.Context, q *generated.Queries, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	return calresolve.Member(ctx, q, calPubID, userID)
+func nullStringValue(n sql.NullString) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.String
 }
 
-func mapMemo(m generated.Memo) MemoResponse {
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
+func nullTimeValue(n sql.NullTime) time.Time {
+	if !n.Valid {
+		return time.Time{}
+	}
+	return n.Time
+}
+
+func mapMemo(m generated.CalendarMemo) MemoResponse {
 	return MemoResponse{
 		ID:        pubIDToHex(m.PublicID),
 		Title:     m.Title,
-		Body:      m.Body,
+		Body:      nullStringValue(m.Body),
 		Done:      m.Done,
-		SortOrder: m.SortOrder,
+		SortOrder: m.SortWeight,
 		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		UpdatedAt: nullTimeValue(m.UpdatedAt),
 	}
+}
+
+// loadMemo resolves a memo public id inside the calendar the caller has
+// already proved access to, so an id from another calendar cannot be
+// reached by guessing.
+func loadMemo(ctx context.Context, deps Deps, calID uint32, memoID string) (generated.CalendarMemo, error) {
+	memoPub, err := parseUUID(memoID)
+	if err != nil {
+		return generated.CalendarMemo{}, apierrors.MemoNotFound
+	}
+	memo, err := deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+		PublicID:   memoPub,
+		CalendarID: calID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return generated.CalendarMemo{}, apierrors.MemoNotFound
+		}
+		return generated.CalendarMemo{}, apierrors.InternalUnexpected
+	}
+	return memo, nil
 }
 
 func ListMemos(deps Deps) func(context.Context, *ListMemosInput) (*ListMemosOutput, error) {
 	return func(ctx context.Context, in *ListMemosInput) (*ListMemosOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		rows, err := deps.Queries.ListMemosByCalendar(ctx, cal.ID)
@@ -83,90 +126,100 @@ func ListMemos(deps Deps) func(context.Context, *ListMemosInput) (*ListMemosOutp
 func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoOutput, error) {
 	return func(ctx context.Context, in *CreateMemoInput) (*CreateMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
+			return nil, toAPIError(err)
+		}
+
+		pubID, err := uuid.NewV7()
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		pubID, _ := uuid.NewV7()
-		result, err := deps.Queries.CreateMemo(ctx, generated.CreateMemoParams{
-			PublicID:   pubID[:],
-			CalendarID: cal.ID,
-			Title:      in.Body.Title,
-			Body:       in.Body.Body,
-			SortOrder:  in.Body.SortOrder,
-			CreatedBy:  userID,
+		var created generated.CalendarMemo
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.CreateMemo(ctx, generated.CreateMemoParams{
+				PublicID:        pubID[:],
+				WorkspaceID:     deps.WorkspaceID,
+				CalendarID:      cal.ID,
+				CreatedByUserID: userID,
+				Title:           in.Body.Title,
+				Body:            nullString(in.Body.Body),
+				SortWeight:      in.Body.SortOrder,
+			}); err != nil {
+				return err
+			}
+			var err error
+			// Read the stored row back so the response carries the database's
+			// own timestamps rather than the server's clock.
+			created, err = q.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+				PublicID:   pubID[:],
+				CalendarID: cal.ID,
+			})
+			if err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeMemoCreated,
+				Summary:     in.Body.Title,
+				Subject:     pubID[:],
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		memoID64, _ := result.LastInsertId()
-		audit.Record(ctx, deps.Queries, cal.ID, uint32(memoID64), pubID[:], audit.EntityMemo, audit.ActionCreate, userID, in.Body.Title)
-
-		out := &CreateMemoOutput{}
-		out.Body = MemoResponse{
-			ID:        pubID.String(),
-			Title:     in.Body.Title,
-			Body:      in.Body.Body,
-			SortOrder: in.Body.SortOrder,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		return out, nil
+		return &CreateMemoOutput{Body: mapMemo(created)}, nil
 	}
 }
 
 func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoOutput, error) {
 	return func(ctx context.Context, in *UpdateMemoInput) (*UpdateMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
+			return nil, toAPIError(err)
+		}
+
+		memo, err := loadMemo(ctx, deps, cal.ID, in.MemoID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+
+		var updated generated.CalendarMemo
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdateMemo(ctx, generated.UpdateMemoParams{
+				Title:      in.Body.Title,
+				Body:       nullString(in.Body.Body),
+				Done:       in.Body.Done,
+				SortWeight: in.Body.SortOrder,
+				ID:         memo.ID,
+			}); err != nil {
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		memoPub, err := parseUUID(in.MemoID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.MemoNotFound)
-		}
-
-		memo, err := deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
-			PublicID:   memoPub,
-			CalendarID: cal.ID,
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.MemoNotFound)
+			var err error
+			updated, err = q.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+				PublicID:   memo.PublicID,
+				CalendarID: cal.ID,
+			})
+			if err != nil {
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		err = deps.Queries.UpdateMemo(ctx, generated.UpdateMemoParams{
-			Title:     in.Body.Title,
-			Body:      in.Body.Body,
-			Done:      in.Body.Done,
-			SortOrder: in.Body.SortOrder,
-			ID:        memo.ID,
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeMemoUpdated,
+				Summary:     in.Body.Title,
+				Subject:     memo.PublicID,
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		updated, err := deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
-			PublicID:   memoPub,
-			CalendarID: cal.ID,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		audit.Record(ctx, deps.Queries, cal.ID, memo.ID, memo.PublicID, audit.EntityMemo, audit.ActionUpdate, userID, in.Body.Title)
 
 		return &UpdateMemoOutput{Body: mapMemo(updated)}, nil
 	}
@@ -175,36 +228,32 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoOutput, error) {
 	return func(ctx context.Context, in *DeleteMemoInput) (*DeleteMemoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps.Queries, in.CalendarID, userID)
+		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
+			return nil, toAPIError(err)
+		}
+
+		memo, err := loadMemo(ctx, deps, cal.ID, in.MemoID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.SoftDeleteMemo(ctx, memo.ID); err != nil {
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		memoPub, err := parseUUID(in.MemoID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.MemoNotFound)
-		}
-
-		memo, err := deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
-			PublicID:   memoPub,
-			CalendarID: cal.ID,
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeMemoDeleted,
+				Summary:     memo.Title,
+				Subject:     memo.PublicID,
+			})
 		})
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.MemoNotFound)
-			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		err = deps.Queries.DeleteMemo(ctx, memo.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		audit.Record(ctx, deps.Queries, cal.ID, memo.ID, memo.PublicID, audit.EntityMemo, audit.ActionDelete, userID, memo.Title)
 
 		return &DeleteMemoOutput{}, nil
 	}

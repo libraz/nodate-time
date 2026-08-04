@@ -9,28 +9,12 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
-func resolveEvent(ctx context.Context, deps Deps, calID uint32, eventID string) (generated.Event, error) {
-	eid := eventID
-	if parentUUID, _ := parseCompositeID(eid); parentUUID != "" {
-		eid = parentUUID
-	}
-	evtPub, err := parseUUID(eid)
-	if err != nil {
-		return generated.Event{}, apierrors.EventNotFound
-	}
-	evt, err := deps.Queries.GetEventByPublicID(ctx, evtPub)
-	if err != nil || evt.CalendarID != calID {
-		return generated.Event{}, apierrors.EventNotFound
-	}
-	return evt, nil
-}
-
-func mapChecklistItem(item generated.EventChecklistItem) ChecklistItemResponse {
+func mapChecklistItem(item generated.CalendarEventChecklistItem) ChecklistItemResponse {
 	return ChecklistItemResponse{
 		ID:        pubIDToHex(item.PublicID),
 		Title:     item.Title,
 		Done:      item.Done,
-		SortOrder: int(item.SortOrder),
+		SortOrder: int(item.SortWeight),
 		CreatedAt: item.CreatedAt,
 	}
 }
@@ -41,18 +25,12 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		rows, err := deps.Queries.ListChecklistItems(ctx, evt.ID)
@@ -74,28 +52,26 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		pubID, _ := uuid.NewV7()
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		_, err = deps.Queries.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
-			PublicID:  pubID[:],
-			EventID:   evt.ID,
-			Title:     in.Body.Title,
-			Done:      false,
-			SortOrder: int32(in.Body.SortOrder),
-			CreatedBy: userID,
+			PublicID:        pubID[:],
+			WorkspaceID:     deps.WorkspaceID,
+			EventID:         evt.ID,
+			Title:           in.Body.Title,
+			Done:            false,
+			SortWeight:      int32(in.Body.SortOrder),
+			CreatedByUserID: userID,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -118,18 +94,12 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		itemPub, err := parseUUID(in.ItemID)
@@ -146,15 +116,15 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 
 		// sortOrder is unchanged when omitted so title/done edits cannot
 		// silently reorder the item to position zero.
-		sortOrder := item.SortOrder
+		sortOrder := item.SortWeight
 		if in.Body.SortOrder != nil {
 			sortOrder = int32(*in.Body.SortOrder)
 		}
 		err = deps.Queries.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
-			Title:     in.Body.Title,
-			Done:      in.Body.Done,
-			SortOrder: sortOrder,
-			ID:        item.ID,
+			Title:      in.Body.Title,
+			Done:       in.Body.Done,
+			SortWeight: sortOrder,
+			ID:         item.ID,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -177,18 +147,12 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		evt, err := resolveEvent(ctx, deps, cal.ID, in.EventID)
+		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		itemPub, err := parseUUID(in.ItemID)
@@ -203,7 +167,7 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
 		}
 
-		err = deps.Queries.DeleteChecklistItem(ctx, item.ID)
+		err = deps.Queries.SoftDeleteChecklistItem(ctx, item.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

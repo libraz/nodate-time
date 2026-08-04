@@ -6,19 +6,30 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// AccessTokenTTL is deliberately shorter than the session it belongs to.
+// The session row is the revocation point; this only bounds how long a
+// token stays usable between checks.
+const AccessTokenTTL = 24 * time.Hour
+
+// Claims names the session the token was issued for, not a version counter
+// on the user. Revocation is per-session, so signing one device out leaves
+// the others alone -- a counter can only invalidate every token a user
+// holds at once, which turns "log out this browser" into "log out
+// everywhere".
 type Claims struct {
-	UserID       uint32 `json:"uid"`
-	TokenVersion uint32 `json:"tv"`
+	UserID    uint32 `json:"uid"`
+	SessionID uint32 `json:"sid"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID, tokenVersion uint32, secret string) (string, error) {
+func GenerateToken(userID, sessionID uint32, secret string) (string, error) {
+	now := time.Now()
 	claims := Claims{
-		UserID:       userID,
-		TokenVersion: tokenVersion,
+		UserID:    userID,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(now.Add(AccessTokenTTL)),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

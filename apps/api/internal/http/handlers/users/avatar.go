@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
@@ -32,8 +34,23 @@ func isAcceptedImageContentType(ct string) bool {
 	return false
 }
 
-func avatarStorageKey(userPubHex, avatarPubHex string) string {
-	return fmt.Sprintf("%s/%s/%s", avatarStoragePath, userPubHex, avatarPubHex)
+// avatarStorageKey is built from the user and the digest of the bytes, so
+// the same picture uploaded twice lands on one object rather than two.
+func avatarStorageKey(userPubHex, sha256Hex string) string {
+	return fmt.Sprintf("%s/%s/%s", avatarStoragePath, userPubHex, sha256Hex)
+}
+
+// parseSHA256 accepts the digest the client computed over the bytes it is
+// about to upload; storage_objects is keyed on it.
+func parseSHA256(s string) ([]byte, bool) {
+	if len(s) != 64 {
+		return nil, false
+	}
+	raw, err := hex.DecodeString(strings.ToLower(s))
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
 }
 
 // PresignAvatar issues a presigned PUT URL for uploading the current user's avatar.
@@ -60,10 +77,18 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		avatarPubID, _ := uuid.NewV7()
+		digest, ok := parseSHA256(in.Body.SHA256)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+
+		avatarPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		userPubHex := pubIDToHex(user.PublicID)
 		avatarPubHex := avatarPubID.String()
-		key := avatarStorageKey(userPubHex, avatarPubHex)
+		key := avatarStorageKey(userPubHex, hex.EncodeToString(digest))
 		expiresAt := time.Now().Add(avatarUploadTTL)
 
 		activeUploads, err := deps.Queries.CountActiveAvatarUploads(ctx, userID)
@@ -100,9 +125,10 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 		if _, err := q.CreateAvatarUpload(ctx, generated.CreateAvatarUploadParams{
 			PublicID:    avatarPubID[:],
 			UserID:      userID,
+			Sha256:      digest,
 			StorageKey:  key,
 			ContentType: strings.ToLower(in.Body.ContentType),
-			ByteSize:    in.Body.ByteSize,
+			ByteSize:    uint64(in.Body.ByteSize),
 			ExpiresAt:   expiresAt,
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -155,7 +181,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
 		}
 		actualContentType := strings.ToLower(strings.TrimSpace(info.ContentType))
-		if info.Size != upload.ByteSize || info.Size > maxAvatarSize || actualContentType != upload.ContentType {
+		if uint64(info.Size) != upload.ByteSize || info.Size > maxAvatarSize || actualContentType != upload.ContentType {
 			if err := deps.Storage.DeleteObject(ctx, upload.StorageKey); err != nil {
 				slog.WarnContext(ctx, "failed to delete invalid avatar upload", "key", upload.StorageKey, "error", err)
 				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
@@ -187,30 +213,50 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		oldKey := ""
-		if user.AvatarStorageKey.Valid {
-			oldKey = user.AvatarStorageKey.String
-		}
-
-		err = q.UpdateUserAvatar(ctx, generated.UpdateUserAvatarParams{
-			AvatarStorageKey:  sql.NullString{String: upload.StorageKey, Valid: true},
-			AvatarContentType: sql.NullString{String: upload.ContentType, Valid: true},
-			ID:                userID,
-		})
+		// The picture is a storage_objects row scoped to this user, and the
+		// user row points at it. Releasing the previous reference here rather
+		// than deleting its blob is what makes the two-avatars-same-bytes
+		// case safe: the object survives while anything still refers to it.
+		objectPubID, err := uuid.NewV7()
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if _, err := q.CreateStorageObject(ctx, generated.CreateStorageObjectParams{
+			PublicID:    objectPubID[:],
+			OwnerUserID: sql.NullInt32{Int32: int32(userID), Valid: true},
+			Sha256:      upload.Sha256,
+			ByteSize:    upload.ByteSize,
+			ContentType: upload.ContentType,
+			StorageKey:  upload.StorageKey,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		object, err := q.GetStorageObjectByKey(ctx, upload.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		previousObjectID := user.AvatarStorageObjectID
+
+		if err := q.SetUserAvatarObject(ctx, generated.SetUserAvatarObjectParams{
+			AvatarStorageObjectID: sql.NullInt32{Int32: int32(object.ID), Valid: true},
+			ID:                    userID,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if err := q.IncrementStorageObjectRefs(ctx, object.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if previousObjectID.Valid && uint32(previousObjectID.Int32) != object.ID {
+			if err := q.DecrementStorageObjectRefs(ctx, uint32(previousObjectID.Int32)); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 		}
 		if err := q.DeleteAvatarUpload(ctx, upload.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if oldKey != "" && oldKey != upload.StorageKey {
-			if err := deps.Storage.DeleteObject(ctx, oldKey); err != nil {
-				slog.WarnContext(ctx, "failed to delete previous avatar", "key", oldKey, "error", err)
-			}
 		}
 
 		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
@@ -235,12 +281,19 @@ func DeleteAvatar(deps Deps) func(context.Context, *DeleteAvatarInput) (*DeleteA
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		if user.AvatarStorageKey.Valid && user.AvatarStorageKey.String != "" {
-			if deps.Storage != nil {
-				if err := deps.Storage.DeleteObject(ctx, user.AvatarStorageKey.String); err != nil {
-					slog.WarnContext(ctx, "failed to delete avatar object", "key", user.AvatarStorageKey.String, "error", err)
+		// Clearing the avatar releases the reference; the blob itself is left
+		// to the sweep, because the same picture may still be somebody's.
+		if user.AvatarStorageObjectID.Valid {
+			objectID := uint32(user.AvatarStorageObjectID.Int32)
+			if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+				if err := q.ClearUserAvatar(ctx, userID); err != nil {
+					return err
 				}
+				return q.DecrementStorageObjectRefs(ctx, objectID)
+			}); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
+		} else if user.AvatarURL.Valid {
 			if err := deps.Queries.ClearUserAvatar(ctx, userID); err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}

@@ -14,12 +14,12 @@ type CalendarResponse struct {
 }
 
 type MemberResponse struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Icon  string `json:"icon"`
-	Role  string `json:"role"`
-	Color string `json:"color"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+	Avatar string `json:"avatar,omitempty"`
+	Role   string `json:"role"`
+	Color  string `json:"color"`
 }
 
 type LabelResponse struct {
@@ -88,7 +88,7 @@ type UpdateMemberRoleInput struct {
 	CalendarID string `path:"calendarId"`
 	UserID     string `path:"userId"`
 	Body       struct {
-		Role string `json:"role" enum:"admin,member,viewer"`
+		Role string `json:"role" enum:"owner,manager,editor,viewer"`
 	}
 }
 type UpdateMemberRoleOutput struct {

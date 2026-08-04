@@ -4,24 +4,28 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"log/slog"
+	"errors"
 	"strconv"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
 type Deps struct {
-	DB      *sql.DB
-	Queries *generated.Queries
-	Storage *storage.Client
+	DB          *sql.DB
+	Queries     *generated.Queries
+	Storage     *storage.Client
+	WorkspaceID uint32
 }
+
+// defaultCalendarColor is applied when a client sends no colour.
+const defaultCalendarColor = "#4CAF50"
 
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
@@ -36,37 +40,68 @@ func parseUUID(s string) ([]byte, error) {
 	return b, nil
 }
 
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
+	}
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
+}
+
+func nullStringValue(n sql.NullString) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.String
+}
+
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
 func mapCalendar(c generated.Calendar) CalendarResponse {
 	return CalendarResponse{
 		ID:        pubIDToHex(c.PublicID),
 		Name:      c.Name,
 		Color:     c.Color,
-		CoverURL:  c.CoverUrl,
+		CoverURL:  nullStringValue(c.CoverURL),
 		CreatedAt: c.CreatedAt,
 	}
 }
 
 // resolveCalendar converts public UUID to internal calendar row + verifies membership.
 func resolveCalendar(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Read(ctx, deps.Queries, calendarPubID, userID)
+	return calresolve.Read(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
+}
+
+// resolveCalendarManage resolves the calendar and admits only roles that may
+// change its settings or membership. It replaces the older pattern of
+// resolving for read and then checking the role separately -- two steps that
+// could drift apart, which is exactly how an authorization check goes
+// missing.
+func resolveCalendarManage(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
+	return calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Write(ctx, deps.Queries, calendarPubID, userID)
+	return calresolve.Write(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
 }
 
 // resolveCalendarMember resolves the calendar row and the requesting user's
 // membership, returning both for callers that need the member's role.
 func resolveCalendarMember(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	return calresolve.Member(ctx, deps.Queries, calendarPubID, userID)
+	return calresolve.Member(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
 }
 
 func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListCalendarsOutput, error) {
 	return func(ctx context.Context, _ *ListCalendarsInput) (*ListCalendarsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		rows, err := deps.Queries.ListCalendarsByUser(ctx, userID)
+		rows, err := deps.Queries.ListCalendarsByUser(ctx, generated.ListCalendarsByUserParams{
+			UserID:      userID,
+			WorkspaceID: deps.WorkspaceID,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -80,7 +115,13 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 
 		out := &ListCalendarsOutput{Body: make([]CalendarResponse, 0, len(rows))}
 		for _, c := range rows {
-			resp := mapCalendar(c)
+			resp := CalendarResponse{
+				ID:        pubIDToHex(c.PublicID),
+				Name:      c.Name,
+				Color:     c.Color,
+				CoverURL:  nullStringValue(c.CoverURL),
+				CreatedAt: c.CreatedAt,
+			}
 			resp.PublicShared = publicSet[c.ID]
 			out.Body = append(out.Body, resp)
 		}
@@ -93,10 +134,7 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		resp := mapCalendar(cal)
 		if cnt, err := deps.Queries.CountActivePublicInvites(ctx, cal.ID); err == nil {
@@ -109,74 +147,82 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*CreateCalendarOutput, error) {
 	return func(ctx context.Context, in *CreateCalendarInput) (*CreateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		pubID, _ := uuid.NewV7()
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		memberPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
 		color := in.Body.Color
 		if color == "" {
-			color = "#4CAF50"
+			color = defaultCalendarColor
 		}
 
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		qtx := deps.Queries.WithTx(tx)
+		var created generated.Calendar
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// owner_user_id is deliberately left NULL. The column cascades on
+			// delete, so naming an owner would mean removing that one person
+			// deletes the calendar and every event in it -- which is the
+			// opposite of what a calendar a group shares is for. Who may
+			// administer it is a calendar_members role, not this column.
+			result, err := q.CreateCalendar(ctx, generated.CreateCalendarParams{
+				PublicID:    pubID[:],
+				WorkspaceID: deps.WorkspaceID,
+				Name:        in.Body.Name,
+				Color:       color,
+			})
+			if err != nil {
+				return err
+			}
+			calID64, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			calID := uint32(calID64)
 
-		result, err := qtx.CreateCalendar(ctx, generated.CreateCalendarParams{
-			PublicID:  pubID[:],
-			Name:      in.Body.Name,
-			Color:     color,
-			CreatedBy: userID,
+			// The creator becomes the owning member, which is what actually
+			// grants them administration.
+			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
+				PublicID:    memberPubID[:],
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  calID,
+				UserID:      userID,
+				Role:        generated.CalendarMembersRoleOwner,
+				MemberColor: color,
+			}); err != nil {
+				return err
+			}
+
+			created, err = q.GetCalendarByID(ctx, calID)
+			if err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  calID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeCalendarSetUp,
+				Summary:     in.Body.Name,
+				Subject:     pubID[:],
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		calID, _ := result.LastInsertId()
 
-		// Auto-add creator as admin
-		_, err = qtx.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
-			CalendarID: uint32(calID),
-			UserID:     userID,
-			Role:       "admin",
-			Color:      color,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		out := &CreateCalendarOutput{}
-		out.Body = CalendarResponse{
-			ID:        pubID.String(),
-			Name:      in.Body.Name,
-			Color:     color,
-			CreatedAt: time.Now(),
-		}
-		return out, nil
+		return &CreateCalendarOutput{Body: mapCalendar(created)}, nil
 	}
 }
 
 func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 	return func(ctx context.Context, in *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Check admin role
-		member, _ := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-			CalendarID: cal.ID,
-			UserID:     userID,
-		})
-		if member.Role != "admin" {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+			return nil, toAPIError(err)
 		}
 
 		// All fields are optional: when omitted, keep the current values so a
@@ -189,21 +235,39 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		if in.Body.Color != nil {
 			color = *in.Body.Color
 		}
-		coverURL := cal.CoverUrl
+		coverURL := cal.CoverURL
 		if in.Body.CoverURL != nil {
-			coverURL = *in.Body.CoverURL
+			coverURL = nullString(*in.Body.CoverURL)
 		}
-		err = deps.Queries.UpdateCalendar(ctx, generated.UpdateCalendarParams{
-			Name:     name,
-			Color:    color,
-			CoverUrl: coverURL,
-			ID:       cal.ID,
+
+		var updated generated.Calendar
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdateCalendar(ctx, generated.UpdateCalendarParams{
+				Name:     name,
+				Color:    color,
+				CoverURL: coverURL,
+				ID:       cal.ID,
+			}); err != nil {
+				return err
+			}
+			var err error
+			updated, err = q.GetCalendarByID(ctx, cal.ID)
+			if err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeCalendarEdited,
+				Summary:     name,
+				Subject:     cal.PublicID,
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		updated, _ := deps.Queries.GetCalendarByPublicID(ctx, cal.PublicID)
 		return &UpdateCalendarOutput{Body: mapCalendar(updated)}, nil
 	}
 }
@@ -211,96 +275,72 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*DeleteCalendarOutput, error) {
 	return func(ctx context.Context, in *DeleteCalendarInput) (*DeleteCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
+			return nil, toAPIError(err)
+		}
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Release the blobs this calendar's attachments were holding.
+			// The objects are content-addressed and may be shared, so they
+			// are not deleted here -- dropping the reference is what lets the
+			// sweep collect the ones nothing else points at.
+			objectIDs, err := q.ListAttachmentObjectIDsByCalendar(ctx, cal.ID)
+			if err != nil {
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Check admin role
-		member, _ := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-			CalendarID: cal.ID,
-			UserID:     userID,
+			for _, objectID := range objectIDs {
+				if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
+					return err
+				}
+			}
+			if err := q.SoftDeleteCalendar(ctx, cal.ID); err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypeCalendarGone,
+				Summary:     cal.Name,
+				Subject:     cal.PublicID,
+			})
 		})
-		if member.Role != "admin" {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
-
-		attachmentKeys, err := deps.Queries.ListAttachmentStorageKeysByCalendar(ctx, cal.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		photoKeys, err := deps.Queries.ListAlbumPhotoStorageKeysByCalendar(ctx, cal.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		err = deps.Queries.DeleteCalendar(ctx, cal.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		deleteStorageObjects(ctx, deps.Storage, attachmentKeys)
-		deleteStorageObjects(ctx, deps.Storage, photoKeys)
 		return &DeleteCalendarOutput{}, nil
-	}
-}
-
-// deleteStorageObjects removes cascaded storage objects on a best-effort basis:
-// the owning rows are already gone by the time it runs, so a failure or a crash
-// mid-loop leaves the objects orphaned with no record to reconcile against.
-// Individual failures are logged rather than propagated so one bad key cannot
-// block the rest of the cleanup.
-func deleteStorageObjects(ctx context.Context, storageClient *storage.Client, keys []string) {
-	if storageClient == nil {
-		return
-	}
-	for _, key := range keys {
-		if key == "" {
-			continue
-		}
-		if err := storageClient.DeleteObject(ctx, key); err != nil {
-			slog.WarnContext(ctx, "failed to delete cascaded storage object", "key", key, "error", err)
-		}
 	}
 }
 
 func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembersOutput, error) {
 	return func(ctx context.Context, in *ListMembersInput) (*ListMembersOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, caller, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		rows, err := deps.Queries.ListCalendarMembers(ctx, cal.ID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		caller, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-			CalendarID: cal.ID,
-			UserID:     userID,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
 
 		out := &ListMembersOutput{Body: make([]MemberResponse, 0, len(rows))}
 		for _, m := range rows {
+			// An address is shown to whoever administers the calendar and to
+			// its owner; to everyone else a member is a name and a colour.
 			email := ""
-			if caller.Role == generated.CalendarMembersRoleAdmin || m.UserID == userID {
+			if calresolve.CanManage(caller.Role) || m.UserID == userID {
 				email = m.UserEmail
 			}
 			out.Body = append(out.Body, MemberResponse{
-				ID:    pubIDToHex(m.UserPublicID),
-				Name:  m.UserName,
-				Email: email,
-				Icon:  m.UserIcon,
-				Role:  string(m.Role),
-				Color: m.Color,
+				ID:     pubIDToHex(m.UserPublicID),
+				Name:   m.UserDisplayName,
+				Email:  email,
+				Avatar: nullStringValue(m.UserAvatarURL),
+				Role:   string(m.Role),
+				Color:  m.MemberColor,
 			})
 		}
 		return out, nil
@@ -310,16 +350,9 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 	return func(ctx context.Context, in *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, actorID)
+		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		actor, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: actorID})
-		if err != nil || actor.Role != "admin" {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+			return nil, toAPIError(err)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -330,8 +363,8 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
-		// Admins manage other members' roles, not their own. Changing your own role
-		// must go through another admin.
+		// Managers change other members' roles, not their own. Changing your
+		// own must go through somebody else.
 		if target.ID == actorID {
 			return nil, apierrors.ToHuma(apierrors.MemberSelfModify)
 		}
@@ -340,45 +373,48 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
 
-		// Lock the admin count and apply the role change atomically so concurrent
-		// demotions cannot drop the calendar below one admin.
-		tx, err := deps.DB.BeginTx(ctx, nil)
+		newRole := generated.CalendarMembersRole(in.Body.Role)
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Lock the owner count and apply the role change atomically so
+			// concurrent demotions cannot leave the calendar with nobody who
+			// can administer it.
+			if current.Role == generated.CalendarMembersRoleOwner && newRole != generated.CalendarMembersRoleOwner {
+				ownerCount, err := q.CountCalendarOwnersForUpdate(ctx, cal.ID)
+				if err != nil {
+					return err
+				}
+				if ownerCount <= 1 {
+					return apierrors.MemberLastAdmin
+				}
+			}
+			if err := q.UpdateCalendarMemberRole(ctx, generated.UpdateCalendarMemberRoleParams{
+				Role:       newRole,
+				CalendarID: cal.ID,
+				UserID:     target.ID,
+			}); err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: actorID,
+				Type:        eventlog.TypeMemberRoleSet,
+				Summary:     target.DisplayName + " -> " + in.Body.Role,
+				Subject:     target.PublicID,
+			})
+		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
-		defer tx.Rollback()
-		qtx := deps.Queries.WithTx(tx)
-
-		if current.Role == "admin" && in.Body.Role != "admin" {
-			adminCount, err := qtx.CountCalendarAdminsForUpdate(ctx, cal.ID)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			if adminCount <= 1 {
-				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
-			}
-		}
-
-		if err := qtx.UpdateCalendarMemberRole(ctx, generated.UpdateCalendarMemberRoleParams{
-			Role:       generated.CalendarMembersRole(in.Body.Role),
-			CalendarID: cal.ID,
-			UserID:     target.ID,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		audit.Record(ctx, deps.Queries, cal.ID, current.ID, target.PublicID, audit.EntityMember, audit.ActionRoleChange, actorID, target.Name+" -> "+in.Body.Role)
 
 		return &UpdateMemberRoleOutput{Body: MemberResponse{
-			ID:    pubIDToHex(target.PublicID),
-			Name:  target.Name,
-			Email: target.Email,
-			Icon:  target.Icon,
-			Role:  in.Body.Role,
-			Color: current.Color,
+			ID:     pubIDToHex(target.PublicID),
+			Name:   target.DisplayName,
+			Email:  target.Email,
+			Avatar: nullStringValue(target.AvatarURL),
+			Role:   in.Body.Role,
+			Color:  current.MemberColor,
 		}}, nil
 	}
 }
@@ -388,10 +424,7 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		actor, err := deps.Queries.GetUserByID(ctx, actorID)
@@ -406,7 +439,7 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		// Compare parsed UUID bytes so a self-leave is recognized regardless of the
 		// hex casing the client used in the path.
 		isSelfLeave := bytes.Equal(targetPub, actor.PublicID)
-		if !isSelfLeave && actorMember.Role != generated.CalendarMembersRoleAdmin {
+		if !isSelfLeave && !calresolve.CanManage(actorMember.Role) {
 			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
@@ -422,40 +455,44 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
 
-		// Lock the admin count and remove the member atomically so concurrent
-		// removals cannot drop the calendar below one admin.
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		qtx := deps.Queries.WithTx(tx)
-
-		if current.Role == "admin" {
-			adminCount, err := qtx.CountCalendarAdminsForUpdate(ctx, cal.ID)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			if adminCount <= 1 {
-				return nil, apierrors.ToHuma(apierrors.MemberLastAdmin)
-			}
-		}
-
-		if err := qtx.RemoveCalendarMember(ctx, generated.RemoveCalendarMemberParams{
-			CalendarID: cal.ID,
-			UserID:     target.ID,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		action := audit.ActionDelete
+		// Leaving and being removed are different events, not one event with
+		// a flag: a feed that cannot tell them apart reads the same either
+		// way, and only one of the two is something the member chose.
+		eventType := eventlog.TypeMemberRemoved
 		if isSelfLeave {
-			action = audit.ActionLeave
+			eventType = eventlog.TypeMemberLeft
 		}
-		audit.Record(ctx, deps.Queries, cal.ID, current.ID, target.PublicID, audit.EntityMember, action, actorID, target.Name)
+
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Lock the owner count and revoke atomically so concurrent
+			// removals cannot leave the calendar without an owner.
+			if current.Role == generated.CalendarMembersRoleOwner {
+				ownerCount, err := q.CountCalendarOwnersForUpdate(ctx, cal.ID)
+				if err != nil {
+					return err
+				}
+				if ownerCount <= 1 {
+					return apierrors.MemberLastAdmin
+				}
+			}
+			if err := q.RevokeCalendarMember(ctx, generated.RevokeCalendarMemberParams{
+				CalendarID: cal.ID,
+				UserID:     target.ID,
+			}); err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: actorID,
+				Type:        eventType,
+				Summary:     target.DisplayName,
+				Subject:     target.PublicID,
+			})
+		})
+		if err != nil {
+			return nil, toAPIError(err)
+		}
 		return &RemoveMemberOutput{}, nil
 	}
 }
@@ -475,10 +512,7 @@ func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsO
 	return func(ctx context.Context, in *ListLabelsInput) (*ListLabelsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		return &ListLabelsOutput{Body: labels}, nil
 	}

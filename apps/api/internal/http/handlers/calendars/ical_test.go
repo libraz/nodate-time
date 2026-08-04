@@ -1,6 +1,7 @@
 package calendars
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ func TestBuildICSAllDayUsesEventTimezone(t *testing.T) {
 	// Midnight 2025-06-24 in Asia/Tokyo == 2025-06-23T15:00:00Z.
 	startUTC := time.Date(2025, 6, 23, 15, 0, 0, 0, time.UTC)
 	endUTC := startUTC.AddDate(0, 0, 1)
-	ev := generated.Event{
+	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Concert",
 		AllDay:   true,
@@ -35,7 +36,7 @@ func TestBuildICSAllDayUsesEventTimezone(t *testing.T) {
 func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
 	startUTC := time.Date(2025, 6, 23, 15, 0, 0, 0, time.UTC) // 2025-06-24 JST
 	endUTC := startUTC.AddDate(0, 0, 1)                       // exclusive: 2025-06-25 JST midnight
-	ev := generated.Event{
+	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Concert",
 		AllDay:   true,
@@ -57,7 +58,7 @@ func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
 // so no TZID reference is emitted without an accompanying VTIMEZONE component.
 func TestBuildICSTimedEmitsUTC(t *testing.T) {
 	start := time.Date(2025, 6, 24, 1, 0, 0, 0, time.UTC) // 10:00 JST
-	ev := generated.Event{
+	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Meeting",
 		Timezone: "Asia/Tokyo",
@@ -73,11 +74,11 @@ func TestBuildICSTimedEmitsUTC(t *testing.T) {
 
 // TestBuildICSEscaping verifies TEXT vs URI escaping rules.
 func TestBuildICSEscaping(t *testing.T) {
-	ev := generated.Event{
+	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "A, B; C",
-		Memo:     "line1\r\nline2",
-		Url:      "https://example.com/a,b;c",
+		Memo:     sql.NullString{String: "line1\r\nline2", Valid: true},
+		URL:      sql.NullString{String: "https://example.com/a,b;c", Valid: true},
 		Timezone: "UTC",
 	}
 	out := buildICS("Cal", []exportEvent{{event: ev, startAt: time.Now().UTC(), endAt: time.Now().UTC()}})
@@ -95,7 +96,7 @@ func TestBuildICSEscaping(t *testing.T) {
 // TestBuildICSExpandsMultipleOccurrences verifies a recurring master expanded
 // into several occurrences emits one VEVENT per occurrence (C-5).
 func TestBuildICSExpandsMultipleOccurrences(t *testing.T) {
-	ev := generated.Event{
+	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Standup",
 		Timezone: "UTC",

@@ -418,3 +418,95 @@ func computeNthOccurrence(rule *Rule, start time.Time, n int) time.Time {
 	}
 	return last
 }
+
+// Exceptions is the set of occurrences a recurring series skips.
+//
+// The shared contract allows exactly two ways to depart from a rule, and
+// this is the one for cancelling: the start the occurrence would have had
+// is listed here, and the expander drops it. Changing an occurrence is the
+// other way, and it is a row -- never an entry here.
+//
+// Storing a cancellation both ways would give a consumer two places to
+// look before it could say whether an occurrence happens, and the two
+// answers drift apart the first time a writer updates one and not the
+// other.
+type Exceptions []time.Time
+
+// ParseExceptions reads the stored exclusion list. Entries that are not
+// valid timestamps are dropped rather than failing the read: an unreadable
+// entry cannot identify an occurrence to skip, and refusing to render the
+// series because of one would hide every occurrence instead of one.
+func ParseExceptions(data *json.RawMessage) Exceptions {
+	if data == nil || len(*data) == 0 || string(*data) == "null" {
+		return nil
+	}
+	var raw []string
+	if err := json.Unmarshal(*data, &raw); err != nil {
+		return nil
+	}
+	out := make(Exceptions, 0, len(raw))
+	for _, s := range raw {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			out = append(out, t.UTC())
+		}
+	}
+	return out
+}
+
+// Contains reports whether the given occurrence start is excluded.
+//
+// Comparison is by instant, not by calendar day: an all-day series and a
+// timed one both anchor on an exact start, and matching on the date alone
+// would cancel the wrong occurrence for any rule that fires more than once
+// a day.
+func (e Exceptions) Contains(start time.Time) bool {
+	target := start.UTC().UnixMilli()
+	for _, ex := range e {
+		if ex.UnixMilli() == target {
+			return true
+		}
+	}
+	return false
+}
+
+// With returns the list with start added, unchanged if it is already
+// present. Cancelling the same occurrence twice must not grow the column
+// without bound.
+func (e Exceptions) With(start time.Time) Exceptions {
+	if e.Contains(start) {
+		return e
+	}
+	return append(append(Exceptions{}, e...), start.UTC())
+}
+
+// Without returns the list with start removed, which is what restoring a
+// cancelled occurrence does.
+func (e Exceptions) Without(start time.Time) Exceptions {
+	target := start.UTC().UnixMilli()
+	out := make(Exceptions, 0, len(e))
+	for _, ex := range e {
+		if ex.UnixMilli() != target {
+			out = append(out, ex)
+		}
+	}
+	return out
+}
+
+// MarshalColumn renders the list for storage. An empty list is stored as
+// NULL rather than "[]" so "this series has no exclusions" has one
+// representation instead of two.
+func (e Exceptions) MarshalColumn() (*json.RawMessage, error) {
+	if len(e) == 0 {
+		return nil, nil
+	}
+	raw := make([]string, 0, len(e))
+	for _, ex := range e {
+		raw = append(raw, ex.UTC().Format(time.RFC3339))
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	msg := json.RawMessage(body)
+	return &msg, nil
+}

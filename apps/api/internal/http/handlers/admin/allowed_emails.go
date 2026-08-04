@@ -6,17 +6,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
 // --- DTOs ---
 
 type AllowedEmail struct {
-	ID        uint32    `json:"id"`
+	ID        string    `json:"id"`
 	Email     string    `json:"email"`
-	Note      string    `json:"note"`
+	Reason    string    `json:"reason"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -44,7 +46,7 @@ type CreateAllowedEmailOutput struct {
 }
 
 type DeleteAllowedEmailInput struct {
-	ID uint32 `path:"id"`
+	ID string `path:"id"`
 }
 
 type DeleteAllowedEmailOutput struct{}
@@ -63,9 +65,9 @@ func ListAllowedEmails(deps Deps) func(context.Context, *ListAllowedEmailsInput)
 		out.Body.Emails = make([]AllowedEmail, 0, len(rows))
 		for _, r := range rows {
 			out.Body.Emails = append(out.Body.Emails, AllowedEmail{
-				ID:        r.ID,
+				ID:        calresolve.PublicIDString(r.PublicID),
 				Email:     r.Email,
-				Note:      r.Note,
+				Reason:    r.Reason,
 				CreatedAt: r.CreatedAt,
 			})
 		}
@@ -90,19 +92,23 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 
 		userID, _ := middleware.ActorFromContext(ctx)
 
-		res, err := deps.Queries.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
-			Email:     email,
-			Note:      strings.TrimSpace(in.Body.Note),
-			CreatedBy: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
-		})
+		pubID, err := uuid.NewV7()
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		id, _ := res.LastInsertId()
+		reason := strings.TrimSpace(in.Body.Note)
+		if _, err := deps.Queries.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
+			PublicID:        pubID[:],
+			Email:           email,
+			Reason:          reason,
+			CreatedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		return &CreateAllowedEmailOutput{Body: AllowedEmail{
-			ID:        uint32(id),
+			ID:        pubID.String(),
 			Email:     email,
-			Note:      strings.TrimSpace(in.Body.Note),
+			Reason:    reason,
 			CreatedAt: time.Now(),
 		}}, nil
 	}
@@ -110,8 +116,19 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 
 func DeleteAllowedEmail(deps Deps) func(context.Context, *DeleteAllowedEmailInput) (*DeleteAllowedEmailOutput, error) {
 	return func(ctx context.Context, in *DeleteAllowedEmailInput) (*DeleteAllowedEmailOutput, error) {
-		if err := deps.Queries.DeleteAllowedEmail(ctx, in.ID); err != nil {
+		pub, err := uuid.Parse(in.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.NotFound)
+		}
+		res, err := deps.Queries.WithdrawAllowedEmail(ctx, pub[:])
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Report a miss rather than a silent success: an operator who thinks
+		// they withdrew an exception and did not has a live one they believe
+		// is gone.
+		if affected, err := res.RowsAffected(); err != nil || affected == 0 {
+			return nil, apierrors.ToHuma(apierrors.NotFound)
 		}
 		return &DeleteAllowedEmailOutput{}, nil
 	}

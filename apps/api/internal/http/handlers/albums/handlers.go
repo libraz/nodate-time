@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -12,9 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/audit"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -39,9 +41,25 @@ const (
 )
 
 type Deps struct {
-	DB      *sql.DB
-	Queries *generated.Queries
-	Storage *storage.Client
+	DB          *sql.DB
+	Queries     *generated.Queries
+	Storage     *storage.Client
+	WorkspaceID uint32
+}
+
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
+	}
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
+}
+
+func nullStringValue(n sql.NullString) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.String
 }
 
 func pubIDToHex(b []byte) string {
@@ -57,17 +75,17 @@ func parseUUID(s string) ([]byte, error) {
 }
 
 func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Read(ctx, deps.Queries, calPubID, userID)
+	return calresolve.Read(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Write(ctx, deps.Queries, calPubID, userID)
+	return calresolve.Write(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
 func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	return calresolve.Member(ctx, deps.Queries, calPubID, userID)
+	return calresolve.Member(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
 // isImageContentType checks against an exact allowlist rather than a
@@ -140,7 +158,7 @@ func eventPubIDForResponse(ctx context.Context, deps Deps, evtID sql.NullInt32) 
 	if !evtID.Valid {
 		return ""
 	}
-	evt, err := deps.Queries.GetEventByID(ctx, uint32(evtID.Int32))
+	evt, err := deps.Queries.GetCalendarEventByID(ctx, uint32(evtID.Int32))
 	if err != nil {
 		return ""
 	}
@@ -152,12 +170,16 @@ func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUpl
 	if err != nil {
 		return AlbumUploader{ID: ""}
 	}
-	resp := AlbumUploader{ID: pubIDToHex(u.PublicID), Name: u.Name}
-	if deps.Storage != nil && u.AvatarStorageKey.Valid && u.AvatarStorageKey.String != "" {
-		if url, err := deps.Storage.PresignGet(ctx, u.AvatarStorageKey.String, downloadTTL); err == nil {
-			resp.AvatarURL = url
+	resp := AlbumUploader{ID: pubIDToHex(u.PublicID), Name: u.DisplayName}
+	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
+		if obj, oerr := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32)); oerr == nil {
+			if url, perr := deps.Storage.PresignGet(ctx, obj.StorageKey, downloadTTL); perr == nil {
+				resp.AvatarURL = url
+				return resp
+			}
 		}
 	}
+	resp.AvatarURL = nullStringValue(u.AvatarURL)
 	return resp
 }
 
@@ -166,7 +188,7 @@ type albumPhotoListRow struct {
 	publicID          []byte
 	caption           string
 	contentType       string
-	byteSize          int64
+	byteSize          uint64
 	width             sql.NullInt32
 	height            sql.NullInt32
 	storageKey        string
@@ -174,7 +196,7 @@ type albumPhotoListRow struct {
 	createdAt         time.Time
 	uploaderPublicID  []byte
 	uploaderName      string
-	uploaderAvatarKey sql.NullString
+	uploaderAvatarURL sql.NullString
 	eventPublicID     sql.NullString
 }
 
@@ -193,8 +215,8 @@ func firstPagePhotoRows(rows []generated.ListAlbumPhotosFirstPageRow) []albumPho
 			takenAt:           r.TakenAt,
 			createdAt:         r.CreatedAt,
 			uploaderPublicID:  r.UploaderPublicID,
-			uploaderName:      r.UploaderName,
-			uploaderAvatarKey: r.UploaderAvatarKey,
+			uploaderName:      r.UploaderDisplayName,
+			uploaderAvatarURL: r.UploaderAvatarURL,
 			eventPublicID:     r.EventPublicID,
 		})
 	}
@@ -216,8 +238,8 @@ func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoLi
 			takenAt:           r.TakenAt,
 			createdAt:         r.CreatedAt,
 			uploaderPublicID:  r.UploaderPublicID,
-			uploaderName:      r.UploaderName,
-			uploaderAvatarKey: r.UploaderAvatarKey,
+			uploaderName:      r.UploaderDisplayName,
+			uploaderAvatarURL: r.UploaderAvatarURL,
 			eventPublicID:     r.EventPublicID,
 		})
 	}
@@ -230,7 +252,7 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		CalendarID:  pubIDToHex(cal.PublicID),
 		Caption:     p.caption,
 		ContentType: p.contentType,
-		ByteSize:    p.byteSize,
+		ByteSize:    int64(p.byteSize),
 		TakenAt:     p.takenAt,
 		CreatedAt:   p.createdAt,
 		UploadedBy:  AlbumUploader{ID: pubIDToHex(p.uploaderPublicID), Name: p.uploaderName},
@@ -246,8 +268,8 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		h := int(p.height.Int32)
 		resp.Height = &h
 	}
-	if deps.Storage != nil && p.uploaderAvatarKey.Valid && p.uploaderAvatarKey.String != "" {
-		key := p.uploaderAvatarKey.String
+	if deps.Storage != nil && p.uploaderAvatarURL.Valid && p.uploaderAvatarURL.String != "" {
+		key := p.uploaderAvatarURL.String
 		if cached, ok := avatarURLs[key]; ok {
 			resp.UploadedBy.AvatarURL = cached
 		} else if url, err := deps.Storage.PresignGet(ctx, key, downloadTTL); err == nil {
@@ -271,11 +293,11 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 		CalendarID:  pubIDToHex(cal.PublicID),
 		Caption:     p.Caption,
 		ContentType: p.ContentType,
-		ByteSize:    p.ByteSize,
+		ByteSize:    int64(p.ByteSize),
 		TakenAt:     p.TakenAt,
 		CreatedAt:   p.CreatedAt,
-		EventID:     eventPubIDForResponse(ctx, deps, p.EventID),
-		UploadedBy:  uploaderForResponse(ctx, deps, p.UploadedBy),
+		EventID:     eventPubIDForResponse(ctx, deps, p.CalendarEventID),
+		UploadedBy:  uploaderForResponse(ctx, deps, p.UploadedByUserID),
 	}
 	if p.Width.Valid {
 		w := int(p.Width.Int32)
@@ -305,7 +327,10 @@ func resolveEventForCalendar(ctx context.Context, deps Deps, calID uint32, event
 	if err != nil {
 		return sql.NullInt32{}, apierrors.EventNotFound
 	}
-	evt, err := deps.Queries.GetEventByPublicID(ctx, pub)
+	evt, err := deps.Queries.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{
+		WorkspaceID: deps.WorkspaceID,
+		PublicID:    pub,
+	})
 	if err != nil || evt.CalendarID != calID {
 		return sql.NullInt32{}, apierrors.EventNotFound
 	}
@@ -318,10 +343,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		limit := int32(in.Limit)
@@ -389,10 +411,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		if !isImageContentType(in.Body.ContentType) {
 			return nil, apierrors.ToHuma(apierrors.InvalidImageContentType)
@@ -406,10 +425,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 
 		eventID, err := resolveEventForCalendar(ctx, deps, cal.ID, in.Body.EventID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		photoPubID, _ := uuid.NewV7()
@@ -432,17 +448,18 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		}
 
 		_, err = deps.Queries.CreateAlbumPhoto(ctx, generated.CreateAlbumPhotoParams{
-			PublicID:    photoPubID[:],
-			CalendarID:  cal.ID,
-			UploadedBy:  userID,
-			EventID:     eventID,
-			Caption:     in.Body.Caption,
-			ContentType: strings.ToLower(in.Body.ContentType),
-			ByteSize:    in.Body.ByteSize,
-			Width:       width,
-			Height:      height,
-			StorageKey:  key,
-			TakenAt:     takenAt,
+			PublicID:         photoPubID[:],
+			WorkspaceID:      deps.WorkspaceID,
+			CalendarID:       cal.ID,
+			UploadedByUserID: userID,
+			CalendarEventID:  eventID,
+			Caption:          in.Body.Caption,
+			ContentType:      strings.ToLower(in.Body.ContentType),
+			ByteSize:         uint64(in.Body.ByteSize),
+			Width:            width,
+			Height:           height,
+			StorageKey:       key,
+			TakenAt:          takenAt,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -469,10 +486,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
@@ -486,7 +500,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		if err != nil || p.CalendarID != cal.ID {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
-		if p.Enabled || p.UploadedBy != userID {
+		if p.Enabled || p.UploadedByUserID != userID {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
 
@@ -501,25 +515,44 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			deleteMismatchedPhoto(ctx, deps, p)
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
 		}
-		if info.Size != p.ByteSize {
+		if uint64(info.Size) != p.ByteSize {
 			deleteMismatchedPhoto(ctx, deps, p)
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
-		res, err := deps.Queries.ConfirmAlbumPhoto(ctx, generated.ConfirmAlbumPhotoParams{
-			ID:         p.ID,
-			UploadedBy: userID,
+		// Logged on Confirm, not on the earlier presign: a presign whose
+		// upload is abandoned never becomes a real photo, so it must not
+		// appear in the feed.
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			res, err := q.ConfirmAlbumPhoto(ctx, generated.ConfirmAlbumPhotoParams{
+				ID:               p.ID,
+				UploadedByUserID: userID,
+			})
+			if err != nil {
+				return err
+			}
+			// The update re-checks enabled = FALSE, so a repeated confirm
+			// affects nothing and does not append a second event for one photo.
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				return apierrors.AlbumPhotoNotFound
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypePhotoUploaded,
+				Summary:     p.Caption,
+				Subject:     p.PublicID,
+			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if affected, _ := res.RowsAffected(); affected != 1 {
-			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
+			return nil, toAPIError(err)
 		}
 		p.Enabled = true
-		// Audited on Confirm, not on the earlier presign: a presign whose upload
-		// is abandoned never becomes a real photo, so it must not appear in history.
-		audit.Record(ctx, deps.Queries, cal.ID, p.ID, p.PublicID, audit.EntityAlbumPhoto, audit.ActionCreate, userID, p.Caption)
 		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, p)}, nil
 	}
 }
@@ -534,8 +567,8 @@ func deleteMismatchedPhoto(ctx context.Context, deps Deps, p generated.AlbumPhot
 		slog.WarnContext(ctx, "failed to delete mismatched album photo object", "key", p.StorageKey, "error", err)
 	}
 	if err := deps.Queries.DeletePendingAlbumPhoto(ctx, generated.DeletePendingAlbumPhotoParams{
-		ID:         p.ID,
-		UploadedBy: p.UploadedBy,
+		ID:               p.ID,
+		UploadedByUserID: p.UploadedByUserID,
 	}); err != nil {
 		slog.WarnContext(ctx, "failed to delete mismatched album photo row", "photoID", p.ID, "error", err)
 	}
@@ -562,18 +595,12 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		caption := photo.Caption
@@ -581,36 +608,45 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 			caption = *in.Body.Caption
 		}
 
-		eventID := photo.EventID
+		eventID := photo.CalendarEventID
 		if in.Body.EventID != nil {
 			if *in.Body.EventID == "" {
 				eventID = sql.NullInt32{}
 			} else {
 				resolved, rerr := resolveEventForCalendar(ctx, deps, cal.ID, *in.Body.EventID)
 				if rerr != nil {
-					if spec, ok := rerr.(*apierrors.Spec); ok {
-						return nil, apierrors.ToHuma(spec)
-					}
-					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+					return nil, toAPIError(rerr)
 				}
 				eventID = resolved
 			}
 		}
 
-		err = deps.Queries.UpdateAlbumPhotoMeta(ctx, generated.UpdateAlbumPhotoMetaParams{
-			Caption: caption,
-			EventID: eventID,
-			ID:      photo.ID,
+		var refreshed generated.AlbumPhoto
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdateAlbumPhotoMeta(ctx, generated.UpdateAlbumPhotoMetaParams{
+				Caption:         caption,
+				CalendarEventID: eventID,
+				ID:              photo.ID,
+			}); err != nil {
+				return err
+			}
+			var err error
+			refreshed, err = q.GetAlbumPhotoByPublicID(ctx, photo.PublicID)
+			if err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypePhotoUpdated,
+				Summary:     refreshed.Caption,
+				Subject:     refreshed.PublicID,
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		refreshed, err := deps.Queries.GetAlbumPhotoByPublicID(ctx, photo.PublicID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		audit.Record(ctx, deps.Queries, cal.ID, refreshed.ID, refreshed.PublicID, audit.EntityAlbumPhoto, audit.ActionUpdate, userID, refreshed.Caption)
 		return &UpdatePhotoOutput{Body: mapPhoto(ctx, deps, cal, refreshed)}, nil
 	}
 }
@@ -621,24 +657,30 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
-		if err := deps.Queries.SoftDeleteAlbumPhoto(ctx, photo.ID); err != nil {
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.SoftDeleteAlbumPhoto(ctx, photo.ID); err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: userID,
+				Type:        eventlog.TypePhotoDeleted,
+				Summary:     photo.Caption,
+				Subject:     photo.PublicID,
+			})
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		audit.Record(ctx, deps.Queries, cal.ID, photo.ID, photo.PublicID, audit.EntityAlbumPhoto, audit.ActionDelete, userID, photo.Caption)
 		if deps.Storage != nil {
 			if derr := deps.Storage.DeleteObject(ctx, photo.StorageKey); derr != nil {
 				slog.WarnContext(ctx, "failed to delete album photo object", "key", photo.StorageKey, "error", derr)
@@ -654,18 +696,12 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
 		if err != nil {
-			if spec, ok := err.(*apierrors.Spec); ok {
-				return nil, apierrors.ToHuma(spec)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		if deps.Storage == nil {

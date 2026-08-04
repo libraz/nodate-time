@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -20,9 +20,9 @@ import (
 
 const avatarDownloadTTL = 5 * time.Minute
 
-// dummyPasswordHash is a valid bcrypt hash compared against when a login is
-// attempted for a non-existent account, so that the response time does not
-// reveal whether the email exists (user-enumeration side channel).
+// dummyPasswordHash is compared against when a login is attempted for an
+// account with no local identity, so the response time does not reveal
+// whether the address exists.
 var dummyPasswordHash, _ = auth.HashPassword("nodate-time-login-timing-equalizer")
 
 func isDuplicateKey(err error) bool {
@@ -30,20 +30,12 @@ func isDuplicateKey(err error) bool {
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
-func passwordHashForLogin(passwordHash string) string {
-	if strings.HasPrefix(passwordHash, "$2a$") ||
-		strings.HasPrefix(passwordHash, "$2b$") ||
-		strings.HasPrefix(passwordHash, "$2y$") {
-		return passwordHash
-	}
-	return dummyPasswordHash
-}
-
 type Deps struct {
-	DB        *sql.DB
-	Queries   *generated.Queries
-	JWTSecret string
-	Storage   *storage.Client
+	DB          *sql.DB
+	Queries     *generated.Queries
+	JWTSecret   string
+	Storage     *storage.Client
+	WorkspaceID uint32
 	// AllowedDomains restricts which email domains may register a password
 	// account, mirroring the Google OIDC policy. Empty means unrestricted.
 	AllowedDomains []string
@@ -57,42 +49,74 @@ func pubIDToHex(b []byte) string {
 	return u.String()
 }
 
-// avatarURLFor returns a short-lived presigned GET URL for the user's avatar,
-// or an empty string if no avatar is set or storage is unavailable.
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
+func nullStringValue(n sql.NullString) string {
+	if !n.Valid {
+		return ""
+	}
+	return n.String
+}
+
+// avatarURLFor prefers an uploaded picture over an external one: a user who
+// uploaded an avatar has said which they want, and the provider URL they
+// signed up with may since have gone stale.
 func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
-	if deps.Storage == nil || !u.AvatarStorageKey.Valid || u.AvatarStorageKey.String == "" {
-		return ""
+	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
+		obj, err := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32))
+		if err == nil {
+			url, err := deps.Storage.PresignGet(ctx, obj.StorageKey, avatarDownloadTTL)
+			if err == nil {
+				return url
+			}
+			slog.WarnContext(ctx, "failed to presign avatar URL", "userID", u.ID, "error", err)
+		}
 	}
-	url, err := deps.Storage.PresignGet(ctx, u.AvatarStorageKey.String, avatarDownloadTTL)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to presign avatar URL", "userID", u.ID, "error", err)
-		return ""
-	}
-	return url
+	return nullStringValue(u.AvatarURL)
 }
 
 func mapUser(u generated.User) UserResponse {
 	return UserResponse{
 		ID:        pubIDToHex(u.PublicID),
-		Name:      u.Name,
+		Name:      u.DisplayName,
 		Email:     u.Email,
-		Icon:      u.Icon,
-		Color:     u.Color,
-		IsAdmin:   u.IsAdmin,
+		Locale:    u.Locale,
+		Timezone:  u.Timezone,
 		CreatedAt: u.CreatedAt,
 	}
 }
 
-// mapUserWithAvatar is like mapUser but also fills AvatarURL via presigned GET.
+// mapUserWithAvatar is like mapUser but also resolves the avatar URL and the
+// instance-admin grant, both of which live outside the user row.
 func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserResponse {
 	resp := mapUser(u)
 	resp.AvatarURL = avatarURLFor(ctx, deps, u)
+	if isAdmin, err := deps.Queries.IsInstanceAdmin(ctx, u.ID); err == nil {
+		resp.IsAdmin = isAdmin
+	}
 	return resp
+}
+
+// defaultLocale and defaultTimezone seed a new account. Both are
+// overridable from the profile; they exist because the columns are NOT NULL
+// and a sign-up form does not ask.
+const (
+	defaultLocale   = "ja"
+	defaultTimezone = "Asia/Tokyo"
+)
+
+// requestOrigin pulls the client hint stored on a session, so a user can
+// later tell their devices apart.
+func requestOrigin(ctx context.Context) (userAgent, ipAddress string) {
+	ip, _ := middleware.ClientIPFromContext(ctx)
+	return "", ip
 }
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {
 	return func(ctx context.Context, in *RegisterInput) (*RegisterOutput, error) {
-		// Enforce the same access policy as Google OIDC sign-in.
+		// Enforce the same access policy as OIDC sign-in.
 		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, in.Body.Email)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -101,7 +125,6 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			return nil, apierrors.ToHuma(apierrors.AuthSignupNotAllowed)
 		}
 
-		// Check existing
 		_, err = deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err == nil {
 			return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
@@ -115,14 +138,64 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		pubID, _ := uuid.NewV7()
-		result, err := deps.Queries.CreateUser(ctx, generated.CreateUserParams{
-			PublicID:     pubID[:],
-			Name:         in.Body.Name,
-			Email:        in.Body.Email,
-			Icon:         "👤",
-			Color:        "#42A5F5",
-			PasswordHash: hash,
+		userPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		identityPubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		var created generated.User
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// The account and the credential are two rows and must land
+			// together: a user with no identity cannot sign in, and an
+			// identity with no user is an orphan the unique key will later
+			// collide with.
+			result, err := q.CreateUser(ctx, generated.CreateUserParams{
+				PublicID:    userPubID[:],
+				Email:       in.Body.Email,
+				DisplayName: in.Body.Name,
+				Locale:      defaultLocale,
+				Timezone:    defaultTimezone,
+			})
+			if err != nil {
+				return err
+			}
+			insertID, err := result.LastInsertId()
+			if err != nil {
+				return err
+			}
+			userID := uint32(insertID)
+
+			if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
+				PublicID:     identityPubID[:],
+				UserID:       userID,
+				Provider:     generated.IdentitiesProviderLocal,
+				Subject:      in.Body.Email,
+				PasswordHash: nullString(hash),
+			}); err != nil {
+				return err
+			}
+
+			// Every user joins the single workspace: the contract scopes
+			// calendars by it, so an account outside it could reach nothing.
+			memberPubID, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
+				PublicID:    memberPubID[:],
+				WorkspaceID: deps.WorkspaceID,
+				UserID:      userID,
+				Role:        generated.WorkspaceMembersRoleMember,
+			}); err != nil {
+				return err
+			}
+
+			created, err = q.GetUserByID(ctx, userID)
+			return err
 		})
 		if err != nil {
 			if isDuplicateKey(err) {
@@ -131,53 +204,127 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		insertID, _ := result.LastInsertId()
-		token, err := auth.GenerateToken(uint32(insertID), 1, deps.JWTSecret)
+		userAgent, ipAddress := requestOrigin(ctx)
+		creds, err := startSession(ctx, deps, created.ID, userAgent, ipAddress)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &RegisterOutput{}
-		out.Body.Token = token
-		out.Body.User = UserResponse{
-			ID:        pubID.String(),
-			Name:      in.Body.Name,
-			Email:     in.Body.Email,
-			Icon:      "👤",
-			Color:     "#42A5F5",
-			IsAdmin:   false,
-			CreatedAt: time.Now(),
-		}
+		out.Body.Token = creds.Token
+		out.Body.RefreshToken = creds.RefreshToken
+		out.Body.User = mapUserWithAvatar(ctx, deps, created)
 		return out, nil
 	}
 }
 
 func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 	return func(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
-		user, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
+		identity, err := deps.Queries.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
+			Provider: generated.IdentitiesProviderLocal,
+			Subject:  in.Body.Email,
+		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				// Run a comparison anyway so the response time matches the
-				// found-user path and does not leak account existence.
+				// Hash anyway so the response time matches the found path and
+				// does not leak which addresses have an account.
 				auth.CheckPassword(in.Body.Password, dummyPasswordHash)
 				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		if !auth.CheckPassword(in.Body.Password, passwordHashForLogin(user.PasswordHash)) {
+		// A locked identity is refused before the password is even checked,
+		// so brute-forcing cannot proceed by simply continuing to guess.
+		if identity.LockedUntilAt.Valid && identity.LockedUntilAt.Time.After(time.Now()) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
-		token, err := auth.GenerateToken(user.ID, user.TokenVersion, deps.JWTSecret)
+		if !identity.PasswordHash.Valid || !auth.CheckPassword(in.Body.Password, identity.PasswordHash.String) {
+			recordFailedAttempt(ctx, deps, identity)
+			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
+		}
+
+		user, err := deps.Queries.GetUserByID(ctx, identity.UserID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		if err := deps.Queries.RecordSuccessfulLogin(ctx, identity.ID); err != nil {
+			slog.WarnContext(ctx, "failed to clear login lockout", "identityID", identity.ID, "error", err)
+		}
+
+		userAgent, ipAddress := requestOrigin(ctx)
+		creds, err := startSession(ctx, deps, user.ID, userAgent, ipAddress)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &LoginOutput{}
-		out.Body.Token = token
+		out.Body.Token = creds.Token
+		out.Body.RefreshToken = creds.RefreshToken
 		out.Body.User = mapUserWithAvatar(ctx, deps, user)
 		return out, nil
+	}
+}
+
+// lockoutThreshold and lockoutWindow bound password guessing. The counter
+// lives on the identity rather than the user, so locking a password does not
+// also lock a provider sign-in that never had one.
+const (
+	lockoutThreshold = 10
+	lockoutWindow    = 15 * time.Minute
+)
+
+func recordFailedAttempt(ctx context.Context, deps Deps, identity generated.Identity) {
+	lockedUntil := sql.NullTime{}
+	if identity.FailedAttempts+1 >= lockoutThreshold {
+		lockedUntil = sql.NullTime{Time: time.Now().Add(lockoutWindow), Valid: true}
+	}
+	if err := deps.Queries.RecordFailedLogin(ctx, generated.RecordFailedLoginParams{
+		LockedUntilAt: lockedUntil,
+		ID:            identity.ID,
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to record login attempt", "identityID", identity.ID, "error", err)
+	}
+}
+
+// Refresh trades a refresh token for a new pair. The old one stops working,
+// so a token that leaked cannot be used alongside the real client's.
+func Refresh(deps Deps) func(context.Context, *RefreshInput) (*RefreshOutput, error) {
+	return func(ctx context.Context, in *RefreshInput) (*RefreshOutput, error) {
+		creds, userID, err := rotateSession(ctx, deps, in.Body.RefreshToken)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		user, err := deps.Queries.GetUserByID(ctx, userID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		out := &RefreshOutput{}
+		out.Body.Token = creds.Token
+		out.Body.RefreshToken = creds.RefreshToken
+		out.Body.User = mapUserWithAvatar(ctx, deps, user)
+		return out, nil
+	}
+}
+
+// Logout revokes the session the request authenticated with, and only that
+// one: signing out of a browser must not sign the user out of their phone.
+func Logout(deps Deps) func(context.Context, *LogoutInput) (*LogoutOutput, error) {
+	return func(ctx context.Context, _ *LogoutInput) (*LogoutOutput, error) {
+		sessionID, ok := middleware.SessionFromContext(ctx)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
+		}
+		if err := deps.Queries.RevokeSession(ctx, sessionID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		return &LogoutOutput{}, nil
 	}
 }
 
@@ -202,12 +349,17 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 		}
 
-		user, err := deps.Queries.GetUserByID(ctx, userID)
+		identity, err := deps.Queries.GetLocalIdentityByUser(ctx, userID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// No local credential to change: this account signs in
+				// through a provider.
+				return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		if !auth.CheckPassword(in.Body.CurrentPassword, user.PasswordHash) {
+		if !identity.PasswordHash.Valid || !auth.CheckPassword(in.Body.CurrentPassword, identity.PasswordHash.String) {
 			return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
 		}
 
@@ -216,29 +368,32 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		err = deps.Queries.UpdateUserPassword(ctx, generated.UpdateUserPasswordParams{
-			PasswordHash: hash,
-			ID:           userID,
+		// Replacing the credential ends every session opened with the old
+		// one -- otherwise whoever knew it keeps their access. This device is
+		// then given a fresh session, so changing your own password does not
+		// sign you out of the browser you did it from.
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdatePasswordHash(ctx, generated.UpdatePasswordHashParams{
+				PasswordHash: nullString(hash),
+				UserID:       userID,
+			}); err != nil {
+				return err
+			}
+			return q.RevokeAllUserSessions(ctx, userID)
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// UpdateUserPassword bumped token_version, invalidating every outstanding
-		// token — including the one this request just authenticated with. Issue a
-		// fresh token carrying the new version so this device stays signed in;
-		// every other device is invalidated as intended.
-		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		token, err := auth.GenerateToken(userID, refreshed.TokenVersion, deps.JWTSecret)
+		userAgent, ipAddress := requestOrigin(ctx)
+		creds, err := startSession(ctx, deps, userID, userAgent, ipAddress)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &ChangePasswordOutput{}
-		out.Body.Token = token
+		out.Body.Token = creds.Token
+		out.Body.RefreshToken = creds.RefreshToken
 		return out, nil
 	}
 }
@@ -249,13 +404,33 @@ func UpdateMe(deps Deps) func(context.Context, *UpdateMeInput) (*UpdateMeOutput,
 		if !ok {
 			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 		}
-		err := deps.Queries.UpdateUser(ctx, generated.UpdateUserParams{
-			Name:  in.Body.Name,
-			Icon:  in.Body.Icon,
-			Color: in.Body.Color,
-			ID:    userID,
-		})
+		current, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		timezone := current.Timezone
+		if in.Body.Timezone != "" {
+			if _, lerr := time.LoadLocation(in.Body.Timezone); lerr != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			timezone = in.Body.Timezone
+		}
+		locale := current.Locale
+		if in.Body.Locale != "" {
+			locale = in.Body.Locale
+		}
+
+		if err := deps.Queries.UpdateUser(ctx, generated.UpdateUserParams{
+			DisplayName: in.Body.Name,
+			// The uploaded avatar is not touched here: it lives in
+			// avatar_storage_object_id, and this endpoint only sets the
+			// external URL fallback.
+			AvatarURL: current.AvatarURL,
+			Timezone:  timezone,
+			Locale:    locale,
+			ID:        userID,
+		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		user, err := deps.Queries.GetUserByID(ctx, userID)

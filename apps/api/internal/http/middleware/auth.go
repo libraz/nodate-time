@@ -13,6 +13,7 @@ type ctxKey int
 
 const (
 	ctxKeyActorUserID ctxKey = iota
+	ctxKeySessionID
 )
 
 // WithActor stores the authenticated user ID in the context.
@@ -23,6 +24,18 @@ func WithActor(ctx context.Context, userID uint32) context.Context {
 // ActorFromContext retrieves the authenticated user ID.
 func ActorFromContext(ctx context.Context) (uint32, bool) {
 	v, ok := ctx.Value(ctxKeyActorUserID).(uint32)
+	return v, ok
+}
+
+// WithSession stores the session the request authenticated with, so a
+// handler that revokes sessions can spare the current one.
+func WithSession(ctx context.Context, sessionID uint32) context.Context {
+	return context.WithValue(ctx, ctxKeySessionID, sessionID)
+}
+
+// SessionFromContext retrieves the authenticated session ID.
+func SessionFromContext(ctx context.Context) (uint32, bool) {
+	v, ok := ctx.Value(ctxKeySessionID).(uint32)
 	return v, ok
 }
 
@@ -47,13 +60,18 @@ func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler
 				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
 				return
 			}
-			user, err := queries.GetUserByID(r.Context(), claims.UserID)
-			if err != nil || user.TokenVersion != claims.TokenVersion {
+			// The signature alone proves only that this token was issued at
+			// some point. The session row is what says it is still good, so
+			// a revoked session stops the token here rather than when it
+			// eventually expires.
+			session, err := queries.GetLiveSession(r.Context(), claims.SessionID)
+			if err != nil || session.UserID != claims.UserID {
 				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
 				return
 			}
 
 			ctx := WithActor(r.Context(), claims.UserID)
+			ctx = WithSession(ctx, claims.SessionID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
