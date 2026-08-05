@@ -19,7 +19,7 @@ WHERE a.public_id = ? AND a.enabled = TRUE;
 -- on the one above is what keeps an unconfirmed row out of every read path
 -- -- and confirming is the one operation that has to see it.
 -- name: GetPendingAttachmentByPublicID :one
-SELECT a.*, so.storage_key, so.content_type, so.byte_size
+SELECT a.*, so.storage_key, so.content_type, so.byte_size, so.sha256
 FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.public_id = ? AND a.enabled = FALSE;

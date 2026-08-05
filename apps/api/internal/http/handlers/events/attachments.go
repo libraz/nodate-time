@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -120,6 +121,22 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		// another namespace.
 		storageKey := fmt.Sprintf("workspace/%s/%s", pubIDToHex(deps.WorkspacePublicID), hex.EncodeToString(digest))
 
+		// Bytes another attachment already stands behind are never handed out
+		// for overwriting. The key is the digest of the file, so anyone who
+		// knows a file's bytes can ask for a presign at the same key from
+		// their own calendar and PUT something else there -- and every
+		// attachment in the workspace that resolved to that object would start
+		// serving the replacement. A caller with the same digest gets the
+		// object that is already there and confirms against it.
+		alreadyStored := false
+		if existing, err := deps.Queries.GetStorageObjectByKey(ctx, storageKey); err == nil && existing.RefCount > 0 {
+			_, exists, serr := deps.Storage.StatObject(ctx, storageKey)
+			if serr != nil {
+				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+			}
+			alreadyStored = exists
+		}
+
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if _, err := q.CreateStorageObject(ctx, generated.CreateStorageObjectParams{
 				PublicID:    objectPubID[:],
@@ -153,14 +170,15 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-		}
-
 		out := &PresignUploadOutput{}
 		out.Body.AttachmentID = attachPubID.String()
-		out.Body.UploadURL = url
+		if !alreadyStored {
+			url, err := deps.Storage.PresignPut(ctx, storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+			}
+			out.Body.UploadURL = url
+		}
 		return out, nil
 	}
 }
@@ -347,6 +365,18 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		if uint64(info.Size) != att.ByteSize {
 			discardReservation(ctx, deps, att.ID, att.UploaderID)
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		// The digest decided which object these bytes are stored as, so it has
+		// to be checked against them rather than taken on trust. Without this
+		// an upload can put anything at a key it names, and every later
+		// attachment of the real file resolves to it.
+		stored, err := deps.Storage.SHA256(ctx, att.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+		if !bytes.Equal(stored, att.Sha256) {
+			discardReservation(ctx, deps, att.ID, att.UploaderID)
+			return nil, apierrors.ToHuma(apierrors.AttachmentDigestMismatch)
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {

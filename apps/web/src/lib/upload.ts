@@ -87,6 +87,11 @@ export async function uploadViaPresign<P extends PresignResult>(
     ? { ...args.presignBody, sha256: await sha256Hex(args.body) }
     : args.presignBody;
   const presign = await api.post<P>(args.presignPath, presignBody);
+  // Content-addressed storage answers with no upload URL when the bytes are
+  // already there and something is already using them. Re-uploading would only
+  // be a chance to replace a file other people's attachments point at, so the
+  // reservation goes straight to its confirm step.
+  if (!presign.uploadUrl) return presign;
   const putRes = await fetch(presign.uploadUrl, {
     method: 'PUT',
     headers: { 'Content-Type': args.contentType },

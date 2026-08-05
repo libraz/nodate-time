@@ -90,7 +90,10 @@ var (
 var (
 	AttachmentNotFound = &Spec{Status: 404, Code: "ATTACHMENT.NOT_FOUND", Message: "Attachment not found"}
 	AttachmentTooLarge = &Spec{Status: 400, Code: "ATTACHMENT.TOO_LARGE", Message: "File exceeds maximum size of 100MB"}
-	StorageUnavailable = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
+	// AttachmentDigestMismatch reports that the uploaded bytes are not the
+	// ones the reservation declared.
+	AttachmentDigestMismatch = &Spec{Status: 400, Code: "ATTACHMENT.DIGEST_MISMATCH", Message: "Uploaded file does not match the declared checksum"}
+	StorageUnavailable       = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
 )
 
 // --- Avatar errors ---

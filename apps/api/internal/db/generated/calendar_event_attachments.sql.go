@@ -138,7 +138,7 @@ func (q *Queries) GetAttachmentByPublicID(ctx context.Context, publicID []byte) 
 }
 
 const getPendingAttachmentByPublicID = `-- name: GetPendingAttachmentByPublicID :one
-SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size
+SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size, so.sha256
 FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.public_id = ? AND a.enabled = FALSE
@@ -160,6 +160,7 @@ type GetPendingAttachmentByPublicIDRow struct {
 	StorageKey      string         `json:"storageKey"`
 	ContentType     string         `json:"contentType"`
 	ByteSize        uint64         `json:"byteSize"`
+	Sha256          []byte         `json:"sha256"`
 }
 
 // GetPendingAttachmentByPublicID finds a reservation whose upload has not
@@ -185,6 +186,7 @@ func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID [
 		&i.StorageKey,
 		&i.ContentType,
 		&i.ByteSize,
+		&i.Sha256,
 	)
 	return i, err
 }
