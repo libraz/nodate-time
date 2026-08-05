@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon';
 import { create } from 'zustand';
 import type { Locale } from '@/i18n';
+import type { AccountPreferences } from '@/lib/preferences';
+import { detectTimezone } from '@/lib/preferences';
 import { loadJson, saveJson } from '@/lib/storage';
 import type { ColorMode, ThemeStyle } from '@/lib/theme';
 import type { CalendarView } from '@/types/calendar';
@@ -58,6 +60,14 @@ interface UiState {
   setLocale: (locale: Locale) => void;
   setTimezone: (tz: string) => void;
   setHolidaysCountry: (country: string | null) => void;
+  /**
+   * Takes on the preferences stored against the signed-in account.
+   *
+   * The account decides, not the device: a timezone read from the browser
+   * makes a calendar say different times on a laptop and a phone, and the
+   * one thing a calendar cannot afford to be is device-dependent.
+   */
+  adoptAccountPreferences: (prefs: AccountPreferences) => void;
   resetSessionUi: () => void;
 }
 
@@ -82,7 +92,7 @@ export const useUiStore = create<UiState>((set) => ({
   theme: loadJson<ThemeStyle>('theme', 'glass'),
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
   locale: loadJson<Locale>('locale', 'ja'),
-  timezone: loadJson<string>('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'),
+  timezone: loadJson<string>('timezone', detectTimezone()),
   holidaysCountry: loadJson<string | null>('holidaysCountry', 'JP'),
 
   setCalendarView: (view) => set({ calendarView: view }),
@@ -142,6 +152,19 @@ export const useUiStore = create<UiState>((set) => ({
   setHolidaysCountry: (country) => {
     saveJson('holidaysCountry', country);
     set({ holidaysCountry: country });
+  },
+  adoptAccountPreferences: (prefs) => {
+    // Persisted as well as applied: the next reload reads local storage
+    // before the account has been fetched, and a flash of the wrong
+    // timezone moves every event on screen.
+    if (prefs.locale) {
+      saveJson('locale', prefs.locale);
+      set({ locale: prefs.locale });
+    }
+    if (prefs.timezone) {
+      saveJson('timezone', prefs.timezone);
+      set({ timezone: prefs.timezone });
+    }
   },
   resetSessionUi: () =>
     set({

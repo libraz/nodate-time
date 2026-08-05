@@ -19,7 +19,7 @@ export function SettingsModal() {
   const locale = useUiStore((s) => s.locale);
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
-  const setLocale = useUiStore((s) => s.setLocale);
+  const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
 
   if (!showSettings) return null;
 
@@ -113,7 +113,11 @@ export function SettingsModal() {
                     key={v}
                     type="button"
                     data-active={locale === v}
-                    onClick={() => setLocale(v)}
+                    onClick={() => {
+                      saveAccountPreference({ locale: v }).catch((e) =>
+                        toast.error(errorMessage(e)),
+                      );
+                    }}
                     className="flex-1"
                   >
                     {v === 'ja' ? '\u65E5\u672C\u8A9E' : 'English'}

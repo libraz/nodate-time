@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
-import { useT } from '@/i18n';
+import { type Locale, useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { HOLIDAY_COUNTRIES } from '@/lib/holidays';
 import {
@@ -13,6 +13,7 @@ import {
   INVITE_ROLE_OPTIONS,
   roleLabelKey,
 } from '@/lib/permissions';
+import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
@@ -658,17 +659,17 @@ function AppearanceSection() {
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
-  const setLocale = useUiStore((s) => s.setLocale);
-  const setTimezone = useUiStore((s) => s.setTimezone);
   const setHolidaysCountry = useUiStore((s) => s.setHolidaysCountry);
+  const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
 
-  const detectedTz = useMemo(() => {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    } catch {
-      return 'UTC';
-    }
-  }, []);
+  const detectedTz = useMemo(detectTimezone, []);
+
+  // Language and timezone belong to the account: they decide what every date
+  // on screen says, and a person reading the same calendar on a phone and a
+  // laptop is entitled to the same answer on both.
+  const savePreference = (prefs: { locale?: Locale; timezone?: string }) => {
+    saveAccountPreference(prefs).catch((e) => toast.error(errorMessage(e)));
+  };
 
   return (
     <>
@@ -697,7 +698,7 @@ function AppearanceSection() {
           <SegmentedControl
             ariaLabel={t('settings.language')}
             value={locale}
-            onChange={setLocale}
+            onChange={(next) => savePreference({ locale: next })}
             options={[
               { value: 'ja', label: '日本語' },
               { value: 'en', label: 'English' },
@@ -710,7 +711,7 @@ function AppearanceSection() {
         <FieldRow label={t('settings.timezone')} hint={detectedTz}>
           <CustomSelect
             value={timezone}
-            onChange={setTimezone}
+            onChange={(next) => savePreference({ timezone: next })}
             className="w-full max-w-[420px]"
             triggerClassName="input-modern"
             options={Array.from(new Set([detectedTz, ...TIMEZONE_OPTIONS])).map((tz) => ({

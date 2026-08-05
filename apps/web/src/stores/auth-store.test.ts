@@ -368,3 +368,65 @@ describe('fetchMe', () => {
     expect(s.initError).toBeNull();
   });
 });
+
+/**
+ * Language and timezone belong to the account. A timezone that lives only in
+ * one browser makes the same calendar say different times on a phone and a
+ * laptop, and neither of them is wrong from where it is standing.
+ */
+describe('account preferences', () => {
+  it('takes on the account timezone on sign-in rather than the device one', async () => {
+    useUiStore.setState({ timezone: 'America/New_York', locale: 'en' });
+    mockApi.post.mockResolvedValue({
+      token: 't',
+      refreshToken: 'r',
+      user: { ...sampleUser, locale: 'ja', timezone: 'Europe/Paris' },
+    } as never);
+
+    await useAuthStore.getState().login('alice@example.com', 'pw');
+
+    expect(useUiStore.getState().timezone).toBe('Europe/Paris');
+    expect(useUiStore.getState().locale).toBe('ja');
+  });
+
+  it('takes it on when the session is restored, not only when signing in', async () => {
+    useUiStore.setState({ timezone: 'America/New_York' });
+    mockHasToken.mockReturnValue(true);
+    mockApi.get.mockResolvedValue({ ...sampleUser, timezone: 'Europe/Paris' } as never);
+
+    await useAuthStore.getState().fetchMe();
+
+    expect(useUiStore.getState().timezone).toBe('Europe/Paris');
+  });
+
+  it('ignores a preference this build cannot honour', async () => {
+    useUiStore.setState({ timezone: 'Asia/Tokyo', locale: 'ja' });
+    mockHasToken.mockReturnValue(true);
+    mockApi.get.mockResolvedValue({
+      ...sampleUser,
+      locale: 'fr',
+      timezone: 'Mars/Olympus_Mons',
+    } as never);
+
+    await useAuthStore.getState().fetchMe();
+
+    // Adopting either would render every label as its own key, or make every
+    // date format throw. Keeping what works is the lesser wrong.
+    expect(useUiStore.getState().locale).toBe('ja');
+    expect(useUiStore.getState().timezone).toBe('Asia/Tokyo');
+  });
+
+  it('stores a changed preference against the account, keeping the name', async () => {
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+    mockApi.put.mockResolvedValue({ ...sampleUser, timezone: 'Europe/Paris' } as never);
+
+    await useAuthStore.getState().saveAccountPreference({ timezone: 'Europe/Paris' });
+
+    // The endpoint requires a name; sending the preference alone is a 422.
+    expect(mockApi.put).toHaveBeenCalledWith('/user', {
+      name: 'Alice',
+      timezone: 'Europe/Paris',
+    });
+    expect(useUiStore.getState().timezone).toBe('Europe/Paris');
+  });
+});
