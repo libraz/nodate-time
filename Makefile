@@ -46,6 +46,7 @@ sqlc:
 # layered sources they are generated from.
 verify-codegen:
 	bash scripts/check-codegen-drift.sh
+	bash scripts/check-error-messages.sh
 
 # API
 api:

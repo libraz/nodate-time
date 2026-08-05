@@ -406,6 +406,7 @@ export const ja = {
   'invites.linkUnavailable': 'リンクは再表示できません。取り消して作り直してください',
 
   // Errors
+  'error.serverUnavailable': 'サーバに接続できません。少し待ってからお試しください',
   'error.generic': 'エラーが発生しました',
   'error.noPermission': 'この操作を行う権限がありません',
   'error.sessionExpired': 'セッションの有効期限が切れました。再度ログインしてください',
@@ -486,6 +487,60 @@ export const ja = {
   'activity.revoked': '失効',
   'activity.published': '公開',
   'activity.loadMore': 'さらに読み込む',
+
+  // One entry per API error code. The server names the failure; this is
+  // where it is said in the reader's language.
+  'apiError.AUTH.TOKEN_MISSING': '認証情報が送信されていません',
+  'apiError.AUTH.TOKEN_INVALID':
+    'サインインの有効期限が切れています。もう一度サインインしてください',
+  'apiError.AUTH.EMAIL_EXISTS': 'このメールアドレスは既に登録されています',
+  'apiError.AUTH.REGISTER_FAILED': '入力された内容では登録できません',
+  'apiError.AUTH.BAD_CREDENTIALS': 'メールアドレスまたはパスワードが違います',
+  'apiError.AUTH.WRONG_PASSWORD': '現在のパスワードが違います',
+  'apiError.AUTH.RESET_INVALID': 'パスワード再設定のリンクが無効か、有効期限が切れています',
+  'apiError.AUTH.VERIFICATION_INVALID': '確認用のリンクが無効か、有効期限が切れています',
+  'apiError.AUTH.OAUTH_FAILED': '外部サービスでの認証に失敗しました',
+  'apiError.AUTH.SIGNUP_NOT_ALLOWED':
+    'このメールアドレスでは登録できません。管理者にお問い合わせください',
+  'apiError.AUTH.ADMIN_REQUIRED': '管理者権限が必要です',
+  'apiError.AUTH.SESSION_NOT_FOUND': '対象のセッションが見つかりません',
+  'apiError.SECRETS.UNAVAILABLE': 'サーバの暗号鍵が設定されていないため、この操作は実行できません',
+  'apiError.CALENDAR.NOT_FOUND': 'カレンダーが見つかりません',
+  'apiError.CALENDAR.ACCESS_DENIED': 'このカレンダーにアクセスする権限がありません',
+  'apiError.CALENDAR.ROLE_REQUIRED': 'この操作を行う権限がありません',
+  'apiError.EVENT.NOT_FOUND': '予定が見つかりません',
+  'apiError.EVENT.ACCESS_DENIED': 'この予定にアクセスする権限がありません',
+  'apiError.EVENT.EDIT_DENIED': 'この予定を編集する権限がありません',
+  'apiError.EVENT.NOT_ATTENDEE': 'この予定の参加者ではありません',
+  'apiError.COMMENT.NOT_FOUND': 'コメントが見つかりません',
+  'apiError.COMMENT.ACCESS_DENIED': '編集できるのは自分のコメントだけです',
+  'apiError.CHECKLIST.NOT_FOUND': 'チェックリストの項目が見つかりません',
+  'apiError.ATTACHMENT.NOT_FOUND': '添付ファイルが見つかりません',
+  'apiError.ATTACHMENT.TOO_LARGE': 'ファイルが上限の 100MB を超えています',
+  'apiError.ATTACHMENT.DIGEST_MISMATCH': 'アップロードされたファイルが申告された内容と一致しません',
+  'apiError.STORAGE.UNAVAILABLE': 'ファイル保管庫に接続できません',
+  'apiError.AVATAR.NOT_FOUND': 'アイコンのアップロードセッションが見つかりません',
+  'apiError.AVATAR.TOO_LARGE': 'アイコンが上限の 5MB を超えています',
+  'apiError.AVATAR.UPLOAD_INVALID': 'アップロードされたアイコンが申告された内容と一致しません',
+  'apiError.AVATAR.UPLOAD_LIMIT':
+    'アイコンのアップロードが多すぎます。少し待ってからお試しください',
+  'apiError.IMAGE.INVALID_CONTENT_TYPE': 'JPEG・PNG・WebP の画像のみアップロードできます',
+  'apiError.ALBUM.NOT_FOUND': 'アルバムの写真が見つかりません',
+  'apiError.ALBUM.TOO_LARGE': '写真が上限の 20MB を超えています',
+  'apiError.MEMBER.NOT_FOUND': 'メンバーが見つかりません',
+  'apiError.MEMBER.ALREADY_EXISTS': 'このユーザは既にカレンダーのメンバーです',
+  'apiError.MEMBER.LAST_ADMIN': '最後の管理者は外せません',
+  'apiError.MEMBER.SELF_MODIFY': '自分のメンバーシップは変更できません',
+  'apiError.INVITE.NOT_FOUND': '招待リンクが見つからないか、有効期限が切れています',
+  'apiError.INVITE.EXPIRED': '招待リンクの有効期限が切れたか、使用回数の上限に達しています',
+  'apiError.INVITE.PUBLIC_VIEW_ONLY': 'これは閲覧専用の公開リンクのため、参加はできません',
+  'apiError.INVITE.PUBLIC_ALREADY_EXISTS': 'このカレンダーには既に有効な公開リンクがあります',
+  'apiError.MEMO.NOT_FOUND': 'メモが見つかりません',
+  'apiError.INTERNAL.UNEXPECTED': '予期しないエラーが発生しました',
+  'apiError.REQUEST.INVALID': 'リクエストの内容が正しくありません',
+  'apiError.NOT_FOUND': '対象が見つかりません',
+  'apiError.CONFLICT': '既に存在しています',
+  'apiError.RATE.LIMITED': 'リクエストが多すぎます。少し待ってからお試しください',
 } as const;
 
 export type TranslationKey = keyof typeof ja;
