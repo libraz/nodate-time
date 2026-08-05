@@ -36,6 +36,25 @@ export function getMonthDays(year: number, month: number, zone?: string): DateTi
   return days;
 }
 
+/**
+ * The days a month grid actually draws, as the inclusive date range to ask the
+ * API for.
+ *
+ * A month view is 35 or 42 cells, so it always shows some of the month before
+ * and after. Fetching the month itself leaves those cells permanently empty,
+ * which reads as "nothing planned" rather than "not asked for".
+ */
+export function gridRange(month: DateTime, zone?: string): { start: string; end: string } {
+  const days = getMonthDays(month.year, month.month - 1, zone);
+  const first = days[0];
+  const last = days[days.length - 1];
+  const fallback = month.toISODate() ?? '';
+  return {
+    start: first?.toISODate() ?? fallback,
+    end: last?.toISODate() ?? fallback,
+  };
+}
+
 export function getWeekDays(date: DateTime, zone?: string): DateTime[] {
   const anchored = zone && zone.length > 0 ? date.setZone(zone, { keepLocalTime: true }) : date;
   const dayOfWeek = anchored.weekday % 7;

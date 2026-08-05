@@ -3,7 +3,7 @@ import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { ApiError, api, hasToken } from '@/lib/api';
-import { formatMonthYear, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
 import { publicEventOccursOnDay } from '@/lib/public-calendar';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -34,6 +34,7 @@ export const Route = createFileRoute('/share/$token')({
 function SharedCalendarView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
   const { token } = Route.useParams();
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
@@ -79,13 +80,16 @@ function SharedCalendarView() {
 
   useEffect(() => {
     if (!calendar) return;
-    const start = currentMonth.toISODate();
-    const end = currentMonth.endOf('month').toISODate();
+    // The grid draws part of the neighbouring months, and the dates are days
+    // in the zone this page renders -- both have to be said, or the edge cells
+    // stay empty and an event near a month boundary lands in the wrong one.
+    const { start, end } = gridRange(currentMonth, timezone);
+    const tz = encodeURIComponent(timezone);
     api
-      .get<PublicEvent[]>(`/share/${token}/events?start=${start}&end=${end}`, true)
+      .get<PublicEvent[]>(`/share/${token}/events?start=${start}&end=${end}&tz=${tz}`, true)
       .then(setEvents)
       .catch(() => setEvents([]));
-  }, [token, calendar, currentMonth]);
+  }, [token, calendar, currentMonth, timezone]);
 
   if (error) {
     return (
@@ -121,7 +125,7 @@ function SharedCalendarView() {
     );
   }
 
-  const days = getMonthDays(currentMonth.year, currentMonth.month - 1);
+  const days = getMonthDays(currentMonth.year, currentMonth.month - 1, timezone);
   const weeks: DateTime[][] = [];
   for (let i = 0; i < days.length; i += 7) {
     weeks.push(days.slice(i, i + 7));

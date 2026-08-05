@@ -33,9 +33,12 @@ func createDailyAcrossSpringForward(t *testing.T, calURL, token string) []recIns
 		}, &evt)
 	require.NotEmpty(t, evt.ID)
 
+	// The dates are New York days, which is where the series lives; read as
+	// days anywhere else the window covers a different set of instants and
+	// clips an occurrence off the end.
 	var evts []recInstance
 	helpers.DoJSON(t, http.MethodGet,
-		calURL+"/events?start=2026-03-05&end=2026-03-12", token, nil, &evts)
+		calURL+"/events?start=2026-03-05&end=2026-03-12&tz=America/New_York", token, nil, &evts)
 	require.Len(t, evts, 8)
 	return evts
 }
@@ -117,7 +120,7 @@ func TestCancellingTheTransitionDayOccurrenceLeavesItsNeighbours(t *testing.T) {
 
 	var after []recInstance
 	helpers.DoJSON(t, http.MethodGet,
-		calURL+"/events?start=2026-03-05&end=2026-03-12", tt.AccessToken, nil, &after)
+		calURL+"/events?start=2026-03-05&end=2026-03-12&tz=America/New_York", tt.AccessToken, nil, &after)
 	require.Len(t, after, 7)
 	for _, e := range after {
 		require.NotEqual(t, target.StartAt, e.StartAt, "the cancelled occurrence must be gone")
