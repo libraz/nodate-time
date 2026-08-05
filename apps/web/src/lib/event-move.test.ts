@@ -16,6 +16,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     ownerId: null,
     showAs: 'busy',
     flexibility: 'fixed',
+    visibility: 'default',
     location: '',
     memo: '',
     url: '',

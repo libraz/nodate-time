@@ -23,6 +23,7 @@ function makeEvent(
     ownerId: null,
     showAs: 'busy',
     flexibility: 'fixed',
+    visibility: 'default',
     location: '',
     memo: '',
     url: '',

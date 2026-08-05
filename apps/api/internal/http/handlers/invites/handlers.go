@@ -443,12 +443,21 @@ func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*Pub
 // their details are not for everyone, and the link does not override that:
 // those show as taken time with no title.
 func publicEventFields(e generated.CalendarEvent) (title, location string, private bool) {
-	switch e.Visibility {
-	case generated.CalendarEventsVisibilityPrivate, generated.CalendarEventsVisibilityConfidential:
+	if e.Visibility == generated.CalendarEventsVisibilityPrivate {
 		return "", "", true
-	default:
-		return e.Title, nullStringValue(e.Location), false
 	}
+	return e.Title, nullStringValue(e.Location), false
+}
+
+// publishedToLink reports whether an event belongs in a public feed at all.
+//
+// Private and confidential differ in kind, not degree: private hides the
+// details but still says the time is taken, while confidential says the event
+// is nobody else's business. Publishing a confidential event as an anonymous
+// busy block still tells a stranger when its owner is occupied, which is the
+// thing the setting exists to withhold.
+func publishedToLink(e generated.CalendarEvent) bool {
+	return e.Visibility != generated.CalendarEventsVisibilityConfidential
 }
 
 func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicEventsOutput, error) {
@@ -508,7 +517,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 
 		var results []PublicEventResponse
 		for _, e := range rows {
-			if !e.StartAt.Valid || !e.EndAt.Valid {
+			if !e.StartAt.Valid || !e.EndAt.Valid || !publishedToLink(e) {
 				continue
 			}
 			results = append(results, render(e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time))
@@ -524,6 +533,9 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 
 		for _, e := range recurringRows {
+			if !publishedToLink(e) {
+				continue
+			}
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
 				// The series' own zone decides the day, matching the ids the
@@ -531,7 +543,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 				dateStr := inst.OriginalStart.In(recurrence.LoadLocation(e.Timezone)).Format("20060102")
 				id := fmt.Sprintf("%s_%s", parentID, dateStr)
 				if inst.IsOverride {
-					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
+					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid || !publishedToLink(inst.Event) {
 						continue
 					}
 					results = append(results, render(inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time))

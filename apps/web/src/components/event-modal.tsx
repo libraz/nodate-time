@@ -6,7 +6,13 @@ import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { api, errorMessage } from '@/lib/api';
 import { eventTimesForSave } from '@/lib/event-times';
-import { canEdit, canEditEvent, roleForCalendar } from '@/lib/permissions';
+import {
+  canEdit,
+  canEditEvent,
+  roleForCalendar,
+  showAsLabelKey,
+  visibilityLabelKey,
+} from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import { useAuthStore } from '@/stores/auth-store';
@@ -19,11 +25,15 @@ import type {
   RecurrencePreset,
   RecurrenceRule,
   Rsvp,
+  ShowAs,
+  Visibility,
 } from '@/types/calendar';
 import {
   FALLBACK_LABEL_COLOR,
   NOTIFICATION_OFFSETS,
   normalizeNotificationOffset,
+  SHOW_AS_OPTIONS,
+  VISIBILITY_OPTIONS,
 } from '@/types/calendar';
 
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
@@ -781,6 +791,8 @@ interface FormState {
   notificationOffset: number | null;
   participants: string[];
   ownerId: string | null;
+  visibility: Visibility;
+  showAs: ShowAs;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
 }
@@ -899,6 +911,8 @@ export function EventModal() {
     notificationOffset: null,
     participants: [],
     ownerId: null,
+    visibility: 'default',
+    showAs: 'busy',
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
@@ -972,6 +986,8 @@ export function EventModal() {
         notificationOffset: editingEvent.notificationOffset ?? null,
         participants: editingEvent.participants ?? [],
         ownerId: editingEvent.ownerId ?? null,
+        visibility: editingEvent.visibility ?? 'default',
+        showAs: editingEvent.showAs ?? 'busy',
         recurrenceRule: rule,
         recurrencePreset: preset,
       });
@@ -1008,6 +1024,8 @@ export function EventModal() {
         notificationOffset: null,
         participants: [],
         ownerId: null,
+        visibility: 'default',
+        showAs: 'busy',
         recurrencePreset: 'none',
         recurrenceRule: null,
       });
@@ -1060,6 +1078,8 @@ export function EventModal() {
         notificationOffset: normalizeNotificationOffset(form.notificationOffset),
         participants: form.participants,
         ownerId: form.ownerId,
+        visibility: form.visibility,
+        showAs: form.showAs,
         recurrenceRule: normalizeRuleForApi(form.recurrenceRule, anchorZone),
       };
       setSaving(true);
@@ -1965,6 +1985,39 @@ export function EventModal() {
                       notificationOffset: v === 'none' ? null : Number(v),
                     }));
                   }}
+                  className="flex-1"
+                />
+              </div>
+
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+
+              {/* Visibility on a shared link, and whether the time reads as taken */}
+              <div className="flex items-center gap-3 py-1.5">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-text-tertiary)"
+                  strokeWidth="2"
+                  className="shrink-0"
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" />
+                  <path d="M7 11V7a5 5 0 0110 0v4" />
+                </svg>
+                <CustomSelect
+                  value={form.visibility}
+                  options={VISIBILITY_OPTIONS.map((v) => ({
+                    value: v,
+                    label: t(visibilityLabelKey(v)),
+                  }))}
+                  onChange={(v) => setForm((f) => ({ ...f, visibility: v as Visibility }))}
+                  className="flex-1"
+                />
+                <CustomSelect
+                  value={form.showAs}
+                  options={SHOW_AS_OPTIONS.map((v) => ({ value: v, label: t(showAsLabelKey(v)) }))}
+                  onChange={(v) => setForm((f) => ({ ...f, showAs: v as ShowAs }))}
                   className="flex-1"
                 />
               </div>

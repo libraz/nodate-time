@@ -140,6 +140,23 @@ func showAsOrDefault(s string) generated.CalendarEventsShowAs {
 	}
 }
 
+// visibilityOrDefault falls back to the calendar's own setting rather than
+// guessing. Reading an unknown value as public would publish something its
+// owner marked as not for everyone, which is the one mistake this axis exists
+// to prevent.
+func visibilityOrDefault(s string) generated.CalendarEventsVisibility {
+	switch generated.CalendarEventsVisibility(s) {
+	case generated.CalendarEventsVisibilityPublic:
+		return generated.CalendarEventsVisibilityPublic
+	case generated.CalendarEventsVisibilityPrivate:
+		return generated.CalendarEventsVisibilityPrivate
+	case generated.CalendarEventsVisibilityConfidential:
+		return generated.CalendarEventsVisibilityConfidential
+	default:
+		return generated.CalendarEventsVisibilityDefault
+	}
+}
+
 // flexibilityOrDefault defaults to fixed. Assuming an unspecified
 // commitment is movable would advertise availability its owner never
 // agreed to.
@@ -190,6 +207,7 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 		URL:                nullStringValue(e.URL),
 		ShowAs:             string(e.ShowAs),
 		Flexibility:        string(e.Flexibility),
+		Visibility:         string(e.Visibility),
 		NotificationOffset: nullInt32ToPtr(e.NotificationOffset),
 		Participants:       []string{},
 		Attendees:          []AttendeeResponse{},
@@ -804,7 +822,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				WorkspaceID:        deps.WorkspaceID,
 				CalendarID:         cal.ID,
 				Kind:               generated.CalendarEventsKindEvent,
-				Visibility:         generated.CalendarEventsVisibilityDefault,
+				Visibility:         visibilityOrDefault(in.Body.Visibility),
 				ShowAs:             showAsOrDefault(in.Body.ShowAs),
 				Flexibility:        flexibilityOrDefault(in.Body.Flexibility),
 				Title:              in.Body.Title,
@@ -906,6 +924,28 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(spec)
 		}
 
+		// Omitting visibility keeps what the event already has, the same way
+		// timezone works. Treating the omission as "default" would quietly
+		// republish an event somebody had marked private, and every edit made
+		// by a client that does not know the field would do it.
+		visibility := evt.Visibility
+		if in.Body.Visibility != "" {
+			visibility = visibilityOrDefault(in.Body.Visibility)
+		}
+
+		// Same for the two availability axes. A client that does not send them
+		// -- a drag, which only means to move the event -- would otherwise
+		// reset an out-of-office block to busy and a negotiable meeting to
+		// fixed on every move.
+		showAs := evt.ShowAs
+		if in.Body.ShowAs != "" {
+			showAs = showAsOrDefault(in.Body.ShowAs)
+		}
+		flexibility := evt.Flexibility
+		if in.Body.Flexibility != "" {
+			flexibility = flexibilityOrDefault(in.Body.Flexibility)
+		}
+
 		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, evt.OwnerUserID)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
@@ -959,9 +999,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 					WorkspaceID:             deps.WorkspaceID,
 					CalendarID:              cal.ID,
 					Kind:                    evt.Kind,
-					Visibility:              evt.Visibility,
-					ShowAs:                  showAsOrDefault(in.Body.ShowAs),
-					Flexibility:             flexibilityOrDefault(in.Body.Flexibility),
+					Visibility:              visibility,
+					ShowAs:                  showAs,
+					Flexibility:             flexibility,
 					Title:                   in.Body.Title,
 					AllDay:                  in.Body.AllDay,
 					StartAt:                 sql.NullTime{Time: startAt, Valid: true},
@@ -1075,9 +1115,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 
 			if err := q.UpdateCalendarEvent(ctx, generated.UpdateCalendarEventParams{
 				Kind:               evt.Kind,
-				Visibility:         evt.Visibility,
-				ShowAs:             showAsOrDefault(in.Body.ShowAs),
-				Flexibility:        flexibilityOrDefault(in.Body.Flexibility),
+				Visibility:         visibility,
+				ShowAs:             showAs,
+				Flexibility:        flexibility,
 				Title:              in.Body.Title,
 				AllDay:             in.Body.AllDay,
 				StartAt:            sql.NullTime{Time: startAt, Valid: true},

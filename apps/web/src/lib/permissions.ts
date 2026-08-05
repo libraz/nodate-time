@@ -29,6 +29,34 @@ export const INVITE_ROLE_OPTIONS: Role[] = ['editor', 'viewer'];
 /** Default role for newly created invites / share links. */
 export const DEFAULT_INVITE_ROLE: Role = 'editor';
 
+/** i18n key for each visibility's display label. */
+export function visibilityLabelKey(visibility: string): TranslationKey {
+  switch (visibility) {
+    case 'public':
+      return 'event.visibilityPublic';
+    case 'private':
+      return 'event.visibilityPrivate';
+    case 'confidential':
+      return 'event.visibilityConfidential';
+    default:
+      return 'event.visibilityDefault';
+  }
+}
+
+/** i18n key for each availability value's display label. */
+export function showAsLabelKey(showAs: string): TranslationKey {
+  switch (showAs) {
+    case 'free':
+      return 'event.showAsFree';
+    case 'tentative':
+      return 'event.showAsTentative';
+    case 'oof':
+      return 'event.showAsOof';
+    default:
+      return 'event.showAsBusy';
+  }
+}
+
 /** i18n key for each role's display label. */
 export function roleLabelKey(role: string): TranslationKey {
   switch (role) {

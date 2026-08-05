@@ -487,10 +487,68 @@ func buildICS(calName string, rows []exportEvent) string {
 		if e.URL.Valid && e.URL.String != "" {
 			writeFolded(&b, "URL:"+icsURI(e.URL.String))
 		}
+		if class := icsClass(e.Visibility); class != "" {
+			writeFolded(&b, "CLASS:"+class)
+		}
+		writeFolded(&b, "TRANSP:"+icsTransp(e.ShowAs))
 		writeFolded(&b, "END:VEVENT")
 	}
 	writeFolded(&b, "END:VCALENDAR")
 	return b.String()
+}
+
+// icsTransp renders the availability axis. iCalendar only distinguishes taken
+// from free, so the two shades in between -- tentative and out of office --
+// both read as taken, which is the answer that does not advertise time its
+// owner has not offered.
+func icsTransp(s generated.CalendarEventsShowAs) string {
+	if s == generated.CalendarEventsShowAsFree {
+		return "TRANSPARENT"
+	}
+	return "OPAQUE"
+}
+
+// importTransp reads TRANSP back. Only the free end of the axis is carried,
+// because that is all the property can say; the finer values survive only in
+// events this product wrote.
+func importTransp(transp string) generated.CalendarEventsShowAs {
+	if transp == "TRANSPARENT" {
+		return generated.CalendarEventsShowAsFree
+	}
+	return generated.CalendarEventsShowAsBusy
+}
+
+// importVisibility reads a CLASS property back onto the visibility axis. An
+// absent or unrecognised value means the calendar default, which is what a
+// file without the property is saying.
+func importVisibility(class string) generated.CalendarEventsVisibility {
+	switch class {
+	case "PUBLIC":
+		return generated.CalendarEventsVisibilityPublic
+	case "PRIVATE":
+		return generated.CalendarEventsVisibilityPrivate
+	case "CONFIDENTIAL":
+		return generated.CalendarEventsVisibilityConfidential
+	default:
+		return generated.CalendarEventsVisibilityDefault
+	}
+}
+
+// icsClass renders the visibility axis as the property receiving clients
+// already understand. Nothing is written for the calendar default, which is
+// what an absent CLASS means; an event marked as not for everyone carries the
+// marking into the file, so the export does not quietly strip it.
+func icsClass(v generated.CalendarEventsVisibility) string {
+	switch v {
+	case generated.CalendarEventsVisibilityPublic:
+		return "PUBLIC"
+	case generated.CalendarEventsVisibilityPrivate:
+		return "PRIVATE"
+	case generated.CalendarEventsVisibilityConfidential:
+		return "CONFIDENTIAL"
+	default:
+		return ""
+	}
 }
 
 func csvEscape(s string) string {
@@ -563,11 +621,17 @@ type rawEvent struct {
 	location string
 	desc     string
 	url      string
-	start    time.Time
-	end      time.Time
-	allDay   bool
-	tzid     string
-	rrule    string
+	// class is the CLASS property, which carries the same axis as an event's
+	// visibility. An unrecognised value imports as the calendar default.
+	class string
+	// transp is the TRANSP property, the free/busy half of the availability
+	// axis.
+	transp string
+	start  time.Time
+	end    time.Time
+	allDay bool
+	tzid   string
+	rrule  string
 	// exdates are the occurrences the series cancels.
 	exdates []time.Time
 	// recurrenceID names the occurrence this entry replaces; when set the
@@ -644,6 +708,10 @@ func parseICS(text string) []rawEvent {
 				cur.desc = unescapeICS(val)
 			case "URL":
 				cur.url = val
+			case "CLASS":
+				cur.class = strings.ToUpper(strings.TrimSpace(val))
+			case "TRANSP":
+				cur.transp = strings.ToUpper(strings.TrimSpace(val))
 			case "RRULE":
 				cur.rrule = val
 			case "DTSTART":
@@ -974,8 +1042,8 @@ func importSeriesHead(
 			WorkspaceID:     deps.WorkspaceID,
 			CalendarID:      cal.ID,
 			Kind:            generated.CalendarEventsKindEvent,
-			Visibility:      generated.CalendarEventsVisibilityDefault,
-			ShowAs:          generated.CalendarEventsShowAsBusy,
+			Visibility:      importVisibility(e.class),
+			ShowAs:          importTransp(e.transp),
 			Flexibility:     generated.CalendarEventsFlexibilityFixed,
 			Title:           e.summary,
 			AllDay:          e.allDay,
@@ -1050,8 +1118,8 @@ func importChangedOccurrence(
 			WorkspaceID:             deps.WorkspaceID,
 			CalendarID:              cal.ID,
 			Kind:                    generated.CalendarEventsKindEvent,
-			Visibility:              generated.CalendarEventsVisibilityDefault,
-			ShowAs:                  generated.CalendarEventsShowAsBusy,
+			Visibility:              importVisibility(e.class),
+			ShowAs:                  importTransp(e.transp),
 			Flexibility:             generated.CalendarEventsFlexibilityFixed,
 			Title:                   e.summary,
 			AllDay:                  e.allDay,

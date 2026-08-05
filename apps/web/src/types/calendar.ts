@@ -99,6 +99,17 @@ export type ShowAs = 'busy' | 'free' | 'tentative' | 'oof';
  *  cannot move are both busy, which is why this is its own axis. */
 export type Flexibility = 'fixed' | 'negotiable' | 'conditional';
 
+/**
+ * Who may see an event's details. `default` follows the calendar, `private`
+ * publishes the time with no details, and `confidential` is not published at
+ * all.
+ */
+export type Visibility = 'default' | 'public' | 'private' | 'confidential';
+
+/** The option sets shown in pickers, in the order they read best. */
+export const VISIBILITY_OPTIONS: Visibility[] = ['default', 'public', 'private', 'confidential'];
+export const SHOW_AS_OPTIONS: ShowAs[] = ['busy', 'free', 'tentative', 'oof'];
+
 export type Rsvp = 'pending' | 'accepted' | 'declined' | 'tentative';
 
 export interface Attendee {
@@ -126,6 +137,7 @@ export interface CalendarEvent {
   url: string;
   showAs: ShowAs;
   flexibility: Flexibility;
+  visibility: Visibility;
   notificationOffset: number | null;
   participants: string[];
   /** Per-participant state: their answer, and whether the owner has trusted
