@@ -74,6 +74,12 @@ interface CalendarState {
     patch: { name?: string; color?: string; coverUrl?: string },
   ) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
+  /**
+   * Gives up the caller's own membership. Distinct from removing someone
+   * else: the calendar leaves with the membership rather than staying behind
+   * to be refetched.
+   */
+  leaveCalendar: (calendarId: string, memberId: string) => Promise<void>;
 
   addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
   updateEvent: (
@@ -99,6 +105,28 @@ interface CalendarState {
 
   /** Returns the currently visible event window as ISO date strings. */
   visibleRange: () => { start: string; end: string };
+}
+
+/**
+ * Drops every trace of a calendar the session no longer has access to,
+ * whether it was deleted or merely left. Anything kept behind would be
+ * fetched again on the next month change and answered with a 403.
+ */
+function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
+  const ids = s.activeCalendarIds.filter((cid) => cid !== id);
+  saveJson('activeCalendarIds', ids);
+  const nextMap = { ...s.membersMap };
+  delete nextMap[id];
+  const nextErrors = { ...s.memberErrors };
+  delete nextErrors[id];
+  return {
+    calendars: s.calendars.filter((c) => c.id !== id),
+    events: s.events.filter((e) => e.calendarId !== id),
+    memos: s.memos.filter((m) => m.calendarId !== id),
+    activeCalendarIds: ids,
+    membersMap: nextMap,
+    memberErrors: nextErrors,
+  };
 }
 
 let accountGeneration = 0;
@@ -306,22 +334,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async deleteCalendar(id) {
     await api.delete(`/calendars/${id}`);
-    set((s) => {
-      const ids = s.activeCalendarIds.filter((cid) => cid !== id);
-      saveJson('activeCalendarIds', ids);
-      const nextMap = { ...s.membersMap };
-      delete nextMap[id];
-      const nextErrors = { ...s.memberErrors };
-      delete nextErrors[id];
-      return {
-        calendars: s.calendars.filter((c) => c.id !== id),
-        events: s.events.filter((e) => e.calendarId !== id),
-        memos: s.memos.filter((m) => m.calendarId !== id),
-        activeCalendarIds: ids,
-        membersMap: nextMap,
-        memberErrors: nextErrors,
-      };
-    });
+    set((s) => forgetCalendar(s, id));
+  },
+
+  async leaveCalendar(calendarId, memberId) {
+    await api.delete(`/calendars/${calendarId}/members/${memberId}`);
+    // Everything this calendar contributed goes with the membership. Refetching
+    // its members instead -- which is what the generic remove path does -- asks
+    // a calendar the caller has just left, and the 403 that comes back reads as
+    // a failure to leave.
+    set((s) => forgetCalendar(s, calendarId));
   },
 
   async addEvent(calendarId, evt) {

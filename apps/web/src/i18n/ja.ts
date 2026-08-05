@@ -369,6 +369,8 @@ export const ja = {
   'members.roleEditor': '編集者',
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このメンバーを削除しますか?',
+  'members.leaveConfirm': 'このカレンダーから抜けますか? 予定は他のメンバーには残ります',
+  'members.leftCalendar': 'カレンダーから抜けました',
   'members.lastOwner': 'オーナーは最低 1 人必要です',
   'members.selfModify': '自分自身の権限は変更できません',
 
