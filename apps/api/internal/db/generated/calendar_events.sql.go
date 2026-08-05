@@ -550,6 +550,38 @@ func (q *Queries) MarkCalendarEventNotified(ctx context.Context, arg MarkCalenda
 	return err
 }
 
+const retimeRecurrenceOverride = `-- name: RetimeRecurrenceOverride :exec
+UPDATE calendar_events
+SET recurrence_original_start = ?, start_at = ?, end_at = ?
+WHERE id = ?
+`
+
+type RetimeRecurrenceOverrideParams struct {
+	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
+	StartAt                 sql.NullTime `json:"startAt"`
+	EndAt                   sql.NullTime `json:"endAt"`
+	ID                      uint32       `json:"id"`
+}
+
+// RetimeRecurrenceOverride moves one override row with the series it belongs
+// to. The original start moves with it: it identifies which occurrence is
+// replaced, so leaving it behind would orphan the override against a parent
+// that no longer generates that occurrence.
+//
+// The instants are computed by the caller rather than added here. Occurrences
+// step in calendar units in the event's own timezone, so a series that moves
+// across a DST boundary moves by a different number of hours than of days, and
+// an interval added in SQL lands the override off the grid it names.
+func (q *Queries) RetimeRecurrenceOverride(ctx context.Context, arg RetimeRecurrenceOverrideParams) error {
+	_, err := q.db.ExecContext(ctx, retimeRecurrenceOverride,
+		arg.RecurrenceOriginalStart,
+		arg.StartAt,
+		arg.EndAt,
+		arg.ID,
+	)
+	return err
+}
+
 const setRecurrenceExceptions = `-- name: SetRecurrenceExceptions :exec
 UPDATE calendar_events SET recurrence_exceptions = ? WHERE id = ?
 `
@@ -564,35 +596,6 @@ type SetRecurrenceExceptionsParams struct {
 // transaction, not a tombstone row.
 func (q *Queries) SetRecurrenceExceptions(ctx context.Context, arg SetRecurrenceExceptionsParams) error {
 	_, err := q.db.ExecContext(ctx, setRecurrenceExceptions, arg.RecurrenceExceptions, arg.ID)
-	return err
-}
-
-const shiftRecurrenceOverrides = `-- name: ShiftRecurrenceOverrides :exec
-UPDATE calendar_events
-SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), recurrence_original_start),
-    start_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), start_at),
-    end_at = TIMESTAMPADD(MICROSECOND, CAST(? AS SIGNED), end_at)
-WHERE recurrence_parent_id = ?
-`
-
-type ShiftRecurrenceOverridesParams struct {
-	DeltaUs            int64         `json:"deltaUs"`
-	DeltaUs_2          int64         `json:"deltaUs2"`
-	DeltaUs_3          int64         `json:"deltaUs3"`
-	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
-}
-
-// ShiftRecurrenceOverrides moves a series and its overrides together. The
-// original start shifts with the row: it identifies which occurrence is
-// replaced, so leaving it behind would orphan the override against a
-// parent that no longer generates that occurrence.
-func (q *Queries) ShiftRecurrenceOverrides(ctx context.Context, arg ShiftRecurrenceOverridesParams) error {
-	_, err := q.db.ExecContext(ctx, shiftRecurrenceOverrides,
-		arg.DeltaUs,
-		arg.DeltaUs_2,
-		arg.DeltaUs_3,
-		arg.RecurrenceParentID,
-	)
 	return err
 }
 

@@ -72,16 +72,19 @@ ON DUPLICATE KEY UPDATE
 -- name: DeleteRecurrenceOverridesByParent :exec
 DELETE FROM calendar_events WHERE recurrence_parent_id = ?;
 
--- ShiftRecurrenceOverrides moves a series and its overrides together. The
--- original start shifts with the row: it identifies which occurrence is
--- replaced, so leaving it behind would orphan the override against a
--- parent that no longer generates that occurrence.
--- name: ShiftRecurrenceOverrides :exec
+-- RetimeRecurrenceOverride moves one override row with the series it belongs
+-- to. The original start moves with it: it identifies which occurrence is
+-- replaced, so leaving it behind would orphan the override against a parent
+-- that no longer generates that occurrence.
+--
+-- The instants are computed by the caller rather than added here. Occurrences
+-- step in calendar units in the event's own timezone, so a series that moves
+-- across a DST boundary moves by a different number of hours than of days, and
+-- an interval added in SQL lands the override off the grid it names.
+-- name: RetimeRecurrenceOverride :exec
 UPDATE calendar_events
-SET recurrence_original_start = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), recurrence_original_start),
-    start_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), start_at),
-    end_at = TIMESTAMPADD(MICROSECOND, CAST(sqlc.arg(delta_us) AS SIGNED), end_at)
-WHERE recurrence_parent_id = sqlc.arg(recurrence_parent_id);
+SET recurrence_original_start = ?, start_at = ?, end_at = ?
+WHERE id = ?;
 
 -- name: CreateCalendarEvent :execresult
 INSERT INTO calendar_events (
