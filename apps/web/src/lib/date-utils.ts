@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import type { Locale } from '@/i18n';
 import { MONTH_NAMES_EN } from '@/i18n';
+import type { CalendarView } from '@/types/calendar';
 
 const WEEKDAY_LABELS_JA = ['日', '月', '火', '水', '木', '金', '土'] as const;
 const WEEKDAY_LABELS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -53,6 +54,27 @@ export function gridRange(month: DateTime, zone?: string): { start: string; end:
     start: first?.toISODate() ?? fallback,
     end: last?.toISODate() ?? fallback,
   };
+}
+
+/**
+ * The date range a view needs fetched, as ISO dates.
+ *
+ * Views do not all show the same span, and one window sized for the month
+ * grid does not serve them. The year grid draws twelve months of density
+ * dots; given three months of events, nine of them are permanently blank and
+ * read as a year with nothing in it.
+ *
+ * The end is exclusive, matching the API's own range handling.
+ */
+export function fetchWindow(view: CalendarView, month: DateTime): { start: string; end: string } {
+  const [from, to] =
+    view === 'year'
+      ? [month.startOf('year'), month.startOf('year').plus({ years: 1 })]
+      : // A month either side, so scrolling to the neighbouring month has
+        // something to show before its own fetch lands.
+        [month.minus({ months: 1 }).startOf('month'), month.plus({ months: 2 }).startOf('month')];
+  const fallback = month.toISODate() ?? '';
+  return { start: from.toISODate() ?? fallback, end: to.toISODate() ?? fallback };
 }
 
 export function getWeekDays(date: DateTime, zone?: string): DateTime[] {

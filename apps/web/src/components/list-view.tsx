@@ -1,13 +1,12 @@
 import { DateTime } from 'luxon';
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
+import { groupByDay } from '@/lib/agenda';
 import { fromISOInZone } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
-import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { CalendarEvent } from '@/types/calendar';
 
 export function ListView() {
   const t = useT();
@@ -18,23 +17,10 @@ export function ListView() {
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const locale = useUiStore((s) => s.locale);
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    const filtered = events
-      .filter((e) => activeCalendarIds.includes(e.calendarId))
-      .sort(
-        (a, b) =>
-          fromISOInZone(a.startAt, timezone).toMillis() -
-          fromISOInZone(b.startAt, timezone).toMillis(),
-      );
-    for (const evt of filtered) {
-      const key = eventStartDay(evt, timezone).toFormat('yyyy-MM-dd');
-      const arr = map.get(key) ?? [];
-      arr.push(evt);
-      map.set(key, arr);
-    }
-    return Array.from(map.entries());
-  }, [events, activeCalendarIds, timezone]);
+  const grouped = useMemo(
+    () => groupByDay(events, activeCalendarIds, timezone),
+    [events, activeCalendarIds, timezone],
+  );
   const holidayYears = useMemo(
     () => grouped.map(([date]) => Number(date.slice(0, 4))).filter(Number.isFinite),
     [grouped],

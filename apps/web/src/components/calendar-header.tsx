@@ -96,8 +96,6 @@ export function CalendarHeader() {
       navigateMonth(dir);
     }
   };
-  // The list view is a flat agenda with no date window, so it has no paging.
-  const showDateNav = calendarView !== 'list';
 
   const ChevronLeft = () => (
     <svg
@@ -369,8 +367,11 @@ export function CalendarHeader() {
           </div>
         </div>
 
-        {/* Week/year paging (month uses infinite scroll; list is a flat agenda) */}
-        {showDateNav && calendarView !== 'month' && (
+        {/* Week/year/list paging. The month view is an infinite scroll and
+            pages itself; every other view here shows the window that was
+            fetched, and without these its events are unreachable rather than
+            merely off screen. */}
+        {calendarView !== 'month' && (
           <div className="flex shrink-0 items-center">
             <button
               type="button"

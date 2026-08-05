@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import {
+  fetchWindow,
   formatDateKey,
   formatMonthYear,
   formatTime,
@@ -132,5 +133,27 @@ describe('gridRange', () => {
     const { start, end } = gridRange(month, 'UTC');
     expect(start).toBe('2026-03-01');
     expect(DateTime.fromISO(end).diff(DateTime.fromISO(start), 'days').days).toBeGreaterThan(27);
+  });
+});
+
+describe('fetchWindow', () => {
+  const august = DateTime.fromISO('2026-08-01T00:00:00', { zone: 'Asia/Tokyo' });
+
+  it('asks for the whole year when the year grid is showing', () => {
+    // The year grid draws twelve months of density dots. Given the month
+    // window, nine of them are permanently blank and read as a year with
+    // nothing planned in it.
+    expect(fetchWindow('year', august)).toEqual({ start: '2026-01-01', end: '2027-01-01' });
+  });
+
+  it('asks for a month either side for the other views', () => {
+    for (const view of ['month', 'week', 'list'] as const) {
+      expect(fetchWindow(view, august)).toEqual({ start: '2026-07-01', end: '2026-10-01' });
+    }
+  });
+
+  it('crosses the year boundary rather than clipping at it', () => {
+    const december = DateTime.fromISO('2026-12-01T00:00:00', { zone: 'Asia/Tokyo' });
+    expect(fetchWindow('month', december)).toEqual({ start: '2026-11-01', end: '2027-02-01' });
   });
 });
