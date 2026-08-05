@@ -54,11 +54,28 @@ type Deps struct {
 	// endpoints. Zero applies the default (60/min); a negative value disables the
 	// limiter entirely (used by parallel integration tests).
 	AuthRateLimit int
+	// ShareRateLimit is the budget for public share links, counted separately.
+	//
+	// A share link is meant to be opened by many people, and one page view
+	// costs more than one request. Counted against the sign-in budget, an
+	// ordinary audience behind one address exhausts the limit that exists to
+	// slow down credential guessing -- and locks out sign-in for everyone
+	// sharing that address. Zero applies the default; negative disables.
+	ShareRateLimit int
 	// TrustedProxies lists reverse-proxy hops allowed to set X-Forwarded-For for
 	// per-client rate limiting. Nil trusts no proxy: RemoteAddr is always used.
 	// See config.Config.TrustedProxyList.
 	TrustedProxies []netip.Prefix
 }
+
+// Default per-IP budgets, per minute. Sign-in is deliberately tight: the
+// requests it covers are the ones worth guessing at. A share link is opened by
+// an audience rather than an attacker, so its budget is sized for a page view
+// costing more than one request.
+const (
+	defaultAuthRateLimit  = 60
+	defaultShareRateLimit = 600
+)
 
 func Build(deps Deps) http.Handler {
 	r := chi.NewRouter()
@@ -80,7 +97,11 @@ func Build(deps Deps) http.Handler {
 	// brute-force and password-reset mail-bombing.
 	authLimit := deps.AuthRateLimit
 	if authLimit == 0 {
-		authLimit = 60
+		authLimit = defaultAuthRateLimit
+	}
+	shareLimit := deps.ShareRateLimit
+	if shareLimit == 0 {
+		shareLimit = defaultShareRateLimit
 	}
 	r.Group(func(pub chi.Router) {
 		if authLimit > 0 {
@@ -201,7 +222,14 @@ func Build(deps Deps) http.Handler {
 			Tags:        []string{"Auth"},
 		}, users.OAuthCallback(oauthDeps))
 
-		// Public share (no auth)
+	})
+
+	// --- Public share links (no auth, counted on their own budget) ---
+	r.Group(func(share chi.Router) {
+		if shareLimit > 0 {
+			share.Use(middleware.NewRateLimiter(shareLimit, time.Minute, deps.TrustedProxies).Middleware())
+		}
+		api := humachi.New(share, apiConfig)
 		invPubDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
 
 		huma.Register(api, huma.Operation{

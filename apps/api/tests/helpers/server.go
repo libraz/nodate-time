@@ -122,6 +122,9 @@ func buildHandler(db *sql.DB, mc *CapturingMailer, sc *storage.Client) *router.D
 		// Parallel tenants register from one loopback IP; the per-IP limiter would
 		// otherwise reject them with 429.
 		AuthRateLimit: -1,
+		// Likewise for the share budget: a parallel run reads many links from
+		// the same address.
+		ShareRateLimit: -1,
 		// The test client is the only peer, so treating loopback as a proxy hop
 		// lets a test present an arbitrary client address — including a
 		// full-length IPv6 one, which an httptest listener never produces on its

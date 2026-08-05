@@ -58,6 +58,14 @@ type Config struct {
 	// deployment behind an unlisted proxy has every request collapse onto one
 	// rate-limit bucket rather than risk trusting a spoofable header.
 	TrustedProxies string `env:"TC_TRUSTED_PROXIES" envDefault:""`
+
+	// AuthRateLimit is the per-IP per-minute budget for sensitive
+	// unauthenticated endpoints (sign-in, registration, password reset,
+	// OAuth). Zero uses the built-in default; negative disables the limiter.
+	AuthRateLimit int `env:"TC_AUTH_RATE_LIMIT" envDefault:"0"`
+	// ShareRateLimit is the same for public share links, counted separately so
+	// an audience reading a shared calendar cannot exhaust the sign-in budget.
+	ShareRateLimit int    `env:"TC_SHARE_RATE_LIMIT" envDefault:"0"`
 	S3Endpoint     string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`
 	S3AccessKey    string `env:"TC_S3_ACCESS_KEY" envDefault:"minioadmin"`
 	S3SecretKey    string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
