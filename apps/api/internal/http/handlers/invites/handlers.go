@@ -241,12 +241,22 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 	return func(ctx context.Context, in *AcceptInviteInput) (*AcceptInviteOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 
-		invite, err := deps.Queries.GetInviteByTokenHash(ctx, hashToken(in.Token))
+		invite, err := deps.Queries.GetLiveInviteByTokenHash(ctx, hashToken(in.Token))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// A link that has run out is a different answer from one that never
+		// existed, and the holder is entitled to it: they have the token, so
+		// nothing is disclosed, and "expired" is what prompts asking for
+		// another rather than concluding the calendar is gone.
+		if invite.ExpiresAt.Valid && !invite.ExpiresAt.Time.After(time.Now()) {
+			return nil, apierrors.ToHuma(apierrors.InviteExpired)
+		}
+		if invite.MaxUses.Valid && invite.UseCount >= uint32(invite.MaxUses.Int32) {
+			return nil, apierrors.ToHuma(apierrors.InviteExpired)
 		}
 
 		cal, err := deps.Queries.GetCalendarByID(ctx, invite.CalendarID)

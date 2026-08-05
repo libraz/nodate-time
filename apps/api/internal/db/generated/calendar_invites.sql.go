@@ -166,6 +166,40 @@ func (q *Queries) GetInviteByTokenHashWithCalendar(ctx context.Context, tokenHas
 	return i, err
 }
 
+const getLiveInviteByTokenHash = `-- name: GetLiveInviteByTokenHash :one
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites
+WHERE token_hash = ? AND enabled = TRUE
+`
+
+// GetLiveInviteByTokenHash matches a link that still exists, whether or not it
+// is still usable, so the person following it can be told which of the two it
+// is. Distinguishing gives nothing away: they are holding the token already,
+// and "this link has expired" is what makes them ask for another rather than
+// conclude the calendar is gone.
+func (q *Queries) GetLiveInviteByTokenHash(ctx context.Context, tokenHash string) (CalendarInvite, error) {
+	row := q.db.QueryRowContext(ctx, getLiveInviteByTokenHash, tokenHash)
+	var i CalendarInvite
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CreatedByUserID,
+		&i.TokenHash,
+		&i.Role,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.IsPublic,
+		&i.ExpiresAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getPublicInviteByTokenHash = `-- name: GetPublicInviteByTokenHash :one
 SELECT ci.id, ci.public_id, ci.workspace_id, ci.calendar_id, ci.created_by_user_id, ci.token_hash, ci.role, ci.max_uses, ci.use_count, ci.is_public, ci.expires_at, ci.sort_weight, ci.notes, ci.enabled, ci.updated_at, ci.created_at, c.public_id AS calendar_public_id, c.name AS calendar_name, c.color AS calendar_color
 FROM calendar_invites ci

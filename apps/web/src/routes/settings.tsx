@@ -19,7 +19,15 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { Member } from '@/types/calendar';
-import { type InviteData, mergeInviteTokens } from '@/types/invite';
+import {
+  INVITE_EXPIRY_HOURS,
+  INVITE_MAX_USES,
+  type InviteData,
+  inviteCreateBody,
+  inviteExpiryLabelKey,
+  inviteUsesLabelKey,
+  mergeInviteTokens,
+} from '@/types/invite';
 
 export interface SettingsSearch {
   tab?: TabId | undefined;
@@ -849,6 +857,9 @@ function CalendarsSection() {
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [inviteRole, setInviteRole] = useState(DEFAULT_INVITE_ROLE);
+  // Bounded by default: an unbounded link cannot be taken back once forwarded.
+  const [inviteExpiry, setInviteExpiry] = useState<number>(168);
+  const [inviteUses, setInviteUses] = useState<number>(1);
 
   useEffect(() => {
     if (!selectedId && calendars.length > 0) {
@@ -913,10 +924,10 @@ function CalendarsSection() {
   const handleCreateInvite = async () => {
     setCreatingInvite(true);
     try {
-      const inv = await api.post<InviteData>(`/calendars/${selectedId}/invites`, {
-        role: inviteRole,
-        maxUses: 1,
-      });
+      const inv = await api.post<InviteData>(
+        `/calendars/${selectedId}/invites`,
+        inviteCreateBody(inviteRole, inviteExpiry, inviteUses),
+      );
       setInvites((cur) => [inv, ...cur]);
       toast.success(t('invites.create'));
     } catch (e) {
@@ -1055,6 +1066,28 @@ function CalendarsSection() {
           className="mb-3 max-w-xs"
           triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
         />
+        <div className="mb-3 flex max-w-md gap-2">
+          <CustomSelect
+            className="flex-1"
+            value={String(inviteExpiry)}
+            onChange={(v) => setInviteExpiry(Number(v))}
+            options={INVITE_EXPIRY_HOURS.map((h) => ({
+              value: String(h),
+              label: t(inviteExpiryLabelKey(h)),
+            }))}
+            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+          />
+          <CustomSelect
+            className="flex-1"
+            value={String(inviteUses)}
+            onChange={(v) => setInviteUses(Number(v))}
+            options={INVITE_MAX_USES.map((u) => ({
+              value: String(u),
+              label: t(inviteUsesLabelKey(u)),
+            }))}
+            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+          />
+        </div>
         <button
           type="button"
           onClick={handleCreateInvite}
@@ -1079,11 +1112,11 @@ function CalendarsSection() {
                 <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
                   {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
                 </span>
-                {inv.expiresAt && (
-                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
-                    {t('invites.expiresAt')}: {new Date(inv.expiresAt).toLocaleDateString()}
-                  </span>
-                )}
+                <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
+                  {inv.expiresAt
+                    ? `${t('invites.expiresAt')}: ${new Date(inv.expiresAt).toLocaleDateString()}`
+                    : t('invites.noExpiry')}
+                </span>
                 {inv.token && (
                   <button
                     type="button"

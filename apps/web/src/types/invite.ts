@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/i18n';
+
 /**
  * A share/join link as the API renders it.
  *
@@ -39,4 +41,53 @@ export function mergeInviteTokens(listed: InviteData[], known: InviteData[]): In
     const token = tokens.get(i.id);
     return token ? { ...i, token } : i;
   });
+}
+
+/**
+ * How long a join link stays usable, and how many people it admits.
+ *
+ * A link with neither bound is a standing invitation: it works for whoever
+ * finds it, forever, and the only remedy left is revoking it after the fact.
+ * Offering both makes the narrow choice the easy one.
+ */
+export const INVITE_EXPIRY_HOURS = [24, 168, 720, 0] as const;
+export const INVITE_MAX_USES = [1, 5, 0] as const;
+
+/** i18n key for each expiry choice. 0 means no expiry. */
+export function inviteExpiryLabelKey(hours: number): TranslationKey {
+  switch (hours) {
+    case 24:
+      return 'invites.expiry24h';
+    case 168:
+      return 'invites.expiry7d';
+    case 720:
+      return 'invites.expiry30d';
+    default:
+      return 'invites.expiryNever';
+  }
+}
+
+/** i18n key for each use-count choice. 0 means unlimited. */
+export function inviteUsesLabelKey(uses: number): TranslationKey {
+  switch (uses) {
+    case 1:
+      return 'invites.usesOnce';
+    case 5:
+      return 'invites.usesFive';
+    default:
+      return 'invites.usesUnlimited';
+  }
+}
+
+/**
+ * Builds the create-invite body. A zero bound is omitted rather than sent:
+ * the API reads an absent field as "no limit", and sending zero would ask for
+ * a link nobody can use.
+ */
+export function inviteCreateBody(role: string, expiryHours: number, maxUses: number) {
+  return {
+    role,
+    ...(expiryHours > 0 ? { expiresInHours: expiryHours } : {}),
+    ...(maxUses > 0 ? { maxUses } : {}),
+  };
 }
