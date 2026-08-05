@@ -58,6 +58,11 @@ func loadOverrides(ctx context.Context, loader OverrideLoader, parentID uint32) 
 	return set
 }
 
+// inWindow reports whether a start lands in [windowStart, windowEnd).
+func inWindow(start, windowStart, windowEnd time.Time) bool {
+	return !start.Before(windowStart) && start.Before(windowEnd)
+}
+
 // ExpandRecurringEvent returns the occurrences of event between windowStart
 // and windowEnd, with cancellations removed and overrides substituted in.
 func ExpandRecurringEvent(
@@ -93,6 +98,13 @@ func ExpandRecurringEvent(
 		}
 		if child, ok := overrides.byInstant[key]; ok {
 			consumed[key] = true
+			// An override replaces the occurrence, so what the window sees is
+			// the override's own dates. Emitting it here because the
+			// occurrence it replaces falls in the window would show it on the
+			// day it was moved off as well as the day it was moved to.
+			if child.StartAt.Valid && !inWindow(child.StartAt.Time, windowStart, windowEnd) {
+				continue
+			}
 			instances = append(instances, Instance{
 				Event:         child,
 				Occurrence:    occ,
@@ -119,7 +131,7 @@ func ExpandRecurringEvent(
 		if cancelled.Contains(original) {
 			continue
 		}
-		if child.StartAt.Time.Before(windowStart) || !child.StartAt.Time.Before(windowEnd) {
+		if !inWindow(child.StartAt.Time, windowStart, windowEnd) {
 			continue
 		}
 		instances = append(instances, Instance{

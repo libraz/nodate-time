@@ -906,6 +906,17 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				}); err != nil {
 					return err
 				}
+				// An occurrence dragged past the end of its own series has to
+				// carry that end with it, or the master stops being selected
+				// for the window it now falls in and the occurrence vanishes
+				// from every view without being deleted.
+				if err := q.ExtendRecurrenceEnd(ctx, generated.ExtendRecurrenceEndParams{
+					RecurrenceEnd: sql.NullTime{Time: endAt, Valid: true},
+					ID:            evt.ID,
+					Boundary:      sql.NullTime{Time: endAt, Valid: true},
+				}); err != nil {
+					return err
+				}
 				var err error
 				child, err = q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
 					RecurrenceParentID:      parentRef,

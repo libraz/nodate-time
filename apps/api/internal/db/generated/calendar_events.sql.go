@@ -79,6 +79,33 @@ func (q *Queries) DeleteRecurrenceOverridesByParent(ctx context.Context, recurre
 	return err
 }
 
+const extendRecurrenceEnd = `-- name: ExtendRecurrenceEnd :exec
+UPDATE calendar_events
+SET recurrence_end = ?
+WHERE id = ?
+  AND recurrence_end IS NOT NULL
+  AND recurrence_end < ?
+`
+
+type ExtendRecurrenceEndParams struct {
+	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
+	ID            uint32       `json:"id"`
+	Boundary      sql.NullTime `json:"boundary"`
+}
+
+// ExtendRecurrenceEnd widens a series' end boundary to cover an occurrence
+// that was moved past it.
+//
+// recurrence_end is what range queries filter masters on, and a moved
+// occurrence is a row hanging off the master rather than one the rule
+// produces. Left alone, the master stops being selected for the window the
+// occurrence now falls in, so the row survives but appears in no view,
+// export or share -- indistinguishable from a deletion.
+func (q *Queries) ExtendRecurrenceEnd(ctx context.Context, arg ExtendRecurrenceEndParams) error {
+	_, err := q.db.ExecContext(ctx, extendRecurrenceEnd, arg.RecurrenceEnd, arg.ID, arg.Boundary)
+	return err
+}
+
 const getCalendarEventByID = `-- name: GetCalendarEventByID :one
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events WHERE id = ? AND enabled = TRUE
 `
