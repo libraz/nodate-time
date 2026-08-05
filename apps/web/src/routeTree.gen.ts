@@ -9,33 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root';
-import { Route as SettingsRouteImport } from './routes/settings';
-import { Route as ResetPasswordRouteImport } from './routes/reset-password';
-import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
-import { Route as LoginRouteImport } from './routes/login';
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
 import { Route as IndexRouteImport } from './routes/index';
-import { Route as ShareTokenRouteImport } from './routes/share/$token';
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
+import { Route as LoginRouteImport } from './routes/login';
+import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
+import { Route as ResetPasswordRouteImport } from './routes/reset-password';
+import { Route as SettingsRouteImport } from './routes/settings';
 import { Route as EmbedTokenRouteImport } from './routes/embed/$token';
+import { Route as ShareTokenRouteImport } from './routes/share/$token';
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const OauthCompleteRoute = OauthCompleteRouteImport.update({
-  id: '/oauth-complete',
-  path: '/oauth-complete',
-  getParentRoute: () => rootRouteImport,
-} as any);
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any);
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -43,19 +28,34 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any);
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any);
-const ShareTokenRoute = ShareTokenRouteImport.update({
-  id: '/share/$token',
-  path: '/share/$token',
+const OauthCompleteRoute = OauthCompleteRouteImport.update({
+  id: '/oauth-complete',
+  path: '/oauth-complete',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any);
 const EmbedTokenRoute = EmbedTokenRouteImport.update({
   id: '/embed/$token',
   path: '/embed/$token',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any);
 
@@ -136,32 +136,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings';
-      path: '/settings';
-      fullPath: '/settings';
-      preLoaderRoute: typeof SettingsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/reset-password': {
-      id: '/reset-password';
-      path: '/reset-password';
-      fullPath: '/reset-password';
-      preLoaderRoute: typeof ResetPasswordRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/oauth-complete': {
-      id: '/oauth-complete';
-      path: '/oauth-complete';
-      fullPath: '/oauth-complete';
-      preLoaderRoute: typeof OauthCompleteRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    '/login': {
-      id: '/login';
-      path: '/login';
-      fullPath: '/login';
-      preLoaderRoute: typeof LoginRouteImport;
+    '/': {
+      id: '/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/forgot-password': {
@@ -171,18 +150,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForgotPasswordRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/': {
-      id: '/';
-      path: '/';
-      fullPath: '/';
-      preLoaderRoute: typeof IndexRouteImport;
+    '/login': {
+      id: '/login';
+      path: '/login';
+      fullPath: '/login';
+      preLoaderRoute: typeof LoginRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/share/$token': {
-      id: '/share/$token';
-      path: '/share/$token';
-      fullPath: '/share/$token';
-      preLoaderRoute: typeof ShareTokenRouteImport;
+    '/oauth-complete': {
+      id: '/oauth-complete';
+      path: '/oauth-complete';
+      fullPath: '/oauth-complete';
+      preLoaderRoute: typeof OauthCompleteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/reset-password': {
+      id: '/reset-password';
+      path: '/reset-password';
+      fullPath: '/reset-password';
+      preLoaderRoute: typeof ResetPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/settings': {
+      id: '/settings';
+      path: '/settings';
+      fullPath: '/settings';
+      preLoaderRoute: typeof SettingsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/embed/$token': {
@@ -190,6 +183,13 @@ declare module '@tanstack/react-router' {
       path: '/embed/$token';
       fullPath: '/embed/$token';
       preLoaderRoute: typeof EmbedTokenRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/share/$token': {
+      id: '/share/$token';
+      path: '/share/$token';
+      fullPath: '/share/$token';
+      preLoaderRoute: typeof ShareTokenRouteImport;
       parentRoute: typeof rootRouteImport;
     };
   }
