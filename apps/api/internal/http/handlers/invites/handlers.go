@@ -20,6 +20,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 type Deps struct {
@@ -525,7 +526,9 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		for _, e := range recurringRows {
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
-				dateStr := inst.OriginalStart.Format("20060102")
+				// The series' own zone decides the day, matching the ids the
+				// authenticated event API hands out for the same occurrences.
+				dateStr := inst.OriginalStart.In(recurrence.LoadLocation(e.Timezone)).Format("20060102")
 				id := fmt.Sprintf("%s_%s", parentID, dateStr)
 				if inst.IsOverride {
 					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
