@@ -845,7 +845,8 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
   );
 }
 
-function CalendarsSection() {
+/** Exported for testing: the invite listing is role-gated on the client too. */
+export function CalendarsSection() {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
@@ -884,15 +885,20 @@ function CalendarsSection() {
   }, []);
 
   useEffect(() => {
-    if (selectedId) {
-      fetchMembers(selectedId);
-      loadInvites(selectedId);
-    }
-  }, [selectedId, fetchMembers, loadInvites]);
+    if (selectedId) fetchMembers(selectedId);
+  }, [selectedId, fetchMembers]);
 
   const members = (selectedId && membersMap[selectedId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
   const isAdmin = canManageRole(myMembership?.role);
+
+  // Only a manager may read a calendar's invites. Asking regardless meant an
+  // editor or viewer got a permission error for opening a screen, once per
+  // calendar they selected, having done nothing wrong.
+  useEffect(() => {
+    if (selectedId && isAdmin) loadInvites(selectedId);
+    else setInvites([]);
+  }, [selectedId, isAdmin, loadInvites]);
   const amOwner = canOwn(myMembership?.role);
   const roleOptions = assignableRoles(myMembership?.role);
   const ownerCount = members.filter((m) => m.role === 'owner').length;
@@ -1061,92 +1067,94 @@ function CalendarsSection() {
         )}
       </Section>
 
-      <Section title={t('settings.invites')}>
-        <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
-          {t('share.inviteSingleUseNote')}
-        </p>
-        <CustomSelect
-          value={inviteRole}
-          onChange={(role) => setInviteRole(role as typeof inviteRole)}
-          options={INVITE_ROLE_OPTIONS.map((role) => ({
-            value: role,
-            label: t(roleLabelKey(role)),
-          }))}
-          className="mb-3 max-w-xs"
-          triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-        />
-        <div className="mb-3 flex max-w-md gap-2">
-          <CustomSelect
-            className="flex-1"
-            value={String(inviteExpiry)}
-            onChange={(v) => setInviteExpiry(Number(v))}
-            options={INVITE_EXPIRY_HOURS.map((h) => ({
-              value: String(h),
-              label: t(inviteExpiryLabelKey(h)),
-            }))}
-            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          />
-          <CustomSelect
-            className="flex-1"
-            value={String(inviteUses)}
-            onChange={(v) => setInviteUses(Number(v))}
-            options={INVITE_MAX_USES.map((u) => ({
-              value: String(u),
-              label: t(inviteUsesLabelKey(u)),
-            }))}
-            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={handleCreateInvite}
-          disabled={creatingInvite || !isAdmin}
-          className="btn-primary mb-4 px-5 text-default disabled:opacity-50"
-        >
-          {creatingInvite ? t('share.creating') : t('invites.create')}
-        </button>
-        {loadingInvites ? (
-          <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
-        ) : joinInvites.length === 0 ? (
-          <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
-            {t('invites.empty')}
+      {isAdmin && (
+        <Section title={t('settings.invites')}>
+          <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
+            {t('share.inviteSingleUseNote')}
           </p>
-        ) : (
-          <ul className="-my-2 divide-y divide-[var(--color-separator)]">
-            {joinInvites.map((inv) => (
-              <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
-                <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
-                  {inv.token ? `/share/${inv.token}` : t('invites.linkUnavailable')}
-                </code>
-                <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
-                  {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
-                </span>
-                <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
-                  {inv.expiresAt
-                    ? `${t('invites.expiresAt')}: ${new Date(inv.expiresAt).toLocaleDateString()}`
-                    : t('invites.noExpiry')}
-                </span>
-                {inv.token && (
+          <CustomSelect
+            value={inviteRole}
+            onChange={(role) => setInviteRole(role as typeof inviteRole)}
+            options={INVITE_ROLE_OPTIONS.map((role) => ({
+              value: role,
+              label: t(roleLabelKey(role)),
+            }))}
+            className="mb-3 max-w-xs"
+            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+          />
+          <div className="mb-3 flex max-w-md gap-2">
+            <CustomSelect
+              className="flex-1"
+              value={String(inviteExpiry)}
+              onChange={(v) => setInviteExpiry(Number(v))}
+              options={INVITE_EXPIRY_HOURS.map((h) => ({
+                value: String(h),
+                label: t(inviteExpiryLabelKey(h)),
+              }))}
+              triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            />
+            <CustomSelect
+              className="flex-1"
+              value={String(inviteUses)}
+              onChange={(v) => setInviteUses(Number(v))}
+              options={INVITE_MAX_USES.map((u) => ({
+                value: String(u),
+                label: t(inviteUsesLabelKey(u)),
+              }))}
+              triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleCreateInvite}
+            disabled={creatingInvite || !isAdmin}
+            className="btn-primary mb-4 px-5 text-default disabled:opacity-50"
+          >
+            {creatingInvite ? t('share.creating') : t('invites.create')}
+          </button>
+          {loadingInvites ? (
+            <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
+          ) : joinInvites.length === 0 ? (
+            <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
+              {t('invites.empty')}
+            </p>
+          ) : (
+            <ul className="-my-2 divide-y divide-[var(--color-separator)]">
+              {joinInvites.map((inv) => (
+                <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
+                    {inv.token ? `/share/${inv.token}` : t('invites.linkUnavailable')}
+                  </code>
+                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
+                    {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
+                  </span>
+                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
+                    {inv.expiresAt
+                      ? `${t('invites.expiresAt')}: ${new Date(inv.expiresAt).toLocaleDateString()}`
+                      : t('invites.noExpiry')}
+                  </span>
+                  {inv.token && (
+                    <button
+                      type="button"
+                      onClick={() => copyInvite(inv.token as string)}
+                      className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
+                    >
+                      {t('invites.copy')}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => copyInvite(inv.token as string)}
-                    className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
+                    onClick={() => handleRevokeInvite(inv.id)}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
                   >
-                    {t('invites.copy')}
+                    {t('invites.revoke')}
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleRevokeInvite(inv.id)}
-                  className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
-                >
-                  {t('invites.revoke')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
     </>
   );
 }
