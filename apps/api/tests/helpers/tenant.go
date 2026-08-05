@@ -93,6 +93,16 @@ func DoJSON(t *testing.T, method, url, bearer string, body any, out any) {
 // DoJSONStatus makes an HTTP request and returns status + raw body.
 func DoJSONStatus(t *testing.T, method, url, bearer string, body any) (int, []byte) {
 	t.Helper()
+	return DoJSONStatusWithHeaders(t, method, url, bearer, body, nil)
+}
+
+// DoJSONStatusWithHeaders is DoJSONStatus with extra request headers, for the
+// cases where what is being tested is how the server reads the request itself
+// (client address, content negotiation) rather than the body.
+func DoJSONStatusWithHeaders(
+	t *testing.T, method, url, bearer string, body any, headers map[string]string,
+) (int, []byte) {
+	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -111,6 +121,9 @@ func DoJSONStatus(t *testing.T, method, url, bearer string, body any) (int, []by
 	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

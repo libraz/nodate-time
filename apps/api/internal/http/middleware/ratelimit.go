@@ -1,12 +1,13 @@
 package middleware
 
 import (
-	"fmt"
 	"net/http"
 	"net/netip"
 	"strconv"
 	"sync"
 	"time"
+
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 )
 
 // rateBucket is a fixed-window counter for a single client key.
@@ -84,9 +85,10 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 					retryAfter = 1
 				}
 				h.Set("Retry-After", strconv.Itoa(retryAfter))
-				h.Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				fmt.Fprint(w, `{"status":429,"code":"RATE.LIMITED","message":"Too many requests, please try again later"}`)
+				// Through the shared writer rather than a hand-written literal,
+				// so this envelope cannot drift from the one every handler
+				// returns — the client maps a single shape, not two.
+				apierrors.WriteSpec(w, apierrors.RateLimited)
 				return
 			}
 			next.ServeHTTP(w, r)
