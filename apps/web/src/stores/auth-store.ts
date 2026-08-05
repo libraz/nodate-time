@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getT } from '@/i18n';
+import { getT, type Locale } from '@/i18n';
 import {
   ApiError,
   api,
@@ -10,6 +10,7 @@ import {
   setToken,
 } from '@/lib/api';
 import { resizeImageForAvatar } from '@/lib/image-resize';
+import { accountPreferences, detectLocale, detectTimezone } from '@/lib/preferences';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -54,6 +55,14 @@ interface AuthState {
   fetchMe: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   updateProfile: (data: { name: string; locale?: string; timezone?: string }) => Promise<void>;
+  /**
+   * Applies a preference to this device and stores it against the account.
+   *
+   * Kept here rather than in the UI store because it belongs to the account:
+   * a language or timezone chosen on one device is meant to be waiting on the
+   * next one, and the UI store has no idea who is signed in.
+   */
+  saveAccountPreference: (prefs: { locale?: Locale; timezone?: string }) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   removeAvatar: () => Promise<void>;
   clearError: () => void;
@@ -89,6 +98,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await api.post<AuthResponse>('/auth/login', { email, password });
       setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
       throw e;
@@ -101,6 +111,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await api.post<AuthResponse>('/auth/dev-login', { email });
       setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
       throw e;
@@ -113,6 +124,21 @@ export const useAuthStore = create<AuthState>((set) => ({
       const data = await api.post<AuthResponse>('/auth/register', { name, email, password });
       setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      // A new account is seeded with the server's defaults, which know
+      // nothing about where the person signing up actually is. Send what
+      // this device reports once, so a first calendar opens in local time.
+      try {
+        const user = await api.put<User>('/user', {
+          name: data.user.name,
+          locale: detectLocale(),
+          timezone: detectTimezone(),
+        });
+        set({ user });
+        useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
+      } catch {
+        // Not worth failing a registration over: the account keeps the
+        // defaults and the settings screen can still change them.
+      }
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.registerFailed')) });
       throw e;
@@ -153,6 +179,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       // flash the authed shell before the next request bounces to /login.
       if (!hasToken()) return;
       set({ user, isAuthenticated: true, isInitializing: false, initError: null });
+      useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.code === 'AUTH.TOKEN_INVALID')) {
         useAuthStore.getState().logout();
@@ -176,6 +203,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   updateProfile: async (data) => {
     const user = await api.put<User>('/user', data);
+    set({ user });
+  },
+
+  saveAccountPreference: async (prefs) => {
+    // Applied first and unconditionally: the choice was made here, and a
+    // network failure is no reason for the interface to ignore it.
+    useUiStore.getState().adoptAccountPreferences(prefs);
+    const current = useAuthStore.getState().user;
+    if (!current) return;
+    const user = await api.put<User>('/user', { name: current.name, ...prefs });
     set({ user });
   },
 
