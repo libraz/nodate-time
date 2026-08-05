@@ -411,6 +411,7 @@ const (
 	IdentitiesProviderGithub      IdentitiesProvider = "github"
 	IdentitiesProviderMicrosoft   IdentitiesProvider = "microsoft"
 	IdentitiesProviderGenericOidc IdentitiesProvider = "generic_oidc"
+	IdentitiesProviderLine        IdentitiesProvider = "line"
 )
 
 func (e *IdentitiesProvider) Scan(src interface{}) error {
@@ -1364,6 +1365,32 @@ type CalendarSubscription struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Single-use email ownership proofs
+type EmailVerification struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Address the token was sent to. Recorded so a token stops applying once the account changes address, rather than confirming whatever address is current at redemption time.
+	Email string `json:"email"`
+	// SHA-256 hex of the token; the plaintext is emailed once and never stored
+	TokenHash string `json:"tokenHash"`
+	// Expiry
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Redemption time; a non-NULL value makes the token spent
+	UsedAt sql.NullTime `json:"usedAt"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
 // Append-only event log
 type Event struct {
 	// Internal PK, never exposed; BIGINT UNSIGNED for unbounded append-only growth
@@ -1410,8 +1437,6 @@ type Identity struct {
 	PublicID []byte `json:"publicId"`
 	// Internal FK to users.id
 	UserID uint32 `json:"userId"`
-	// Identity provider kind
-	Provider IdentitiesProvider `json:"provider"`
 	// Provider subject / external ID (ASCII)
 	Subject string `json:"subject"`
 	// Argon2id encoded hash, only for provider=local
@@ -1436,6 +1461,8 @@ type Identity struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+	// Identity provider kind
+	Provider IdentitiesProvider `json:"provider"`
 }
 
 // Instance-wide admin grants
@@ -1677,7 +1704,7 @@ type Session struct {
 	// Client user agent at issue time
 	UserAgent sql.NullString `json:"userAgent"`
 	// Packed IPv4/IPv6 address at issue time
-	IpAddress sql.NullString `json:"ipAddress"`
+	IpAddress []byte `json:"ipAddress"`
 	// Refresh token expiry
 	ExpiresAt time.Time `json:"expiresAt"`
 	// Explicit revocation time

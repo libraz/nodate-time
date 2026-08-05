@@ -8,6 +8,9 @@
 #
 # Layers:
 #
+# Within a layer: tables/, then alters/ (a product layer widening a core
+# column it does not own), then constraints/, views/ and triggers/.
+#
 #   core/   tables shared with any other product implementing the contract:
 #           workspaces, users/identities/sessions, calendars, calendar_events
 #           and friends, and the append-only `events` log.
@@ -171,6 +174,17 @@ emit_drop_tables "${TABLE_DIRS[@]}"
 echo
 
 emit_tables "${TABLE_DIRS[@]}"
+
+# A product layer may widen a core table it does not own — an ENUM gaining a
+# value this product supports and the shared contract does not name. Keeping
+# that as an ALTER here rather than an edit to core/ leaves the vendored
+# contract byte-identical to upstream, so the conformance suite still compares
+# like for like. Emitted after every CREATE TABLE and before any constraint,
+# view or trigger, so the altered column is already in its final shape by the
+# time anything references it.
+for layer in "${LAYERS[@]}"; do
+  emit_files "${SCRIPT_DIR}/${layer}/alters"
+done
 
 # Cross-layer foreign keys reference tables from more than one layer, so they
 # run only after every layer's CREATE TABLE has been emitted.

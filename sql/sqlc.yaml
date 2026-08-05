@@ -9,6 +9,9 @@ sql:
     schema:
       - "core/tables/"
       - "time/tables/"
+      # Product-layer widenings of core columns. Listed last so the ALTERs
+      # apply to the tables above, matching the order build-schema.sh emits.
+      - "time/alters/"
     gen:
       go:
         package: "generated"
@@ -34,6 +37,13 @@ sql:
             go_type:
               type: "NullString"
               import: "database/sql"
+          # A packed address, not text: sqlc maps a nullable VARBINARY to
+          # NullString, which invites writing the dotted/colon form and
+          # overflowing the column for anything but a short IPv4.
+          - column: "sessions.ip_address"
+            go_type:
+              type: "byte"
+              slice: true
           - column: "calendar_events.recurrence_rule"
             go_type:
               type: "RawMessage"
