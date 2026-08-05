@@ -14,6 +14,21 @@ set -e
 
 toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 
+# sql/core is a copy of a contract another product also writes to, so an
+# edit here does not change what that product does -- it only makes this
+# repository's description of the shared schema wrong, and that shows up
+# as bad data rather than as a failed build. Hashes only, no network, so
+# this stays instant and works offline.
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '^sql/core/'; then
+  if ! bash "$toplevel/scripts/check-vendored-core.sh" --local-only; then
+    echo "" >&2
+    echo "✖ pre-commit hook: the vendored contract was edited here (see above)." >&2
+    echo "  Change it upstream and re-vendor; editing the copy desyncs the two." >&2
+    echo "  Bypass only when you know why: git commit --no-verify" >&2
+    exit 1
+  fi
+fi
+
 # --staged makes the checker return immediately when nothing it cares about
 # is staged. Which paths those are is the checker's business, not the hook's,
 # so the decision lives in one place; paying for a generator run on every
