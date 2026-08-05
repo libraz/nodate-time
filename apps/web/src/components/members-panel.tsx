@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { canManage, ROLE_OPTIONS, roleLabelKey } from '@/lib/permissions';
+import { assignableRoles, canManage, canOwn, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -24,6 +24,8 @@ export function MembersPanel() {
   const members = (calendarId && membersMap[calendarId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
   const canManageMembers = canManage(myMembership?.role);
+  const amOwner = canOwn(myMembership?.role);
+  const roleOptions = assignableRoles(myMembership?.role);
   const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   useEffect(() => {
@@ -121,9 +123,13 @@ export function MembersPanel() {
               {members.map((m) => {
                 const isMe = m.email === me?.email;
                 const lastOwner = m.role === 'owner' && ownerCount <= 1;
+                // Touching an owner is the owner's own business, so a manager
+                // sees the row but not the controls.
+                const targetIsOwner = m.role === 'owner';
+                const mayTouch = canManageMembers && (!targetIsOwner || amOwner);
                 // You manage other members, not yourself: no self role change or self removal.
-                const canChangeRole = canManageMembers && !isMe && !lastOwner;
-                const canRemove = canManageMembers && !isMe && !lastOwner;
+                const canChangeRole = mayTouch && !isMe && !lastOwner;
+                const canRemove = mayTouch && !isMe && !lastOwner;
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     <span
@@ -152,7 +158,7 @@ export function MembersPanel() {
                         onChange={(v) => handleRoleChange(m, v)}
                         className="shrink-0"
                         triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                        options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
                       />
                     ) : (
                       <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">

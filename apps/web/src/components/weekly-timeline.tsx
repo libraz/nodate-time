@@ -15,7 +15,7 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEditEvent, roleForCalendar } from '@/lib/permissions';
 import { layoutTimedEventsForDay, resizedEndForDaySegment } from '@/lib/timed-layout';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -60,7 +60,8 @@ export function WeeklyTimeline() {
   const dragGeom = useRef<{ width: number; height: number }>({ width: 160, height: 40 });
 
   const canMove = useCallback(
-    (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
+    (evt: CalendarEvent) =>
+      canEditEvent(evt, roleForCalendar(membersMap[evt.calendarId], me?.email), me?.id),
     [membersMap, me],
   );
 

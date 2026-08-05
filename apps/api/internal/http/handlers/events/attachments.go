@@ -68,12 +68,7 @@ func mapAttachment(publicID []byte, filename, contentType string, byteSize uint6
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -275,12 +270,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 	return func(ctx context.Context, in *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -322,12 +312,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}

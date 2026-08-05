@@ -35,6 +35,37 @@ func (q *Queries) AddEventAttendee(ctx context.Context, arg AddEventAttendeePara
 	return err
 }
 
+const getEventAttendee = `-- name: GetEventAttendee :one
+SELECT id, public_id, workspace_id, event_id, user_id, event_id_key, rsvp, can_edit, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_attendees
+WHERE event_id = ? AND user_id = ? AND enabled = TRUE
+`
+
+type GetEventAttendeeParams struct {
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+}
+
+func (q *Queries) GetEventAttendee(ctx context.Context, arg GetEventAttendeeParams) (CalendarEventAttendee, error) {
+	row := q.db.QueryRowContext(ctx, getEventAttendee, arg.EventID, arg.UserID)
+	var i CalendarEventAttendee
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.EventID,
+		&i.UserID,
+		&i.EventIDKey,
+		&i.Rsvp,
+		&i.CanEdit,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listEventAttendees = `-- name: ListEventAttendees :many
 SELECT a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
        u.display_name, u.avatar_url
@@ -92,8 +123,23 @@ func (q *Queries) RemoveAllEventAttendees(ctx context.Context, eventID sql.NullI
 	return err
 }
 
+const setEventAttendeeCanEdit = `-- name: SetEventAttendeeCanEdit :exec
+UPDATE calendar_event_attendees SET can_edit = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE
+`
+
+type SetEventAttendeeCanEditParams struct {
+	CanEdit bool          `json:"canEdit"`
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+}
+
+func (q *Queries) SetEventAttendeeCanEdit(ctx context.Context, arg SetEventAttendeeCanEditParams) error {
+	_, err := q.db.ExecContext(ctx, setEventAttendeeCanEdit, arg.CanEdit, arg.EventID, arg.UserID)
+	return err
+}
+
 const setEventAttendeeRsvp = `-- name: SetEventAttendeeRsvp :exec
-UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ?
+UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE
 `
 
 type SetEventAttendeeRsvpParams struct {

@@ -83,6 +83,13 @@ func resolveCalendarManage(ctx context.Context, deps Deps, calendarPubID string,
 	return calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
 }
 
+// resolveCalendarOwn resolves the calendar and admits only its owner, for the
+// operations that are not merely administrative -- handing ownership out or
+// taking it away, and destroying the calendar for everyone on it.
+func resolveCalendarOwn(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
+	return calresolve.Own(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
+}
+
 // resolveCalendarWrite resolves the calendar and rejects read-only (viewer)
 // members, who may read but not mutate calendar content.
 func resolveCalendarWrite(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
@@ -275,7 +282,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*DeleteCalendarOutput, error) {
 	return func(ctx context.Context, in *DeleteCalendarInput) (*DeleteCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		cal, err := resolveCalendarOwn(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -365,9 +372,12 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 	return func(ctx context.Context, in *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
+		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
 			return nil, toAPIError(err)
+		}
+		if !calresolve.CanManage(actorMember.Role) {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -389,6 +399,15 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		}
 
 		newRole := generated.CalendarMembersRole(in.Body.Role)
+
+		// Ownership only moves by the owner's hand. A manager that could hand
+		// it to a second account it controls, or strip it from the person who
+		// created the calendar, would hold every power the owner has plus
+		// deniability -- so both directions are gated, not just the promotion.
+		if (newRole == generated.CalendarMembersRoleOwner || current.Role == generated.CalendarMembersRoleOwner) &&
+			!calresolve.CanOwn(actorMember.Role) {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			// Lock the owner count and apply the role change atomically so
@@ -468,6 +487,14 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 
 		if isSelfLeave && target.ID != actorID {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+
+		// Removing an owner is the same power as demoting one, reached by a
+		// different verb. Gating only the role change would leave the shorter
+		// path open. Leaving of your own accord stays available to anyone.
+		if !isSelfLeave && current.Role == generated.CalendarMembersRoleOwner &&
+			!calresolve.CanOwn(actorMember.Role) {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		// Leaving and being removed are different events, not one event with

@@ -431,6 +431,22 @@ func Build(deps Deps) http.Handler {
 			Tags:        []string{"Event"},
 		}, events.DeleteEvent(evtDeps))
 
+		huma.Register(api, huma.Operation{
+			OperationID: "set-event-rsvp",
+			Method:      http.MethodPut,
+			Path:        "/calendars/{calendarId}/events/{eventId}/rsvp",
+			Summary:     "Answer an event invitation",
+			Tags:        []string{"Event"},
+		}, events.SetRsvp(evtDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "set-event-attendee-can-edit",
+			Method:      http.MethodPut,
+			Path:        "/calendars/{calendarId}/events/{eventId}/attendees/{userId}",
+			Summary:     "Delegate editing of an event to a participant",
+			Tags:        []string{"Event"},
+		}, events.SetAttendeeCanEdit(evtDeps))
+
 		// Audit history / activity feed
 		huma.Register(api, huma.Operation{
 			OperationID: "get-event-history",

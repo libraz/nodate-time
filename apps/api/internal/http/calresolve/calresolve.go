@@ -96,6 +96,20 @@ func Manage(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID
 	return cal, nil
 }
 
+// Own admits only the owner. Managing a calendar and owning it are not the
+// same power: a manager runs the membership list, but handing out ownership
+// or destroying the calendar for everyone on it is the owner's alone.
+func Own(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
+	cal, member, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
+	if err != nil {
+		return generated.Calendar{}, err
+	}
+	if !CanOwn(member.Role) {
+		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	return cal, nil
+}
+
 // CanWrite reports whether a role may change calendar contents.
 func CanWrite(role generated.CalendarMembersRole) bool {
 	switch role {
@@ -116,6 +130,14 @@ func CanManage(role generated.CalendarMembersRole) bool {
 	default:
 		return false
 	}
+}
+
+// CanOwn reports whether a role may grant or revoke ownership and delete the
+// calendar. Only the owner qualifies -- a manager that could promote itself,
+// or a second account it controls, to owner would make the distinction
+// between the two roles decorative.
+func CanOwn(role generated.CalendarMembersRole) bool {
+	return role == generated.CalendarMembersRoleOwner
 }
 
 func parseUUID(s string) ([]byte, error) {

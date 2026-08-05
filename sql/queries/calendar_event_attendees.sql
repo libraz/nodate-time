@@ -13,8 +13,15 @@ INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id
 VALUES (?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE enabled = TRUE;
 
+-- name: GetEventAttendee :one
+SELECT * FROM calendar_event_attendees
+WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
+
 -- name: SetEventAttendeeRsvp :exec
-UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ?;
+UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
+
+-- name: SetEventAttendeeCanEdit :exec
+UPDATE calendar_event_attendees SET can_edit = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
 
 -- name: RemoveAllEventAttendees :exec
 UPDATE calendar_event_attendees SET enabled = FALSE WHERE event_id = ?;

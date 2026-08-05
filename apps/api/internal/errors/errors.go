@@ -70,6 +70,11 @@ var (
 var (
 	EventNotFound     = &Spec{Status: 404, Code: "EVENT.NOT_FOUND", Message: "Event not found"}
 	EventAccessDenied = &Spec{Status: 403, Code: "EVENT.ACCESS_DENIED", Message: "You do not have access to this event"}
+	// EventEditDenied separates "you may write to this calendar" from "you may
+	// change this particular event". Sharing a calendar is not the same as
+	// handing everyone on it the right to rewrite each other's plans.
+	EventEditDenied  = &Spec{Status: 403, Code: "EVENT.EDIT_DENIED", Message: "You cannot edit this event"}
+	EventNotAttendee = &Spec{Status: 403, Code: "EVENT.NOT_ATTENDEE", Message: "You are not a participant of this event"}
 )
 
 // --- Comment errors ---

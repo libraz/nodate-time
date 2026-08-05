@@ -17,7 +17,7 @@ import {
 } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEditEvent, roleForCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -442,7 +442,8 @@ export function MonthScroll() {
   );
 
   const canMove = useCallback(
-    (evt: CalendarEvent) => canEdit(roleForCalendar(membersMap[evt.calendarId], me?.email)),
+    (evt: CalendarEvent) =>
+      canEditEvent(evt, roleForCalendar(membersMap[evt.calendarId], me?.email), me?.id),
     [membersMap, me],
   );
 

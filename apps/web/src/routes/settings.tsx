@@ -6,10 +6,11 @@ import { useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { HOLIDAY_COUNTRIES } from '@/lib/holidays';
 import {
+  assignableRoles,
   canManage as canManageRole,
+  canOwn,
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
-  ROLE_OPTIONS,
   roleLabelKey,
 } from '@/lib/permissions';
 import { THEME_OPTIONS } from '@/lib/theme';
@@ -791,6 +792,8 @@ function CalendarsSection() {
   const members = (selectedId && membersMap[selectedId]) || [];
   const myMembership = members.find((m) => m.email === me?.email);
   const isAdmin = canManageRole(myMembership?.role);
+  const amOwner = canOwn(myMembership?.role);
+  const roleOptions = assignableRoles(myMembership?.role);
   const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   const handleRoleChange = async (member: Member, role: string) => {
@@ -881,6 +884,9 @@ function CalendarsSection() {
             {members.map((m) => {
               const isMe = m.email === me?.email;
               const cannotChange = m.role === 'owner' && ownerCount <= 1;
+              // An owner's role and membership are the owner's own business;
+              // a manager sees the row without the controls.
+              const mayTouch = isAdmin && (m.role !== 'owner' || amOwner);
               return (
                 <li key={m.id} className="flex items-center gap-3 py-3">
                   <span
@@ -903,20 +909,20 @@ function CalendarsSection() {
                       {m.email}
                     </p>
                   </div>
-                  {isAdmin && !cannotChange ? (
+                  {mayTouch && !cannotChange ? (
                     <CustomSelect
                       value={m.role}
                       onChange={(v) => handleRoleChange(m, v)}
                       className="shrink-0"
                       triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                      options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
                     />
                   ) : (
                     <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
                       {t(roleLabelKey(m.role))}
                     </span>
                   )}
-                  {(isAdmin || isMe) && !(cannotChange && isMe) && (
+                  {(mayTouch || isMe) && !(cannotChange && isMe) && (
                     <button
                       type="button"
                       onClick={() => handleRemoveMember(m)}

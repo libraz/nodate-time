@@ -111,6 +111,10 @@ export const ja = {
   'event.saveComment': '保存',
   // Participants
   'event.selectParticipants': '参加者を選択',
+  'event.yourRsvp': '出欠',
+  'event.rsvpAccepted': '参加',
+  'event.rsvpTentative': '未定',
+  'event.rsvpDeclined': '不参加',
 
   // Panels
   'panel.memo': 'メモ',

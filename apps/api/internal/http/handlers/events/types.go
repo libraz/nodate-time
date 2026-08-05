@@ -39,18 +39,55 @@ type EventResponse struct {
 	// Flexibility is whether the commitment could move, which is a separate
 	// question from whether the time is taken. A meeting its owner would
 	// gladly reschedule and one that cannot move are both busy.
-	Flexibility        string                  `json:"flexibility" enum:"fixed,negotiable,conditional"`
-	NotificationOffset *int                    `json:"notificationOffset"`
-	Participants       []string                `json:"participants"`
-	OwnerID            string                  `json:"ownerId" doc:"public user ID of the member whose layer this event sits on"`
-	RecurrenceRule     *RecurrenceRuleResponse `json:"recurrenceRule"`
-	IsRecurrence       bool                    `json:"isRecurrence"`
-	RecurrenceDate     *string                 `json:"recurrenceDate,omitempty"`
-	CreatedBy          string                  `json:"createdBy" doc:"public user ID of the creator"`
-	CreatorName        string                  `json:"creatorName"`
-	CreatorAvatarURL   string                  `json:"creatorAvatarUrl,omitempty"`
-	CreatedAt          time.Time               `json:"createdAt"`
-	UpdatedAt          time.Time               `json:"updatedAt"`
+	Flexibility        string   `json:"flexibility" enum:"fixed,negotiable,conditional"`
+	NotificationOffset *int     `json:"notificationOffset"`
+	Participants       []string `json:"participants"`
+	// Attendees carries what Participants cannot: each participant's answer
+	// and whether the owner has trusted them to change the event. Participants
+	// stays as the id-only list because it is also the write format.
+	Attendees        []AttendeeResponse      `json:"attendees"`
+	OwnerID          string                  `json:"ownerId" doc:"public user ID of the member whose layer this event sits on"`
+	RecurrenceRule   *RecurrenceRuleResponse `json:"recurrenceRule"`
+	IsRecurrence     bool                    `json:"isRecurrence"`
+	RecurrenceDate   *string                 `json:"recurrenceDate,omitempty"`
+	CreatedBy        string                  `json:"createdBy" doc:"public user ID of the creator"`
+	CreatorName      string                  `json:"creatorName"`
+	CreatorAvatarURL string                  `json:"creatorAvatarUrl,omitempty"`
+	CreatedAt        time.Time               `json:"createdAt"`
+	UpdatedAt        time.Time               `json:"updatedAt"`
+}
+
+// AttendeeResponse is one participant's state on an event: whether they have
+// answered, and whether the owner has delegated editing to them.
+type AttendeeResponse struct {
+	UserID  string `json:"userId" doc:"public user ID"`
+	Rsvp    string `json:"rsvp" enum:"pending,accepted,declined,tentative"`
+	CanEdit bool   `json:"canEdit" doc:"read-only here; set through the attendee endpoint"`
+}
+
+type SetRsvpInput struct {
+	CalendarID string `path:"calendarId"`
+	EventID    string `path:"eventId"`
+	Body       struct {
+		Rsvp string `json:"rsvp" enum:"pending,accepted,declined,tentative"`
+	}
+}
+
+type SetRsvpOutput struct {
+	Body AttendeeResponse
+}
+
+type SetAttendeeCanEditInput struct {
+	CalendarID string `path:"calendarId"`
+	EventID    string `path:"eventId"`
+	UserID     string `path:"userId"`
+	Body       struct {
+		CanEdit bool `json:"canEdit"`
+	}
+}
+
+type SetAttendeeCanEditOutput struct {
+	Body AttendeeResponse
 }
 
 type CommentResponse struct {

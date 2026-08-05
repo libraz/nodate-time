@@ -6,7 +6,7 @@ import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { api, errorMessage } from '@/lib/api';
 import { eventTimesForSave } from '@/lib/event-times';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEdit, canEditEvent, roleForCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import { useAuthStore } from '@/stores/auth-store';
@@ -18,6 +18,7 @@ import type {
   EventComment,
   RecurrencePreset,
   RecurrenceRule,
+  Rsvp,
 } from '@/types/calendar';
 import {
   FALLBACK_LABEL_COLOR,
@@ -906,10 +907,12 @@ export function EventModal() {
   // auto-expand when an existing event already uses any of them.
   const [showMore, setShowMore] = useState(false);
 
-  // The current user's role for the event's calendar gates all mutating UI.
+  // The current user's role for the event's calendar gates all mutating UI,
+  // and for an existing event so does whose layer it sits on: a shared
+  // calendar is not a licence to rewrite everyone else's plans.
   const formCalendarId = form.calendarId || (editingEvent?.calendarId ?? '');
   const myRole = roleForCalendar(membersMap[formCalendarId], me?.email);
-  const editable = canEdit(myRole);
+  const editable = editingEvent ? canEditEvent(editingEvent, myRole, me?.id) : canEdit(myRole);
 
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
@@ -921,6 +924,29 @@ export function EventModal() {
     [calendars, activeCalendarIds, membersMap, me?.email],
   );
   const defaultCalendarId = postableCalendars[0]?.id ?? calendars[0]?.id ?? '';
+
+  // Answering an invitation is the invitee's own to give and is not editing,
+  // so the control appears for a participant of a saved event regardless of
+  // whether they may change it.
+  const myAttendance = editingEvent?.attendees?.find((a) => a.userId === me?.id);
+  const [rsvp, setRsvp] = useState<Rsvp | null>(null);
+  useEffect(() => {
+    setRsvp(myAttendance?.rsvp ?? null);
+  }, [myAttendance?.rsvp]);
+
+  const answerRsvp = async (next: Rsvp) => {
+    if (!editingEvent) return;
+    const previous = rsvp;
+    setRsvp(next);
+    try {
+      await api.put(`/calendars/${editingEvent.calendarId}/events/${editingEvent.id}/rsvp`, {
+        rsvp: next,
+      });
+    } catch (e) {
+      setRsvp(previous);
+      toast.error(errorMessage(e));
+    }
+  };
 
   useEffect(() => {
     if (!showEventModal) return;
@@ -1869,6 +1895,47 @@ export function EventModal() {
                   )}
                 </div>
               </div>
+
+              {myAttendance && (
+                <>
+                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                  <div className="flex items-center gap-3 py-1.5">
+                    <span className="w-[18px] shrink-0" aria-hidden />
+                    <span className="text-footnote text-[var(--color-text-secondary)]">
+                      {t('event.yourRsvp')}
+                    </span>
+                    <div className="flex gap-1.5">
+                      {(['accepted', 'tentative', 'declined'] as const).map((answer) => (
+                        <button
+                          key={answer}
+                          type="button"
+                          onClick={() => answerRsvp(answer)}
+                          aria-pressed={rsvp === answer}
+                          className="rounded-full px-3 py-1 text-footnote transition"
+                          style={{
+                            backgroundColor:
+                              rsvp === answer
+                                ? 'var(--color-accent-bg)'
+                                : 'var(--color-surface-inset)',
+                            color:
+                              rsvp === answer
+                                ? 'var(--color-accent)'
+                                : 'var(--color-text-secondary)',
+                          }}
+                        >
+                          {t(
+                            answer === 'accepted'
+                              ? 'event.rsvpAccepted'
+                              : answer === 'tentative'
+                                ? 'event.rsvpTentative'
+                                : 'event.rsvpDeclined',
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
