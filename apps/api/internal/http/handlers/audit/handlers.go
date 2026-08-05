@@ -194,7 +194,7 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 	rows, err := deps.Queries.ListEventsBySubject(ctx, generated.ListEventsBySubjectParams{
 		WorkspaceID: deps.WorkspaceID,
 		CalendarID:  sql.NullInt32{Int32: int32(calendarID), Valid: true},
-		SubjectID:   subjectID,
+		SubjectID:   sql.NullString{String: subjectID, Valid: true},
 		Limit:       perEntityHistoryLimit,
 	})
 	if err != nil {

@@ -159,16 +159,16 @@ FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
-  AND e.payload_json->>'$.id' = CAST(? AS CHAR)
+  AND e.subject_public_id = ?
 ORDER BY e.id DESC
 LIMIT ?
 `
 
 type ListEventsBySubjectParams struct {
-	WorkspaceID uint32        `json:"workspaceId"`
-	CalendarID  sql.NullInt32 `json:"calendarId"`
-	SubjectID   interface{}   `json:"subjectId"`
-	Limit       int32         `json:"limit"`
+	WorkspaceID uint32         `json:"workspaceId"`
+	CalendarID  sql.NullInt32  `json:"calendarId"`
+	SubjectID   sql.NullString `json:"subjectId"`
+	Limit       int32          `json:"limit"`
 }
 
 type ListEventsBySubjectRow struct {
@@ -183,15 +183,14 @@ type ListEventsBySubjectRow struct {
 }
 
 // ListEventsBySubject is one entity's history: every log row whose payload
-// names it. The subject is matched inside payload_json rather than through
-// a column, because the log records public ids and the contract gives the
-// payload no fixed schema beyond that.
-//
-// The (workspace_id, calendar_id, occurred_at) index bounds the scan to one
-// calendar's history, which is the same set the activity feed already pages
-// through. There is deliberately no second table keyed by entity: two
+// points at it. There is deliberately no second table keyed by entity: two
 // records of who changed what eventually disagree, and then neither can be
 // trusted.
+//
+// Matched on subject_public_id, the stored generated column that lifts the
+// subject out of payload_json. Reading the JSON directly is not indexable,
+// so the same question used to scan every row the calendar had ever
+// produced -- and LIMIT applies after the scan, not to it.
 func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubjectParams) ([]ListEventsBySubjectRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventsBySubject,
 		arg.WorkspaceID,
@@ -230,7 +229,7 @@ func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubje
 }
 
 const listEventsSince = `-- name: ListEventsSince :many
-SELECT id, public_id, workspace_id, task_id, calendar_id, triggered_by_signal_id, actor_user_id, actor_agent_id, actor_system_source, reverses_event_id, type, payload_json, occurred_at, sort_weight, notes, enabled, updated_at, created_at FROM events
+SELECT id, public_id, workspace_id, task_id, calendar_id, triggered_by_signal_id, actor_user_id, actor_agent_id, actor_system_source, reverses_event_id, type, payload_json, occurred_at, sort_weight, notes, enabled, updated_at, created_at, subject_public_id FROM events
 WHERE id > ?
 ORDER BY id
 LIMIT ?
@@ -269,6 +268,7 @@ func (q *Queries) ListEventsSince(ctx context.Context, arg ListEventsSinceParams
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SubjectPublicID,
 		); err != nil {
 			return nil, err
 		}

@@ -44,15 +44,14 @@ SELECT id FROM events
 WHERE workspace_id = ? AND calendar_id = ? AND public_id = ?;
 
 -- ListEventsBySubject is one entity's history: every log row whose payload
--- names it. The subject is matched inside payload_json rather than through
--- a column, because the log records public ids and the contract gives the
--- payload no fixed schema beyond that.
---
--- The (workspace_id, calendar_id, occurred_at) index bounds the scan to one
--- calendar's history, which is the same set the activity feed already pages
--- through. There is deliberately no second table keyed by entity: two
+-- points at it. There is deliberately no second table keyed by entity: two
 -- records of who changed what eventually disagree, and then neither can be
 -- trusted.
+--
+-- Matched on subject_public_id, the stored generated column that lifts the
+-- subject out of payload_json. Reading the JSON directly is not indexable,
+-- so the same question used to scan every row the calendar had ever
+-- produced -- and LIMIT applies after the scan, not to it.
 -- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
@@ -61,7 +60,7 @@ FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
-  AND e.payload_json->>'$.id' = CAST(sqlc.arg(subject_id) AS CHAR)
+  AND e.subject_public_id = sqlc.arg(subject_id)
 ORDER BY e.id DESC
 LIMIT ?;
 
