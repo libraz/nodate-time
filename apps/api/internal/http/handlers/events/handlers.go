@@ -964,20 +964,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 						return err
 					}
 				default:
-					if delta := startAt.Sub(evt.StartAt.Time); evt.StartAt.Valid && delta != 0 {
-						// The same delta is bound three times because sqlc
-						// expands each occurrence of the named argument into
-						// its own placeholder rather than reusing one. Binding
-						// only the first leaves start_at and end_at at zero
-						// microseconds: the override would keep pointing at
-						// the right occurrence while showing the old time.
-						deltaUs := delta.Microseconds()
-						if err := q.ShiftRecurrenceOverrides(ctx, generated.ShiftRecurrenceOverridesParams{
-							DeltaUs:            deltaUs,
-							DeltaUs_2:          deltaUs,
-							DeltaUs_3:          deltaUs,
-							RecurrenceParentID: parentRef,
-						}); err != nil {
+					shift := newWallShift(evt.StartAt.Time, startAt, evt.Timezone, tz)
+					if evt.StartAt.Valid && !shift.identity() {
+						if err := shiftOverrides(ctx, q, parentRef, shift); err != nil {
 							return err
 						}
 						// Cancellations are keyed to the same grid, so they have
@@ -985,7 +974,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 						// whichever occurrences now happen to land on the old
 						// instants -- usually none, silently resurrecting every
 						// occurrence the user had deleted.
-						if shifted := shiftExceptions(evt.RecurrenceExceptions, delta); shifted != nil {
+						if shifted := shiftExceptions(evt.RecurrenceExceptions, shift); shifted != nil {
 							column, err := shifted.MarshalColumn()
 							if err != nil {
 								return err
@@ -1057,16 +1046,114 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 
 // shiftExceptions moves every cancellation by delta, returning nil when
 // there is nothing to move.
-func shiftExceptions(stored *json.RawMessage, delta time.Duration) recurrence.Exceptions {
+// shiftOverrides moves every override row of a series by the same wall-clock
+// shift as the series itself, so each keeps naming the occurrence it replaces
+// and keeps the time of day the user gave it.
+func shiftOverrides(ctx context.Context, q *generated.Queries, parentRef sql.NullInt32, shift wallShift) error {
+	rows, err := q.ListRecurrenceOverridesByParent(ctx, parentRef)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		params := generated.RetimeRecurrenceOverrideParams{
+			RecurrenceOriginalStart: row.RecurrenceOriginalStart,
+			StartAt:                 row.StartAt,
+			EndAt:                   row.EndAt,
+			ID:                      row.ID,
+		}
+		if params.RecurrenceOriginalStart.Valid {
+			params.RecurrenceOriginalStart.Time = shift.apply(params.RecurrenceOriginalStart.Time)
+		}
+		if params.StartAt.Valid {
+			params.StartAt.Time = shift.apply(params.StartAt.Time)
+		}
+		if params.EndAt.Valid {
+			params.EndAt.Time = shift.apply(params.EndAt.Time)
+		}
+		if err := q.RetimeRecurrenceOverride(ctx, params); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func shiftExceptions(stored *json.RawMessage, shift wallShift) recurrence.Exceptions {
 	existing := recurrence.ParseExceptions(stored)
 	if len(existing) == 0 {
 		return nil
 	}
 	shifted := make(recurrence.Exceptions, 0, len(existing))
 	for _, ex := range existing {
-		shifted = append(shifted, ex.Add(delta))
+		shifted = append(shifted, shift.apply(ex))
 	}
 	return shifted
+}
+
+// wallShift describes how a series-wide edit moved the grid: a number of
+// calendar days, a change in the time of day, and the zones the two are read
+// and written in.
+//
+// The unit matters. Occurrences step in calendar units in the event's own
+// timezone, so a series whose anchor crosses a DST boundary moves by a
+// different number of hours than of days. Shifting a cancellation or an
+// override by the absolute difference between the two anchors therefore lands
+// it an hour off the grid it is supposed to name: the cancelled occurrence
+// comes back and the edited one is orphaned, showing up twice.
+type wallShift struct {
+	from *time.Location
+	to   *time.Location
+	days int
+	// ofDay is the change in time of day, and may be negative or exceed a day.
+	ofDay time.Duration
+}
+
+// newWallShift measures the move from oldStart in oldTZ to newStart in newTZ.
+func newWallShift(oldStart, newStart time.Time, oldTZ, newTZ string) wallShift {
+	from := recurrence.LoadLocation(oldTZ)
+	to := recurrence.LoadLocation(newTZ)
+	oldLocal := oldStart.In(from)
+	newLocal := newStart.In(to)
+	oldDay := time.Date(oldLocal.Year(), oldLocal.Month(), oldLocal.Day(), 0, 0, 0, 0, time.UTC)
+	newDay := time.Date(newLocal.Year(), newLocal.Month(), newLocal.Day(), 0, 0, 0, 0, time.UTC)
+	return wallShift{
+		from:  from,
+		to:    to,
+		days:  int(newDay.Sub(oldDay) / (24 * time.Hour)),
+		ofDay: timeOfDay(newLocal) - timeOfDay(oldLocal),
+	}
+}
+
+// identity reports whether the shift leaves every instant where it is.
+func (w wallShift) identity() bool {
+	return w.days == 0 && w.ofDay == 0 && w.from == w.to
+}
+
+// apply moves one instant by the shift, staying in wall-clock terms
+// throughout so a DST boundary crossed on the way does not add an hour.
+func (w wallShift) apply(t time.Time) time.Time {
+	local := t.In(w.from)
+	const day = 24 * time.Hour
+	wall := timeOfDay(local) + w.ofDay
+	extraDays := int(wall / day)
+	wall -= time.Duration(extraDays) * day
+	if wall < 0 {
+		wall += day
+		extraDays--
+	}
+	target := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).
+		AddDate(0, 0, w.days+extraDays)
+	return time.Date(
+		target.Year(), target.Month(), target.Day(),
+		int(wall/time.Hour), int(wall/time.Minute)%60, int(wall/time.Second)%60,
+		int(wall%time.Second), w.to,
+	).UTC()
+}
+
+func timeOfDay(t time.Time) time.Duration {
+	return time.Duration(t.Hour())*time.Hour +
+		time.Duration(t.Minute())*time.Minute +
+		time.Duration(t.Second())*time.Second +
+		time.Duration(t.Nanosecond())
 }
 
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
