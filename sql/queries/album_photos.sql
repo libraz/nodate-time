@@ -56,12 +56,22 @@ UPDATE album_photos SET enabled = FALSE WHERE id = ?;
 -- deleted object.
 DELETE FROM album_photos WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE;
 
--- name: ListAlbumPhotoStorageKeysByCalendar :many
-SELECT storage_key FROM album_photos WHERE calendar_id = ?;
+-- name: SoftDeleteAlbumPhotosByCalendar :exec
+UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE;
 
+-- ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
+-- covers both a reservation whose upload never landed and a photo the user
+-- deleted, and both are collected the same way.
+--
+-- The cutoff is on updated_at, which is when the row went out of use, not on
+-- created_at. Ageing by creation time gets it backwards: a photo kept for a
+-- year is collected on the very next pass after it is deleted, while one
+-- uploaded and deleted this morning sits around until it is a year old.
 -- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT storage_key FROM album_photos WHERE enabled = FALSE AND created_at < ?;
+SELECT id, storage_key FROM album_photos
+WHERE enabled = FALSE AND updated_at < ? AND id > ?
+ORDER BY id
+LIMIT ?;
 
--- name: DeleteAbandonedAlbumPhotoByStorageKey :execresult
-DELETE FROM album_photos
-WHERE storage_key = ? AND enabled = FALSE AND created_at < ?;
+-- name: DeleteAbandonedAlbumPhoto :execresult
+DELETE FROM album_photos WHERE id = ? AND enabled = FALSE;

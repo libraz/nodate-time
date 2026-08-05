@@ -66,18 +66,12 @@ func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoPara
 	)
 }
 
-const deleteAbandonedAlbumPhotoByStorageKey = `-- name: DeleteAbandonedAlbumPhotoByStorageKey :execresult
-DELETE FROM album_photos
-WHERE storage_key = ? AND enabled = FALSE AND created_at < ?
+const deleteAbandonedAlbumPhoto = `-- name: DeleteAbandonedAlbumPhoto :execresult
+DELETE FROM album_photos WHERE id = ? AND enabled = FALSE
 `
 
-type DeleteAbandonedAlbumPhotoByStorageKeyParams struct {
-	StorageKey string    `json:"storageKey"`
-	CreatedAt  time.Time `json:"createdAt"`
-}
-
-func (q *Queries) DeleteAbandonedAlbumPhotoByStorageKey(ctx context.Context, arg DeleteAbandonedAlbumPhotoByStorageKeyParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, deleteAbandonedAlbumPhotoByStorageKey, arg.StorageKey, arg.CreatedAt)
+func (q *Queries) DeleteAbandonedAlbumPhoto(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteAbandonedAlbumPhoto, id)
 }
 
 const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :exec
@@ -128,49 +122,44 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 }
 
 const listAbandonedAlbumPhotoStorageKeys = `-- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT storage_key FROM album_photos WHERE enabled = FALSE AND created_at < ?
+SELECT id, storage_key FROM album_photos
+WHERE enabled = FALSE AND updated_at < ? AND id > ?
+ORDER BY id
+LIMIT ?
 `
 
-func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, createdAt time.Time) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listAbandonedAlbumPhotoStorageKeys, createdAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var storage_key string
-		if err := rows.Scan(&storage_key); err != nil {
-			return nil, err
-		}
-		items = append(items, storage_key)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+type ListAbandonedAlbumPhotoStorageKeysParams struct {
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	ID        uint32       `json:"id"`
+	Limit     int32        `json:"limit"`
 }
 
-const listAlbumPhotoStorageKeysByCalendar = `-- name: ListAlbumPhotoStorageKeysByCalendar :many
-SELECT storage_key FROM album_photos WHERE calendar_id = ?
-`
+type ListAbandonedAlbumPhotoStorageKeysRow struct {
+	ID         uint32 `json:"id"`
+	StorageKey string `json:"storageKey"`
+}
 
-func (q *Queries) ListAlbumPhotoStorageKeysByCalendar(ctx context.Context, calendarID uint32) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listAlbumPhotoStorageKeysByCalendar, calendarID)
+// ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
+// covers both a reservation whose upload never landed and a photo the user
+// deleted, and both are collected the same way.
+//
+// The cutoff is on updated_at, which is when the row went out of use, not on
+// created_at. Ageing by creation time gets it backwards: a photo kept for a
+// year is collected on the very next pass after it is deleted, while one
+// uploaded and deleted this morning sits around until it is a year old.
+func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg ListAbandonedAlbumPhotoStorageKeysParams) ([]ListAbandonedAlbumPhotoStorageKeysRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAbandonedAlbumPhotoStorageKeys, arg.UpdatedAt, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []ListAbandonedAlbumPhotoStorageKeysRow
 	for rows.Next() {
-		var storage_key string
-		if err := rows.Scan(&storage_key); err != nil {
+		var i ListAbandonedAlbumPhotoStorageKeysRow
+		if err := rows.Scan(&i.ID, &i.StorageKey); err != nil {
 			return nil, err
 		}
-		items = append(items, storage_key)
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -380,6 +369,15 @@ UPDATE album_photos SET enabled = FALSE WHERE id = ?
 
 func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
 	_, err := q.db.ExecContext(ctx, softDeleteAlbumPhoto, id)
+	return err
+}
+
+const softDeleteAlbumPhotosByCalendar = `-- name: SoftDeleteAlbumPhotosByCalendar :exec
+UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE
+`
+
+func (q *Queries) SoftDeleteAlbumPhotosByCalendar(ctx context.Context, calendarID uint32) error {
+	_, err := q.db.ExecContext(ctx, softDeleteAlbumPhotosByCalendar, calendarID)
 	return err
 }
 

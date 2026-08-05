@@ -25,11 +25,22 @@ UPDATE storage_objects SET ref_count = ref_count + 1 WHERE id = ?;
 -- name: DecrementStorageObjectRefs :exec
 UPDATE storage_objects SET ref_count = GREATEST(ref_count, 1) - 1 WHERE id = ?;
 
+-- The cursor matters more than the limit. The attachments foreign key is
+-- RESTRICT, so an object a row still points at cannot be deleted; reading each
+-- page from the head of the table would put that same object first every time
+-- and the sweep would spend its whole batch budget on it, never reaching the
+-- rest of the backlog.
 -- name: ListUnreferencedStorageObjects :many
 SELECT * FROM storage_objects
-WHERE ref_count = 0 AND created_at < ?
+WHERE ref_count = 0 AND created_at < ? AND id > ?
 ORDER BY id
 LIMIT ?;
 
 -- name: DeleteStorageObject :execresult
 DELETE FROM storage_objects WHERE id = ? AND ref_count = 0;
+
+-- CountStorageObjectsByKey answers whether any object claims a storage key,
+-- ignoring enabled: a disabled row still describes bytes this table is the
+-- index for, and deleting them would leave it pointing at nothing.
+-- name: CountStorageObjectsByKey :one
+SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?;

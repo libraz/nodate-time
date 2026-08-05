@@ -42,14 +42,30 @@ UPDATE calendar_event_attachments SET enabled = FALSE WHERE id = ?;
 DELETE FROM calendar_event_attachments
 WHERE id = ? AND uploader_id = ? AND enabled = FALSE;
 
+-- Only a confirmed row holds a reference: an unconfirmed reservation never
+-- incremented one, and a row already soft-deleted released its own. Listing
+-- either would decrement a count nobody took, and because objects are
+-- content-addressed and shared, that drives a blob another calendar is still
+-- using down to zero and into the sweep.
 -- name: ListAttachmentObjectIDsByEvent :many
-SELECT storage_object_id FROM calendar_event_attachments WHERE event_id = ?;
+SELECT storage_object_id FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE;
 
 -- name: ListAttachmentObjectIDsByCalendar :many
 SELECT a.storage_object_id
 FROM calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
-WHERE e.calendar_id = ?;
+WHERE e.calendar_id = ? AND a.enabled = TRUE;
+
+-- name: SoftDeleteAttachmentsByEvent :exec
+UPDATE calendar_event_attachments SET enabled = FALSE
+WHERE event_id = ? AND enabled = TRUE;
+
+-- name: SoftDeleteAttachmentsByCalendar :exec
+UPDATE calendar_event_attachments a
+INNER JOIN calendar_events e ON e.id = a.event_id
+SET a.enabled = FALSE
+WHERE e.calendar_id = ? AND a.enabled = TRUE;
 
 -- DeleteAbandonedAttachment removes a reservation whose upload never
 -- landed. It re-checks enabled = FALSE so a row confirmed between the
@@ -57,9 +73,30 @@ WHERE e.calendar_id = ?;
 -- name: DeleteAbandonedAttachment :exec
 DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE;
 
+-- ListAbandonedAttachments walks by id rather than re-reading the head of the
+-- table: a row the delete below cannot remove would otherwise be listed again
+-- on the next pass, and the sweep would spend its whole batch budget failing
+-- on the same page.
 -- name: ListAbandonedAttachments :many
 SELECT a.id, a.storage_object_id
 FROM calendar_event_attachments a
-WHERE a.enabled = FALSE AND a.created_at < ?
+WHERE a.enabled = FALSE AND a.created_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?;
+
+-- ListRetiredAttachments walks soft-deleted rows whose retention has run out.
+--
+-- A soft-deleted row keeps the file's name and uploader for the activity
+-- history, but it still points at the blob through a RESTRICT foreign key, so
+-- the object cannot be collected while it exists. Removing the row after a
+-- retention window is what finally lets the sweep reclaim the bytes; the
+-- reference itself was released when the row was soft-deleted.
+-- name: ListRetiredAttachments :many
+SELECT a.id
+FROM calendar_event_attachments a
+WHERE a.enabled = FALSE AND a.updated_at < ? AND a.id > ?
+ORDER BY a.id
+LIMIT ?;
+
+-- name: DeleteRetiredAttachment :exec
+DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE;

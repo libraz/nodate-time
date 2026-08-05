@@ -139,11 +139,21 @@ func (q *Queries) GetAvatarUploadForUserForUpdate(ctx context.Context, arg GetAv
 }
 
 const listExpiredAvatarUploads = `-- name: ListExpiredAvatarUploads :many
-SELECT id, public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads WHERE expires_at <= ? ORDER BY id LIMIT 500
+SELECT id, public_id, user_id, sha256, storage_key, content_type, byte_size, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM avatar_uploads
+WHERE expires_at <= ? AND id > ?
+ORDER BY id
+LIMIT 500
 `
 
-func (q *Queries) ListExpiredAvatarUploads(ctx context.Context, expiresAt time.Time) ([]AvatarUpload, error) {
-	rows, err := q.db.QueryContext(ctx, listExpiredAvatarUploads, expiresAt)
+type ListExpiredAvatarUploadsParams struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	ID        uint32    `json:"id"`
+}
+
+// The cursor keeps a row the delete below cannot remove from heading every
+// page and consuming the sweep's whole batch budget.
+func (q *Queries) ListExpiredAvatarUploads(ctx context.Context, arg ListExpiredAvatarUploadsParams) ([]AvatarUpload, error) {
+	rows, err := q.db.QueryContext(ctx, listExpiredAvatarUploads, arg.ExpiresAt, arg.ID)
 	if err != nil {
 		return nil, err
 	}

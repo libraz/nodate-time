@@ -3,6 +3,7 @@ package cleanup
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 )
 
 const abandonedUploadAge = 7 * 24 * time.Hour
+
+// retiredAttachmentRetention is how long a soft-deleted attachment row is kept
+// after the event or calendar it belonged to went away. The row carries the
+// filename and uploader the activity history reads, and it pins the blob
+// through a RESTRICT foreign key, so this is also the delay before the bytes
+// can be reclaimed.
+const retiredAttachmentRetention = 30 * 24 * time.Hour
 
 // avatarUploadListBatchSize must match the LIMIT in avatar_uploads.sql's
 // ListExpiredAvatarUploads query.
@@ -46,6 +54,13 @@ func Run(ctx context.Context, q *generated.Queries, storageClient *storage.Clien
 	}()
 }
 
+// RunOnce performs a single cleanup pass. Run calls it on a ticker; it is
+// exported so a test can drive one pass and observe what it collected instead
+// of waiting on a timer.
+func RunOnce(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
+	runOnce(ctx, q, storageClient)
+}
+
 func runOnce(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
 	now := time.Now()
 	if err := q.DeleteExpiredPasswordResets(ctx, now); err != nil {
@@ -74,9 +89,15 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 	// is all that happens here; the blob it pointed at falls to ref_count
 	// zero and the object sweep below collects it along with every other
 	// unreferenced one.
+	//
+	// The cursor is what keeps a row the delete cannot remove from heading
+	// every page: without it the sweep re-reads the same failing rows until
+	// its batch budget is spent and never reaches the rest of the backlog.
+	var attachmentCursor uint32
 	for range maxBatches {
 		rows, err := q.ListAbandonedAttachments(ctx, generated.ListAbandonedAttachmentsParams{
 			CreatedAt: olderThan,
+			ID:        attachmentCursor,
 			Limit:     storageSweepBatchSize,
 		})
 		if err != nil {
@@ -84,6 +105,7 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 			break
 		}
 		for _, row := range rows {
+			attachmentCursor = row.ID
 			if err := q.DeleteAbandonedAttachment(ctx, row.ID); err != nil {
 				slog.Warn("cleanup: delete abandoned attachment failed", "id", row.ID, "error", err)
 			}
@@ -93,16 +115,75 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 		}
 	}
 
-	if keys, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, olderThan); err != nil {
-		slog.Warn("cleanup: list abandoned album objects failed", "error", err)
-	} else {
-		deleteObjects(ctx, storageClient, keys, func(ctx context.Context, key string) error {
-			_, err := q.DeleteAbandonedAlbumPhotoByStorageKey(ctx, generated.DeleteAbandonedAlbumPhotoByStorageKeyParams{
-				StorageKey: key,
-				CreatedAt:  olderThan,
-			})
-			return err
+	// Attachment rows retired with their event or calendar released their
+	// reference then, but the row itself still pins the object. Removing it
+	// once the history no longer needs it is what lets the object sweep below
+	// actually reclaim the bytes.
+	var retiredCursor uint32
+	retiredBefore := olderThan.Add(abandonedUploadAge).Add(-retiredAttachmentRetention)
+	for range maxBatches {
+		ids, err := q.ListRetiredAttachments(ctx, generated.ListRetiredAttachmentsParams{
+			UpdatedAt: sql.NullTime{Time: retiredBefore, Valid: true},
+			ID:        retiredCursor,
+			Limit:     storageSweepBatchSize,
 		})
+		if err != nil {
+			slog.Warn("cleanup: list retired attachments failed", "error", err)
+			break
+		}
+		for _, id := range ids {
+			retiredCursor = id
+			if err := q.DeleteRetiredAttachment(ctx, id); err != nil {
+				slog.Warn("cleanup: delete retired attachment failed", "id", id, "error", err)
+			}
+		}
+		if len(ids) < storageSweepBatchSize {
+			break
+		}
+	}
+
+	// Album photos that went out of use -- an upload that never landed, a photo
+	// the user deleted, or one that went with its calendar. The row is dropped
+	// first and the bytes only when no storage object claims that key, the same
+	// order the object sweep uses: keys are derived from content, so another
+	// live row can be pointing at the same bytes.
+	var photoCursor uint32
+	for range maxBatches {
+		photos, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, generated.ListAbandonedAlbumPhotoStorageKeysParams{
+			UpdatedAt: sql.NullTime{Time: olderThan, Valid: true},
+			ID:        photoCursor,
+			Limit:     storageSweepBatchSize,
+		})
+		if err != nil {
+			slog.Warn("cleanup: list abandoned album objects failed", "error", err)
+			break
+		}
+		for _, photo := range photos {
+			photoCursor = photo.ID
+			res, err := q.DeleteAbandonedAlbumPhoto(ctx, photo.ID)
+			if err != nil {
+				slog.Warn("cleanup: delete abandoned album photo failed", "id", photo.ID, "error", err)
+				continue
+			}
+			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
+				continue
+			}
+			if photo.StorageKey == "" {
+				continue
+			}
+			if used, err := q.CountStorageObjectsByKey(ctx, photo.StorageKey); err != nil {
+				slog.Warn("cleanup: count objects for album key failed", "key", photo.StorageKey, "error", err)
+				continue
+			} else if used > 0 {
+				continue
+			}
+			if err := storageClient.DeleteObject(ctx, photo.StorageKey); err != nil {
+				slog.Warn("cleanup: delete abandoned album object failed", "key", photo.StorageKey, "error", err)
+			}
+		}
+		if len(photos) < storageSweepBatchSize {
+			break
+		}
 	}
 
 	// ListExpiredAvatarUploads caps each call at avatarUploadListBatchSize rows;
@@ -112,20 +193,43 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 	// cleanup run in case rows are somehow never removed (e.g. a persistent
 	// delete failure), so this cannot spin forever.
 	expiresBefore := olderThan.Add(abandonedUploadAge)
+	var avatarCursor uint32
 	for range maxBatches {
-		expiredUploads, err := q.ListExpiredAvatarUploads(ctx, expiresBefore)
+		expiredUploads, err := q.ListExpiredAvatarUploads(ctx, generated.ListExpiredAvatarUploadsParams{
+			ExpiresAt: expiresBefore,
+			ID:        avatarCursor,
+		})
 		if err != nil {
 			slog.Warn("cleanup: list expired avatar uploads failed", "error", err)
 			return
 		}
 		for _, upload := range expiredUploads {
-			deleteObjects(ctx, storageClient, []string{upload.StorageKey}, func(ctx context.Context, _ string) error {
-				_, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
-					ID:        upload.ID,
-					ExpiresAt: expiresBefore,
-				})
-				return err
+			avatarCursor = upload.ID
+			res, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
+				ID:        upload.ID,
+				ExpiresAt: expiresBefore,
 			})
+			if err != nil {
+				slog.Warn("cleanup: delete expired avatar upload failed", "id", upload.ID, "error", err)
+				continue
+			}
+			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
+				continue
+			}
+			// The key is derived from the user and the digest of the bytes, so
+			// a second upload of the same picture reserves the same key as the
+			// confirmed avatar already on display. Abandoning that second
+			// reservation must not take the first one's bytes with it, which is
+			// what deleting the blob unconditionally used to do.
+			if used, err := q.CountStorageObjectsByKey(ctx, upload.StorageKey); err != nil {
+				slog.Warn("cleanup: count objects for avatar key failed", "key", upload.StorageKey, "error", err)
+				continue
+			} else if used > 0 {
+				continue
+			}
+			if err := storageClient.DeleteObject(ctx, upload.StorageKey); err != nil {
+				slog.Warn("cleanup: delete abandoned avatar object failed", "key", upload.StorageKey, "error", err)
+			}
 		}
 		if len(expiredUploads) < avatarUploadListBatchSize {
 			return
@@ -143,9 +247,14 @@ func sweepUnreferencedObjects(ctx context.Context, q *generated.Queries, storage
 	if storageClient == nil {
 		return
 	}
+	// Objects are walked by id. An object an attachment row still points at
+	// cannot be deleted (the foreign key is RESTRICT), and re-reading from the
+	// head would put that same object at the front of every page.
+	var cursor uint32
 	for range maxBatches {
 		objects, err := q.ListUnreferencedStorageObjects(ctx, generated.ListUnreferencedStorageObjectsParams{
 			CreatedAt: olderThan,
+			ID:        cursor,
 			Limit:     storageSweepBatchSize,
 		})
 		if err != nil {
@@ -153,6 +262,7 @@ func sweepUnreferencedObjects(ctx context.Context, q *generated.Queries, storage
 			return
 		}
 		for _, obj := range objects {
+			cursor = obj.ID
 			// Drop the row first. DeleteStorageObject re-checks ref_count = 0,
 			// so an object that gained a reference since it was listed reports
 			// no affected rows and its blob is left alone. Deleting the blob
