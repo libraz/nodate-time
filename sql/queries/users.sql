@@ -32,3 +32,7 @@ UPDATE users SET avatar_storage_object_id = NULL, avatar_url = NULL WHERE id = ?
 
 -- name: TouchUserLastLogin :exec
 UPDATE users SET last_login_at = NOW(3) WHERE id = ?;
+
+-- name: MarkUserEmailVerified :execresult
+UPDATE users SET email_verified_at = NOW(3)
+WHERE id = ? AND email = ? AND email_verified_at IS NULL;

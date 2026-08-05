@@ -22,7 +22,7 @@ type CreateSessionParams struct {
 	UserID      uint32         `json:"userId"`
 	RefreshHash string         `json:"refreshHash"`
 	UserAgent   sql.NullString `json:"userAgent"`
-	IpAddress   sql.NullString `json:"ipAddress"`
+	IpAddress   []byte         `json:"ipAddress"`
 	ExpiresAt   time.Time      `json:"expiresAt"`
 }
 

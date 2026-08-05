@@ -35,6 +35,7 @@ DROP TABLE IF EXISTS `workspaces`;
 DROP TABLE IF EXISTS `album_photos`;
 DROP TABLE IF EXISTS `avatar_uploads`;
 DROP TABLE IF EXISTS `calendar_invites`;
+DROP TABLE IF EXISTS `email_verifications`;
 DROP TABLE IF EXISTS `oauth_allowed_emails`;
 DROP TABLE IF EXISTS `oauth_provider_configs`;
 DROP TABLE IF EXISTS `password_resets`;
@@ -1349,6 +1350,45 @@ CREATE TABLE calendar_invites (
   CONSTRAINT chk_calendar_invites_uses CHECK (max_uses IS NULL OR use_count <= max_uses)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Join-by-link calendar invitations';
 
+-- >>> email_verifications.sql
+-- ====================================
+-- email_verifications
+-- Single-use tokens proving a person can read the mailbox they registered
+-- with.
+--
+-- Separate from password_resets for the same reason password_resets is
+-- separate from magic_link_tokens: one table would mean a token minted to
+-- confirm an address is also accepted to replace a credential.
+--
+-- What the proof is for: provider sign-in links a verified provider email to
+-- an existing account with the same address. Without a proof that the
+-- existing account's own address belongs to its owner, anyone can register
+-- someone else's address first and inherit the account they later sign in to.
+-- ====================================
+CREATE TABLE email_verifications (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible ID',
+  user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id',
+
+  email VARCHAR(255) NOT NULL COMMENT 'Address the token was sent to. Recorded so a token stops applying once the account changes address, rather than confirming whatever address is current at redemption time.',
+  token_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'SHA-256 hex of the token; the plaintext is emailed once and never stored',
+  expires_at DATETIME(3) NOT NULL COMMENT 'Expiry',
+  used_at DATETIME(3) NULL COMMENT 'Redemption time; a non-NULL value makes the token spent',
+
+  sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
+  notes TEXT NULL COMMENT 'Admin notes',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enabled flag',
+  updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  UNIQUE KEY uniq_email_verifications_public_id (public_id),
+  UNIQUE KEY uniq_email_verifications_token_hash (token_hash),
+  KEY idx_email_verifications_user (user_id, expires_at),
+  KEY idx_email_verifications_expiry (expires_at),
+
+  CONSTRAINT fk_email_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Single-use email ownership proofs';
+
 -- >>> oauth_allowed_emails.sql
 -- ====================================
 -- oauth_allowed_emails
@@ -1473,6 +1513,28 @@ CREATE TABLE signin_states (
   UNIQUE KEY uniq_signin_states_state_hash (state_hash),
   KEY idx_signin_states_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='In-flight OAuth sign-in state';
+
+-- >>> identities_provider.sql
+-- ====================================
+-- identities.provider — product-layer widening
+--
+-- The shared contract enumerates the providers every product implementing it
+-- must accept. This product also offers LINE sign-in, which the contract does
+-- not name, so the value is added here rather than in core/: widening an ENUM
+-- in the product layer keeps the vendored contract byte-identical to upstream
+-- while still letting a LINE identity be stored.
+--
+-- Without this the provider is rejected by the column's own constraint, the
+-- sign-in transaction rolls back, and the failure surfaces as a raw error in
+-- the middle of a browser redirect.
+--
+-- oauth_provider_configs.provider already lists 'line' in its own definition
+-- because that table belongs to this layer.
+-- ====================================
+ALTER TABLE identities
+  MODIFY COLUMN provider
+    ENUM('local','google','github','microsoft','generic_oidc','line')
+    NOT NULL COMMENT 'Identity provider kind';
 
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_del`;
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_ins`;

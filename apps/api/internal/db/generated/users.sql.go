@@ -215,6 +215,20 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, publicID []byte) (User,
 	return i, err
 }
 
+const markUserEmailVerified = `-- name: MarkUserEmailVerified :execresult
+UPDATE users SET email_verified_at = NOW(3)
+WHERE id = ? AND email = ? AND email_verified_at IS NULL
+`
+
+type MarkUserEmailVerifiedParams struct {
+	ID    uint32 `json:"id"`
+	Email string `json:"email"`
+}
+
+func (q *Queries) MarkUserEmailVerified(ctx context.Context, arg MarkUserEmailVerifiedParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, markUserEmailVerified, arg.ID, arg.Email)
+}
+
 const setUserAvatarObject = `-- name: SetUserAvatarObject :exec
 UPDATE users SET avatar_storage_object_id = ?, avatar_url = NULL WHERE id = ?
 `

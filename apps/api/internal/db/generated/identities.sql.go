@@ -49,7 +49,7 @@ func (q *Queries) DisableIdentity(ctx context.Context, arg DisableIdentityParams
 
 const getIdentityByProviderSubject = `-- name: GetIdentityByProviderSubject :one
 
-SELECT id, public_id, user_id, provider, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM identities
+SELECT id, public_id, user_id, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, provider FROM identities
 WHERE provider = ? AND subject = ? AND enabled = TRUE
 `
 
@@ -67,7 +67,6 @@ func (q *Queries) GetIdentityByProviderSubject(ctx context.Context, arg GetIdent
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
-		&i.Provider,
 		&i.Subject,
 		&i.PasswordHash,
 		&i.MfaSecretCiphertext,
@@ -81,12 +80,13 @@ func (q *Queries) GetIdentityByProviderSubject(ctx context.Context, arg GetIdent
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.Provider,
 	)
 	return i, err
 }
 
 const getLocalIdentityByUser = `-- name: GetLocalIdentityByUser :one
-SELECT id, public_id, user_id, provider, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM identities
+SELECT id, public_id, user_id, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, provider FROM identities
 WHERE user_id = ? AND provider = 'local' AND enabled = TRUE
 `
 
@@ -97,7 +97,6 @@ func (q *Queries) GetLocalIdentityByUser(ctx context.Context, userID uint32) (Id
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
-		&i.Provider,
 		&i.Subject,
 		&i.PasswordHash,
 		&i.MfaSecretCiphertext,
@@ -111,12 +110,13 @@ func (q *Queries) GetLocalIdentityByUser(ctx context.Context, userID uint32) (Id
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.Provider,
 	)
 	return i, err
 }
 
 const getLocalIdentityByUserForUpdate = `-- name: GetLocalIdentityByUserForUpdate :one
-SELECT id, public_id, user_id, provider, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM identities
+SELECT id, public_id, user_id, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, provider FROM identities
 WHERE user_id = ? AND provider = 'local' AND enabled = TRUE FOR UPDATE
 `
 
@@ -127,7 +127,6 @@ func (q *Queries) GetLocalIdentityByUserForUpdate(ctx context.Context, userID ui
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
-		&i.Provider,
 		&i.Subject,
 		&i.PasswordHash,
 		&i.MfaSecretCiphertext,
@@ -141,12 +140,13 @@ func (q *Queries) GetLocalIdentityByUserForUpdate(ctx context.Context, userID ui
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.Provider,
 	)
 	return i, err
 }
 
 const listIdentitiesForUser = `-- name: ListIdentitiesForUser :many
-SELECT id, public_id, user_id, provider, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM identities WHERE user_id = ? AND enabled = TRUE ORDER BY created_at
+SELECT id, public_id, user_id, subject, password_hash, mfa_secret_ciphertext, mfa_confirmed_at, mfa_last_step, failed_attempts, locked_until_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, provider FROM identities WHERE user_id = ? AND enabled = TRUE ORDER BY created_at
 `
 
 func (q *Queries) ListIdentitiesForUser(ctx context.Context, userID uint32) ([]Identity, error) {
@@ -162,7 +162,6 @@ func (q *Queries) ListIdentitiesForUser(ctx context.Context, userID uint32) ([]I
 			&i.ID,
 			&i.PublicID,
 			&i.UserID,
-			&i.Provider,
 			&i.Subject,
 			&i.PasswordHash,
 			&i.MfaSecretCiphertext,
@@ -176,6 +175,7 @@ func (q *Queries) ListIdentitiesForUser(ctx context.Context, userID uint32) ([]I
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.Provider,
 		); err != nil {
 			return nil, err
 		}
