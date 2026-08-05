@@ -5,6 +5,7 @@ import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { api, errorMessage } from '@/lib/api';
+import { eventTimesForSave } from '@/lib/event-times';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
@@ -27,11 +28,6 @@ import {
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
 function toLocalDatetime(iso: string, zone: string): string {
   return toLocalDatetimeInput(iso, zone);
-}
-
-/** Interprets a wall-clock `yyyy-MM-ddTHH:mm` string as an instant in the given zone. */
-function fromLocalDatetimeToISO(s: string, zone: string): string {
-  return DateTime.fromISO(s, { zone }).toISO() ?? s;
 }
 
 export function eventCommentText(comment: EventComment): string {
@@ -809,6 +805,12 @@ export function EventModal() {
   const me = useAuthStore((s) => s.user);
 
   const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
+  // The zone an event's dates are anchored in. An existing event keeps the one
+  // it was created in: its all-day dates and its recurrence grid are both
+  // measured there, so re-anchoring it to whoever happens to have the modal
+  // open would move the dates and shift every later occurrence across a DST
+  // boundary. A new event takes the zone its author is working in.
+  const anchorZone = editingEvent?.timezone || timezone;
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
 
@@ -924,15 +926,17 @@ export function EventModal() {
     if (!showEventModal) return;
     if (editingEvent) {
       const rule = editingEvent.recurrenceRule ?? null;
-      const startDt = DateTime.fromISO(editingEvent.startAt, { zone: timezone });
+      const startDt = DateTime.fromISO(editingEvent.startAt, { zone: anchorZone });
       const preset = ruleToPreset(rule, startDt);
       setShowCustomRecurrence(preset === 'custom');
       setForm({
         title: editingEvent.title,
         allDay: editingEvent.allDay,
-        startAt: toLocalDatetime(editingEvent.startAt, timezone),
+        startAt: editingEvent.allDay
+          ? toLocalDatetime(editingEvent.startAt, anchorZone)
+          : toLocalDatetime(editingEvent.startAt, timezone),
         endAt: editingEvent.allDay
-          ? toAllDayInclusiveEndInput(editingEvent.endAt, timezone)
+          ? toAllDayInclusiveEndInput(editingEvent.endAt, anchorZone)
           : toLocalDatetime(editingEvent.endAt, timezone),
         color: editingEvent.color,
         calendarId: editingEvent.calendarId,
@@ -983,7 +987,15 @@ export function EventModal() {
       });
       setShowMore(false);
     }
-  }, [editingEvent, showEventModal, selectedDate, eventDraftStart, defaultCalendarId, timezone]);
+  }, [
+    editingEvent,
+    showEventModal,
+    selectedDate,
+    eventDraftStart,
+    defaultCalendarId,
+    timezone,
+    anchorZone,
+  ]);
 
   useEffect(() => {
     if (showEventModal) {
@@ -1006,24 +1018,7 @@ export function EventModal() {
         setScopePrompt('save');
         return;
       }
-      let startIso = fromLocalDatetimeToISO(form.startAt, timezone);
-      let endIso = fromLocalDatetimeToISO(form.endAt, timezone);
-      if (form.allDay) {
-        // All-day events are wall dates anchored at midnight in the selected zone.
-        const startDay = DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day');
-        const endDay = DateTime.fromISO(form.endAt, { zone: timezone }).startOf('day');
-        startIso = startDay.toISO() ?? startIso;
-        // End is exclusive: add 1 day. Clamp end >= start.
-        const effectiveEnd = endDay >= startDay ? endDay : startDay;
-        endIso = effectiveEnd.plus({ days: 1 }).toISO() ?? endIso;
-      } else {
-        // For timed events, ensure end > start
-        const startDt = DateTime.fromISO(startIso);
-        const endDt = DateTime.fromISO(endIso);
-        if (endDt <= startDt) {
-          endIso = startDt.plus({ hours: 1 }).toISO() ?? endIso;
-        }
-      }
+      const { startAt: startIso, endAt: endIso } = eventTimesForSave(form, timezone, anchorZone);
       // Annotated so TypeScript's excess-property check rejects any field the
       // API does not accept: the body schema forbids unknown properties, so a
       // stray key is a 422 on every save rather than a value the server ignores.
@@ -1032,14 +1027,14 @@ export function EventModal() {
         allDay: form.allDay,
         startAt: startIso,
         endAt: endIso,
-        timezone,
+        timezone: anchorZone,
         location: form.location,
         memo: form.memo,
         url: form.url,
         notificationOffset: normalizeNotificationOffset(form.notificationOffset),
         participants: form.participants,
         ownerId: form.ownerId,
-        recurrenceRule: normalizeRuleForApi(form.recurrenceRule, timezone),
+        recurrenceRule: normalizeRuleForApi(form.recurrenceRule, anchorZone),
       };
       setSaving(true);
       try {
@@ -1066,6 +1061,7 @@ export function EventModal() {
       saving,
       editable,
       timezone,
+      anchorZone,
       t,
     ],
   );

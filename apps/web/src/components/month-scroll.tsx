@@ -23,6 +23,7 @@ import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import {
   eventEndDay,
+  eventStartDay,
   isMultiDay,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
@@ -130,7 +131,7 @@ function WeekRow({
     const map = new Map<string, CalendarEvent[]>();
     for (const evt of events) {
       if (isMultiDay(evt, zone)) continue;
-      const startDt = fromISOInZone(evt.startAt, zone).startOf('day');
+      const startDt = eventStartDay(evt, zone);
       const inWeek = week.find((d) => d.hasSame(startDt, 'day'));
       if (!inWeek) continue;
       const key = inWeek.toFormat('yyyy-MM-dd');

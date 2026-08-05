@@ -15,7 +15,13 @@ import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import { eventEndDay, isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from '@/lib/week-layout';
+import {
+  eventEndDay,
+  eventStartDay,
+  isMultiDay,
+  layoutWeek,
+  MAX_VISIBLE_TRACKS,
+} from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -197,7 +203,7 @@ export function CalendarGrid() {
           const singleDayMap = new Map<string, CalendarEvent[]>();
           for (const evt of visibleEvents) {
             if (isMultiDay(evt, timezone)) continue;
-            const startDt = fromISOInZone(evt.startAt, timezone).startOf('day');
+            const startDt = eventStartDay(evt, timezone);
             const inWeek = week.find((d) => d.hasSame(startDt, 'day'));
             if (!inWeek) continue;
             const key = inWeek.toFormat('yyyy-MM-dd');

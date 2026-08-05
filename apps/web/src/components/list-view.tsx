@@ -4,6 +4,7 @@ import { useT } from '@/i18n';
 import { fromISOInZone } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
+import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -27,7 +28,7 @@ export function ListView() {
           fromISOInZone(b.startAt, timezone).toMillis(),
       );
     for (const evt of filtered) {
-      const key = fromISOInZone(evt.startAt, timezone).toFormat('yyyy-MM-dd');
+      const key = eventStartDay(evt, timezone).toFormat('yyyy-MM-dd');
       const arr = map.get(key) ?? [];
       arr.push(evt);
       map.set(key, arr);

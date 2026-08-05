@@ -1,7 +1,13 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
-import { isMultiDay, layoutWeek, MAX_VISIBLE_TRACKS } from './week-layout';
+import {
+  eventOccupiesDay,
+  eventStartDay,
+  isMultiDay,
+  layoutWeek,
+  MAX_VISIBLE_TRACKS,
+} from './week-layout';
 
 const ZONE = 'Asia/Tokyo';
 
@@ -73,6 +79,44 @@ describe('isMultiDay', () => {
       endAt: '2026-04-22T00:00:00+09:00',
     });
     expect(isMultiDay(evt, ZONE)).toBe(true);
+  });
+});
+
+// An all-day event is a span of dates, not of instants. Read in the viewer's
+// zone instead of its own, a one-day event created in Tokyo becomes a two-day
+// bar starting the day before for a viewer in New York.
+describe('all-day events read in a viewer zone behind the event zone', () => {
+  const VIEWER = 'America/New_York';
+  const tokyoBirthday = makeEvent({
+    allDay: true,
+    timezone: 'Asia/Tokyo',
+    startAt: '2026-08-05T00:00:00+09:00',
+    endAt: '2026-08-06T00:00:00+09:00',
+  });
+
+  it('stays a single day', () => {
+    expect(isMultiDay(tokyoBirthday, VIEWER)).toBe(false);
+  });
+
+  it('stays on the date it was created for', () => {
+    expect(eventStartDay(tokyoBirthday, VIEWER).toFormat('yyyy-MM-dd')).toBe('2026-08-05');
+  });
+
+  it('occupies that day and not the one before it', () => {
+    const fifth = DateTime.fromISO('2026-08-05T00:00:00', { zone: VIEWER });
+    expect(eventOccupiesDay(tokyoBirthday, fifth, VIEWER)).toBe(true);
+    expect(eventOccupiesDay(tokyoBirthday, fifth.minus({ days: 1 }), VIEWER)).toBe(false);
+  });
+
+  it('still reads a timed event in the viewer zone', () => {
+    // 09:00 Tokyo on the 5th is 20:00 New York on the 4th, and a viewer in
+    // New York needs to see it on the 4th.
+    const meeting = makeEvent({
+      timezone: 'Asia/Tokyo',
+      startAt: '2026-08-05T09:00:00+09:00',
+      endAt: '2026-08-05T10:00:00+09:00',
+    });
+    expect(eventStartDay(meeting, VIEWER).toFormat('yyyy-MM-dd')).toBe('2026-08-04');
   });
 });
 
