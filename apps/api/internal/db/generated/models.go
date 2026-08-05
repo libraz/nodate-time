@@ -1427,6 +1427,8 @@ type Event struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+	// Public id of the entity this event is about, lifted out of the payload so one entity history can be indexed. Generated: never written directly.
+	SubjectPublicID sql.NullString `json:"subjectPublicId"`
 }
 
 // User authentication identities
