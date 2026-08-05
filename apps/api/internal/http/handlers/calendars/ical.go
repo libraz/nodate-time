@@ -491,10 +491,138 @@ func buildICS(calName string, rows []exportEvent) string {
 			writeFolded(&b, "CLASS:"+class)
 		}
 		writeFolded(&b, "TRANSP:"+icsTransp(e.ShowAs))
+		if e.NotificationOffset.Valid {
+			// The reminder is delivered by whatever client holds the calendar,
+			// which is the only thing that can raise one when the app is not
+			// open. Leaving it out of the file is what makes a reminder set here
+			// silently never arrive.
+			writeFolded(&b, "BEGIN:VALARM")
+			writeFolded(&b, "ACTION:DISPLAY")
+			// DISPLAY alarms require a DESCRIPTION; the event's own title is
+			// what the reminder should say.
+			writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Title))
+			writeFolded(&b, "TRIGGER:"+icsTrigger(e.NotificationOffset.Int32))
+			writeFolded(&b, "END:VALARM")
+		}
 		writeFolded(&b, "END:VEVENT")
 	}
 	writeFolded(&b, "END:VCALENDAR")
 	return b.String()
+}
+
+// icsTrigger renders a reminder as a duration relative to the start, which is
+// the form every receiving client understands. Minutes are used throughout
+// rather than the largest fitting unit: the value is stored in minutes, and a
+// unit conversion is one more place for a day to become an hour.
+func icsTrigger(minutes int32) string {
+	if minutes <= 0 {
+		return "PT0S"
+	}
+	return "-PT" + strconv.Itoa(int(minutes)) + "M"
+}
+
+// supportedAlarmOffsets is the set of reminders this product can show.
+//
+// An imported alarm outside it is dropped rather than kept: the picker is the
+// only place a reminder is visible or changeable, so a value it cannot
+// represent would be invisible, and the next edit through that picker would
+// clear it without anyone choosing to. Dropping it on the way in at least
+// happens where the import result can report it.
+var supportedAlarmOffsets = map[int32]bool{
+	0: true, 5: true, 10: true, 15: true, 30: true,
+	60: true, 120: true, 1440: true, 2880: true,
+}
+
+// parseTriggerMinutes reads a TRIGGER value as minutes before the start.
+//
+// Only a duration relative to the start is usable: an absolute trigger names
+// an instant rather than an offset, and one relative to the end has no
+// equivalent here. Both are reported as unusable rather than approximated,
+// because a reminder that fires at the wrong time is worse than one the
+// import says it did not take.
+func parseTriggerMinutes(value string, params []string) (int32, bool) {
+	for _, p := range params {
+		if strings.EqualFold(p, "VALUE=DATE-TIME") || strings.EqualFold(p, "RELATED=END") {
+			return 0, false
+		}
+	}
+	value = strings.TrimSpace(strings.ToUpper(value))
+	negative := strings.HasPrefix(value, "-")
+	value = strings.TrimLeft(value, "+-")
+	d, ok := parseICSDuration(value)
+	if !ok {
+		return 0, false
+	}
+	if d == 0 {
+		return 0, true
+	}
+	// A trigger after the start would be a reminder for a commitment already
+	// under way, which this product has no way to express.
+	if !negative {
+		return 0, false
+	}
+	if d%time.Minute != 0 {
+		return 0, false
+	}
+	return int32(d / time.Minute), true
+}
+
+// parseICSDuration parses the unsigned part of an RFC 5545 duration. Weeks are
+// accepted but cannot be combined with other units, which is what the grammar
+// says.
+func parseICSDuration(s string) (time.Duration, bool) {
+	if !strings.HasPrefix(s, "P") {
+		return 0, false
+	}
+	s = s[1:]
+	var total time.Duration
+	inTime := false
+	num := ""
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			num += string(r)
+			continue
+		}
+		if r == 'T' {
+			if num != "" {
+				return 0, false
+			}
+			inTime = true
+			continue
+		}
+		n, err := strconv.Atoi(num)
+		if err != nil {
+			return 0, false
+		}
+		num = ""
+		switch {
+		case r == 'W' && !inTime:
+			total += time.Duration(n) * 7 * 24 * time.Hour
+		case r == 'D' && !inTime:
+			total += time.Duration(n) * 24 * time.Hour
+		case r == 'H' && inTime:
+			total += time.Duration(n) * time.Hour
+		case r == 'M' && inTime:
+			total += time.Duration(n) * time.Minute
+		case r == 'S' && inTime:
+			total += time.Duration(n) * time.Second
+		default:
+			return 0, false
+		}
+	}
+	if num != "" {
+		return 0, false
+	}
+	return total, true
+}
+
+// importAlarm maps a parsed alarm onto the stored offset. An alarm this
+// product cannot show is left off rather than snapped to a neighbouring value.
+func importAlarm(minutes *int32) sql.NullInt32 {
+	if minutes == nil || !supportedAlarmOffsets[*minutes] {
+		return sql.NullInt32{}
+	}
+	return sql.NullInt32{Int32: *minutes, Valid: true}
 }
 
 // icsTransp renders the availability axis. iCalendar only distinguishes taken
@@ -639,6 +767,9 @@ type rawEvent struct {
 	// event of its own.
 	recurrenceID    time.Time
 	hasRecurrenceID bool
+	// alarmMinutes is how long before the start the event's reminder fires,
+	// taken from the first VALARM the event can express.
+	alarmMinutes *int32
 }
 
 // parseICSTime parses a DTSTART/DTEND value. Wall-clock values carrying a TZID
@@ -668,15 +799,39 @@ func parseICS(text string) []rawEvent {
 	lines := strings.Split(text, "\n")
 	var events []rawEvent
 	var cur *rawEvent
+	// A VALARM is a component nested inside the event, and it carries property
+	// names the event itself uses. Read flat, its DESCRIPTION would land on the
+	// event as its memo, replacing whatever the file said the event was about.
+	inAlarm := false
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
 		switch {
 		case line == "BEGIN:VEVENT":
 			cur = &rawEvent{}
+			inAlarm = false
 		case line == "END:VEVENT":
 			if cur != nil {
 				events = append(events, *cur)
 				cur = nil
+			}
+			inAlarm = false
+		case cur != nil && line == "BEGIN:VALARM":
+			inAlarm = true
+		case cur != nil && line == "END:VALARM":
+			inAlarm = false
+		case cur != nil && inAlarm:
+			colon := strings.Index(line, ":")
+			if colon < 0 {
+				continue
+			}
+			parts := strings.Split(line[:colon], ";")
+			if !strings.EqualFold(parts[0], "TRIGGER") || cur.alarmMinutes != nil {
+				// The first usable alarm wins. An event may carry several, and
+				// there is one reminder to keep.
+				continue
+			}
+			if m, ok := parseTriggerMinutes(line[colon+1:], parts[1:]); ok {
+				cur.alarmMinutes = &m
 			}
 		case cur != nil:
 			colon := strings.Index(line, ":")
@@ -1038,25 +1193,26 @@ func importSeriesHead(
 	var newID uint32
 	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 		res, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
-			PublicID:        pubID[:],
-			WorkspaceID:     deps.WorkspaceID,
-			CalendarID:      cal.ID,
-			Kind:            generated.CalendarEventsKindEvent,
-			Visibility:      importVisibility(e.class),
-			ShowAs:          importTransp(e.transp),
-			Flexibility:     generated.CalendarEventsFlexibilityFixed,
-			Title:           e.summary,
-			AllDay:          e.allDay,
-			StartAt:         sql.NullTime{Time: e.start, Valid: true},
-			EndAt:           sql.NullTime{Time: endAt, Valid: true},
-			Timezone:        tz,
-			Location:        nullString(e.location),
-			Memo:            nullString(e.desc),
-			URL:             nullString(e.url),
-			OwnerUserID:     userID,
-			CreatedByUserID: userID,
-			RecurrenceRule:  ruleData,
-			RecurrenceEnd:   recEnd,
+			PublicID:           pubID[:],
+			WorkspaceID:        deps.WorkspaceID,
+			CalendarID:         cal.ID,
+			Kind:               generated.CalendarEventsKindEvent,
+			Visibility:         importVisibility(e.class),
+			ShowAs:             importTransp(e.transp),
+			Flexibility:        generated.CalendarEventsFlexibilityFixed,
+			Title:              e.summary,
+			AllDay:             e.allDay,
+			StartAt:            sql.NullTime{Time: e.start, Valid: true},
+			EndAt:              sql.NullTime{Time: endAt, Valid: true},
+			Timezone:           tz,
+			Location:           nullString(e.location),
+			Memo:               nullString(e.desc),
+			URL:                nullString(e.url),
+			OwnerUserID:        userID,
+			CreatedByUserID:    userID,
+			NotificationOffset: importAlarm(e.alarmMinutes),
+			RecurrenceRule:     ruleData,
+			RecurrenceEnd:      recEnd,
 		})
 		if err != nil {
 			return err
@@ -1131,6 +1287,7 @@ func importChangedOccurrence(
 			URL:                     nullString(e.url),
 			OwnerUserID:             userID,
 			CreatedByUserID:         userID,
+			NotificationOffset:      importAlarm(e.alarmMinutes),
 			RecurrenceParentID:      parentRef,
 			RecurrenceOriginalStart: originalRef,
 		})

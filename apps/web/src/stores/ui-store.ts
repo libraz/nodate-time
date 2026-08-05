@@ -5,7 +5,7 @@ import { loadJson, saveJson } from '@/lib/storage';
 import type { ColorMode, ThemeStyle } from '@/lib/theme';
 import type { CalendarView } from '@/types/calendar';
 
-export type RightPanelId = 'memo' | 'album' | 'members' | 'notifications' | 'share' | null;
+export type RightPanelId = 'memo' | 'album' | 'members' | 'share' | null;
 
 export type MobileTab = 'calendar' | 'memo' | 'search' | 'settings';
 

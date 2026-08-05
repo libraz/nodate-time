@@ -346,82 +346,6 @@ func (q *Queries) ListCalendarEventsByCalendarAndRange(ctx context.Context, arg 
 	return items, nil
 }
 
-const listCalendarEventsDueForNotification = `-- name: ListCalendarEventsDueForNotification :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
-WHERE enabled = TRUE
-  AND notification_offset IS NOT NULL
-  AND notified_at IS NULL
-  AND start_at IS NOT NULL
-  AND TIMESTAMPADD(MINUTE, -notification_offset, start_at) <= ?
-  AND start_at > ?
-ORDER BY start_at
-LIMIT ?
-`
-
-type ListCalendarEventsDueForNotificationParams struct {
-	Now   sql.NullTime `json:"now"`
-	Limit int32        `json:"limit"`
-}
-
-func (q *Queries) ListCalendarEventsDueForNotification(ctx context.Context, arg ListCalendarEventsDueForNotificationParams) ([]CalendarEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listCalendarEventsDueForNotification, arg.Now, arg.Now, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CalendarEvent
-	for rows.Next() {
-		var i CalendarEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.WorkspaceID,
-			&i.CalendarID,
-			&i.Kind,
-			&i.Visibility,
-			&i.ShowAs,
-			&i.Flexibility,
-			&i.Title,
-			&i.AllDay,
-			&i.StartAt,
-			&i.EndAt,
-			&i.Timezone,
-			&i.Location,
-			&i.Memo,
-			&i.URL,
-			&i.OwnerUserID,
-			&i.CreatedByUserID,
-			&i.BlockLabel,
-			&i.RecurrenceRule,
-			&i.RecurrenceEnd,
-			&i.RecurrenceExceptions,
-			&i.RecurrenceParentID,
-			&i.RecurrenceOriginalStart,
-			&i.NotificationOffset,
-			&i.NotifiedAt,
-			&i.TaskID,
-			&i.TaskRole,
-			&i.TaskRoleKey,
-			&i.SortWeight,
-			&i.Notes,
-			&i.Flags,
-			&i.Enabled,
-			&i.UpdatedAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCalendarEventsForExport = `-- name: ListCalendarEventsForExport :many
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
 WHERE calendar_id = ?
@@ -637,20 +561,6 @@ func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Cont
 		return nil, err
 	}
 	return items, nil
-}
-
-const markCalendarEventNotified = `-- name: MarkCalendarEventNotified :exec
-UPDATE calendar_events SET notified_at = ? WHERE id = ?
-`
-
-type MarkCalendarEventNotifiedParams struct {
-	NotifiedAt sql.NullTime `json:"notifiedAt"`
-	ID         uint32       `json:"id"`
-}
-
-func (q *Queries) MarkCalendarEventNotified(ctx context.Context, arg MarkCalendarEventNotifiedParams) error {
-	_, err := q.db.ExecContext(ctx, markCalendarEventNotified, arg.NotifiedAt, arg.ID)
-	return err
 }
 
 const retimeRecurrenceOverride = `-- name: RetimeRecurrenceOverride :exec
