@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -163,6 +165,24 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 type ObjectInfo struct {
 	Size        int64
 	ContentType string
+}
+
+// SHA256 streams the stored object and returns the digest of its bytes.
+//
+// The digest a client declares before uploading decides which object its
+// bytes are stored as, so it cannot also be taken as proof of what they are.
+// This is the only thing that can say what actually landed.
+func (c *Client) SHA256(ctx context.Context, key string) ([]byte, error) {
+	obj, err := c.mc.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, obj); err != nil {
+		return nil, err
+	}
+	return h.Sum(nil), nil
 }
 
 // StatObject returns object metadata and whether the object exists.
