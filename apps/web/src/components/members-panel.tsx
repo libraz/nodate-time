@@ -53,6 +53,18 @@ export function MembersPanel() {
     }
   };
 
+  // The colour is how anyone reading a shared calendar tells whose plan is
+  // whose, so it belongs to the calendar rather than the viewer: everyone sees
+  // the same one.
+  const handleColorChange = async (member: Member, color: string) => {
+    try {
+      await api.put(`/calendars/${calendarId}/members/${member.id}/color`, { color });
+      await fetchMembers(calendarId);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
   const handleRemove = async (member: Member) => {
     if (!confirm(t('members.removeConfirm'))) return;
     try {
@@ -132,13 +144,32 @@ export function MembersPanel() {
                 const canRemove = mayTouch && !isMe && !lastOwner;
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
-                    <span
-                      aria-hidden
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
-                      style={{ backgroundColor: m.color }}
-                    >
-                      {m.name.slice(0, 1)}
-                    </span>
+                    {canManageMembers || isMe ? (
+                      <label className="relative shrink-0" aria-label={t('members.color')}>
+                        <span
+                          aria-hidden
+                          className="flex h-9 w-9 items-center justify-center rounded-full text-default font-bold text-white"
+                          style={{ backgroundColor: m.color }}
+                        >
+                          {m.name.slice(0, 1)}
+                        </span>
+                        <input
+                          type="color"
+                          value={m.color}
+                          onChange={(e) => handleColorChange(m, e.target.value)}
+                          className="absolute inset-0 h-9 w-9 cursor-pointer opacity-0"
+                          aria-label={t('members.color')}
+                        />
+                      </label>
+                    ) : (
+                      <span
+                        aria-hidden
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
+                        style={{ backgroundColor: m.color }}
+                      >
+                        {m.name.slice(0, 1)}
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
                         {m.name}

@@ -814,7 +814,6 @@ export function EventModal() {
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
-  const labels = useCalendarStore((s) => s.labels);
   const me = useAuthStore((s) => s.user);
 
   const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
@@ -1234,39 +1233,9 @@ export function EventModal() {
             return null;
           })()}
 
-          {/* Color */}
-          <div className="flex items-center gap-3 py-1.5">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              className="shrink-0"
-            >
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-              <circle cx="7" cy="7" r="1" />
-            </svg>
-            <div className="flex flex-wrap gap-2.5">
-              {labels.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, color: c.color }))}
-                  className="color-dot h-7 w-7"
-                  style={{
-                    backgroundColor: c.color,
-                    boxShadow:
-                      form.color === c.color
-                        ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${c.color}`
-                        : 'none',
-                  }}
-                  aria-label={t(c.nameKey as TranslationKey)}
-                />
-              ))}
-            </div>
-          </div>
+          {/* An event has no colour of its own: it sits on its owner's layer,
+              and the layer is what carries a colour the whole calendar has
+              agreed on. Changing it is done in the members list. */}
         </div>
       </div>
 

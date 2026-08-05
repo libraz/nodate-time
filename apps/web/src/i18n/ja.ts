@@ -360,6 +360,7 @@ export const ja = {
   'settings.adminAllowedEmailsRemove': '削除',
 
   // Members admin
+  'members.color': 'レイヤーの色',
   'members.role': '権限',
   'members.roleOwner': 'オーナー',
   'members.roleManager': '管理者',

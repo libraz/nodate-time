@@ -343,6 +343,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminAllowedEmailsEmpty': 'No individually allowed emails yet.',
   'settings.adminAllowedEmailsRemove': 'Remove',
 
+  'members.color': 'Layer colour',
   'members.role': 'Role',
   'members.roleOwner': 'Owner',
   'members.roleManager': 'Manager',

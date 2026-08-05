@@ -453,6 +453,62 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 	}
 }
 
+// UpdateMemberColor changes the colour a member's layer is drawn in.
+//
+// The product is one shared calendar with a colour per person, so this is not
+// a cosmetic preference: it is how anyone reading the calendar tells whose
+// plan is whose. It belongs to the calendar rather than the viewer, which is
+// why it is changed here and not in a local setting.
+func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput) (*UpdateMemberColorOutput, error) {
+	return func(ctx context.Context, in *UpdateMemberColorInput) (*UpdateMemberColorOutput, error) {
+		actorID, _ := middleware.ActorFromContext(ctx)
+		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+
+		targetPub, err := parseUUID(in.UserID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		// Your own colour is yours to pick; anyone else's is the calendar's
+		// administration, because two members claiming the same colour is a
+		// problem only somebody looking at the whole list can resolve.
+		if target.ID != actorID && !calresolve.CanManage(actorMember.Role) {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
+		}
+		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+
+		if err := deps.Queries.UpdateCalendarMemberColor(ctx, generated.UpdateCalendarMemberColorParams{
+			MemberColor: in.Body.Color,
+			CalendarID:  cal.ID,
+			UserID:      target.ID,
+		}); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		email := ""
+		if calresolve.CanManage(actorMember.Role) || target.ID == actorID {
+			email = target.Email
+		}
+		return &UpdateMemberColorOutput{Body: MemberResponse{
+			ID:     pubIDToHex(target.PublicID),
+			Name:   target.DisplayName,
+			Email:  email,
+			Avatar: nullStringValue(target.AvatarURL),
+			Role:   string(current.Role),
+			Color:  in.Body.Color,
+		}}, nil
+	}
+}
+
 func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveMemberOutput, error) {
 	return func(ctx context.Context, in *RemoveMemberInput) (*RemoveMemberOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
@@ -539,9 +595,9 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 	}
 }
 
-// ListLabels returns the predefined color palette. Names are returned as i18n
-// keys (label.1 .. label.10) so the frontend can localize them.
-func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsOutput, error) {
+// labelPalette builds the colour list, one entry per colour, with the name as
+// an i18n key so the client can localize it.
+func labelPalette() []LabelResponse {
 	colors := []string{
 		"#47B2F7", "#F35F8C", "#B38BDC", "#FDC02D", "#E73B3B",
 		"#2ECC87", "#F5A623", "#8F8F8F", "#42A5F5", "#FF7043",
@@ -551,6 +607,18 @@ func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsO
 		id := strconv.Itoa(i + 1)
 		labels[i] = LabelResponse{ID: id, NameKey: "label." + id, Color: c}
 	}
+	return labels
+}
+
+// ListLabels returns the predefined color palette. Names are returned as i18n
+// keys (label.1 .. label.10) so the frontend can localize them.
+//
+// The same list is repeated in the web client's MEMBER_COLORS, because the
+// first calendar is created before there is one to ask. Both sides are pinned
+// by a test: a palette that drifts hands out a colour the calendar's own list
+// does not contain.
+func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsOutput, error) {
+	labels := labelPalette()
 	return func(ctx context.Context, in *ListLabelsInput) (*ListLabelsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
