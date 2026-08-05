@@ -154,6 +154,15 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		if candidate.IsZero() {
 			break
 		}
+		// A series never begins before its own start. A rule naming a day the
+		// anchor is already past — byMonthDay 5 on a start of the 25th, or the
+		// first Monday of a month that began mid-month — walks the anchor's own
+		// month first, and that candidate is not an occurrence: emitting it
+		// invents an instance the user never scheduled and, worse, counts
+		// against a `count` limit so the real last occurrence is dropped.
+		if candidate.Before(eventStart) {
+			continue
+		}
 		occurrenceOrdinal++
 
 		// Check until boundary
@@ -415,12 +424,20 @@ func computeNthOccurrence(rule *Rule, start time.Time, n int) time.Time {
 	r.Count = 0
 	r.Until = nil
 	it := newIterator(&r, start)
-	for i := 0; i < n; i++ {
+	found := 0
+	for scanned := 0; found < n && scanned < maxExpansionIterations; scanned++ {
 		t := it.next()
 		if t.IsZero() {
 			break
 		}
+		// Skip the same pre-start candidates Expand skips, or the boundary
+		// this computes lands one occurrence short of where the series
+		// actually ends and range queries stop returning it.
+		if t.Before(start) {
+			continue
+		}
 		last = t
+		found++
 	}
 	return last
 }

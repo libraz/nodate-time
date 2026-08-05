@@ -89,6 +89,46 @@ func TestExpandMonthlyByDateClamp(t *testing.T) {
 	assert.Equal(t, 30, results[3].StartAt.Day()) // Apr
 }
 
+// A monthly rule naming a day the start has already passed must begin the
+// month after, not walk backwards into the start's own month. The invented
+// occurrence is both a date the user never scheduled and a consumer of the
+// count limit, so the real last occurrence goes missing behind it.
+func TestExpandMonthlyByDateDoesNotReachBackBeforeTheStart(t *testing.T) {
+	rule := &Rule{Freq: "monthly", Interval: 1, ByMonthDay: 5, Count: 3}
+	start := d("2026-01-25 10:00")
+	end := d("2026-01-25 11:00")
+
+	results := Expand(rule, start, end, d("2026-01-01 00:00"), d("2026-07-01 00:00"))
+	require.Len(t, results, 3)
+	assert.Equal(t, d("2026-02-05 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2026-03-05 10:00"), results[1].StartAt)
+	assert.Equal(t, d("2026-04-05 10:00"), results[2].StartAt)
+}
+
+// The same for the nth-weekday form: the first Monday of the start's month
+// can precede the start.
+func TestExpandMonthlyByNthWeekdayDoesNotReachBackBeforeTheStart(t *testing.T) {
+	rule := &Rule{Freq: "monthly", Interval: 1, BySetPos: 1, ByDay: []string{"MO"}, Count: 2}
+	start := d("2026-04-20 10:00") // the first Monday of April is the 6th
+	end := d("2026-04-20 11:00")
+
+	results := Expand(rule, start, end, d("2026-01-01 00:00"), d("2026-09-01 00:00"))
+	require.Len(t, results, 2)
+	assert.Equal(t, d("2026-05-04 10:00"), results[0].StartAt)
+	assert.Equal(t, d("2026-06-01 10:00"), results[1].StartAt)
+}
+
+// The end boundary feeds the SQL range query that decides whether a series is
+// read at all. Counting a pre-start candidate as the first occurrence pulls
+// that boundary a month early and the last occurrence stops being returned.
+func TestComputeEndCountsFromTheFirstRealOccurrence(t *testing.T) {
+	rule := &Rule{Freq: "monthly", Interval: 1, ByMonthDay: 5, Count: 3}
+	start := d("2026-01-25 10:00")
+	end := d("2026-01-25 11:00")
+
+	assert.Equal(t, d("2026-04-05 11:00"), ComputeEnd(rule, start, end))
+}
+
 func TestExpandMonthlyByNthWeekday(t *testing.T) {
 	// 3rd Sunday of month
 	rule := &Rule{Freq: "monthly", Interval: 1, BySetPos: 3, ByDay: []string{"SU"}}
