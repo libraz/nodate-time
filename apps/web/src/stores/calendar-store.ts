@@ -1,6 +1,6 @@
-import { DateTime } from 'luxon';
 import { create } from 'zustand';
 import { api, errorMessage } from '@/lib/api';
+import { fetchWindow } from '@/lib/date-utils';
 import { loadJson, saveJson } from '@/lib/storage';
 import { toast } from '@/lib/toast';
 import { useUiStore } from '@/stores/ui-store';
@@ -488,12 +488,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   visibleRange() {
-    const { currentMonth } = useUiStore.getState();
-    const start = currentMonth.minus({ months: 1 }).startOf('month');
-    const end = currentMonth.plus({ months: 2 }).startOf('month');
-    return {
-      start: (start.toISODate() ?? DateTime.now().toISODate()) as string,
-      end: (end.toISODate() ?? DateTime.now().toISODate()) as string,
-    };
+    const { currentMonth, calendarView } = useUiStore.getState();
+    return fetchWindow(calendarView, currentMonth);
   },
 }));

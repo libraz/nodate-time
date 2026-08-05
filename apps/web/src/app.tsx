@@ -8,8 +8,11 @@ import { MonthScroll } from '@/components/month-scroll';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
 import { useT } from '@/i18n';
-import { fromISOInZone } from '@/lib/date-utils';
+import { errorMessage } from '@/lib/api';
+import { fetchWindow, fromISOInZone } from '@/lib/date-utils';
 import { THEME_OPTIONS } from '@/lib/theme';
+import { toast } from '@/lib/toast';
+import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -181,7 +184,7 @@ function MobileSettingsView() {
   const locale = useUiStore((s) => s.locale);
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
-  const setLocale = useUiStore((s) => s.setLocale);
+  const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto px-4 py-4">
@@ -241,7 +244,9 @@ function MobileSettingsView() {
               key={v}
               type="button"
               data-active={locale === v}
-              onClick={() => setLocale(v)}
+              onClick={() => {
+                saveAccountPreference({ locale: v }).catch((e) => toast.error(errorMessage(e)));
+              }}
               className="flex-1"
             >
               {v === 'ja' ? '\u65E5\u672C\u8A9E' : 'English'}
@@ -358,11 +363,13 @@ export function App() {
 
   useEffect(() => {
     if (calendars.length === 0) return;
-    const start = currentMonth.minus({ months: 1 }).toFormat('yyyy-MM-dd');
-    const end = currentMonth.plus({ months: 2 }).toFormat('yyyy-MM-dd');
+    // Sized by the view, not by the month: the year grid draws twelve months
+    // of density dots, and three months of events leaves nine of them blank
+    // in a way that reads as a year with nothing planned.
+    const { start, end } = fetchWindow(calendarView, currentMonth);
     fetchEvents(start, end).catch(() => {});
     fetchMemos().catch(() => {});
-  }, [calendars, currentMonth, fetchEvents, fetchMemos]);
+  }, [calendars, currentMonth, calendarView, fetchEvents, fetchMemos]);
 
   const membersFailed = Object.keys(memberErrors).length > 0;
 
