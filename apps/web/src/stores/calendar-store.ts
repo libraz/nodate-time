@@ -7,10 +7,13 @@ import { useUiStore } from '@/stores/ui-store';
 import type {
   Calendar,
   CalendarEvent,
+  Flexibility,
   Label,
   Member,
   Memo,
   RecurrenceRule,
+  ShowAs,
+  Visibility,
 } from '@/types/calendar';
 
 /** Request body shared by event create and update. */
@@ -27,6 +30,13 @@ export interface EventInput {
   participants?: string[] | undefined;
   ownerId?: string | null | undefined;
   recurrenceRule?: RecurrenceRule | null | undefined;
+  // showAs, flexibility and visibility are omitted-means-unchanged on the
+  // wire. They have to be listed here all the same: a caller that carries
+  // them forward -- a drag, say -- must be able to send them back, or the
+  // server's defaults would silently overwrite what the user chose.
+  showAs?: ShowAs | undefined;
+  flexibility?: Flexibility | undefined;
+  visibility?: Visibility | undefined;
 }
 
 interface CalendarState {

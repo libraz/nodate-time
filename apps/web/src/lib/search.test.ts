@@ -14,6 +14,7 @@ function event(id: string, overrides: Partial<CalendarEvent> = {}): CalendarEven
     ownerId: null,
     showAs: 'busy',
     flexibility: 'fixed',
+    visibility: 'default',
     location: '',
     memo: '',
     url: '',

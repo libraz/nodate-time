@@ -22,6 +22,8 @@ interface PublicEvent {
   timezone?: string;
   color: string;
   location?: string;
+  /** The event's details are withheld; only the time is published. */
+  private?: boolean;
 }
 
 export const Route = createFileRoute('/embed/$token')({
@@ -209,7 +211,7 @@ function EmbeddedCalendarView() {
                       className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white"
                       style={{ backgroundColor: evt.color || calendar.color }}
                     >
-                      {evt.title}
+                      {evt.private ? t('event.privateBusy') : evt.title}
                     </div>
                   ))}
                   {dayEvents.length > 3 && (

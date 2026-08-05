@@ -39,7 +39,11 @@ type EventResponse struct {
 	// Flexibility is whether the commitment could move, which is a separate
 	// question from whether the time is taken. A meeting its owner would
 	// gladly reschedule and one that cannot move are both busy.
-	Flexibility        string   `json:"flexibility" enum:"fixed,negotiable,conditional"`
+	Flexibility string `json:"flexibility" enum:"fixed,negotiable,conditional"`
+	// Visibility decides what a reader outside the calendar's membership is
+	// told: default follows the calendar, private shows the time with no
+	// details, and confidential is not published at all.
+	Visibility         string   `json:"visibility" enum:"default,public,private,confidential"`
 	NotificationOffset *int     `json:"notificationOffset"`
 	Participants       []string `json:"participants"`
 	// Attendees carries what Participants cannot: each participant's answer
@@ -132,6 +136,7 @@ type CreateEventInput struct {
 		URL                string           `json:"url,omitempty" maxLength:"2000" required:"false"`
 		ShowAs             string           `json:"showAs,omitempty" enum:"busy,free,tentative,oof" required:"false" doc:"defaults to busy"`
 		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"defaults to fixed"`
+		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"defaults to the calendar's setting; omitted on update keeps the current value"`
 		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
 		Participants       []string         `json:"participants,omitempty" required:"false"`
 		OwnerID            *string          `json:"ownerId,omitempty" required:"false" doc:"public user ID of the owning member; defaults to the caller"`
@@ -161,6 +166,7 @@ type UpdateEventInput struct {
 		URL                string           `json:"url" maxLength:"2000"`
 		ShowAs             string           `json:"showAs,omitempty" enum:"busy,free,tentative,oof" required:"false" doc:"defaults to busy"`
 		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"defaults to fixed"`
+		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"defaults to the calendar's setting; omitted on update keeps the current value"`
 		NotificationOffset *int             `json:"notificationOffset" doc:"null clears the notification"`
 		Participants       []string         `json:"participants" doc:"full participant list; an empty array removes all participants"`
 		OwnerID            *string          `json:"ownerId" doc:"public user ID of the owning member; null leaves the owner unchanged"`

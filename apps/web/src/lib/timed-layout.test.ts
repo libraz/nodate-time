@@ -18,6 +18,7 @@ function makeEvent(id: string, startAt: string, endAt: string): CalendarEvent {
     ownerId: null,
     showAs: 'busy',
     flexibility: 'fixed',
+    visibility: 'default',
     location: '',
     memo: '',
     url: '',

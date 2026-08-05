@@ -27,6 +27,12 @@ export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventIn
     participants: evt.participants,
     ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
+    // A move is a move. Carrying these forward is what keeps a drag from
+    // resetting an out-of-office block to busy, a negotiable meeting to
+    // fixed, or a private event to whatever the calendar publishes.
+    showAs: evt.showAs,
+    flexibility: evt.flexibility,
+    visibility: evt.visibility,
   };
 }
 
@@ -48,6 +54,12 @@ export function buildResizedEvent(evt: CalendarEvent, newEnd: DateTime): EventIn
     participants: evt.participants,
     ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
+    // A move is a move. Carrying these forward is what keeps a drag from
+    // resetting an out-of-office block to busy, a negotiable meeting to
+    // fixed, or a private event to whatever the calendar publishes.
+    showAs: evt.showAs,
+    flexibility: evt.flexibility,
+    visibility: evt.visibility,
   };
 }
 
