@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { type TranslationKey, useT } from '@/i18n';
+import { useT } from '@/i18n';
+import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -12,24 +13,15 @@ export interface HistoryActor {
 }
 
 export interface HistoryItem {
-  id: number;
-  action: 'create' | 'update' | 'delete';
+  id: string;
+  /** The server's dotted name, e.g. `calendar.event.updated`. Read through the
+   *  helpers in lib/activity rather than matched literally: matching on a
+   *  vocabulary the server does not use leaves every row unlabelled. */
+  action: string;
   summary: string;
   createdAt: string;
   actor: HistoryActor | null;
 }
-
-const ACTION_LABEL: Record<HistoryItem['action'], TranslationKey> = {
-  create: 'history.created',
-  update: 'history.updated',
-  delete: 'history.deleted',
-};
-
-const ACTION_COLOR: Record<HistoryItem['action'], string> = {
-  create: 'var(--color-accent)',
-  update: 'var(--color-text-tertiary)',
-  delete: 'var(--color-danger)',
-};
 
 interface HistoryTimelineProps {
   kind: 'event' | 'memo';
@@ -89,7 +81,7 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
         <div key={item.id} className="flex gap-2">
           <span
             className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: ACTION_COLOR[item.action] }}
+            style={{ backgroundColor: activityColor(item.action) }}
           />
           <span
             className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-[var(--color-surface-inset)] text-default"
@@ -108,9 +100,9 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
               </span>
               <span
                 className="text-caption font-medium"
-                style={{ color: ACTION_COLOR[item.action] }}
+                style={{ color: activityColor(item.action) }}
               >
-                {t(ACTION_LABEL[item.action])}
+                {t(activityLabelKey(item.action))}
               </span>
               <span className="text-caption text-[var(--color-text-tertiary)]">
                 {formatRelativeTime(item.createdAt, locale)}

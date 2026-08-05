@@ -5,7 +5,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -50,7 +52,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -59,16 +61,21 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		_, err = deps.Queries.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
-			PublicID:        pubID[:],
-			WorkspaceID:     deps.WorkspaceID,
-			EventID:         evt.ID,
-			Title:           in.Body.Title,
-			Done:            false,
-			SortWeight:      int32(in.Body.SortOrder),
-			CreatedByUserID: userID,
-		})
-		if err != nil {
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
+				PublicID:        pubID[:],
+				WorkspaceID:     deps.WorkspaceID,
+				EventID:         evt.ID,
+				Title:           in.Body.Title,
+				Done:            false,
+				SortWeight:      int32(in.Body.SortOrder),
+				CreatedByUserID: userID,
+			}); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeChecklistAdded, in.Body.Title, pubID[:])
+		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -87,7 +94,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -110,13 +117,18 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 		if in.Body.SortOrder != nil {
 			sortOrder = int32(*in.Body.SortOrder)
 		}
-		err = deps.Queries.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
-			Title:      in.Body.Title,
-			Done:       in.Body.Done,
-			SortWeight: sortOrder,
-			ID:         item.ID,
-		})
-		if err != nil {
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
+				Title:      in.Body.Title,
+				Done:       in.Body.Done,
+				SortWeight: sortOrder,
+				ID:         item.ID,
+			}); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeChecklistSet, in.Body.Title, item.PublicID)
+		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -135,7 +147,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 	return func(ctx context.Context, in *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -152,8 +164,13 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
 		}
 
-		err = deps.Queries.SoftDeleteChecklistItem(ctx, item.ID)
-		if err != nil {
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.SoftDeleteChecklistItem(ctx, item.ID); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeChecklistGone, item.Title, item.PublicID)
+		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 

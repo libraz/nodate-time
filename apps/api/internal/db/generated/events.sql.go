@@ -48,6 +48,31 @@ func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (sql.R
 	)
 }
 
+const getEventIDByPublicID = `-- name: GetEventIDByPublicID :one
+SELECT id FROM events
+WHERE workspace_id = ? AND calendar_id = ? AND public_id = ?
+`
+
+type GetEventIDByPublicIDParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	CalendarID  sql.NullInt32 `json:"calendarId"`
+	PublicID    []byte        `json:"publicId"`
+}
+
+// GetEventIDByPublicID resolves the cursor a client was handed back to the
+// row it names. The feed pages by the internal id because that is what orders
+// strictly by insertion, but nothing outside ever sees that number.
+//
+// Scoped to the calendar the cursor is being used on: a cursor from a
+// different feed names a real row, and resolving it would silently start this
+// feed from an unrelated position rather than saying the cursor is wrong.
+func (q *Queries) GetEventIDByPublicID(ctx context.Context, arg GetEventIDByPublicIDParams) (uint64, error) {
+	row := q.db.QueryRowContext(ctx, getEventIDByPublicID, arg.WorkspaceID, arg.CalendarID, arg.PublicID)
+	var id uint64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listEventsByCalendar = `-- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
@@ -83,6 +108,11 @@ type ListEventsByCalendarRow struct {
 // id alone: id is strictly monotonic in insertion order, so it already
 // orders by time, and using one column keeps the ORDER BY and the cursor
 // from ever disagreeing about ties.
+//
+// The cursor a client receives names the row by its public id; see
+// GetEventIDByPublicID. The internal id is a single deployment-wide sequence,
+// so handing it out tells anyone holding two cursors how much the whole
+// instance wrote in between.
 func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCalendarParams) ([]ListEventsByCalendarRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventsByCalendar,
 		arg.WorkspaceID,

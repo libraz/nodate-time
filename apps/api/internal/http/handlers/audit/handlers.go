@@ -10,11 +10,9 @@ package audit
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -40,20 +38,33 @@ const (
 	perEntityHistoryLimit = 200
 )
 
-func encodeActivityCursor(id uint64) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatUint(id, 10)))
+// The cursor names a row by its public id. The feed pages by the internal one
+// because that is what orders strictly by insertion, but the internal id is a
+// single sequence shared by every calendar in the deployment: a client holding
+// two cursors from it could read off how much the whole instance wrote in
+// between, which is not something a member of one calendar is entitled to
+// know.
+func encodeActivityCursor(publicID []byte) string {
+	return pubIDToHex(publicID)
 }
 
-func decodeActivityCursor(cursor string) (uint64, error) {
+// resolveActivityCursor turns a cursor back into the row it names. An empty
+// cursor means the first page; anything that does not name a row in this
+// workspace is a bad request rather than a silent restart from the top.
+func resolveActivityCursor(ctx context.Context, deps Deps, calendarID uint32, cursor string) (uint64, error) {
 	if cursor == "" {
 		return 0, nil
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	pub, err := uuid.Parse(cursor)
 	if err != nil {
-		return 0, fmt.Errorf("decode cursor: %w", err)
+		return 0, fmt.Errorf("invalid cursor")
 	}
-	id, err := strconv.ParseUint(string(raw), 10, 64)
-	if err != nil || id == 0 {
+	id, err := deps.Queries.GetEventIDByPublicID(ctx, generated.GetEventIDByPublicIDParams{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  sql.NullInt32{Int32: int32(calendarID), Valid: true},
+		PublicID:    pub[:],
+	})
+	if err != nil {
 		return 0, fmt.Errorf("invalid cursor")
 	}
 	return id, nil
@@ -193,7 +204,7 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 	for _, r := range rows {
 		payload := readPayload(r.PayloadJSON)
 		items = append(items, HistoryItem{
-			ID:        r.ID,
+			ID:        pubIDToHex(r.PublicID),
 			Action:    r.Type,
 			Summary:   payload.Summary,
 			CreatedAt: r.OccurredAt,
@@ -219,7 +230,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		if limit > maxActivityLimit {
 			limit = maxActivityLimit
 		}
-		afterID, err := decodeActivityCursor(in.Cursor)
+		afterID, err := resolveActivityCursor(ctx, deps, cal.ID, in.Cursor)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
@@ -237,7 +248,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 
 		nextCursor := ""
 		if len(rows) > limit {
-			nextCursor = encodeActivityCursor(rows[limit-1].ID)
+			nextCursor = encodeActivityCursor(rows[limit-1].PublicID)
 			rows = rows[:limit]
 		}
 
@@ -248,7 +259,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 			payload := readPayload(r.PayloadJSON)
 			out.Body.Items = append(out.Body.Items, FeedItem{
 				HistoryItem: HistoryItem{
-					ID:        r.ID,
+					ID:        pubIDToHex(r.PublicID),
 					Action:    r.Type,
 					Summary:   payload.Summary,
 					CreatedAt: r.OccurredAt,

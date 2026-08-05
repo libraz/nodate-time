@@ -622,7 +622,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 	type activityFeedItem struct {
 		EntityType string `json:"entityType"`
 		Action     string `json:"action"`
-		ID         uint64 `json:"id"`
+		ID         string `json:"id"`
 		Summary    string `json:"summary"`
 		Actor      *struct {
 			ID string `json:"id"`
@@ -658,7 +658,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 	var secondPage activityPage
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=2&cursor="+firstPage.NextCursor, owner.AccessToken, nil, &secondPage)
 	require.NotEmpty(t, secondPage.Items)
-	ids := map[uint64]bool{}
+	ids := map[string]bool{}
 	for _, item := range firstPage.Items {
 		ids[item.ID] = true
 	}

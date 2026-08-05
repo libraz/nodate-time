@@ -1,26 +1,38 @@
 package audit
 
-import "testing"
+import (
+	"strconv"
+	"testing"
 
-func TestActivityCursorRoundTrip(t *testing.T) {
-	const id uint64 = 12345
-	cursor := encodeActivityCursor(id)
-	if cursor == "" {
-		t.Fatal("cursor is empty")
-	}
-	got, err := decodeActivityCursor(cursor)
+	"github.com/google/uuid"
+)
+
+// A cursor is a value handed to a client, so what matters is what it says
+// rather than that it round-trips: it names the row and nothing else.
+func TestActivityCursorNamesTheRowAndNothingElse(t *testing.T) {
+	id, err := uuid.NewV7()
 	if err != nil {
-		t.Fatalf("decode cursor: %v", err)
+		t.Fatalf("new uuid: %v", err)
 	}
-	if got != id {
-		t.Fatalf("cursor id = %d, want %d", got, id)
+	cursor := encodeActivityCursor(id[:])
+	if cursor != id.String() {
+		t.Fatalf("cursor = %q, want %q", cursor, id.String())
+	}
+	if _, err := uuid.Parse(cursor); err != nil {
+		t.Fatalf("cursor is not a public id: %v", err)
 	}
 }
 
-func TestActivityCursorRejectsInvalidInput(t *testing.T) {
-	for _, cursor := range []string{"not-base64!", encodeActivityCursor(0)} {
-		if _, err := decodeActivityCursor(cursor); err == nil {
-			t.Fatalf("decodeActivityCursor(%q) succeeded, want error", cursor)
-		}
+// The internal id is a single deployment-wide sequence. A cursor that is a
+// decimal number, however it is wrapped, tells its holder how much the whole
+// instance has written.
+func TestActivityCursorCarriesNoInternalNumber(t *testing.T) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("new uuid: %v", err)
+	}
+	cursor := encodeActivityCursor(id[:])
+	if _, err := strconv.ParseUint(cursor, 10, 64); err == nil {
+		t.Fatalf("cursor %q reads as a number", cursor)
 	}
 }

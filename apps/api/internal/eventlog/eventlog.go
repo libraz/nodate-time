@@ -44,6 +44,17 @@ const (
 	TypeCalendarSetUp  = "calendar.created"
 	TypeCalendarEdited = "calendar.updated"
 	TypeCalendarGone   = "calendar.deleted"
+	// What people do to an event after it exists is most of what happens on a
+	// shared calendar. Without these the history of an event reads as though
+	// nobody ever discussed it, ticked anything off, or attached anything.
+	TypeCommentAdded    = "calendar.comment.added"
+	TypeCommentEdited   = "calendar.comment.edited"
+	TypeCommentRemoved  = "calendar.comment.removed"
+	TypeChecklistAdded  = "calendar.checklist.added"
+	TypeChecklistSet    = "calendar.checklist.updated"
+	TypeChecklistGone   = "calendar.checklist.removed"
+	TypeAttachmentAdded = "calendar.attachment.added"
+	TypeAttachmentGone  = "calendar.attachment.removed"
 )
 
 // summaryMaxRunes bounds the stored summary. It is cut on a rune boundary

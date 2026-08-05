@@ -50,7 +50,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt time.Time
 
 const getLiveSession = `-- name: GetLiveSession :one
 SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
-WHERE id = ?
+WHERE public_id = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
   AND expires_at > NOW(3)
@@ -60,8 +60,11 @@ WHERE id = ?
 // token carries the session id, so revoking one device signs out that
 // device and no other -- which a version counter on the user row cannot
 // express, since it can only invalidate all of them at once.
-func (q *Queries) GetLiveSession(ctx context.Context, id uint32) (Session, error) {
-	row := q.db.QueryRowContext(ctx, getLiveSession, id)
+//
+// The token names the session by its public id. The internal ids are one
+// deployment-wide sequence, and an access token is a value a client holds.
+func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getLiveSession, publicID)
 	var i Session
 	err := row.Scan(
 		&i.ID,

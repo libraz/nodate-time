@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { HistoryActor } from '@/components/history-timeline';
 import { type TranslationKey, useT } from '@/i18n';
+import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { roleForCalendar } from '@/lib/permissions';
@@ -10,12 +11,14 @@ import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
 interface FeedItem {
-  id: number;
-  action: 'create' | 'update' | 'delete' | 'join' | 'leave' | 'role_change' | 'revoke' | 'publish';
+  id: string;
+  /** The server's dotted name, e.g. `calendar.event.created`. Read through
+   *  the helpers in lib/activity rather than matched literally. */
+  action: string;
   summary: string;
   createdAt: string;
   actor: HistoryActor | null;
-  entityType: 'event' | 'memo' | 'member' | 'invite';
+  entityType: string;
   entityId: string;
 }
 
@@ -24,48 +27,21 @@ interface ActivityPage {
   nextCursor?: string;
 }
 
-const ENTITY_LABEL: Record<FeedItem['entityType'], TranslationKey> = {
+const ENTITY_LABEL: Record<string, TranslationKey> = {
   event: 'activity.entityEvent',
   memo: 'activity.entityMemo',
   member: 'activity.entityMember',
   invite: 'activity.entityInvite',
+  comment: 'activity.entityComment',
+  checklist: 'activity.entityChecklist',
+  attachment: 'activity.entityAttachment',
+  photo: 'activity.entityPhoto',
+  calendar: 'activity.entityCalendar',
 };
 
-function actionLabel(action: FeedItem['action']): TranslationKey {
-  switch (action) {
-    case 'create':
-      return 'history.created';
-    case 'update':
-      return 'history.updated';
-    case 'delete':
-      return 'history.deleted';
-    case 'join':
-      return 'activity.joined';
-    case 'leave':
-      return 'activity.left';
-    case 'role_change':
-      return 'activity.roleChanged';
-    case 'revoke':
-      return 'activity.revoked';
-    case 'publish':
-      return 'activity.published';
-  }
-}
-
-function actionColor(action: FeedItem['action']): string {
-  switch (action) {
-    case 'create':
-    case 'join':
-    case 'publish':
-      return 'var(--color-accent)';
-    case 'delete':
-    case 'revoke':
-      return 'var(--color-danger)';
-    case 'update':
-    case 'leave':
-    case 'role_change':
-      return 'var(--color-text-tertiary)';
-  }
+/** An unrecognised entity still names something, so it renders as itself. */
+function entityLabel(entityType: string): TranslationKey | null {
+  return ENTITY_LABEL[entityType] ?? null;
 }
 
 interface ActivityPanelProps {
@@ -244,13 +220,15 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
                             {item.actor?.name ?? t('history.deletedUser')}
                           </span>
                           <span className="rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-text-secondary)]">
-                            {t(ENTITY_LABEL[item.entityType])}
+                            {entityLabel(item.entityType)
+                              ? t(entityLabel(item.entityType) as TranslationKey)
+                              : item.entityType}
                           </span>
                           <span
                             className="text-caption font-medium"
-                            style={{ color: actionColor(item.action) }}
+                            style={{ color: activityColor(item.action) }}
                           >
-                            {t(actionLabel(item.action))}
+                            {t(activityLabelKey(item.action))}
                           </span>
                           <span className="text-caption text-[var(--color-text-tertiary)]">
                             {formatRelativeTime(item.createdAt, locale)}
