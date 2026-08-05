@@ -422,6 +422,82 @@ func (q *Queries) ListCalendarEventsDueForNotification(ctx context.Context, arg 
 	return items, nil
 }
 
+const listCalendarEventsForExport = `-- name: ListCalendarEventsForExport :many
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+WHERE calendar_id = ?
+  AND enabled = TRUE
+  AND recurrence_parent_id IS NULL
+ORDER BY start_at, id
+`
+
+// ListCalendarEventsForExport returns every series head in a calendar, dated or
+// not, recurring or not. Overrides are excluded: they belong to the series
+// that owns them and are read through it.
+//
+// There is deliberately no window. An export is a backup, and a backup that
+// quietly stops at a boundary is worse than no backup -- the caller cannot
+// tell the difference between "the calendar had nothing there" and "the
+// server decided not to look". Callers that want a window apply it to the
+// result themselves and say so.
+func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID uint32) ([]CalendarEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listCalendarEventsForExport, calendarID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CalendarEvent
+	for rows.Next() {
+		var i CalendarEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.CalendarID,
+			&i.Kind,
+			&i.Visibility,
+			&i.ShowAs,
+			&i.Flexibility,
+			&i.Title,
+			&i.AllDay,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Timezone,
+			&i.Location,
+			&i.Memo,
+			&i.URL,
+			&i.OwnerUserID,
+			&i.CreatedByUserID,
+			&i.BlockLabel,
+			&i.RecurrenceRule,
+			&i.RecurrenceEnd,
+			&i.RecurrenceExceptions,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.NotificationOffset,
+			&i.NotifiedAt,
+			&i.TaskID,
+			&i.TaskRole,
+			&i.TaskRoleKey,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Flags,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecurrenceOverridesByParent = `-- name: ListRecurrenceOverridesByParent :many
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
 WHERE recurrence_parent_id = ? AND enabled = TRUE

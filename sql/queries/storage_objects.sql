@@ -30,10 +30,21 @@ UPDATE storage_objects SET ref_count = GREATEST(ref_count, 1) - 1 WHERE id = ?;
 -- page from the head of the table would put that same object first every time
 -- and the sweep would spend its whole batch budget on it, never reaching the
 -- rest of the backlog.
+--
+-- A retired attachment row is still a row, and it holds its object until the
+-- retention window passes. Those objects are excluded here rather than
+-- attempted and logged: a foreign key doing its job every fifteen minutes is
+-- not a warning, and burying the real failures under it costs more than the
+-- extra clause.
 -- name: ListUnreferencedStorageObjects :many
-SELECT * FROM storage_objects
-WHERE ref_count = 0 AND created_at < ? AND id > ?
-ORDER BY id
+SELECT * FROM storage_objects so
+WHERE so.ref_count = 0
+  AND so.created_at < ?
+  AND so.id > ?
+  AND NOT EXISTS (
+    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
+  )
+ORDER BY so.id
 LIMIT ?;
 
 -- name: DeleteStorageObject :execresult

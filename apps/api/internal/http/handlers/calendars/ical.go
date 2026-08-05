@@ -25,28 +25,107 @@ import (
 type ExportInput struct {
 	CalendarID string `path:"calendarId"`
 	Format     string `query:"format" enum:"ics,csv" default:"ics"`
+	From       string `query:"from" doc:"first day to export (YYYY-MM-DD)" required:"false"`
+	To         string `query:"to" doc:"last day to export, inclusive (YYYY-MM-DD)" required:"false"`
 }
 
 type ExportOutput struct {
 	ContentType        string `header:"Content-Type"`
 	ContentDisposition string `header:"Content-Disposition"`
-	Body               []byte
+	// ExportWindow states the range the body actually covers, so a caller can
+	// tell a calendar with nothing in a period from an export that stopped
+	// short of it. Empty means the whole calendar.
+	ExportWindow string `header:"X-Export-Window"`
+	Body         []byte
 }
 
-// Export window — all events whose [start_at, end_at] overlaps [windowStart, windowEnd].
+// csvWindow bounds the CSV export, which lists one row per occurrence and so
+// cannot represent an unbounded series. The iCalendar export carries the rule
+// itself and needs no bound.
 const (
-	exportWindowPast   = -5 * 365 * 24 * time.Hour
-	exportWindowFuture = 10 * 365 * 24 * time.Hour
+	csvWindowPast   = -5 * 365 * 24 * time.Hour
+	csvWindowFuture = 10 * 365 * 24 * time.Hour
 )
 
-// exportEvent is a single event instance to render. For non-recurring events it
-// mirrors the stored row; for recurring masters it carries one expanded
-// occurrence's start/end plus a uidSuffix to keep the UID unique per instance.
+// exportEvent is a single row to render as one VEVENT.
+//
+// A recurring series is one entry carrying its rule and its cancellations,
+// not one entry per occurrence: expanding it would turn a daily series into
+// thousands of unrelated single events, which is what an importing client
+// would then have — a pile it can no longer edit as a series.
 type exportEvent struct {
-	event     generated.CalendarEvent
-	startAt   time.Time
-	endAt     time.Time
-	uidSuffix string
+	event   generated.CalendarEvent
+	startAt time.Time
+	endAt   time.Time
+	// rule and exceptions are set for a series head.
+	rule       *recurrence.Rule
+	exceptions recurrence.Exceptions
+	// originalStart is set for a changed occurrence, which shares the series'
+	// UID and names the occurrence it replaces.
+	originalStart time.Time
+	isOverride    bool
+}
+
+// exportWindow is the range an export covers. A zero bound means unbounded.
+type exportWindow struct {
+	start time.Time
+	end   time.Time
+}
+
+func (w exportWindow) header() string {
+	if w.start.IsZero() && w.end.IsZero() {
+		return "full"
+	}
+	from, to := "", ""
+	if !w.start.IsZero() {
+		from = w.start.UTC().Format("2006-01-02")
+	}
+	if !w.end.IsZero() {
+		to = w.end.UTC().Format("2006-01-02")
+	}
+	return from + "/" + to
+}
+
+// parseExportWindow reads the optional from/to parameters. An absent bound
+// stays zero, which means "no bound" rather than a default the caller cannot
+// see.
+func parseExportWindow(from, to string) (exportWindow, error) {
+	var w exportWindow
+	if from != "" {
+		t, err := time.Parse("2006-01-02", from)
+		if err != nil {
+			return w, err
+		}
+		w.start = t
+	}
+	if to != "" {
+		t, err := time.Parse("2006-01-02", to)
+		if err != nil {
+			return w, err
+		}
+		// Inclusive: a caller asking for the 5th means through the end of it.
+		w.end = t.AddDate(0, 0, 1)
+	}
+	if !w.start.IsZero() && !w.end.IsZero() && !w.end.After(w.start) {
+		return w, fmt.Errorf("empty window")
+	}
+	return w, nil
+}
+
+// overlapsWindow reports whether a series head could produce anything inside
+// the window. A recurring head is judged by the end of its series, not of its
+// first occurrence.
+func overlapsWindow(e generated.CalendarEvent, w exportWindow) bool {
+	if !w.end.IsZero() && !e.StartAt.Time.Before(w.end) {
+		return false
+	}
+	if w.start.IsZero() {
+		return true
+	}
+	if e.RecurrenceRule != nil {
+		return !e.RecurrenceEnd.Valid || e.RecurrenceEnd.Time.After(w.start)
+	}
+	return e.EndAt.Time.After(w.start)
 }
 
 func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput, error) {
@@ -57,88 +136,150 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 			return nil, toAPIError(err)
 		}
 
-		now := time.Now()
-		windowStart := now.Add(exportWindowPast)
-		windowEnd := now.Add(exportWindowFuture)
+		window, err := parseExportWindow(in.From, in.To)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
 
-		rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
-			CalendarID: cal.ID,
-			RangeEnd:   sql.NullTime{Time: windowEnd, Valid: true},
-			RangeStart: sql.NullTime{Time: windowStart, Valid: true},
-		})
+		if in.Format == "csv" {
+			return exportCSV(ctx, deps, cal, window)
+		}
+		return exportICS(ctx, deps, cal, window)
+	}
+}
+
+// exportICS writes the calendar as iCalendar, series as series.
+func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow) (*ExportOutput, error) {
+	rows, err := deps.Queries.ListCalendarEventsForExport(ctx, cal.ID)
+	if err != nil {
+		return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+	}
+
+	exports := make([]exportEvent, 0, len(rows))
+	for _, e := range rows {
+		// An undated row has nothing to render as DTSTART. The shared schema
+		// allows one; this product does not create them, but the export must
+		// not invent a zero time if another writer has.
+		if !e.StartAt.Valid || !e.EndAt.Valid || !overlapsWindow(e, window) {
+			continue
+		}
+		entry := exportEvent{event: e, startAt: e.StartAt.Time, endAt: e.EndAt.Time}
+		if e.RecurrenceRule != nil {
+			entry.rule = recurrence.ParseRule(*e.RecurrenceRule)
+			entry.exceptions = recurrence.ParseExceptions(e.RecurrenceExceptions)
+		}
+		exports = append(exports, entry)
+
+		if entry.rule == nil {
+			continue
+		}
+		// A changed occurrence is its own VEVENT under the same UID, so an
+		// importing client can tell it apart from the series and put it back
+		// where it belongs.
+		overrides, err := deps.Queries.ListRecurrenceOverridesByParent(ctx,
+			sql.NullInt32{Int32: int32(e.ID), Valid: true})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		exports := make([]exportEvent, 0, len(rows))
-		for _, e := range rows {
-			// An undated row has nothing to render as DTSTART. The shared
-			// schema allows one; this product does not create them, but the
-			// export must not invent a zero time if another writer has.
-			if !e.StartAt.Valid || !e.EndAt.Valid {
+		for _, child := range overrides {
+			if !child.StartAt.Valid || !child.EndAt.Valid || !child.RecurrenceOriginalStart.Valid {
 				continue
 			}
-			exports = append(exports, exportEvent{event: e, startAt: e.StartAt.Time, endAt: e.EndAt.Time})
-		}
-
-		// Recurring masters are stored once; expand each into its occurrences
-		// within the export window so they are not silently dropped.
-		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
-			CalendarID: cal.ID,
-			RangeEnd:   sql.NullTime{Time: windowEnd, Valid: true},
-			RangeStart: sql.NullTime{Time: windowStart, Valid: true},
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Expansion goes through eventexpand so both departures from the rule
-		// are honored: cancelled occurrences stay out of the export and
-		// changed ones carry their override's values, matching what the app
-		// displays.
-		for _, e := range recurringRows {
-			if e.RecurrenceRule == nil {
+			if entry.exceptions.Contains(child.RecurrenceOriginalStart.Time) {
 				continue
 			}
-			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, windowStart, windowEnd) {
-				uidSuffix := "-" + inst.OriginalStart.UTC().Format("20060102T150405")
-				if inst.IsOverride {
-					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
-						continue
-					}
-					exports = append(exports, exportEvent{
-						event:     inst.Event,
-						startAt:   inst.Event.StartAt.Time,
-						endAt:     inst.Event.EndAt.Time,
-						uidSuffix: uidSuffix,
-					})
+			exports = append(exports, exportEvent{
+				// The child's own fields render, but the series' identity and
+				// zone are what name the occurrence being replaced.
+				event:         child,
+				startAt:       child.StartAt.Time,
+				endAt:         child.EndAt.Time,
+				originalStart: child.RecurrenceOriginalStart.Time,
+				isOverride:    true,
+				rule:          nil,
+			})
+			exports[len(exports)-1].event.PublicID = e.PublicID
+			exports[len(exports)-1].event.Timezone = e.Timezone
+		}
+	}
+
+	return &ExportOutput{
+		ContentType:        "text/calendar; charset=utf-8",
+		ContentDisposition: fmt.Sprintf(`attachment; filename="%s.ics"`, sanitizeFilename(cal.Name)),
+		ExportWindow:       window.header(),
+		Body:               []byte(buildICS(cal.Name, exports)),
+	}, nil
+}
+
+// exportCSV writes one row per occurrence, which means a series has to be
+// expanded and so bounded. The bound is whatever the caller asked for, and the
+// response says what it was.
+func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow) (*ExportOutput, error) {
+	if window.start.IsZero() {
+		window.start = time.Now().Add(csvWindowPast)
+	}
+	if window.end.IsZero() {
+		window.end = time.Now().Add(csvWindowFuture)
+	}
+
+	rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
+		CalendarID: cal.ID,
+		RangeEnd:   sql.NullTime{Time: window.end, Valid: true},
+		RangeStart: sql.NullTime{Time: window.start, Valid: true},
+	})
+	if err != nil {
+		return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+	}
+
+	exports := make([]exportEvent, 0, len(rows))
+	for _, e := range rows {
+		if !e.StartAt.Valid || !e.EndAt.Valid {
+			continue
+		}
+		exports = append(exports, exportEvent{event: e, startAt: e.StartAt.Time, endAt: e.EndAt.Time})
+	}
+
+	recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
+		CalendarID: cal.ID,
+		RangeEnd:   sql.NullTime{Time: window.end, Valid: true},
+		RangeStart: sql.NullTime{Time: window.start, Valid: true},
+	})
+	if err != nil {
+		return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+	}
+	// Expansion goes through eventexpand so both departures from the rule are
+	// honored: cancelled occurrences stay out and changed ones carry their
+	// override's values, matching what the app displays.
+	for _, e := range recurringRows {
+		if e.RecurrenceRule == nil {
+			continue
+		}
+		for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, window.start, window.end) {
+			if inst.IsOverride {
+				if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
 					continue
 				}
 				exports = append(exports, exportEvent{
-					event:     e,
-					startAt:   inst.Occurrence.StartAt,
-					endAt:     inst.Occurrence.EndAt,
-					uidSuffix: uidSuffix,
+					event:   inst.Event,
+					startAt: inst.Event.StartAt.Time,
+					endAt:   inst.Event.EndAt.Time,
 				})
+				continue
 			}
-		}
-
-		switch in.Format {
-		case "csv":
-			body := buildCSV(exports)
-			return &ExportOutput{
-				ContentType:        "text/csv; charset=utf-8",
-				ContentDisposition: fmt.Sprintf(`attachment; filename="%s.csv"`, sanitizeFilename(cal.Name)),
-				Body:               []byte(body),
-			}, nil
-		default:
-			body := buildICS(cal.Name, exports)
-			return &ExportOutput{
-				ContentType:        "text/calendar; charset=utf-8",
-				ContentDisposition: fmt.Sprintf(`attachment; filename="%s.ics"`, sanitizeFilename(cal.Name)),
-				Body:               []byte(body),
-			}, nil
+			exports = append(exports, exportEvent{
+				event:   e,
+				startAt: inst.Occurrence.StartAt,
+				endAt:   inst.Occurrence.EndAt,
+			})
 		}
 	}
+
+	return &ExportOutput{
+		ContentType:        "text/csv; charset=utf-8",
+		ContentDisposition: fmt.Sprintf(`attachment; filename="%s.csv"`, sanitizeFilename(cal.Name)),
+		ExportWindow:       window.header(),
+		Body:               []byte(buildCSV(exports)),
+	}, nil
 }
 
 func sanitizeFilename(s string) string {
@@ -221,6 +362,81 @@ func writeFolded(b *strings.Builder, line string) {
 	}
 }
 
+// icsRRule renders an internal recurrence rule as an RFC 5545 RRULE value.
+//
+// WKST is always written out: the expander is fixed to a Sunday week start,
+// which differs from the RFC default, and a weekly rule with an interval
+// would land on different days in a client that assumed Monday.
+func icsRRule(r *recurrence.Rule, allDay bool, tz string) string {
+	if r == nil || r.Freq == "" {
+		return ""
+	}
+	parts := []string{"FREQ=" + strings.ToUpper(r.Freq)}
+	if r.Interval > 1 {
+		parts = append(parts, "INTERVAL="+strconv.Itoa(r.Interval))
+	}
+	if len(r.ByDay) > 0 {
+		parts = append(parts, "BYDAY="+strings.Join(r.ByDay, ","))
+	}
+	if r.ByMonthDay > 0 {
+		parts = append(parts, "BYMONTHDAY="+strconv.Itoa(r.ByMonthDay))
+	}
+	if r.BySetPos > 0 {
+		parts = append(parts, "BYSETPOS="+strconv.Itoa(r.BySetPos))
+	}
+	if r.Count > 0 {
+		parts = append(parts, "COUNT="+strconv.Itoa(r.Count))
+	}
+	if until := icsUntil(r.Until, allDay, tz); until != "" {
+		parts = append(parts, "UNTIL="+until)
+	}
+	parts = append(parts, "WKST=SU")
+	return strings.Join(parts, ";")
+}
+
+// icsUntil renders the rule's end boundary in the value type DTSTART uses: a
+// date for an all-day series, a UTC instant for a timed one. Mixing the two
+// is what makes some clients drop the boundary and repeat forever.
+func icsUntil(until *string, allDay bool, tz string) string {
+	if until == nil || *until == "" {
+		return ""
+	}
+	loc := loadLocationOrUTC(tz)
+	if t, err := time.Parse(time.RFC3339, *until); err == nil {
+		if allDay {
+			return t.In(loc).Format("20060102")
+		}
+		return icsTime(t)
+	}
+	if t, err := time.ParseInLocation("2006-01-02", *until, loc); err == nil {
+		if allDay {
+			return t.Format("20060102")
+		}
+		return icsTime(t.AddDate(0, 0, 1).Add(-time.Second))
+	}
+	return ""
+}
+
+// icsExdate renders the series' cancellations. They are stored as the instants
+// the occurrences would have started at, which is exactly what EXDATE names.
+func icsExdate(ex recurrence.Exceptions, allDay bool, tz string) string {
+	if len(ex) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(ex))
+	for _, t := range ex {
+		if allDay {
+			values = append(values, icsDate(t, tz))
+			continue
+		}
+		values = append(values, icsTime(t))
+	}
+	if allDay {
+		return "EXDATE;VALUE=DATE:" + strings.Join(values, ",")
+	}
+	return "EXDATE:" + strings.Join(values, ",")
+}
+
 func buildICS(calName string, rows []exportEvent) string {
 	var b strings.Builder
 	writeFolded(&b, "BEGIN:VCALENDAR")
@@ -228,14 +444,22 @@ func buildICS(calName string, rows []exportEvent) string {
 	writeFolded(&b, "PRODID:-//Nodate Time//EN")
 	writeFolded(&b, "CALSCALE:GREGORIAN")
 	writeFolded(&b, "X-WR-CALNAME:"+icsEscape(calName))
+	stamp := icsTime(time.Now())
 	for _, x := range rows {
 		e := x.event
 		writeFolded(&b, "BEGIN:VEVENT")
-		writeFolded(&b, "UID:"+hex.EncodeToString(e.PublicID)+x.uidSuffix+"@nodate-time")
-		writeFolded(&b, "DTSTAMP:"+icsTime(time.Now()))
+		// A changed occurrence shares the series' UID and is told apart by its
+		// RECURRENCE-ID. Giving it one of its own would make it a separate
+		// event, so a re-import would show it alongside the occurrence it is
+		// supposed to replace.
+		writeFolded(&b, "UID:"+hex.EncodeToString(e.PublicID)+"@nodate-time")
+		writeFolded(&b, "DTSTAMP:"+stamp)
 		if e.AllDay {
 			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt, e.Timezone))
 			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt, e.Timezone))
+			if x.isOverride {
+				writeFolded(&b, "RECURRENCE-ID;VALUE=DATE:"+icsDate(x.originalStart, e.Timezone))
+			}
 		} else {
 			// Timed values are normalized to UTC (Z suffix). Referencing a
 			// TZID without emitting a matching VTIMEZONE component violates
@@ -243,6 +467,15 @@ func buildICS(calName string, rows []exportEvent) string {
 			// so the display-zone hint is intentionally dropped.
 			writeFolded(&b, "DTSTART:"+icsTime(x.startAt))
 			writeFolded(&b, "DTEND:"+icsTime(x.endAt))
+			if x.isOverride {
+				writeFolded(&b, "RECURRENCE-ID:"+icsTime(x.originalStart))
+			}
+		}
+		if rrule := icsRRule(x.rule, e.AllDay, e.Timezone); rrule != "" {
+			writeFolded(&b, "RRULE:"+rrule)
+			if exdate := icsExdate(x.exceptions, e.AllDay, e.Timezone); exdate != "" {
+				writeFolded(&b, exdate)
+			}
 		}
 		writeFolded(&b, "SUMMARY:"+icsEscape(e.Title))
 		if e.Location.Valid && e.Location.String != "" {
