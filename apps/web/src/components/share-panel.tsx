@@ -2,29 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { canManage, DEFAULT_INVITE_ROLE, roleForCalendar, roleLabelKey } from '@/lib/permissions';
+import {
+  canManage,
+  DEFAULT_INVITE_ROLE,
+  INVITE_ROLE_OPTIONS,
+  type Role,
+  roleForCalendar,
+  roleLabelKey,
+} from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-
-interface InviteData {
-  id: number;
-  token: string;
-  role: string;
-  maxUses: number | null;
-  useCount: number;
-  isPublic: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
-const JOIN_INVITE_ROLES = ['member', 'viewer'] as const;
-type JoinInviteRole = (typeof JOIN_INVITE_ROLES)[number];
-
-/** A public/embed link is a non-consuming, read-only viewer link. */
-const isPublicLink = (i: InviteData) => i.isPublic;
+import { type InviteData, isPublicLink, mergeInviteTokens } from '@/types/invite';
 
 export function SharePanel() {
   const t = useT();
@@ -56,17 +47,15 @@ export function SharePanel() {
   const [invites, setInvites] = useState<InviteData[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
-  const [inviteRole, setInviteRole] = useState<JoinInviteRole>(
-    DEFAULT_INVITE_ROLE as JoinInviteRole,
-  );
+  const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
 
   // Several single-use invite links may coexist; the public link is at most one.
   const joinInvites = invites.filter((i) => !i.isPublic);
   const publicLink = invites.find(isPublicLink) ?? null;
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  const publicUrl = publicLink ? `${origin}/embed/${publicLink.token}` : '';
-  const embedSnippet = publicLink
+  const publicUrl = publicLink?.token ? `${origin}/embed/${publicLink.token}` : '';
+  const embedSnippet = publicUrl
     ? `<iframe src="${publicUrl}" width="100%" height="640" style="border:1px solid #e5e7eb;border-radius:12px" loading="lazy"></iframe>`
     : '';
 
@@ -81,7 +70,9 @@ export function SharePanel() {
     (async () => {
       try {
         const list = await api.get<InviteData[]>(`/calendars/${calendarId}/invites`);
-        if (!cancelled) setInvites(list);
+        // Listing cannot return tokens, so keep the ones created in this
+        // session rather than blanking a link the user has not copied yet.
+        if (!cancelled) setInvites((cur) => mergeInviteTokens(list, cur));
       } catch (e) {
         if (!cancelled) toast.error(errorMessage(e));
       }
@@ -126,7 +117,7 @@ export function SharePanel() {
   }, [calendarId, t]);
 
   const revoke = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       if (!calendarId) return;
       try {
         await api.delete(`/calendars/${calendarId}/invites/${id}`);
@@ -227,8 +218,8 @@ export function SharePanel() {
                 </p>
                 <CustomSelect
                   value={inviteRole}
-                  onChange={(role) => setInviteRole(role as JoinInviteRole)}
-                  options={JOIN_INVITE_ROLES.map((role) => ({
+                  onChange={(role) => setInviteRole(role as Role)}
+                  options={INVITE_ROLE_OPTIONS.map((role) => ({
                     value: role,
                     label: t(roleLabelKey(role)),
                   }))}
@@ -237,17 +228,33 @@ export function SharePanel() {
                 {joinInvites.length > 0 && (
                   <div className="space-y-3">
                     {joinInvites.map((inv) => {
-                      const url = `${origin}/share/${inv.token}`;
+                      const url = inv.token ? `${origin}/share/${inv.token}` : '';
                       const key = `invite-${inv.id}`;
                       return (
                         <div key={inv.id} className="space-y-2">
-                          <UrlRow
-                            value={url}
-                            copied={copiedKey === key}
-                            onCopy={() => copy(key, url)}
-                            copyLabel={t('common.copy')}
-                            copiedLabel={t('common.copied')}
-                          />
+                          {url ? (
+                            <>
+                              <UrlRow
+                                value={url}
+                                copied={copiedKey === key}
+                                onCopy={() => copy(key, url)}
+                                copyLabel={t('common.copy')}
+                                copiedLabel={t('common.copied')}
+                              />
+                              <p className="text-caption text-[var(--color-text-tertiary)]">
+                                {t('invites.linkShownOnce')}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)] px-3 py-2 text-caption text-[var(--color-text-secondary)]">
+                              {t('invites.linkUnavailable')}
+                            </p>
+                          )}
+                          {inv.expiresAt && (
+                            <p className="text-caption text-[var(--color-text-tertiary)]">
+                              {t('invites.expiresAt')}: {new Date(inv.expiresAt).toLocaleString()}
+                            </p>
+                          )}
                           <div className="flex items-center justify-between">
                             <span
                               className="rounded-full px-2 py-0.5 text-caption font-medium"
@@ -335,32 +342,43 @@ export function SharePanel() {
                   </button>
                 ) : (
                   <div className="space-y-3">
-                    <UrlRow
-                      value={publicUrl}
-                      copied={copiedKey === 'public'}
-                      onCopy={() => copy('public', publicUrl)}
-                      copyLabel={t('share.copyUrl')}
-                      copiedLabel={t('common.copied')}
-                    />
-                    <div className="space-y-1.5">
-                      <span className="text-caption font-medium text-[var(--color-text-secondary)]">
-                        {t('share.embedCode')}
-                      </span>
-                      <textarea
-                        readOnly
-                        value={embedSnippet}
-                        rows={3}
-                        onFocus={(e) => e.currentTarget.select()}
-                        className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-secondary)] px-3 py-2 font-mono text-micro text-[var(--color-text-secondary)] outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => copy('embed', embedSnippet)}
-                        className="btn-secondary w-full text-footnote"
-                      >
-                        {copiedKey === 'embed' ? t('common.copied') : t('share.copyEmbed')}
-                      </button>
-                    </div>
+                    {publicUrl ? (
+                      <>
+                        <UrlRow
+                          value={publicUrl}
+                          copied={copiedKey === 'public'}
+                          onCopy={() => copy('public', publicUrl)}
+                          copyLabel={t('share.copyUrl')}
+                          copiedLabel={t('common.copied')}
+                        />
+                        <p className="text-caption text-[var(--color-text-tertiary)]">
+                          {t('invites.linkShownOnce')}
+                        </p>
+                        <div className="space-y-1.5">
+                          <span className="text-caption font-medium text-[var(--color-text-secondary)]">
+                            {t('share.embedCode')}
+                          </span>
+                          <textarea
+                            readOnly
+                            value={embedSnippet}
+                            rows={3}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-secondary)] px-3 py-2 font-mono text-micro text-[var(--color-text-secondary)] outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copy('embed', embedSnippet)}
+                            className="btn-secondary w-full text-footnote"
+                          >
+                            {copiedKey === 'embed' ? t('common.copied') : t('share.copyEmbed')}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)] px-3 py-2 text-caption text-[var(--color-text-secondary)]">
+                        {t('invites.linkUnavailable')}
+                      </p>
+                    )}
                     <button
                       type="button"
                       onClick={() => revoke(publicLink.id)}

@@ -15,6 +15,12 @@ interface User {
   timezone: string;
   /** Reflects a live instance-admin grant, not a flag on the account. */
   isAdmin?: boolean;
+  /**
+   * Whether the address has been confirmed by following a link sent to it.
+   * Provider sign-in refuses to attach to an account that has not, so the
+   * settings screen offers to send the link again.
+   */
+  emailVerified?: boolean;
 }
 
 interface AuthState {

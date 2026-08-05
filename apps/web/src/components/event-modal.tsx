@@ -9,7 +9,7 @@ import { canEdit, roleForCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import { useAuthStore } from '@/stores/auth-store';
-import { useCalendarStore } from '@/stores/calendar-store';
+import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type {
   ChecklistItem,
@@ -1024,13 +1024,15 @@ export function EventModal() {
           endIso = startDt.plus({ hours: 1 }).toISO() ?? endIso;
         }
       }
-      const data = {
+      // Annotated so TypeScript's excess-property check rejects any field the
+      // API does not accept: the body schema forbids unknown properties, so a
+      // stray key is a 422 on every save rather than a value the server ignores.
+      const data: EventInput = {
         title: form.title.trim(),
         allDay: form.allDay,
         startAt: startIso,
         endAt: endIso,
         timezone,
-        color: form.color,
         location: form.location,
         memo: form.memo,
         url: form.url,

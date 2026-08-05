@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login';
 import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
 import { Route as ResetPasswordRouteImport } from './routes/reset-password';
 import { Route as SettingsRouteImport } from './routes/settings';
+import { Route as VerifyEmailRouteImport } from './routes/verify-email';
 import { Route as EmbedTokenRouteImport } from './routes/embed/$token';
 import { Route as ShareTokenRouteImport } from './routes/share/$token';
 
@@ -48,6 +49,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any);
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const EmbedTokenRoute = EmbedTokenRouteImport.update({
   id: '/embed/$token',
   path: '/embed/$token',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
   '/settings': typeof SettingsRoute;
+  '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/verify-email'
     | '/embed/$token'
     | '/share/$token';
   fileRoutesByTo: FileRoutesByTo;
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/verify-email'
     | '/embed/$token'
     | '/share/$token';
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/oauth-complete'
     | '/reset-password'
     | '/settings'
+    | '/verify-email'
     | '/embed/$token'
     | '/share/$token';
   fileRoutesById: FileRoutesById;
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   OauthCompleteRoute: typeof OauthCompleteRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
   SettingsRoute: typeof SettingsRoute;
+  VerifyEmailRoute: typeof VerifyEmailRoute;
   EmbedTokenRoute: typeof EmbedTokenRoute;
   ShareTokenRoute: typeof ShareTokenRoute;
 }
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/verify-email': {
+      id: '/verify-email';
+      path: '/verify-email';
+      fullPath: '/verify-email';
+      preLoaderRoute: typeof VerifyEmailRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/embed/$token': {
       id: '/embed/$token';
       path: '/embed/$token';
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   OauthCompleteRoute: OauthCompleteRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
   EmbedTokenRoute: EmbedTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
 };

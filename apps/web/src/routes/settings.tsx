@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { Member } from '@/types/calendar';
+import { type InviteData, mergeInviteTokens } from '@/types/invite';
 
 export interface SettingsSearch {
   tab?: TabId | undefined;
@@ -306,6 +307,7 @@ function ProfileSection() {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -371,6 +373,18 @@ function ProfileSection() {
     }
   };
 
+  const handleResendVerification = async () => {
+    setResendingVerification(true);
+    try {
+      await api.post('/user/verify-email/resend', {});
+      toast.success(t('profile.verificationSent'));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.detail : 'Error');
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   return (
     <>
       <Section title={t('settings.profile')} description={t('profile.edit')}>
@@ -426,6 +440,25 @@ function ProfileSection() {
             </div>
           </div>
         </div>
+
+        {user && user.emailVerified === false && (
+          <div className="mx-6 mt-3 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3">
+            <p className="text-default font-medium text-[var(--color-danger)]">
+              {t('profile.emailUnverified')}
+            </p>
+            <p className="mt-1 text-caption text-[var(--color-text-secondary)]">
+              {t('profile.emailUnverifiedHint')}
+            </p>
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={resendingVerification}
+              className="mt-2 text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+            >
+              {t('profile.resendVerification')}
+            </button>
+          </div>
+        )}
 
         <FieldRow label={t('profile.name')}>
           <input
@@ -636,17 +669,6 @@ function AppearanceSection() {
   );
 }
 
-interface InviteData {
-  id: number;
-  token: string;
-  role: string;
-  maxUses: number | null;
-  useCount: number;
-  isPublic: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
 function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
@@ -749,7 +771,9 @@ function CalendarsSection() {
     setLoadingInvites(true);
     try {
       const list = await api.get<InviteData[]>(`/calendars/${calId}/invites`);
-      setInvites(list);
+      // A listing carries no tokens; keep the ones this session created so a
+      // freshly made link does not vanish on the next reload of the section.
+      setInvites((cur) => mergeInviteTokens(list, cur));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.detail : 'Error');
     } finally {
@@ -810,7 +834,7 @@ function CalendarsSection() {
     }
   };
 
-  const handleRevokeInvite = async (id: number) => {
+  const handleRevokeInvite = async (id: string) => {
     try {
       await api.delete(`/calendars/${selectedId}/invites/${id}`);
       setInvites((cur) => cur.filter((i) => i.id !== id));
@@ -955,18 +979,25 @@ function CalendarsSection() {
             {joinInvites.map((inv) => (
               <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
                 <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
-                  /share/{inv.token}
+                  {inv.token ? `/share/${inv.token}` : t('invites.linkUnavailable')}
                 </code>
                 <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
                   {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => copyInvite(inv.token)}
-                  className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
-                >
-                  {t('invites.copy')}
-                </button>
+                {inv.expiresAt && (
+                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
+                    {t('invites.expiresAt')}: {new Date(inv.expiresAt).toLocaleDateString()}
+                  </span>
+                )}
+                {inv.token && (
+                  <button
+                    type="button"
+                    onClick={() => copyInvite(inv.token as string)}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
+                  >
+                    {t('invites.copy')}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleRevokeInvite(inv.id)}

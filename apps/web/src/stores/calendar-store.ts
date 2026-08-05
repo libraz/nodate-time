@@ -20,7 +20,6 @@ export interface EventInput {
   startAt: string;
   endAt: string;
   timezone?: string | undefined;
-  color?: string | undefined;
   location?: string | undefined;
   memo?: string | undefined;
   url?: string | undefined;
