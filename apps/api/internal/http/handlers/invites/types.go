@@ -79,9 +79,15 @@ type PublicEventsInput struct {
 	StartDate string `query:"start" required:"false"`
 	EndDate   string `query:"end" required:"false"`
 	Days      int    `query:"days" minimum:"1" maximum:"366" default:"30" required:"false"`
+	// TZ names the zone the requested dates are days in. A public link has no
+	// account behind it to take the answer from, so the page asking says which
+	// zone it is rendering.
+	TZ string `query:"tz" required:"false" doc:"IANA timezone the dates are read in"`
 }
 type PublicEventsOutput struct {
-	Body []PublicEventResponse
+	// Truncated says the listing stopped at the per-request instance cap.
+	Truncated string `header:"X-Result-Truncated" required:"false"`
+	Body      []PublicEventResponse
 }
 
 type PublicEventResponse struct {

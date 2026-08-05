@@ -18,6 +18,7 @@ import (
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
+	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
@@ -485,21 +486,15 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		calendarID := row.CalendarID
 		calendarColor := row.CalendarColor
 
-		var startTime, endTime time.Time
+		loc := daterange.Location(in.TZ, "")
+		window := daterange.Default(in.Days, loc)
 		if in.StartDate != "" && in.EndDate != "" {
-			startTime, err = time.Parse("2006-01-02", in.StartDate)
+			window, err = daterange.Parse(in.StartDate, in.EndDate, loc)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
-			endTime, err = time.Parse("2006-01-02", in.EndDate)
-			if err != nil || endTime.Before(startTime) {
-				return nil, apierrors.ToHuma(apierrors.BadRequest)
-			}
-			endTime = endTime.AddDate(0, 0, 1)
-		} else {
-			startTime = time.Now().AddDate(0, 0, -7)
-			endTime = time.Now().AddDate(0, 0, in.Days)
 		}
+		startTime, endTime := window.Start, window.End
 
 		render := func(e generated.CalendarEvent, id string, startAt, endAt time.Time) PublicEventResponse {
 			title, location, private := publicEventFields(e)
@@ -542,12 +537,23 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		truncated := false
 		for _, e := range recurringRows {
 			if !publishedToLink(e) {
 				continue
 			}
+			if len(results) >= daterange.MaxInstances {
+				truncated = true
+				break
+			}
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+				// This endpoint takes no token beyond the link itself, so the
+				// cost of one request is whatever the link's holder asks for.
+				if len(results) >= daterange.MaxInstances {
+					truncated = true
+					break
+				}
 				// The series' own zone decides the day, matching the ids the
 				// authenticated event API hands out for the same occurrences.
 				dateStr := inst.OriginalStart.In(recurrence.LoadLocation(e.Timezone)).Format("20060102")
@@ -568,6 +574,9 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		})
 
 		out := &PublicEventsOutput{Body: results}
+		if truncated {
+			out.Truncated = "true"
+		}
 		if out.Body == nil {
 			out.Body = []PublicEventResponse{}
 		}

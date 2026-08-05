@@ -110,9 +110,17 @@ type ListEventsInput struct {
 	StartDate  string `query:"start" doc:"ISO date YYYY-MM-DD"`
 	EndDate    string `query:"end" doc:"ISO date YYYY-MM-DD"`
 	Days       int    `query:"days" default:"30" minimum:"1" maximum:"366" doc:"Number of days ahead (used if start/end not set)"`
+	// TZ names the zone the requested dates are days in. A calendar day is a
+	// different span of instants in each zone, so without it a listing has to
+	// guess which day the caller meant. Defaults to the caller's own setting.
+	TZ string `query:"tz" required:"false" doc:"IANA timezone the dates are read in"`
 }
 type ListEventsOutput struct {
-	Body []EventResponse
+	// Truncated says the listing stopped at the per-request instance cap. A
+	// caller that cannot tell a capped listing from a complete one would
+	// render a calendar with events missing and no sign of it.
+	Truncated string `header:"X-Result-Truncated" required:"false"`
+	Body      []EventResponse
 }
 
 type GetEventInput struct {

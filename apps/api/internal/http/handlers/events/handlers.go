@@ -16,6 +16,7 @@ import (
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
+	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
@@ -481,6 +482,16 @@ func lookupUser(ctx context.Context, deps Deps, id uint32, cache map[uint32]user
 	return b
 }
 
+// actorTimezone is the zone the caller reads their calendar in, used when a
+// request names dates without saying which zone they are days in.
+func actorTimezone(ctx context.Context, deps Deps, userID uint32) string {
+	u, err := deps.Queries.GetUserByID(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	return u.Timezone
+}
+
 // avatarURLFor prefers an uploaded avatar over an external one: a user who
 // has uploaded a picture has said which they want, and the provider URL
 // they signed up with may since have gone stale.
@@ -641,21 +652,15 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			return nil, toAPIError(err)
 		}
 
-		var startTime, endTime time.Time
+		loc := daterange.Location(in.TZ, actorTimezone(ctx, deps, userID))
+		window := daterange.Default(in.Days, loc)
 		if in.StartDate != "" && in.EndDate != "" {
-			startTime, err = time.Parse("2006-01-02", in.StartDate)
+			window, err = daterange.Parse(in.StartDate, in.EndDate, loc)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
-			endTime, err = time.Parse("2006-01-02", in.EndDate)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.BadRequest)
-			}
-			endTime = endTime.AddDate(0, 0, 1) // inclusive end
-		} else {
-			startTime = time.Now().AddDate(0, 0, -7)
-			endTime = time.Now().AddDate(0, 0, in.Days)
 		}
+		startTime, endTime := window.Start, window.End
 
 		rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
@@ -685,9 +690,20 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		truncated := false
 		for _, e := range recurringRows {
+			if len(results) >= daterange.MaxInstances {
+				truncated = true
+				break
+			}
 			masterParticipants, masterAttendees := eventAttendees(ctx, deps, e.ID)
 			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+				// The window bounds one series; the number of series does not
+				// bound itself, and every one of them expands per occurrence.
+				if len(results) >= daterange.MaxInstances {
+					truncated = true
+					break
+				}
 				if expanded.IsOverride {
 					inst := mapOverrideInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
 					setAttendees(ctx, deps, &inst, expanded.Event.ID)
@@ -708,6 +724,9 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		})
 
 		out := &ListEventsOutput{Body: results}
+		if truncated {
+			out.Truncated = "true"
+		}
 		if out.Body == nil {
 			out.Body = []EventResponse{}
 		}

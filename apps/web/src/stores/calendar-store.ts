@@ -154,8 +154,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const allEvents: CalendarEvent[] = [];
     const results = await Promise.allSettled(
       calendars.map(async (cal) => {
+        // The dates are days, and which instants a day spans depends on where
+        // it is read. Saying so keeps the grid and the server agreeing on
+        // which month an early-morning event belongs to.
+        const tz = encodeURIComponent(useUiStore.getState().timezone);
         const evts = await api.get<CalendarEvent[]>(
-          `/calendars/${cal.id}/events?start=${start}&end=${end}`,
+          `/calendars/${cal.id}/events?start=${start}&end=${end}&tz=${tz}`,
         );
         for (const evt of evts) {
           allEvents.push({ ...evt, calendarId: cal.id });

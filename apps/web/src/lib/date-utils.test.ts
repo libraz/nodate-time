@@ -8,6 +8,7 @@ import {
   getMonthDays,
   getWeekDays,
   getWeekdayLabel,
+  gridRange,
   isSameDay,
   jsDayOfWeek,
 } from './date-utils';
@@ -108,5 +109,28 @@ describe('jsDayOfWeek', () => {
   it('maps Sunday to 0 and Saturday to 6', () => {
     expect(jsDayOfWeek(DateTime.local(2026, 4, 19))).toBe(0); // Sunday
     expect(jsDayOfWeek(DateTime.local(2026, 4, 25))).toBe(6); // Saturday
+  });
+});
+
+describe('gridRange', () => {
+  it('covers every cell the month grid draws, not just the month', () => {
+    // April 2026 starts on a Wednesday, so the grid opens with three days of
+    // March. Asking for the month alone leaves them permanently blank, which
+    // reads as an empty day rather than one nobody asked about.
+    const month = DateTime.fromISO('2026-04-01T00:00:00', { zone: 'Asia/Tokyo' });
+    const { start, end } = gridRange(month, 'Asia/Tokyo');
+    const days = getMonthDays(2026, 3, 'Asia/Tokyo');
+
+    expect(start).toBe(days[0]?.toISODate());
+    expect(end).toBe(days[days.length - 1]?.toISODate());
+    expect(start < '2026-04-01').toBe(true);
+    expect(end > '2026-04-30').toBe(true);
+  });
+
+  it('spans a whole grid for a month that starts on a Sunday', () => {
+    const month = DateTime.fromISO('2026-03-01T00:00:00', { zone: 'UTC' });
+    const { start, end } = gridRange(month, 'UTC');
+    expect(start).toBe('2026-03-01');
+    expect(DateTime.fromISO(end).diff(DateTime.fromISO(start), 'days').days).toBeGreaterThan(27);
   });
 });
