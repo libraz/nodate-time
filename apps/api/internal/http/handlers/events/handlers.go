@@ -192,6 +192,7 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 		Flexibility:        string(e.Flexibility),
 		NotificationOffset: nullInt32ToPtr(e.NotificationOffset),
 		Participants:       []string{},
+		Attendees:          []AttendeeResponse{},
 		RecurrenceRule:     mapRecurrenceRule(e.RecurrenceRule),
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          nullTimeValue(e.UpdatedAt),
@@ -237,16 +238,31 @@ func mapOverrideInstance(master, child generated.CalendarEvent, calPubID []byte,
 	return resp
 }
 
-func participantPublicIDs(ctx context.Context, deps Deps, eventID uint32) []string {
+// eventAttendees reads the participant rows once and returns both shapes the
+// response carries: the id-only list, which is also the write format, and the
+// per-participant state that only a read can tell you.
+func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, []AttendeeResponse) {
 	rows, err := deps.Queries.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(eventID), Valid: true})
 	if err != nil || len(rows) == 0 {
-		return []string{}
+		return []string{}, []AttendeeResponse{}
 	}
 	ids := make([]string, 0, len(rows))
+	attendees := make([]AttendeeResponse, 0, len(rows))
 	for _, p := range rows {
-		ids = append(ids, pubIDToHex(p.UserPublicID))
+		id := pubIDToHex(p.UserPublicID)
+		ids = append(ids, id)
+		attendees = append(attendees, AttendeeResponse{
+			UserID:  id,
+			Rsvp:    string(p.Rsvp),
+			CanEdit: p.CanEdit,
+		})
 	}
-	return ids
+	return ids, attendees
+}
+
+// setAttendees fills both attendee-derived fields of a response from one read.
+func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID uint32) {
+	resp.Participants, resp.Attendees = eventAttendees(ctx, deps, eventID)
 }
 
 type eventParticipant struct {
@@ -307,14 +323,6 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 		}
 	}
 	return nil
-}
-
-func participantPublicIDList(participants []eventParticipant) []string {
-	ids := make([]string, 0, len(participants))
-	for _, participant := range participants {
-		ids = append(ids, participant.publicID)
-	}
-	return ids
 }
 
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
@@ -540,6 +548,73 @@ func loadEventInCalendar(ctx context.Context, deps Deps, calID uint32, eventPubl
 	return evt, nil
 }
 
+// resolveEventWrite resolves the calendar, the event and the caller's right to
+// change that particular event, in one step.
+//
+// Writing to a calendar and rewriting a given event are different grants. A
+// shared calendar carries one layer per person, and an editor who may add to
+// their own layer has no business rewriting somebody else's medical
+// appointment. Membership decides whether the calendar is writable at all;
+// the event's owner, the people running the calendar, and attendees the owner
+// explicitly trusted decide the rest.
+//
+// eventPublicID must already be the series id -- a composite occurrence id is
+// split by the caller, because the grant belongs to the series either way.
+func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
+	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	if !calresolve.CanWrite(member.Role) {
+		return generated.Calendar{}, generated.CalendarEvent{}, apierrors.CalendarRoleRequired
+	}
+	evt, err := loadEventInCalendar(ctx, deps, cal.ID, eventPublicID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	if err := requireEventEdit(ctx, deps, member, evt, userID); err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	return cal, evt, nil
+}
+
+// resolveEventForEdit is resolveEventWrite for the paths that take an event id
+// straight from the request: checklist items, attachments and the like hang off
+// the series, so a composite occurrence id resolves to its parent.
+func resolveEventForEdit(ctx context.Context, deps Deps, calPubID, eventID string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
+	if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
+		eventID = parentUUID
+	}
+	return resolveEventWrite(ctx, deps, calPubID, eventID, userID)
+}
+
+// requireEventEdit is the event-level half of resolveEventWrite, split out for
+// the paths that have already loaded the event for other reasons.
+func requireEventEdit(ctx context.Context, deps Deps, member generated.CalendarMember, evt generated.CalendarEvent, userID uint32) error {
+	if calresolve.CanManage(member.Role) || evt.OwnerUserID == userID {
+		return nil
+	}
+	// A changed occurrence carries its own row; the grant is the series'.
+	ownerRef := evt.ID
+	if evt.RecurrenceParentID.Valid {
+		ownerRef = uint32(evt.RecurrenceParentID.Int32)
+	}
+	att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
+		EventID: sql.NullInt32{Int32: int32(ownerRef), Valid: true},
+		UserID:  userID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apierrors.EventEditDenied
+		}
+		return apierrors.InternalUnexpected
+	}
+	if !att.CanEdit {
+		return apierrors.EventEditDenied
+	}
+	return nil
+}
+
 func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsOutput, error) {
 	return func(ctx context.Context, in *ListEventsInput) (*ListEventsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -578,7 +653,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		var results []EventResponse
 		for _, e := range rows {
 			ev := mapEvent(e, cal.PublicID)
-			ev.Participants = participantPublicIDs(ctx, deps, e.ID)
+			setAttendees(ctx, deps, &ev, e.ID)
 			decorate(ctx, deps, &ev, e, cal.ID, userCache, colorCache)
 			results = append(results, ev)
 		}
@@ -593,17 +668,18 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 
 		for _, e := range recurringRows {
-			masterParticipants := participantPublicIDs(ctx, deps, e.ID)
+			masterParticipants, masterAttendees := eventAttendees(ctx, deps, e.ID)
 			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
 				if expanded.IsOverride {
 					inst := mapOverrideInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
-					inst.Participants = participantPublicIDs(ctx, deps, expanded.Event.ID)
+					setAttendees(ctx, deps, &inst, expanded.Event.ID)
 					decorate(ctx, deps, &inst, expanded.Event, cal.ID, userCache, colorCache)
 					results = append(results, inst)
 					continue
 				}
 				inst := mapRecurringInstance(e, cal.PublicID, expanded.Occurrence)
 				inst.Participants = masterParticipants
+				inst.Attendees = masterAttendees
 				decorate(ctx, deps, &inst, e, cal.ID, userCache, colorCache)
 				results = append(results, inst)
 			}
@@ -655,7 +731,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				} else {
 					resp = mapRecurringInstance(evt, cal.PublicID, expanded.Occurrence)
 				}
-				resp.Participants = participantPublicIDs(ctx, deps, source.ID)
+				setAttendees(ctx, deps, &resp, source.ID)
 				decorate(ctx, deps, &resp, source, cal.ID, nil, nil)
 				return &GetEventOutput{Body: resp}, nil
 			}
@@ -668,7 +744,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		}
 
 		resp := mapEvent(evt, cal.PublicID)
-		resp.Participants = participantPublicIDs(ctx, deps, evt.ID)
+		setAttendees(ctx, deps, &resp, evt.ID)
 		decorate(ctx, deps, &resp, evt, cal.ID, nil, nil)
 		return &GetEventOutput{Body: resp}, nil
 	}
@@ -780,7 +856,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		}
 
 		resp := mapEvent(created, cal.PublicID)
-		resp.Participants = participantPublicIDList(participants)
+		setAttendees(ctx, deps, &resp, created.ID)
 		decorate(ctx, deps, &resp, created, cal.ID, nil, nil)
 
 		return &CreateEventOutput{Body: resp}, nil
@@ -790,10 +866,6 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEventOutput, error) {
 	return func(ctx context.Context, in *UpdateEventInput) (*UpdateEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
 
 		// For composite IDs (recurring instances), resolve the parent series.
 		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
@@ -803,7 +875,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			eventID = parentUUID
 		}
 
-		evt, err := loadEventInCalendar(ctx, deps, cal.ID, eventID)
+		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -947,7 +1019,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 
 			resp := mapOverrideInstance(evt, child, cal.PublicID, originalStart)
-			resp.Participants = participantPublicIDList(participants)
+			setAttendees(ctx, deps, &resp, child.ID)
 			decorate(ctx, deps, &resp, child, cal.ID, nil, nil)
 			return &UpdateEventOutput{Body: resp}, nil
 		}
@@ -1049,7 +1121,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		}
 
 		resp := mapEvent(updated, cal.PublicID)
-		resp.Participants = participantPublicIDList(participants)
+		setAttendees(ctx, deps, &resp, updated.ID)
 		decorate(ctx, deps, &resp, updated, cal.ID, nil, nil)
 		return &UpdateEventOutput{Body: resp}, nil
 	}
@@ -1170,10 +1242,6 @@ func timeOfDay(t time.Time) time.Duration {
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
 	return func(ctx context.Context, in *DeleteEventInput) (*DeleteEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
 
 		// For composite IDs, resolve the parent series.
 		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
@@ -1183,7 +1251,7 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			eventID = parentUUID
 		}
 
-		evt, err := loadEventInCalendar(ctx, deps, cal.ID, eventID)
+		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}

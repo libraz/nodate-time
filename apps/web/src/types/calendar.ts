@@ -99,6 +99,15 @@ export type ShowAs = 'busy' | 'free' | 'tentative' | 'oof';
  *  cannot move are both busy, which is why this is its own axis. */
 export type Flexibility = 'fixed' | 'negotiable' | 'conditional';
 
+export type Rsvp = 'pending' | 'accepted' | 'declined' | 'tentative';
+
+export interface Attendee {
+  userId: string;
+  rsvp: Rsvp;
+  /** Granted per person by the event's owner; not implied by attending. */
+  canEdit: boolean;
+}
+
 export interface CalendarEvent {
   id: string;
   calendarId: string;
@@ -119,6 +128,9 @@ export interface CalendarEvent {
   flexibility: Flexibility;
   notificationOffset: number | null;
   participants: string[];
+  /** Per-participant state: their answer, and whether the owner has trusted
+   *  them to change the event. Absent on events read from a public share. */
+  attendees?: Attendee[];
   recurrenceRule: RecurrenceRule | null;
   isRecurrence: boolean;
   recurrenceDate: string | null;

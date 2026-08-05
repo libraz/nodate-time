@@ -50,12 +50,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -92,12 +87,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -145,12 +135,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 	return func(ctx context.Context, in *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}

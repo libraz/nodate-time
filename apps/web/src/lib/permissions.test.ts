@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assignableRoles,
   canEdit,
+  canEditEvent,
   canManage,
+  canOwn,
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
   ROLE_OPTIONS,
@@ -51,6 +54,62 @@ describe('calendar roles', () => {
     expect(canEdit('editor')).toBe(true);
     expect(canEdit('viewer')).toBe(false);
     expect(canEdit(undefined)).toBe(false);
+  });
+
+  it('separates owning from managing', () => {
+    expect(canOwn('owner')).toBe(true);
+    expect(canOwn('manager')).toBe(false);
+    expect(canOwn(undefined)).toBe(false);
+  });
+
+  // The server refuses a manager's attempt to hand out ownership, so offering
+  // the option would produce a picker whose top entry always fails.
+  it('offers ownership only to whoever already has it', () => {
+    expect(assignableRoles('owner')).toEqual(ROLE_OPTIONS);
+    expect(assignableRoles('manager')).not.toContain('owner');
+    expect(assignableRoles('manager')).toEqual(['manager', 'editor', 'viewer']);
+  });
+});
+
+describe('canEditEvent', () => {
+  const someoneElses = { ownerId: 'u-other', attendees: [] };
+
+  it('lets a member change what sits on their own layer', () => {
+    expect(canEditEvent({ ownerId: 'u-me' }, 'editor', 'u-me')).toBe(true);
+  });
+
+  it('does not let an editor rewrite what sits on another layer', () => {
+    expect(canEditEvent(someoneElses, 'editor', 'u-me')).toBe(false);
+  });
+
+  it('admits the people who run the calendar', () => {
+    expect(canEditEvent(someoneElses, 'manager', 'u-me')).toBe(true);
+    expect(canEditEvent(someoneElses, 'owner', 'u-me')).toBe(true);
+  });
+
+  it('honours a delegation the owner granted', () => {
+    const delegated = {
+      ownerId: 'u-other',
+      attendees: [
+        { userId: 'u-me', rsvp: 'accepted' as const, canEdit: true },
+        { userId: 'u-third', rsvp: 'pending' as const, canEdit: false },
+      ],
+    };
+    expect(canEditEvent(delegated, 'editor', 'u-me')).toBe(true);
+    expect(canEditEvent(delegated, 'editor', 'u-third')).toBe(false);
+  });
+
+  // Attending is not permission; only an explicit grant is.
+  it('does not treat participation as permission', () => {
+    const attending = {
+      ownerId: 'u-other',
+      attendees: [{ userId: 'u-me', rsvp: 'accepted' as const, canEdit: false }],
+    };
+    expect(canEditEvent(attending, 'editor', 'u-me')).toBe(false);
+  });
+
+  it('never admits a read-only member', () => {
+    expect(canEditEvent({ ownerId: 'u-me' }, 'viewer', 'u-me')).toBe(false);
   });
 });
 

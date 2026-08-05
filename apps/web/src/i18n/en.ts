@@ -108,6 +108,10 @@ export const en: Record<TranslationKey, string> = {
   'event.saveComment': 'Save',
   // Participants
   'event.selectParticipants': 'Select participants',
+  'event.yourRsvp': 'Your response',
+  'event.rsvpAccepted': 'Going',
+  'event.rsvpTentative': 'Maybe',
+  'event.rsvpDeclined': 'Not going',
 
   'panel.memo': 'Memo',
   'panel.album': 'Album',
