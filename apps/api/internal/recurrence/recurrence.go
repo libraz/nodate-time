@@ -78,9 +78,13 @@ func ComputeEndInZone(rule *Rule, eventStart, eventEnd time.Time, tz string) tim
 // over a decade-wide window) regardless of the requested window size.
 const maxExpansionIterations = 10000
 
-// loadLocation resolves an IANA timezone name, falling back to UTC for empty or
+// LoadLocation resolves an IANA timezone name, falling back to UTC for empty or
 // unknown values so callers never have to nil-check.
-func loadLocation(tz string) *time.Location {
+//
+// Anything that names an occurrence has to agree with the expander on which
+// zone the recurrence lives in, so the resolution — fallback included — is
+// shared rather than repeated.
+func LoadLocation(tz string) *time.Location {
 	if tz == "" {
 		return time.UTC
 	}
@@ -89,6 +93,8 @@ func loadLocation(tz string) *time.Location {
 	}
 	return time.UTC
 }
+
+func loadLocation(tz string) *time.Location { return LoadLocation(tz) }
 
 // ExpandInZone expands occurrences while anchoring the recurrence in the event's
 // IANA timezone, so daily/weekly/monthly steps preserve the wall-clock time

@@ -198,9 +198,19 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 	}
 }
 
+// occurrenceDateKey renders the date half of a recurring instance's composite
+// id. The day is read in the event's own timezone, which is the zone the rule
+// is anchored in: a series that fires at the same wall-clock time every day
+// lands on a different UTC date either side of a DST transition, so two
+// neighbouring occurrences would share a key and one of them would be
+// impossible to address, edit or cancel.
+func occurrenceDateKey(t time.Time, tz string) string {
+	return t.In(recurrence.LoadLocation(tz)).Format("20060102")
+}
+
 func mapRecurringInstance(e generated.CalendarEvent, calPubID []byte, occ recurrence.Occurrence) EventResponse {
 	resp := mapEvent(e, calPubID)
-	dateStr := occ.StartAt.Format("20060102")
+	dateStr := occurrenceDateKey(occ.StartAt, e.Timezone)
 	resp.ID = fmt.Sprintf("%s_%s", pubIDToHex(e.PublicID), dateStr)
 	resp.StartAt = occ.StartAt
 	resp.EndAt = occ.EndAt
@@ -214,7 +224,10 @@ func mapRecurringInstance(e generated.CalendarEvent, calPubID []byte, occ recurr
 // occurrence date, so a subsequent edit resolves back to the same override.
 func mapOverrideInstance(master, child generated.CalendarEvent, calPubID []byte, originalStart time.Time) EventResponse {
 	resp := mapEvent(child, calPubID)
-	dateStr := originalStart.UTC().Format("20060102")
+	// The master's zone, not the override's: the override may have been moved
+	// into a different timezone, and the id has to keep naming the occurrence
+	// the series produced.
+	dateStr := occurrenceDateKey(originalStart, master.Timezone)
 	resp.ID = fmt.Sprintf("%s_%s", pubIDToHex(master.PublicID), dateStr)
 	// The rule belongs to the series; the override row deliberately carries
 	// none of its own, so read it off the master.
@@ -484,18 +497,29 @@ func occurrenceStartForDate(rule *recurrence.Rule, evt generated.CalendarEvent, 
 	if !evt.StartAt.Valid || !evt.EndAt.Valid {
 		return time.Time{}, fmt.Errorf("event has no dates to expand")
 	}
-	instanceDate, err := time.Parse("20060102", dateStr)
+	dayStart, err := occurrenceDayStart(dateStr, evt.Timezone)
 	if err != nil {
 		return time.Time{}, err
 	}
-	dayStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(), 0, 0, 0, 0, time.UTC)
 	dayEnd := dayStart.AddDate(0, 0, 1)
 	for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt.Time, evt.EndAt.Time, dayStart, dayEnd, evt.Timezone) {
-		if occ.StartAt.UTC().Format("20060102") == dateStr {
+		if occurrenceDateKey(occ.StartAt, evt.Timezone) == dateStr {
 			return occ.StartAt.UTC(), nil
 		}
 	}
 	return time.Time{}, fmt.Errorf("date %s is not an occurrence", dateStr)
+}
+
+// occurrenceDayStart turns the date half of a composite id back into the
+// instant the day begins in the event's timezone, which is the window the
+// occurrence it names can be found in.
+func occurrenceDayStart(dateStr, tz string) (time.Time, error) {
+	loc := recurrence.LoadLocation(tz)
+	day, err := time.ParseInLocation("20060102", dateStr, loc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return day, nil
 }
 
 // loadEventInCalendar resolves an event public id and confirms it belongs to
@@ -613,15 +637,14 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				return nil, toAPIError(err)
 			}
 
-			instanceDate, perr := time.Parse("20060102", dateStr)
+			dayStart, perr := occurrenceDayStart(dateStr, evt.Timezone)
 			if perr != nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 
-			dayStart := time.Date(instanceDate.Year(), instanceDate.Month(), instanceDate.Day(), 0, 0, 0, 0, time.UTC)
 			dayEnd := dayStart.AddDate(0, 0, 1)
 			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, evt, dayStart, dayEnd) {
-				if expanded.OriginalStart.Format("20060102") != dateStr {
+				if occurrenceDateKey(expanded.OriginalStart, evt.Timezone) != dateStr {
 					continue
 				}
 				var resp EventResponse
