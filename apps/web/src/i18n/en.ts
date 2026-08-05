@@ -352,6 +352,8 @@ export const en: Record<TranslationKey, string> = {
   'members.roleEditor': 'Editor',
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'Remove this member?',
+  'members.leaveConfirm': 'Leave this calendar? Its events stay with the other members.',
+  'members.leftCalendar': 'You have left the calendar',
   'members.lastOwner': 'A calendar must keep at least one owner',
   'members.selfModify': 'You cannot change your own membership',
 

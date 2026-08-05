@@ -297,6 +297,51 @@ describe('deleteCalendar', () => {
   });
 });
 
+describe('leaveCalendar', () => {
+  it('takes the calendar with the membership and asks nothing more of it', async () => {
+    mockApi.delete.mockResolvedValue(undefined as never);
+    useCalendarStore.setState({
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
+      ],
+      events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
+      memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
+      membersMap: { 'cal-1': [], 'cal-2': [] },
+      activeCalendarIds: ['cal-1', 'cal-2'],
+    });
+
+    await useCalendarStore.getState().leaveCalendar('cal-1', 'member-me');
+
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/members/member-me');
+    // Refetching the members of a calendar the caller has just left answers
+    // 403, which is what used to make a successful departure look failed.
+    expect(mockApi.get).not.toHaveBeenCalled();
+
+    const s = useCalendarStore.getState();
+    expect(s.calendars.map((c) => c.id)).toEqual(['cal-2']);
+    expect(s.events.map((e) => e.id)).toEqual(['e2']);
+    expect(s.memos.map((m) => m.id)).toEqual(['m2']);
+    expect(s.membersMap['cal-1']).toBeUndefined();
+    expect(s.activeCalendarIds).toEqual(['cal-2']);
+  });
+
+  it('keeps the calendar when the departure itself fails', async () => {
+    mockApi.delete.mockRejectedValue(new Error('nope'));
+    useCalendarStore.setState({
+      calendars: [
+        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+      ],
+      activeCalendarIds: ['cal-1'],
+    });
+
+    await expect(useCalendarStore.getState().leaveCalendar('cal-1', 'member-me')).rejects.toThrow(
+      'nope',
+    );
+    expect(useCalendarStore.getState().calendars.map((c) => c.id)).toEqual(['cal-1']);
+  });
+});
+
 describe('toggleCalendarFilter', () => {
   it('removes an active id and persists the change', () => {
     useCalendarStore.setState({ activeCalendarIds: ['cal-1', 'cal-2'] });

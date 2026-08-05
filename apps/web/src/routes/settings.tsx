@@ -849,6 +849,7 @@ function CalendarsSection() {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
+  const leaveCalendar = useCalendarStore((s) => s.leaveCalendar);
   const membersMap = useCalendarStore((s) => s.membersMap);
   const me = useAuthStore((s) => s.user);
 
@@ -911,8 +912,16 @@ function CalendarsSection() {
   };
 
   const handleRemoveMember = async (member: Member) => {
-    if (!confirm(t('members.removeConfirm'))) return;
+    const leaving = member.email === me?.email;
+    if (!confirm(leaving ? t('members.leaveConfirm') : t('members.removeConfirm'))) return;
     try {
+      if (leaving) {
+        const leftId = selectedId;
+        await leaveCalendar(leftId, member.id);
+        setSelectedId(calendars.find((c) => c.id !== leftId)?.id ?? '');
+        toast.success(t('members.leftCalendar'));
+        return;
+      }
       await api.delete(`/calendars/${selectedId}/members/${member.id}`);
       await fetchMembers(selectedId);
       toast.success(t('panel.updated'));
