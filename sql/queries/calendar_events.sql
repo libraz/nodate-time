@@ -36,6 +36,22 @@ WHERE calendar_id = ?
   AND (recurrence_end IS NULL OR recurrence_end > sqlc.arg(range_start))
 ORDER BY start_at;
 
+-- ListCalendarEventsForExport returns every series head in a calendar, dated or
+-- not, recurring or not. Overrides are excluded: they belong to the series
+-- that owns them and are read through it.
+--
+-- There is deliberately no window. An export is a backup, and a backup that
+-- quietly stops at a boundary is worse than no backup -- the caller cannot
+-- tell the difference between "the calendar had nothing there" and "the
+-- server decided not to look". Callers that want a window apply it to the
+-- result themselves and say so.
+-- name: ListCalendarEventsForExport :many
+SELECT * FROM calendar_events
+WHERE calendar_id = ?
+  AND enabled = TRUE
+  AND recurrence_parent_id IS NULL
+ORDER BY start_at, id;
+
 -- name: ListRecurrenceOverridesByParent :many
 SELECT * FROM calendar_events
 WHERE recurrence_parent_id = ? AND enabled = TRUE

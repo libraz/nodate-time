@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 // TestBuildICSAllDayUsesEventTimezone verifies an all-day event is rendered on
-// its local calendar day, not shifted by UTC conversion (H-15).
+// its local calendar day, not shifted by UTC conversion.
 func TestBuildICSAllDayUsesEventTimezone(t *testing.T) {
 	// Midnight 2025-06-24 in Asia/Tokyo == 2025-06-23T15:00:00Z.
 	startUTC := time.Date(2025, 6, 23, 15, 0, 0, 0, time.UTC)
@@ -93,24 +94,59 @@ func TestBuildICSEscaping(t *testing.T) {
 	}
 }
 
-// TestBuildICSExpandsMultipleOccurrences verifies a recurring master expanded
-// into several occurrences emits one VEVENT per occurrence (C-5).
-func TestBuildICSExpandsMultipleOccurrences(t *testing.T) {
+// A recurring series leaves as one VEVENT carrying its rule. Writing one
+// VEVENT per occurrence would hand an importing client thousands of unrelated
+// single events it can no longer edit as a series.
+func TestBuildICSWritesASeriesAsOneVEventWithItsRule(t *testing.T) {
 	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Standup",
 		Timezone: "UTC",
 	}
 	base := time.Date(2025, 6, 24, 9, 0, 0, 0, time.UTC)
+	rows := []exportEvent{{
+		event:      ev,
+		startAt:    base,
+		endAt:      base.Add(time.Hour),
+		rule:       &recurrence.Rule{Freq: "daily", Interval: 1, Count: 30},
+		exceptions: recurrence.Exceptions{base.AddDate(0, 0, 2)},
+	}}
+	out := buildICS("Cal", rows)
+	if n := strings.Count(out, "BEGIN:VEVENT"); n != 1 {
+		t.Errorf("expected 1 VEVENT for the series, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "RRULE:FREQ=DAILY;COUNT=30;WKST=SU") {
+		t.Errorf("the rule itself must be written out:\n%s", out)
+	}
+	if !strings.Contains(out, "EXDATE:20250626T090000Z") {
+		t.Errorf("a cancelled occurrence must be written as EXDATE:\n%s", out)
+	}
+}
+
+// A changed occurrence shares the series' UID and is told apart by its
+// RECURRENCE-ID. A UID of its own would make it a separate event, so a
+// re-import would show it next to the occurrence it replaces.
+func TestBuildICSTiesAChangedOccurrenceToItsSeries(t *testing.T) {
+	ev := generated.CalendarEvent{
+		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+		Title:    "Standup",
+		Timezone: "UTC",
+	}
+	base := time.Date(2025, 6, 24, 9, 0, 0, 0, time.UTC)
+	moved := ev
+	moved.Title = "Standup (moved)"
 	rows := []exportEvent{
-		{event: ev, startAt: base, endAt: base.Add(time.Hour), uidSuffix: "-20250624T090000"},
-		{event: ev, startAt: base.AddDate(0, 0, 1), endAt: base.AddDate(0, 0, 1).Add(time.Hour), uidSuffix: "-20250625T090000"},
+		{event: ev, startAt: base, endAt: base.Add(time.Hour),
+			rule: &recurrence.Rule{Freq: "daily", Interval: 1}},
+		{event: moved, startAt: base.AddDate(0, 0, 1).Add(4 * time.Hour),
+			endAt:         base.AddDate(0, 0, 1).Add(5 * time.Hour),
+			originalStart: base.AddDate(0, 0, 1), isOverride: true},
 	}
 	out := buildICS("Cal", rows)
-	if n := strings.Count(out, "BEGIN:VEVENT"); n != 2 {
-		t.Errorf("expected 2 VEVENTs for 2 occurrences, got %d:\n%s", n, out)
+	if n := strings.Count(out, "UID:0102030405060708090a0b0c0d0e0f10@nodate-time"); n != 2 {
+		t.Errorf("both must carry the series UID, got %d:\n%s", n, out)
 	}
-	if strings.Count(out, "UID:") != 2 || !strings.Contains(out, "-20250625T090000@nodate-time") {
-		t.Errorf("each occurrence should have a unique UID:\n%s", out)
+	if !strings.Contains(out, "RECURRENCE-ID:20250625T090000Z") {
+		t.Errorf("the changed occurrence must name the one it replaces:\n%s", out)
 	}
 }

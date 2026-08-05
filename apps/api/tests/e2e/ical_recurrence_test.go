@@ -13,7 +13,19 @@ import (
 
 func fetchICS(t *testing.T, calURL, token string) string {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, calURL+"/export?format=ics", nil)
+	body, _ := fetchICSWithWindow(t, calURL, token, "")
+	return body
+}
+
+// fetchICSWithWindow returns the exported body and the window the response
+// says it covers.
+func fetchICSWithWindow(t *testing.T, calURL, token, query string) (string, string) {
+	t.Helper()
+	url := calURL + "/export?format=ics"
+	if query != "" {
+		url += "&" + query
+	}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
@@ -22,7 +34,7 @@ func fetchICS(t *testing.T, calURL, token string) string {
 	require.Equal(t, 200, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	return string(body)
+	return string(body), resp.Header.Get("X-Export-Window")
 }
 
 // TestICalImportPreservesTimezoneAndRecurrence verifies that a TZID wall-clock
@@ -108,10 +120,10 @@ func TestICalImportSkipsUnsupportedRRule(t *testing.T) {
 	assert.Zero(t, imp.Failed)
 }
 
-// TestICalExportHonorsRecurrenceExceptions verifies that the export reflects
-// what the app displays: cancelled occurrences are absent and edited ones
-// carry their overridden values.
-func TestICalExportHonorsRecurrenceExceptions(t *testing.T) {
+// The export reflects what the app holds: the series leaves as a rule, its
+// cancellation as an EXDATE, and its edited occurrence as a second VEVENT
+// under the same UID naming the one it replaces.
+func TestICalExportWritesTheSeriesAndItsDepartures(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -140,13 +152,56 @@ func TestICalExportHonorsRecurrenceExceptions(t *testing.T) {
 
 	ics := fetchICS(t, calURL, tt.AccessToken)
 
-	// The cancelled occurrence (2026-04-10 06:00 UTC) must not reappear.
+	// The series is one VEVENT anchored on its first occurrence, carrying the
+	// rule rather than a copy of every date it produces.
+	assert.Contains(t, ics, "DTSTART:20260403T060000Z")
+	assert.Contains(t, ics, "RRULE:FREQ=WEEKLY;BYDAY=FR;WKST=SU")
+
+	// The cancelled occurrence (2026-04-10 06:00 UTC) leaves as an exclusion,
+	// not as a missing date the reader has to infer.
+	assert.Contains(t, ics, "EXDATE:20260410T060000Z")
 	assert.NotContains(t, ics, "DTSTART:20260410T060000Z")
-	// The edited occurrence shows its overridden title and time (11:00 UTC).
+
+	// The edited occurrence is a second VEVENT with its overridden title and
+	// time (11:00 UTC), naming the occurrence it stands in for.
 	assert.Contains(t, ics, "Special export")
 	assert.Contains(t, ics, "DTSTART:20260417T110000Z")
-	assert.NotContains(t, ics, "DTSTART:20260417T060000Z")
-	// The untouched occurrences are still present.
-	assert.Contains(t, ics, "DTSTART:20260403T060000Z")
-	assert.Contains(t, ics, "DTSTART:20260424T060000Z")
+	assert.Contains(t, ics, "RECURRENCE-ID:20260417T060000Z")
+
+	// Two VEVENTs and one UID between them: the series and its one departure.
+	assert.Equal(t, 2, strings.Count(ics, "BEGIN:VEVENT"))
+	uid := strings.Split(strings.Split(ics, "UID:")[1], "\r\n")[0]
+	assert.Equal(t, 2, strings.Count(ics, "UID:"+uid),
+		"a changed occurrence belongs to its series, so it shares the UID")
+}
+
+// The window is the caller's to choose, and whatever it was is stated in the
+// response. An export that silently stops at a boundary the caller never set
+// is a backup with a hole in it.
+func TestICalExportCoversTheWholeCalendarUnlessAskedNotTo(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	// Far outside the window a fixed-range export would have used.
+	for _, when := range []string{"1998-03-14", "2064-09-02"} {
+		helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+			map[string]any{
+				"title": "Anniversary " + when, "allDay": false,
+				"startAt": when + "T10:00:00+09:00", "endAt": when + "T11:00:00+09:00",
+			}, nil)
+	}
+
+	full, window := fetchICSWithWindow(t, calURL, tt.AccessToken, "")
+	assert.Equal(t, "full", window)
+	assert.Contains(t, full, "Anniversary 1998-03-14")
+	assert.Contains(t, full, "Anniversary 2064-09-02")
+
+	narrow, window := fetchICSWithWindow(t, calURL, tt.AccessToken, "from=2060-01-01&to=2070-01-01")
+	assert.Equal(t, "2060-01-01/2070-01-02", window,
+		"the response must say what it actually covered")
+	assert.NotContains(t, narrow, "Anniversary 1998-03-14")
+	assert.Contains(t, narrow, "Anniversary 2064-09-02")
 }

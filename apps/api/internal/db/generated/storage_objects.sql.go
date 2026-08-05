@@ -142,9 +142,14 @@ func (q *Queries) IncrementStorageObjectRefs(ctx context.Context, id uint32) err
 }
 
 const listUnreferencedStorageObjects = `-- name: ListUnreferencedStorageObjects :many
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
-WHERE ref_count = 0 AND created_at < ? AND id > ?
-ORDER BY id
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects so
+WHERE so.ref_count = 0
+  AND so.created_at < ?
+  AND so.id > ?
+  AND NOT EXISTS (
+    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
+  )
+ORDER BY so.id
 LIMIT ?
 `
 
@@ -159,6 +164,12 @@ type ListUnreferencedStorageObjectsParams struct {
 // page from the head of the table would put that same object first every time
 // and the sweep would spend its whole batch budget on it, never reaching the
 // rest of the backlog.
+//
+// A retired attachment row is still a row, and it holds its object until the
+// retention window passes. Those objects are excluded here rather than
+// attempted and logged: a foreign key doing its job every fifteen minutes is
+// not a warning, and burying the real failures under it costs more than the
+// extra clause.
 func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUnreferencedStorageObjectsParams) ([]StorageObject, error) {
 	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {
