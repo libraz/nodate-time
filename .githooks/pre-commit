@@ -1,0 +1,27 @@
+#!/bin/sh
+# Repository pre-commit hook.
+#
+# This file is tracked, and is reached through the global hooks directory
+# (git config --global core.hooksPath), which dispatches to it. That
+# indirection matters: when core.hooksPath is set, git ignores .git/hooks
+# entirely, so anything installed there -- by hand or by a package manager --
+# never runs. `git rev-parse --git-path hooks` shows which directory git
+# actually reads.
+#
+# Bypass (rare, intentional): git commit --no-verify
+
+set -e
+
+toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+# --staged makes the checker return immediately when nothing it cares about
+# is staged. Which paths those are is the checker's business, not the hook's,
+# so the decision lives in one place; paying for a generator run on every
+# commit would make this hook something people route around.
+if ! bash "$toplevel/scripts/check-codegen-drift.sh" --staged; then
+  echo "" >&2
+  echo "✖ pre-commit hook: the schema and its generated code disagree (see above)." >&2
+  echo "  A schema change and the code generated from it belong in the same commit." >&2
+  echo "  Bypass only when you know why: git commit --no-verify" >&2
+  exit 1
+fi
