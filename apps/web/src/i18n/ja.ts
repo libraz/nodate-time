@@ -415,6 +415,11 @@ export const ja = {
   'error.uploadFailed': 'アップロードに失敗しました',
   'error.fileTooLarge': 'ファイルサイズが大きすぎます',
   'error.unsupportedFileType': 'このファイル形式には対応していません',
+  'error.retry': '再読み込み',
+  'error.calendarsUnavailable': 'カレンダーを読み込めませんでした',
+  'error.membersUnavailable':
+    '一部のカレンダーの権限を読み込めませんでした。編集できない状態になっています',
+  'error.profileUnavailable': 'アカウント情報を読み込めませんでした',
 
   // Recurrence (custom builder)
   'event.recurrenceWeekdaysLabel': '曜日',

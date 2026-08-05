@@ -18,6 +18,7 @@ vi.mock('@/lib/api', () => {
     setToken: vi.fn(),
     clearToken: vi.fn(),
     hasToken: vi.fn(() => false),
+    errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error.generic'),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module export
     SESSION_EXPIRED_EVENT: 'nodate:session-expired',
   };
@@ -345,5 +346,25 @@ describe('fetchMe', () => {
     expect(s.user).toEqual(sampleUser);
     expect(s.isAuthenticated).toBe(true);
     expect(s.isInitializing).toBe(false);
+  });
+
+  it('says why the profile is missing, and recovers on a second attempt', async () => {
+    mockHasToken.mockReturnValue(true);
+    mockApi.get.mockRejectedValueOnce(new ApiError(500, 'temporary outage'));
+    useAuthStore.setState({ user: null, isAuthenticated: true, isInitializing: true });
+
+    await useAuthStore.getState().fetchMe();
+
+    // A failed hydration used to leave a signed-in shell with no user behind
+    // it, which is indistinguishable from an account with no permissions.
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().initError).toBe('temporary outage');
+
+    mockApi.get.mockResolvedValueOnce(sampleUser as never);
+    await useAuthStore.getState().fetchMe();
+
+    const s = useAuthStore.getState();
+    expect(s.user).toEqual(sampleUser);
+    expect(s.initError).toBeNull();
   });
 });

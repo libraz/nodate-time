@@ -111,14 +111,44 @@ export function canOwn(role: string | undefined | null): boolean {
 }
 
 /**
+ * What is known about a user's standing in a calendar.
+ *
+ * `unknown` and `none` deny exactly the same actions, which is why they used
+ * to be one value. They are not the same situation: one is an answer, the
+ * other is the absence of one. A member list that failed to arrive left the
+ * calendar looking read-only for the rest of the session, indistinguishable
+ * from a role that really is read-only -- and so nothing offered to ask
+ * again, because nothing knew there was anything to ask.
+ */
+export type Membership =
+  | { status: 'unknown' }
+  | { status: 'none' }
+  | { status: 'member'; role: Role };
+
+/**
+ * Resolves what is known about the current user's standing in a calendar from
+ * its members list. An absent list is unknown, not a denial.
+ */
+export function membershipFor(
+  members: Member[] | undefined,
+  userEmail: string | undefined,
+): Membership {
+  if (!members || !userEmail) return { status: 'unknown' };
+  const me = members.find((m) => m.email === userEmail);
+  if (!me?.role) return { status: 'none' };
+  return { status: 'member', role: me.role as Role };
+}
+
+/**
  * Resolves the current user's role for a calendar from its members list.
- * Returns undefined when membership is unknown (e.g. members not yet loaded).
+ * Returns undefined when there is no role to report -- either because the
+ * membership is unknown or because there is none. Callers that need to tell
+ * those apart want {@link membershipFor}.
  */
 export function roleForCalendar(
   members: Member[] | undefined,
   userEmail: string | undefined,
 ): Role | undefined {
-  if (!members || !userEmail) return undefined;
-  const me = members.find((m) => m.email === userEmail);
-  return (me?.role as Role | undefined) ?? undefined;
+  const membership = membershipFor(members, userEmail);
+  return membership.status === 'member' ? membership.role : undefined;
 }

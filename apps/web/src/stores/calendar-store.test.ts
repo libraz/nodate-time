@@ -201,8 +201,73 @@ describe('fetchCalendars', () => {
 
     await useCalendarStore.getState().fetchCalendars();
 
-    expect(useCalendarStore.getState().calendars.map((c) => c.id)).toEqual(['cal-1', 'cal-2']);
-    expect(mockToast.error).toHaveBeenCalledWith('members failed');
+    const s = useCalendarStore.getState();
+    expect(s.calendars.map((c) => c.id)).toEqual(['cal-1', 'cal-2']);
+    expect(s.memberErrors['cal-2']).toBe('members failed');
+    expect(s.memberErrors['cal-1']).toBeUndefined();
+  });
+
+  it('records why the calendar list is missing instead of leaving an empty grid', async () => {
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') throw new Error('network down');
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    const s = useCalendarStore.getState();
+    expect(s.calendars).toEqual([]);
+    expect(s.loadError).toBe('network down');
+    expect(s.isLoading).toBe(false);
+  });
+});
+
+describe('retryFailedLoads', () => {
+  it('recovers the calendar list after a failed first attempt', async () => {
+    let listAttempts = 0;
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') {
+        listAttempts++;
+        if (listAttempts === 1) throw new Error('network down');
+        return [cal('cal-1')] as never;
+      }
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+    expect(useCalendarStore.getState().loadError).toBe('network down');
+
+    await useCalendarStore.getState().retryFailedLoads();
+
+    const s = useCalendarStore.getState();
+    expect(s.loadError).toBeNull();
+    expect(s.calendars.map((c) => c.id)).toEqual(['cal-1']);
+  });
+
+  it('recovers only the member lists that did not arrive', async () => {
+    let cal2Attempts = 0;
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      if (url === '/calendars/cal-2/members') {
+        cal2Attempts++;
+        if (cal2Attempts === 1) throw new Error('members failed');
+        return [{ id: 'u1', name: 'A', email: 'a@example.com', role: 'editor' }] as never;
+      }
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+    expect(useCalendarStore.getState().memberErrors['cal-2']).toBe('members failed');
+
+    mockApi.get.mockClear();
+    await useCalendarStore.getState().retryFailedLoads();
+
+    const s = useCalendarStore.getState();
+    expect(s.memberErrors).toEqual({});
+    // The calendar that answered the first time is not asked again: the retry
+    // is for what is missing, not a second run of the whole startup.
+    expect(mockApi.get.mock.calls.map((c) => c[0])).toEqual(['/calendars/cal-2/members']);
+    expect(s.membersMap['cal-2']?.[0]?.role).toBe('editor');
   });
 });
 

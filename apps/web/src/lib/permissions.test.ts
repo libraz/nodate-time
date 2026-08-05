@@ -7,6 +7,7 @@ import {
   canOwn,
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
+  membershipFor,
   ROLE_OPTIONS,
   roleForCalendar,
   roleLabelKey,
@@ -126,5 +127,23 @@ describe('roleForCalendar', () => {
   it('reports unknown rather than guessing when members are not loaded', () => {
     expect(roleForCalendar(undefined, 'a@example.com')).toBeUndefined();
     expect(roleForCalendar(members, undefined)).toBeUndefined();
+  });
+});
+
+describe('membershipFor', () => {
+  const members = [
+    { id: 'm1', name: 'A', email: 'a@example.com', role: 'owner' },
+    { id: 'm2', name: 'B', email: 'b@example.com', role: 'viewer' },
+  ] as Parameters<typeof membershipFor>[0];
+
+  it('reports the role of a member', () => {
+    expect(membershipFor(members, 'b@example.com')).toEqual({ status: 'member', role: 'viewer' });
+  });
+
+  it('separates a list that never arrived from one that answered no', () => {
+    // Both deny every action. Only the first is worth asking about again, and
+    // collapsing them is what made one failed fetch look like a lost role.
+    expect(membershipFor(undefined, 'a@example.com')).toEqual({ status: 'unknown' });
+    expect(membershipFor(members, 'nobody@example.com')).toEqual({ status: 'none' });
   });
 });

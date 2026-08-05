@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { getT } from '@/i18n';
-import { ApiError, api, clearToken, hasToken, SESSION_EXPIRED_EVENT, setToken } from '@/lib/api';
+import {
+  ApiError,
+  api,
+  clearToken,
+  errorMessage,
+  hasToken,
+  SESSION_EXPIRED_EVENT,
+  setToken,
+} from '@/lib/api';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -29,6 +37,15 @@ interface AuthState {
   isInitializing: boolean;
   isLoading: boolean;
   error: string | null;
+  /**
+   * Why the signed-in user's own profile is missing, when it is.
+   *
+   * A failure here is not a rejected session -- the token is still good, the
+   * answer simply did not arrive. Without somewhere to say so, the shell
+   * rendered with no user at all, and every permission check in it compared
+   * against an address that was never loaded.
+   */
+  initError: string | null;
 
   login: (email: string, password: string) => Promise<void>;
   devLogin: (email: string) => Promise<void>;
@@ -64,6 +81,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isInitializing: hasToken(),
   isLoading: false,
   error: null,
+  initError: null,
 
   login: async (email, password) => {
     set({ isLoading: true, error: null });
@@ -119,6 +137,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       isInitializing: false,
       isLoading: false,
       error: null,
+      initError: null,
     });
     useCalendarStore.getState().resetSessionData();
     useUiStore.getState().resetSessionUi();
@@ -133,13 +152,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       // flight. Without this, a late success would restore isAuthenticated and
       // flash the authed shell before the next request bounces to /login.
       if (!hasToken()) return;
-      set({ user, isAuthenticated: true, isInitializing: false });
+      set({ user, isAuthenticated: true, isInitializing: false, initError: null });
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.code === 'AUTH.TOKEN_INVALID')) {
         useAuthStore.getState().logout();
         return;
       }
-      set({ isInitializing: false });
+      set({ isInitializing: false, initError: errorMessage(e) });
     } finally {
       fetchMeInFlight = false;
     }

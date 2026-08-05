@@ -396,6 +396,11 @@ export const en: Record<TranslationKey, string> = {
   'error.uploadFailed': 'Upload failed',
   'error.fileTooLarge': 'File is too large',
   'error.unsupportedFileType': 'Unsupported file type',
+  'error.retry': 'Try again',
+  'error.calendarsUnavailable': "Your calendars couldn't be loaded",
+  'error.membersUnavailable':
+    "Permissions for some calendars couldn't be loaded, so they are read-only for now",
+  'error.profileUnavailable': "Your account details couldn't be loaded",
 
   // Recurrence (custom builder)
   'event.recurrenceWeekdaysLabel': 'Days',

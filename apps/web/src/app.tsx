@@ -3,6 +3,7 @@ import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
 import { FabButton } from '@/components/fab-button';
 import { LeftSidebar } from '@/components/left-sidebar';
+import { LoadFailure, LoadFailureBanner } from '@/components/load-failure';
 import { MonthScroll } from '@/components/month-scroll';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
@@ -337,6 +338,9 @@ export function App() {
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const fetchMemos = useCalendarStore((s) => s.fetchMemos);
   const calendars = useCalendarStore((s) => s.calendars);
+  const loadError = useCalendarStore((s) => s.loadError);
+  const memberErrors = useCalendarStore((s) => s.memberErrors);
+  const retryFailedLoads = useCalendarStore((s) => s.retryFailedLoads);
   const initDone = useRef(false);
   const eventModalLoaded = useRef(false);
   if (showEventModal) eventModalLoaded.current = true;
@@ -344,7 +348,12 @@ export function App() {
   useEffect(() => {
     if (initDone.current) return;
     initDone.current = true;
-    fetchCalendars().catch(() => {});
+    // The latch only exists to keep a re-render from refetching. A load that
+    // did not arrive is not a load that happened, so releasing it lets the
+    // next mount ask again instead of leaving the session permanently empty.
+    fetchCalendars().finally(() => {
+      if (useCalendarStore.getState().loadError) initDone.current = false;
+    });
   }, [fetchCalendars]);
 
   useEffect(() => {
@@ -355,7 +364,15 @@ export function App() {
     fetchMemos().catch(() => {});
   }, [calendars, currentMonth, fetchEvents, fetchMemos]);
 
-  const calendarContent = (
+  const membersFailed = Object.keys(memberErrors).length > 0;
+
+  const calendarContent = loadError ? (
+    <LoadFailure
+      title={t('error.calendarsUnavailable')}
+      detail={loadError}
+      onRetry={retryFailedLoads}
+    />
+  ) : (
     <div className="relative flex-1 overflow-hidden">
       <Suspense fallback={null}>
         {calendarView === 'month' && (
@@ -371,7 +388,13 @@ export function App() {
   );
 
   // Mobile month view is a continuous vertical infinite scroll (no month paging).
-  const mobileCalendarContent = (
+  const mobileCalendarContent = loadError ? (
+    <LoadFailure
+      title={t('error.calendarsUnavailable')}
+      detail={loadError}
+      onRetry={retryFailedLoads}
+    />
+  ) : (
     <div className="relative flex-1 overflow-hidden">
       <Suspense fallback={null}>
         {calendarView === 'month' ? (
@@ -392,6 +415,12 @@ export function App() {
       <div className="relative z-[1] contents">
         <CalendarHeader />
       </div>
+
+      {membersFailed && (
+        <div className="relative z-[1]">
+          <LoadFailureBanner title={t('error.membersUnavailable')} onRetry={retryFailedLoads} />
+        </div>
+      )}
 
       {/* PC layout: sidebar + calendar */}
       <div className="relative z-[1] hidden flex-1 overflow-hidden sm:flex">

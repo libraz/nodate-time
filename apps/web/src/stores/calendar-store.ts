@@ -47,12 +47,26 @@ interface CalendarState {
   labels: Label[];
   activeCalendarIds: string[];
   isLoading: boolean;
+  /**
+   * Why the calendar list is missing, when it is. Set means the list was
+   * asked for and did not arrive -- an empty grid with a reason behind it,
+   * rather than an empty grid that looks like an empty account.
+   */
+  loadError: string | null;
+  /**
+   * Calendars whose member list failed to load, by id. Their entries in
+   * `membersMap` are absent, so every permission check on them answers "no";
+   * this is what says that answer is a missing reply rather than a role.
+   */
+  memberErrors: Record<string, string>;
 
   fetchCalendars: () => Promise<void>;
   fetchEvents: (start: string, end: string) => Promise<void>;
   fetchMemos: () => Promise<void>;
   fetchMembers: (calendarId: string) => Promise<void>;
   fetchLabels: (calendarId: string) => Promise<void>;
+  /** Re-runs whichever of the startup loads did not come back. */
+  retryFailedLoads: () => Promise<void>;
 
   addCalendar: (cal: { name: string; color: string }) => Promise<void>;
   updateCalendar: (
@@ -100,18 +114,32 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   labels: [],
   activeCalendarIds: loadJson<string[]>('activeCalendarIds', []),
   isLoading: false,
+  loadError: null,
+  memberErrors: {},
 
   async fetchCalendars() {
     const requestGeneration = ++calendarRequestGeneration;
     const currentAccountGeneration = accountGeneration;
     set({ isLoading: true });
     try {
-      const cals = await api.get<Calendar[]>('/calendars');
+      let cals: Calendar[];
+      try {
+        cals = await api.get<Calendar[]>('/calendars');
+      } catch (e) {
+        if (
+          requestGeneration === calendarRequestGeneration &&
+          currentAccountGeneration === accountGeneration
+        ) {
+          set({ loadError: errorMessage(e) });
+        }
+        return;
+      }
       if (
         requestGeneration !== calendarRequestGeneration ||
         currentAccountGeneration !== accountGeneration
       )
         return;
+      set({ loadError: null });
       const saved = loadJson<string[]>('activeCalendarIds', []);
       const calendarIDs = cals.map((c) => c.id);
       const savedActive = saved.filter((id) => calendarIDs.includes(id));
@@ -120,15 +148,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ calendars: cals, activeCalendarIds: ids });
       saveJson('activeCalendarIds', ids);
 
-      const memberResults = await Promise.allSettled(cals.map((c) => get().fetchMembers(c.id)));
+      // fetchMembers records its own failures rather than rejecting: a
+      // calendar whose members did not arrive is reported once, by the banner
+      // that offers to fetch them again, instead of by a toast per calendar
+      // that scrolls away and leaves nothing to act on.
+      await Promise.all(cals.map((c) => get().fetchMembers(c.id)));
       if (
         requestGeneration !== calendarRequestGeneration ||
         currentAccountGeneration !== accountGeneration
       )
         return;
-      for (const result of memberResults) {
-        if (result.status === 'rejected') toast.error(errorMessage(result.reason));
-      }
       const first = cals[0];
       if (first && get().labels.length === 0) {
         try {
@@ -213,11 +242,25 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async fetchMembers(calendarId) {
     const currentAccountGeneration = accountGeneration;
-    const members = await api.get<Member[]>(`/calendars/${calendarId}/members`);
+    let members: Member[];
+    try {
+      members = await api.get<Member[]>(`/calendars/${calendarId}/members`);
+    } catch (e) {
+      if (currentAccountGeneration !== accountGeneration) return;
+      set((s) => ({
+        memberErrors: { ...s.memberErrors, [calendarId]: errorMessage(e) },
+      }));
+      return;
+    }
     if (currentAccountGeneration !== accountGeneration) return;
-    set((s) => ({
-      membersMap: { ...s.membersMap, [calendarId]: members },
-    }));
+    set((s) => {
+      const nextErrors = { ...s.memberErrors };
+      delete nextErrors[calendarId];
+      return {
+        membersMap: { ...s.membersMap, [calendarId]: members },
+        memberErrors: nextErrors,
+      };
+    });
   },
 
   async fetchLabels(calendarId) {
@@ -225,6 +268,18 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const labels = await api.get<Label[]>(`/calendars/${calendarId}/labels`);
     if (currentAccountGeneration !== accountGeneration) return;
     set({ labels });
+  },
+
+  async retryFailedLoads() {
+    // A missing calendar list is the wider failure: refetching it re-runs the
+    // member loads underneath it, so there is nothing left to retry
+    // separately.
+    if (get().loadError) {
+      await get().fetchCalendars();
+      return;
+    }
+    const failed = Object.keys(get().memberErrors);
+    await Promise.all(failed.map((id) => get().fetchMembers(id)));
   },
 
   async addCalendar(cal) {
@@ -256,12 +311,15 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       saveJson('activeCalendarIds', ids);
       const nextMap = { ...s.membersMap };
       delete nextMap[id];
+      const nextErrors = { ...s.memberErrors };
+      delete nextErrors[id];
       return {
         calendars: s.calendars.filter((c) => c.id !== id),
         events: s.events.filter((e) => e.calendarId !== id),
         memos: s.memos.filter((m) => m.calendarId !== id),
         activeCalendarIds: ids,
         membersMap: nextMap,
+        memberErrors: nextErrors,
       };
     });
   },
@@ -402,6 +460,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       labels: [],
       activeCalendarIds: [],
       isLoading: false,
+      loadError: null,
+      memberErrors: {},
     });
   },
 
