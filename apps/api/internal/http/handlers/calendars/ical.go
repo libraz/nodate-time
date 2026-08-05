@@ -550,6 +550,10 @@ type ImportOutput struct {
 		Imported int `json:"imported"`
 		Skipped  int `json:"skipped"`
 		Failed   int `json:"failed"`
+		// Truncated is how many events past the per-file limit were never
+		// looked at. It is reported separately from Skipped because it is the
+		// one outcome the file itself cannot explain.
+		Truncated int `json:"truncated"`
 	}
 }
 
@@ -564,6 +568,13 @@ type rawEvent struct {
 	allDay   bool
 	tzid     string
 	rrule    string
+	// exdates are the occurrences the series cancels.
+	exdates []time.Time
+	// recurrenceID names the occurrence this entry replaces; when set the
+	// entry is a changed occurrence of the series sharing its uid, not an
+	// event of its own.
+	recurrenceID    time.Time
+	hasRecurrenceID bool
 }
 
 // parseICSTime parses a DTSTART/DTEND value. Wall-clock values carrying a TZID
@@ -649,6 +660,20 @@ func parseICS(text string) []rawEvent {
 				}
 				if t, err := parseICSTime(val, tzid, isDate); err == nil {
 					cur.end = t
+				}
+			case "EXDATE":
+				// EXDATE is multi-valued and may appear more than once. Every
+				// value names an occurrence the series does not have, so
+				// dropping them resurrects occurrences the author cancelled.
+				for _, v := range strings.Split(val, ",") {
+					if t, err := parseICSTime(v, tzid, isDate); err == nil {
+						cur.exdates = append(cur.exdates, t.UTC())
+					}
+				}
+			case "RECURRENCE-ID":
+				if t, err := parseICSTime(val, tzid, isDate); err == nil {
+					cur.recurrenceID = t.UTC()
+					cur.hasRecurrenceID = true
 				}
 			}
 		}
@@ -794,97 +819,49 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		}
 
 		events := parseICS(in.Body.ICS)
+		truncated := 0
 		if len(events) > importMaxEvents {
+			// Counted, not swallowed. A file that lost a thousand events must
+			// not read as a clean import.
+			truncated = len(events) - importMaxEvents
 			events = events[:importMaxEvents]
 		}
 
 		var imported, skipped, failed int
+		// Series heads are written first: a changed occurrence names the one
+		// it belongs to by UID, and the file may put it either side of it.
+		seriesByUID := map[string]importedSeries{}
+		var changed []rawEvent
+
 		for _, e := range events {
-			if e.summary == "" || e.start.IsZero() {
+			if e.hasRecurrenceID {
+				changed = append(changed, e)
+				continue
+			}
+			series, outcome := importSeriesHead(ctx, deps, cal, userID, e)
+			switch outcome {
+			case importSkipped:
+				skipped++
+			case importFailed:
+				failed++
+			default:
+				imported++
+				if e.uid != "" {
+					seriesByUID[e.uid] = series
+				}
+			}
+		}
+
+		for _, e := range changed {
+			parent, ok := seriesByUID[e.uid]
+			if !ok || parent.rule == nil {
+				// Nothing in the file for it to be a departure from. Importing
+				// it as a free-standing event would put a duplicate next to
+				// whichever occurrence it was meant to replace.
 				skipped++
 				continue
 			}
-			endAt := e.end
-			if endAt.IsZero() {
-				if e.allDay {
-					endAt = e.start.AddDate(0, 0, 1)
-				} else {
-					endAt = e.start.Add(time.Hour)
-				}
-			}
-			// Preserve the source zone so wall-clock semantics (recurrence,
-			// all-day rendering) survive the import. Unknown TZIDs fall back
-			// to UTC to match how the times were parsed.
-			tz := "UTC"
-			if e.tzid != "" {
-				if _, lerr := time.LoadLocation(e.tzid); lerr == nil {
-					tz = e.tzid
-				}
-			}
-			var ruleData *json.RawMessage
-			recEnd := sql.NullTime{}
-			if e.rrule != "" {
-				converted, ok := convertRRule(e.rrule, loadLocationOrUTC(tz))
-				if !ok {
-					// An unsupported RRULE must not silently collapse a
-					// recurring event into a single occurrence.
-					skipped++
-					continue
-				}
-				ruleData = converted
-				recEnd = sql.NullTime{
-					Time:  recurrence.ComputeEndInZone(recurrence.ParseRule(*ruleData), e.start, endAt, tz),
-					Valid: true,
-				}
-			}
-			pubID, err := uuid.NewV7()
-			if err != nil {
-				failed++
-				continue
-			}
-			// Each event is its own transaction so one bad row does not
-			// discard the whole file, and each carries its own log entry:
-			// an import is a state change like any other, and a feed that
-			// skipped it would be missing however many events landed.
-			//
-			// The importing user is recorded as the owner. A .ics file has
-			// no notion of one, and filing the events under whoever ran the
-			// import is the honest answer -- they are who put them there.
-			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-				if _, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
-					PublicID:        pubID[:],
-					WorkspaceID:     deps.WorkspaceID,
-					CalendarID:      cal.ID,
-					Kind:            generated.CalendarEventsKindEvent,
-					Visibility:      generated.CalendarEventsVisibilityDefault,
-					ShowAs:          generated.CalendarEventsShowAsBusy,
-					Flexibility:     generated.CalendarEventsFlexibilityFixed,
-					Title:           e.summary,
-					AllDay:          e.allDay,
-					StartAt:         sql.NullTime{Time: e.start, Valid: true},
-					EndAt:           sql.NullTime{Time: endAt, Valid: true},
-					Timezone:        tz,
-					Location:        nullString(e.location),
-					Memo:            nullString(e.desc),
-					URL:             nullString(e.url),
-					OwnerUserID:     userID,
-					CreatedByUserID: userID,
-					RecurrenceRule:  ruleData,
-					RecurrenceEnd:   recEnd,
-				}); err != nil {
-					return err
-				}
-				return eventlog.Append(ctx, q, eventlog.Entry{
-					WorkspaceID: deps.WorkspaceID,
-					CalendarID:  cal.ID,
-					ActorUserID: userID,
-					Type:        eventlog.TypeEventCreated,
-					Summary:     e.summary,
-					Subject:     pubID[:],
-					Extra:       map[string]any{"source": "ics-import"},
-				})
-			})
-			if err != nil {
+			if err := importChangedOccurrence(ctx, deps, cal, userID, e, parent); err != nil {
 				failed++
 				continue
 			}
@@ -895,6 +872,200 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		out.Body.Imported = imported
 		out.Body.Skipped = skipped
 		out.Body.Failed = failed
+		out.Body.Truncated = truncated
 		return out, nil
 	}
+}
+
+// importedSeries is what a changed occurrence needs to attach itself to the
+// series it belongs to.
+type importedSeries struct {
+	id       uint32
+	timezone string
+	rule     *json.RawMessage
+}
+
+type importOutcome int
+
+const (
+	importCreated importOutcome = iota
+	importSkipped
+	importFailed
+)
+
+// importZone keeps the source zone so wall-clock semantics (recurrence,
+// all-day rendering) survive the import. Unknown TZIDs fall back to UTC to
+// match how the times were parsed.
+func importZone(tzid string) string {
+	if tzid != "" {
+		if _, err := time.LoadLocation(tzid); err == nil {
+			return tzid
+		}
+	}
+	return "UTC"
+}
+
+func importEndAt(e rawEvent) time.Time {
+	if !e.end.IsZero() {
+		return e.end
+	}
+	if e.allDay {
+		return e.start.AddDate(0, 0, 1)
+	}
+	return e.start.Add(time.Hour)
+}
+
+// importSeriesHead writes one VEVENT that is not a changed occurrence.
+//
+// Each event is its own transaction so one bad row does not discard the whole
+// file, and each carries its own log entry: an import is a state change like
+// any other, and a feed that skipped it would be missing however many events
+// landed.
+//
+// The importing user is recorded as the owner. A .ics file has no notion of
+// one, and filing the events under whoever ran the import is the honest
+// answer -- they are who put them there.
+func importSeriesHead(
+	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32, e rawEvent,
+) (importedSeries, importOutcome) {
+	if e.summary == "" || e.start.IsZero() {
+		return importedSeries{}, importSkipped
+	}
+	endAt := importEndAt(e)
+	tz := importZone(e.tzid)
+
+	var ruleData *json.RawMessage
+	var exceptions *json.RawMessage
+	recEnd := sql.NullTime{}
+	if e.rrule != "" {
+		converted, ok := convertRRule(e.rrule, loadLocationOrUTC(tz))
+		if !ok {
+			// An unsupported RRULE must not silently collapse a recurring
+			// event into a single occurrence.
+			return importedSeries{}, importSkipped
+		}
+		ruleData = converted
+		recEnd = sql.NullTime{
+			Time:  recurrence.ComputeEndInZone(recurrence.ParseRule(*ruleData), e.start, endAt, tz),
+			Valid: true,
+		}
+		// EXDATE says which occurrences the series does not have. Dropping it
+		// hands back every occurrence its author cancelled.
+		var ex recurrence.Exceptions
+		for _, d := range e.exdates {
+			ex = ex.With(d)
+		}
+		column, err := ex.MarshalColumn()
+		if err != nil {
+			return importedSeries{}, importFailed
+		}
+		exceptions = column
+	}
+
+	pubID, err := uuid.NewV7()
+	if err != nil {
+		return importedSeries{}, importFailed
+	}
+
+	var newID uint32
+	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		res, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
+			PublicID:        pubID[:],
+			WorkspaceID:     deps.WorkspaceID,
+			CalendarID:      cal.ID,
+			Kind:            generated.CalendarEventsKindEvent,
+			Visibility:      generated.CalendarEventsVisibilityDefault,
+			ShowAs:          generated.CalendarEventsShowAsBusy,
+			Flexibility:     generated.CalendarEventsFlexibilityFixed,
+			Title:           e.summary,
+			AllDay:          e.allDay,
+			StartAt:         sql.NullTime{Time: e.start, Valid: true},
+			EndAt:           sql.NullTime{Time: endAt, Valid: true},
+			Timezone:        tz,
+			Location:        nullString(e.location),
+			Memo:            nullString(e.desc),
+			URL:             nullString(e.url),
+			OwnerUserID:     userID,
+			CreatedByUserID: userID,
+			RecurrenceRule:  ruleData,
+			RecurrenceEnd:   recEnd,
+		})
+		if err != nil {
+			return err
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		newID = uint32(id)
+		if exceptions != nil {
+			if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
+				RecurrenceExceptions: exceptions,
+				ID:                   newID,
+			}); err != nil {
+				return err
+			}
+		}
+		return eventlog.Append(ctx, q, eventlog.Entry{
+			WorkspaceID: deps.WorkspaceID,
+			CalendarID:  cal.ID,
+			ActorUserID: userID,
+			Type:        eventlog.TypeEventCreated,
+			Summary:     e.summary,
+			Subject:     pubID[:],
+			Extra:       map[string]any{"source": "ics-import"},
+		})
+	})
+	if err != nil {
+		return importedSeries{}, importFailed
+	}
+	return importedSeries{id: newID, timezone: tz, rule: ruleData}, importCreated
+}
+
+// importChangedOccurrence writes a VEVENT carrying a RECURRENCE-ID as an
+// override of the series it names, which is how the app stores a changed
+// occurrence. Written as a free-standing event it would show up beside the
+// occurrence it was meant to replace.
+func importChangedOccurrence(
+	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32,
+	e rawEvent, parent importedSeries,
+) error {
+	if e.start.IsZero() {
+		return fmt.Errorf("changed occurrence has no start")
+	}
+	overridePubID, err := uuid.NewV7()
+	if err != nil {
+		return err
+	}
+	tz := parent.timezone
+	if e.tzid != "" {
+		tz = importZone(e.tzid)
+	}
+	parentRef := sql.NullInt32{Int32: int32(parent.id), Valid: true}
+	originalRef := sql.NullTime{Time: e.recurrenceID, Valid: true}
+
+	return dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		_, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
+			PublicID:                overridePubID[:],
+			WorkspaceID:             deps.WorkspaceID,
+			CalendarID:              cal.ID,
+			Kind:                    generated.CalendarEventsKindEvent,
+			Visibility:              generated.CalendarEventsVisibilityDefault,
+			ShowAs:                  generated.CalendarEventsShowAsBusy,
+			Flexibility:             generated.CalendarEventsFlexibilityFixed,
+			Title:                   e.summary,
+			AllDay:                  e.allDay,
+			StartAt:                 sql.NullTime{Time: e.start, Valid: true},
+			EndAt:                   sql.NullTime{Time: importEndAt(e), Valid: true},
+			Timezone:                tz,
+			Location:                nullString(e.location),
+			Memo:                    nullString(e.desc),
+			URL:                     nullString(e.url),
+			OwnerUserID:             userID,
+			CreatedByUserID:         userID,
+			RecurrenceParentID:      parentRef,
+			RecurrenceOriginalStart: originalRef,
+		})
+		return err
+	})
 }
