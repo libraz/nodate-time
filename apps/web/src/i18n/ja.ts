@@ -259,6 +259,19 @@ export const ja = {
   'auth.oauthFailed': 'OAuth ログインに失敗しました。もう一度お試しください',
   'auth.oauthDenied': 'ログインがキャンセルされました',
   'auth.oauthState': 'セッションの有効期限が切れました。もう一度ログインしてください',
+  'auth.oauthEmailUnverified':
+    'このメールアドレスを使うアカウントがすでにありますが、確認が済んでいません。パスワードでログインしてアドレスを確認してから、もう一度お試しください',
+
+  // メールアドレスの確認
+  'auth.verifyEmailTitle': 'メールアドレスの確認',
+  'auth.verifyEmailPending': '確認しています...',
+  'auth.verifyEmailSuccess': 'メールアドレスを確認しました',
+  'auth.verifyEmailInvalid': 'この確認リンクは無効か、有効期限が切れています',
+  'profile.emailUnverified': 'メールアドレスがまだ確認されていません',
+  'profile.emailUnverifiedHint':
+    'アドレスの確認が済むまで、Google や LINE のログインはこのアカウントを使えません。',
+  'profile.resendVerification': '確認メールを再送',
+  'profile.verificationSent': '確認メールを送信しました',
   'auth.emailPlaceholder': 'you@example.com',
 
   // Timezone / event extras
@@ -350,6 +363,8 @@ export const ja = {
   'invites.copy': 'リンクをコピー',
   'invites.revoke': '取り消す',
   'invites.empty': '招待リンクがありません',
+  'invites.linkShownOnce': 'リンクは作成した直後にしか表示されません。今のうちにコピーしてください',
+  'invites.linkUnavailable': 'リンクは再表示できません。取り消して作り直してください',
 
   // Errors
   'error.generic': 'エラーが発生しました',

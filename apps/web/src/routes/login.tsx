@@ -23,6 +23,8 @@ export function oauthErrorMessageKey(code: string | undefined): TranslationKey |
       return 'auth.oauthState';
     case 'oauth_not_allowed':
       return 'auth.oauthNotAllowed';
+    case 'oauth_email_unverified':
+      return 'auth.oauthEmailUnverified';
     default:
       return 'auth.oauthFailed';
   }

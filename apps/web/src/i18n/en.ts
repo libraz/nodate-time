@@ -247,6 +247,19 @@ export const en: Record<TranslationKey, string> = {
   'auth.oauthFailed': 'OAuth sign-in failed. Please try again',
   'auth.oauthDenied': 'Sign-in was cancelled',
   'auth.oauthState': 'Your session expired. Please try signing in again',
+  'auth.oauthEmailUnverified':
+    'An account already uses this email but has not confirmed it. Sign in with your password and confirm the address, then try again',
+
+  // Email confirmation
+  'auth.verifyEmailTitle': 'Confirm your email address',
+  'auth.verifyEmailPending': 'Confirming...',
+  'auth.verifyEmailSuccess': 'Email address confirmed',
+  'auth.verifyEmailInvalid': 'This confirmation link is invalid or has expired',
+  'profile.emailUnverified': 'Your email address is not confirmed yet',
+  'profile.emailUnverifiedHint':
+    'Signing in with Google or LINE cannot use this account until the address is confirmed.',
+  'profile.resendVerification': 'Resend confirmation email',
+  'profile.verificationSent': 'Confirmation email sent',
   'auth.emailPlaceholder': 'you@example.com',
 
   'event.timezone': 'Timezone',
@@ -331,6 +344,8 @@ export const en: Record<TranslationKey, string> = {
   'invites.copy': 'Copy link',
   'invites.revoke': 'Revoke',
   'invites.empty': 'No invite links',
+  'invites.linkShownOnce': 'The link is shown only when it is created. Copy it now',
+  'invites.linkUnavailable': 'Link no longer shown — revoke it and create a new one',
 
   // Errors
   'error.generic': 'Something went wrong',

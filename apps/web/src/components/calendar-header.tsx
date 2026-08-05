@@ -24,7 +24,13 @@ export function CalendarHeader() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
+  // The mobile and desktop headers are both mounted at all times — only their
+  // visibility differs — so one ref shared between them would end up holding
+  // whichever mounted last, and the outside-click check would treat every
+  // click on the other header as outside and close the menu before the click
+  // could land on anything in it.
+  const mobileProfileMenuRef = useRef<HTMLDivElement>(null);
+  const desktopProfileMenuRef = useRef<HTMLDivElement>(null);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
 
@@ -43,7 +49,11 @@ export function CalendarHeader() {
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inside = [mobileProfileMenuRef, desktopProfileMenuRef].some((ref) =>
+        ref.current?.contains(target),
+      );
+      if (!inside) {
         setShowProfileMenu(false);
       }
     };
@@ -419,7 +429,7 @@ export function CalendarHeader() {
             </svg>
           </button>
 
-          <div className="relative" ref={profileMenuRef}>
+          <div className="relative" ref={mobileProfileMenuRef}>
             <AvatarButton size="sm" />
             {profileDropdown}
           </div>
@@ -533,7 +543,7 @@ export function CalendarHeader() {
             <span className="hidden lg:inline">{t('event.createEvent')}</span>
           </button>
 
-          <div className="relative" ref={profileMenuRef}>
+          <div className="relative" ref={desktopProfileMenuRef}>
             <AvatarButton />
             {profileDropdown}
           </div>
