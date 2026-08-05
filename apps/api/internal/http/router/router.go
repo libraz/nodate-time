@@ -64,6 +64,10 @@ func Build(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.ClientIPMiddleware(deps.TrustedProxies))
 
+	// One document, three groups: see openapi.go for why the config is shared
+	// and the document routes live on the bare mux.
+	apiConfig := docConfig("Nodate Time", "1.0.0")
+
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -82,7 +86,7 @@ func Build(deps Deps) http.Handler {
 		if authLimit > 0 {
 			pub.Use(middleware.NewRateLimiter(authLimit, time.Minute, deps.TrustedProxies).Middleware())
 		}
-		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
+		api := humachi.New(pub, apiConfig)
 
 		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
 
@@ -220,7 +224,7 @@ func Build(deps Deps) http.Handler {
 	// --- Protected routes (require auth) ---
 	r.Group(func(prot chi.Router) {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
-		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
+		api := humachi.New(prot, apiConfig)
 
 		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
@@ -703,7 +707,7 @@ func Build(deps Deps) http.Handler {
 	r.Group(func(adm chi.Router) {
 		adm.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		adm.Use(middleware.RequireAdmin(deps.Queries))
-		api := humachi.New(adm, huma.DefaultConfig("Nodate Time", "1.0.0"))
+		api := humachi.New(adm, apiConfig)
 
 		envHas := func(p string) bool {
 			switch p {
@@ -766,6 +770,10 @@ func Build(deps Deps) http.Handler {
 			DefaultStatus: 204,
 		}, admin.DeleteAllowedEmail(adminDeps))
 	})
+
+	// Last, so the document is complete and so these registrations are the
+	// ones the shared route tree keeps.
+	serveDocs(r, apiConfig)
 
 	return r
 }

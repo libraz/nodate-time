@@ -161,7 +161,9 @@ DB / storage (`compose.yml`): `TC_DB_PORT` (default 33306), `TC_DB_ROOT_PASSWORD
 
 ## API overview
 
-Huma v2 generates the OpenAPI spec automatically. Routes live in
+Huma v2 generates the OpenAPI description automatically. It is served without
+authentication at `/openapi.json` and `/openapi.yaml`, with a rendered
+reference at `/docs`. Routes live in
 `apps/api/internal/http/router/router.go`.
 
 - **Public** — `/health`, `/auth/*` (register/login/dev-login/password-reset/oauth),

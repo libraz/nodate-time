@@ -145,7 +145,7 @@ DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_
 
 ## API 概要
 
-Huma v2 で OpenAPI 仕様が自動生成される。ルートは `apps/api/internal/http/router/router.go` 参照。
+Huma v2 で OpenAPI 記述が自動生成される。認証なしで `/openapi.json` と `/openapi.yaml` を配信し、`/docs` にリファレンスを描画する。ルートは `apps/api/internal/http/router/router.go` 参照。
 
 - **公開** — `/health`, `/auth/*`（register/login/dev-login/password-reset/oauth）, `/share/{token}`（公開カレンダー）
 - **要認証** — `/user`, `/calendars`, `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}` ほか
