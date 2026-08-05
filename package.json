@@ -19,10 +19,7 @@
     "typecheck": "tsc -b"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4",
-    "typescript": "6.0.3"
-  },
-  "volta": {
-    "node": "24.16.0"
+    "@biomejs/biome": "2.5.7",
+    "typescript": "7.0.2"
   }
 }
