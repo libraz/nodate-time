@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { eventOccupiesDay } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -24,18 +25,14 @@ export function DayDetail() {
   );
 
   const timezone = useUiStore((s) => s.timezone);
-  const dayEvents = useMemo(() => {
-    // Anchor the day boundary to the selected timezone so it matches event bucketing.
-    const dayInZone = selectedDate.setZone(timezone, { keepLocalTime: true });
-    const dayStartMs = dayInZone.startOf('day').toMillis();
-    const dayEndMs = dayInZone.endOf('day').toMillis() + 1;
-    return events.filter((e) => {
-      if (!activeCalendarIds.includes(e.calendarId)) return false;
-      const s = fromISOInZone(e.startAt, timezone).toMillis();
-      const en = fromISOInZone(e.endAt, timezone).toMillis();
-      return s < dayEndMs && en > dayStartMs;
-    });
-  }, [events, activeCalendarIds, selectedDate, timezone]);
+  const dayEvents = useMemo(
+    () =>
+      events.filter(
+        (e) =>
+          activeCalendarIds.includes(e.calendarId) && eventOccupiesDay(e, selectedDate, timezone),
+      ),
+    [events, activeCalendarIds, selectedDate, timezone],
+  );
 
   if (!showDayDetail) return null;
 

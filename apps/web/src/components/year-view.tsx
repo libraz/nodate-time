@@ -1,16 +1,10 @@
 import { DateTime } from 'luxon';
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
-import {
-  fromISOInZone,
-  getMonthDays,
-  getWeekdayLabel,
-  isToday,
-  jsDayOfWeek,
-} from '@/lib/date-utils';
+import { getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
-import { eventEndDay } from '@/lib/week-layout';
+import { eventEndDay, eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -31,7 +25,7 @@ export function YearView() {
     const map = new Map<string, number>();
     for (const evt of events) {
       if (!activeCalendarIds.includes(evt.calendarId)) continue;
-      const start = fromISOInZone(evt.startAt, timezone).startOf('day');
+      const start = eventStartDay(evt, timezone);
       // Exclusive end: an event ending exactly at midnight does not occupy that day.
       const end = eventEndDay(evt, timezone);
       let cur = start;
