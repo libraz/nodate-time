@@ -40,16 +40,73 @@ function getToken(): string | null {
   return token;
 }
 
-export function setToken(token: string): void {
+/**
+ * The refresh token is what makes a sign-in outlast its access token. Keeping
+ * only the access token means every session ends when that token does, however
+ * long the server was willing to keep it alive.
+ */
+export function getRefreshToken(): string | null {
+  return localStorage.getItem('tt_refresh');
+}
+
+export function setToken(token: string, refreshToken?: string): void {
   localStorage.setItem('tt_token', token);
+  if (refreshToken) localStorage.setItem('tt_refresh', refreshToken);
 }
 
 export function clearToken(): void {
   localStorage.removeItem('tt_token');
+  localStorage.removeItem('tt_refresh');
 }
 
+/**
+ * Reports whether this browser still has a way in. An expired access token
+ * with a refresh token beside it counts: the session is alive, the request
+ * just has to renew first.
+ */
 export function hasToken(): boolean {
-  return getToken() !== null;
+  return getToken() !== null || getRefreshToken() !== null;
+}
+
+/**
+ * The renewal currently in flight, if any.
+ *
+ * One at a time, deliberately. Renewal rotates the refresh token -- the old
+ * one stops working the moment the new one is issued -- so two requests that
+ * both noticed a 401 and both tried would race, and the loser would present a
+ * token that had just been retired and be signed out for it.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { token?: string; refreshToken?: string };
+    if (!body.token) return false;
+    setToken(body.token, body.refreshToken);
+    return true;
+  } catch {
+    // A renewal that fails because the network is down is not a revoked
+    // session; the caller retries the original request either way and the
+    // server has the last word.
+    return false;
+  }
+}
+
+function renewSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshSession().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 export class ApiError extends Error {
@@ -124,22 +181,34 @@ function expireSession(): never {
   throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
 }
 
+async function send(path: string, options: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options.headers as Record<string, string>) ?? {}),
+  };
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return fetch(`${API_BASE}${path}`, { ...options, headers });
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
   skipAuthRedirect = false,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...((options.headers as Record<string, string>) ?? {}),
-  };
-
-  const token = getToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  // An expired access token is not an ended session while a refresh token
+  // remains. Renewing before the request saves a guaranteed 401.
+  if (!getToken() && getRefreshToken() && !path.startsWith('/auth/')) {
+    await renewSession();
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let res = await send(path, options);
+
+  if (res.status === 401 && !path.startsWith('/auth/') && (await renewSession())) {
+    res = await send(path, options);
+  }
 
   if (!res.ok) {
     const shouldRedirectOnAuth = !skipAuthRedirect && !path.startsWith('/auth/');

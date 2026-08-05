@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-type ctxKeyClientIP struct{}
+type (
+	ctxKeyClientIP  struct{}
+	ctxKeyUserAgent struct{}
+)
 
 // ClientIP resolves the client IP for a request. If the direct TCP peer is
 // listed in trustedProxies, the rightmost X-Forwarded-For hop that is not
@@ -65,13 +68,39 @@ func ClientIPFromContext(ctx context.Context) (string, bool) {
 	return v, ok
 }
 
+// maxUserAgentLen bounds what is stored. The column is finite and a client
+// controls this header, so it is cut rather than trusted whole.
+const maxUserAgentLen = 255
+
+// WithUserAgent stores the client hint for the current request.
+func WithUserAgent(ctx context.Context, ua string) context.Context {
+	return context.WithValue(ctx, ctxKeyUserAgent{}, ua)
+}
+
+// UserAgentFromContext retrieves the client hint stored by ClientIPMiddleware.
+func UserAgentFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeyUserAgent{}).(string)
+	return v, ok
+}
+
 // ClientIPMiddleware resolves and stores the client IP for every request, so
 // handlers that need to key off it (e.g. per-target rate limiting) do not
 // have to repeat the trusted-proxy logic.
+//
+// It also carries the User-Agent through, for the same reason: a session row
+// records where a sign-in came from, and a handler built on huma's typed
+// inputs has no other route to a raw header it did not declare. Without it
+// every session in the list reads identically, which makes the list useless
+// for the one thing it is for -- recognising a device that is not yours.
 func ClientIPMiddleware(trustedProxies []netip.Prefix) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := WithClientIP(r.Context(), ClientIP(r, trustedProxies))
+			ua := r.UserAgent()
+			if len(ua) > maxUserAgentLen {
+				ua = ua[:maxUserAgentLen]
+			}
+			ctx = WithUserAgent(ctx, ua)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

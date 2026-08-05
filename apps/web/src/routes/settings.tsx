@@ -516,7 +516,96 @@ function ProfileSection() {
           {pwSaving ? t('profile.changing') : t('profile.changePassword')}
         </button>
       </Section>
+
+      <SessionsSection />
     </>
+  );
+}
+
+interface SessionData {
+  id: string;
+  current: boolean;
+  userAgent?: string;
+  ipAddress?: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
+ * The live sign-ins on this account.
+ *
+ * A session is where access is actually revoked, so seeing the list is how a
+ * person notices one they do not recognise, and ending it is the only remedy
+ * short of changing the password and signing every device out at once.
+ */
+function SessionsSection() {
+  const t = useT();
+  const locale = useUiStore((s) => s.locale);
+  const [sessions, setSessions] = useState<SessionData[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setSessions(await api.get<SessionData[]>('/user/sessions'));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const revoke = async (id: string) => {
+    try {
+      await api.delete(`/user/sessions/${id}`);
+      setSessions((cur) => cur.filter((s) => s.id !== id));
+      toast.success(t('sessions.revoked'));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  return (
+    <Section title={t('settings.sessions')} description={t('sessions.description')}>
+      {loading && sessions.length === 0 ? (
+        <p className="py-2 text-body text-[var(--color-text-secondary)]">—</p>
+      ) : (
+        <ul className="-my-2 divide-y divide-[var(--color-separator)]">
+          {sessions.map((s) => (
+            <li key={s.id} className="flex items-center gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-default text-[var(--color-text-primary)]">
+                  {s.userAgent || t('sessions.unknownDevice')}
+                  {s.current && (
+                    <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+                      {t('sessions.current')}
+                    </span>
+                  )}
+                </p>
+                <p className="truncate text-footnote text-[var(--color-text-secondary)]">
+                  {[s.ipAddress, new Date(s.createdAt).toLocaleString(locale)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </div>
+              {!s.current && (
+                <button
+                  type="button"
+                  onClick={() => revoke(s.id)}
+                  className="shrink-0 rounded-lg px-3 py-1 text-footnote text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
+                >
+                  {t('sessions.revoke')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 

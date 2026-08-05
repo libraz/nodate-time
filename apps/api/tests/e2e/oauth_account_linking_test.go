@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -138,8 +137,7 @@ func TestProviderSignInLinksToAConfirmedAccount(t *testing.T) {
 	location := runGoogleCallback(t, app.URL)
 	require.Contains(t, location, "#token=", location)
 
-	token, err := url.QueryUnescape(location[strings.Index(location, "#token=")+len("#token="):])
-	require.NoError(t, err)
+	token, _ := tokensFromRedirect(t, location)
 	var me struct {
 		ID string `json:"id"`
 	}
@@ -172,8 +170,7 @@ func TestProviderCreatedAccountIsAlreadyConfirmed(t *testing.T) {
 	location := runGoogleCallback(t, app.URL)
 	require.Contains(t, location, "#token=", location)
 
-	token, err := url.QueryUnescape(location[strings.Index(location, "#token=")+len("#token="):])
-	require.NoError(t, err)
+	token, _ := tokensFromRedirect(t, location)
 	var me struct {
 		EmailVerified bool `json:"emailVerified"`
 	}

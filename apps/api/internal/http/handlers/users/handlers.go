@@ -114,11 +114,14 @@ const (
 	defaultTimezone = "Asia/Tokyo"
 )
 
-// requestOrigin pulls the client hint stored on a session, so a user can
-// later tell their devices apart.
+// requestOrigin pulls the client hints stored on a session, so a user can
+// later tell their devices apart. Both come from the middleware rather than
+// the handler's typed input: a header a handler did not declare is not
+// reachable from one.
 func requestOrigin(ctx context.Context) (userAgent, ipAddress string) {
 	ip, _ := middleware.ClientIPFromContext(ctx)
-	return "", ip
+	ua, _ := middleware.UserAgentFromContext(ctx)
+	return ua, ip
 }
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {

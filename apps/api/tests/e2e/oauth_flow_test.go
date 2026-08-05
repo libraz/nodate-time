@@ -91,10 +91,12 @@ func TestOAuthGoogleFlowWithVerifiedEmailLinksExistingAccount(t *testing.T) {
 	require.Contains(t, callbackResp.Header.Get("Set-Cookie"), "Max-Age=0")
 	location := callbackResp.Header.Get("Location")
 	require.True(t, strings.HasPrefix(location, helpers.TestWebURL+"/oauth-complete?redirect=%2Fsettings#token="), location)
-	token := strings.TrimPrefix(location, helpers.TestWebURL+"/oauth-complete?redirect=%2Fsettings#token=")
-	token, err = url.QueryUnescape(token)
-	require.NoError(t, err)
+	token, refreshToken := tokensFromRedirect(t, location)
 	require.NotEmpty(t, token)
+	// A provider sign-in opens a session on the same clock as any other, so it
+	// gets the same means of renewing it. Without this everyone who signs in
+	// through a provider is thrown out when the access token expires.
+	require.NotEmpty(t, refreshToken)
 
 	var me struct {
 		ID    string `json:"id"`
@@ -203,4 +205,17 @@ func firstCookie(resp *http.Response, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+// tokensFromRedirect reads the credentials a completed sign-in hands the
+// browser. They travel in the URL fragment, which is a set of key/value pairs
+// rather than a single value: reading "everything after #token=" happens to
+// work only while nothing else is in there.
+func tokensFromRedirect(t *testing.T, location string) (token, refreshToken string) {
+	t.Helper()
+	_, fragment, ok := strings.Cut(location, "#")
+	require.True(t, ok, "no fragment in %s", location)
+	values, err := url.ParseQuery(fragment)
+	require.NoError(t, err)
+	return values.Get("token"), values.Get("refresh")
 }

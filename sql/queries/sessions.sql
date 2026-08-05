@@ -45,5 +45,12 @@ SELECT * FROM sessions
 WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC;
 
+-- RevokeSessionByPublicID is scoped to the owning user: a session is named by
+-- a value its holder was given, and one person's list must not reach another's
+-- devices.
+-- name: RevokeSessionByPublicID :execresult
+UPDATE sessions SET revoked_at = NOW(3)
+WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL;
+
 -- name: DeleteExpiredSessions :exec
 DELETE FROM sessions WHERE expires_at < ?;

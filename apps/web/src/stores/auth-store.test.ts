@@ -77,11 +77,17 @@ beforeEach(() => {
 
 describe('login', () => {
   it('stores the token and marks the user authenticated', async () => {
-    mockApi.post.mockResolvedValue({ token: 'tok', user: sampleUser } as never);
+    mockApi.post.mockResolvedValue({
+      token: 'tok',
+      refreshToken: 'refresh-tok',
+      user: sampleUser,
+    } as never);
 
     await useAuthStore.getState().login('alice@example.com', 'pw');
 
-    expect(mockSetToken).toHaveBeenCalledWith('tok');
+    // The refresh token is stored alongside: without it the sign-in ends when
+    // the access token does, whatever the server was willing to allow.
+    expect(mockSetToken).toHaveBeenCalledWith('tok', 'refresh-tok');
     const s = useAuthStore.getState();
     expect(s.isAuthenticated).toBe(true);
     expect(s.user).toEqual(sampleUser);
@@ -109,6 +115,26 @@ describe('login', () => {
 });
 
 describe('logout', () => {
+  // Forgetting the token locally is not signing out. Anyone who copied the
+  // storage of a shared machine keeps working access until it expires, which
+  // is the whole day the user believed they had just ended.
+  it('ends the session on the server too', () => {
+    mockHasToken.mockReturnValue(true);
+    mockApi.post.mockResolvedValue(undefined as never);
+
+    useAuthStore.getState().logout();
+
+    expect(mockApi.post).toHaveBeenCalledWith('/auth/logout');
+  });
+
+  it('does not call the server when there was nothing to end', () => {
+    mockHasToken.mockReturnValue(false);
+
+    useAuthStore.getState().logout();
+
+    expect(mockApi.post).not.toHaveBeenCalled();
+  });
+
   it('clears the token, tt_ keys, and resets the calendar store', () => {
     localStorage.setItem('tt_token', 'tok');
     localStorage.setItem('tt_activeCalendarIds', '["cal-1"]');
@@ -193,7 +219,10 @@ describe('logout', () => {
 
 describe('changePassword', () => {
   it('persists the rotated token so the device stays signed in', async () => {
-    mockApi.put.mockResolvedValue({ token: 'rotated-token' } as never);
+    mockApi.put.mockResolvedValue({
+      token: 'rotated-token',
+      refreshToken: 'rotated-refresh',
+    } as never);
 
     await useAuthStore.getState().changePassword('old-pw', 'new-pw-1234');
 
@@ -201,7 +230,7 @@ describe('changePassword', () => {
       currentPassword: 'old-pw',
       newPassword: 'new-pw-1234',
     });
-    expect(mockSetToken).toHaveBeenCalledWith('rotated-token');
+    expect(mockSetToken).toHaveBeenCalledWith('rotated-token', 'rotated-refresh');
     // The current session is preserved, not cleared.
     expect(mockClearToken).not.toHaveBeenCalled();
   });
