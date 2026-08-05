@@ -90,6 +90,11 @@ func Load() (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
 	}
+	dsn, err := NormalizeDSN(cfg.DbDsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.DbDsn = dsn
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
