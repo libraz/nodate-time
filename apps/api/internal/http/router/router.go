@@ -84,7 +84,7 @@ func Build(deps Deps) http.Handler {
 		}
 		api := humachi.New(pub, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
 
 		// Email+password auth (register, login, password reset) is registered
 		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
@@ -151,6 +151,16 @@ func Build(deps Deps) http.Handler {
 			}, users.ConfirmPasswordReset(resetDeps))
 		}
 
+		// Confirming an address is public by design: the link lands in a mail
+		// client, which has no session with this API.
+		huma.Register(api, huma.Operation{
+			OperationID: "confirm-email-verification",
+			Method:      http.MethodPost,
+			Path:        "/auth/verify-email/confirm",
+			Summary:     "Confirm an email address with a token",
+			Tags:        []string{"Auth"},
+		}, users.ConfirmEmailVerification(userDeps))
+
 		oauthDeps := users.OAuthDeps{
 			DB:                   deps.DB,
 			Queries:              deps.Queries,
@@ -212,7 +222,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, huma.DefaultConfig("Nodate Time", "1.0.0"))
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, WorkspacePublicID: deps.WorkspacePublicID}
 		memoDeps := memos.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
@@ -236,6 +246,14 @@ func Build(deps Deps) http.Handler {
 			Summary:     "Update current user",
 			Tags:        []string{"User"},
 		}, users.UpdateMe(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "resend-email-verification",
+			Method:      http.MethodPost,
+			Path:        "/user/verify-email/resend",
+			Summary:     "Send a fresh address-confirmation email",
+			Tags:        []string{"User"},
+		}, users.ResendEmailVerification(userDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "logout",

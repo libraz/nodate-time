@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -66,6 +67,9 @@ func TestOAuthGoogleFlowWithVerifiedEmailLinksExistingAccount(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, app.URL+"/auth/register", "",
 		map[string]any{"name": "Password User", "email": email, "password": "password123"},
 		&reg)
+	// Linking requires the existing account to have proven it owns the address,
+	// so complete the confirmation the registration sent.
+	confirmEmail(t, app.URL, email)
 
 	startResp := requestNoRedirect(t, http.MethodGet, app.URL+"/auth/oauth/google/start?redirect=%2Fsettings", "")
 	require.Equal(t, http.StatusFound, startResp.StatusCode)
@@ -159,17 +163,20 @@ func newOAuthTestServer(t *testing.T, cfg users.OAuthConfig) *httptest.Server {
 	t.Helper()
 	queries := generated.New(testDB)
 	deps := router.Deps{
-		DB:                   testDB,
-		Queries:              queries,
-		WorkspaceID:          helpers.TestWorkspace(queries).ID,
-		JWTSecret:            helpers.TestJWTSecret,
-		Mailer:               &helpers.CapturingMailer{},
+		DB:          testDB,
+		Queries:     queries,
+		WorkspaceID: helpers.TestWorkspace(queries).ID,
+		JWTSecret:   helpers.TestJWTSecret,
+		// The package-wide mailer, so a test can read the address-confirmation
+		// message this server sent. Recipients are unique per test, so sharing
+		// one capture buffer does not mix them up.
+		Mailer:               testMailer,
 		WebURL:               helpers.TestWebURL,
 		OAuth:                cfg,
 		PasswordLoginEnabled: true,
 		AuthRateLimit:        -1,
 	}
-	srv := httptest.NewServer(router.Build(deps))
+	srv := httptest.NewServer(app.NewHandler(deps, app.Options{}))
 	t.Cleanup(srv.Close)
 	return srv
 }

@@ -490,13 +490,21 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		}
 		email = strings.ToLower(strings.TrimSpace(email))
 
+		// The browser is mid-redirect here, so a failure has to land on the login
+		// page like every other failure above. Returning a Huma error instead
+		// would render a raw JSON body in the address bar the user is watching.
 		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified)
+		if errors.Is(err, errUnverifiedAccountExists) {
+			return oauthRedirect(deps, "oauth_email_unverified"), nil
+		}
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			slog.ErrorContext(ctx, "oauth user upsert failed", "provider", in.Provider, "error", err)
+			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 		token, err := startOAuthSession(ctx, deps, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			slog.ErrorContext(ctx, "oauth session start failed", "provider", in.Provider, "error", err)
+			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 
 		// Token is delivered via URL fragment (#token=...) so it is not sent
@@ -510,6 +518,12 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		}, nil
 	}
 }
+
+// errUnverifiedAccountExists reports that provider sign-in stopped because an
+// account already holds this address without having proven it owns it. It is
+// not an internal failure: the user is told to confirm the address from the
+// email they were sent, after which the same sign-in links cleanly.
+var errUnverifiedAccountExists = errors.New("an unverified account already holds this address")
 
 // upsertOAuthUser links an OAuth identity to a user, creating one if needed.
 // Wrapped in a transaction so concurrent callbacks for the same subject cannot
@@ -541,6 +555,14 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	// over the victim's account.
 	if emailVerified && email != "" {
 		if u, err := q.GetUserByEmail(ctx, email); err == nil {
+			// Both sides must be proven, not just the provider's. An account
+			// whose own address was never confirmed may have been registered by
+			// someone who does not read that mailbox: linking to it hands them
+			// everything the real owner signs in to. They keep their password,
+			// so the takeover is silent and permanent.
+			if !u.EmailVerifiedAt.Valid {
+				return 0, errUnverifiedAccountExists
+			}
 			identityPubID, err := uuid.NewV7()
 			if err != nil {
 				return 0, err
@@ -593,6 +615,18 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 		return 0, err
 	}
 	uid := uint32(insertID)
+
+	// The provider already proved ownership of this address, so record that:
+	// a later provider sign-in from a second provider can then link to this
+	// account without a second round of confirmation.
+	if emailVerified && email != "" {
+		if _, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{
+			ID:    uid,
+			Email: userEmail,
+		}); err != nil {
+			return 0, err
+		}
+	}
 
 	identityPubID, err := uuid.NewV7()
 	if err != nil {
