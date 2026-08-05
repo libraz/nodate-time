@@ -1061,11 +1061,25 @@ function ExportSection() {
     if (!icsText.trim()) return;
     setImporting(true);
     try {
-      const res = await api.post<{ imported: number; skipped: number; failed: number }>(
-        `/calendars/${selectedId}/import`,
-        { ics: icsText },
-      );
+      const res = await api.post<{
+        imported: number;
+        skipped: number;
+        failed: number;
+        truncated: number;
+      }>(`/calendars/${selectedId}/import`, { ics: icsText });
       toast.success(t('settings.imported', { count: String(res.imported) }));
+      // Every event the file contained is accounted for. Reporting only the
+      // successes turns a migration that lost a slice of the calendar into
+      // one that reads as clean.
+      if (res.skipped > 0) {
+        toast.error(t('settings.importSkipped', { count: String(res.skipped) }));
+      }
+      if (res.failed > 0) {
+        toast.error(t('settings.importFailed', { count: String(res.failed) }));
+      }
+      if (res.truncated > 0) {
+        toast.error(t('settings.importTruncated', { count: String(res.truncated) }));
+      }
       setIcsText('');
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
@@ -1136,6 +1150,7 @@ function ExportSection() {
         >
           {importing ? '...' : t('settings.importPasted')}
         </button>
+        <p className="mt-3 text-footnote text-muted">{t('settings.importAlwaysCreates')}</p>
       </Section>
     </>
   );

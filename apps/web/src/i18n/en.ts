@@ -287,6 +287,12 @@ export const en: Record<TranslationKey, string> = {
   'settings.importPasted': 'Paste & import',
   'settings.importPlaceholder': 'Paste .ics content here...',
   'settings.imported': 'Imported {count} events',
+  'settings.importSkipped': '{count} could not be imported (unsupported recurrence and the like)',
+  'settings.importFailed': '{count} failed to save',
+  'settings.importTruncated':
+    '{count} events were past the per-import limit and were not read. Split the file and try again.',
+  'settings.importAlwaysCreates':
+    'Import always adds new events. Importing the same file twice will duplicate them.',
   'settings.dangerZone': 'Danger zone',
 
   'settings.admin': 'Admin',

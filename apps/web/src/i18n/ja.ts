@@ -302,6 +302,12 @@ export const ja = {
   'settings.importPasted': '貼り付けてインポート',
   'settings.importPlaceholder': 'ここに .ics の内容を貼り付け...',
   'settings.imported': '{count}件のイベントを取り込みました',
+  'settings.importSkipped': '{count}件は取り込めませんでした（対応していない繰り返しなど）',
+  'settings.importFailed': '{count}件は保存に失敗しました',
+  'settings.importTruncated':
+    '1回に取り込める上限を超えたため、{count}件は読み込んでいません。ファイルを分けて再度お試しください',
+  'settings.importAlwaysCreates':
+    'インポートは常に新規イベントとして追加します。同じファイルを2回取り込むと重複します。',
   'settings.dangerZone': '危険操作',
 
   // Admin (platform) settings
