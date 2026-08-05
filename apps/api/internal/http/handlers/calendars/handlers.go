@@ -285,6 +285,11 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			// The objects are content-addressed and may be shared, so they
 			// are not deleted here -- dropping the reference is what lets the
 			// sweep collect the ones nothing else points at.
+			//
+			// The rows are retired in the same transaction so the release
+			// happens once: only live rows are counted, so deleting the
+			// calendar twice cannot drive a shared object's count below what
+			// other calendars still hold.
 			objectIDs, err := q.ListAttachmentObjectIDsByCalendar(ctx, cal.ID)
 			if err != nil {
 				return err
@@ -293,6 +298,16 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 				if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
 					return err
 				}
+			}
+			if err := q.SoftDeleteAttachmentsByCalendar(ctx, cal.ID); err != nil {
+				return err
+			}
+			// Album photos go the same way. Deleting the calendar only disables
+			// the calendar row, so no cascade reaches them: left enabled they
+			// stay in object storage for good, with no API path left that could
+			// ever name them again.
+			if err := q.SoftDeleteAlbumPhotosByCalendar(ctx, cal.ID); err != nil {
+				return err
 			}
 			if err := q.SoftDeleteCalendar(ctx, cal.ID); err != nil {
 				return err

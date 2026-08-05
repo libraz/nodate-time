@@ -80,6 +80,15 @@ func (q *Queries) DeletePendingAttachment(ctx context.Context, arg DeletePending
 	return err
 }
 
+const deleteRetiredAttachment = `-- name: DeleteRetiredAttachment :exec
+DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE
+`
+
+func (q *Queries) DeleteRetiredAttachment(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, deleteRetiredAttachment, id)
+	return err
+}
+
 const getAttachmentByPublicID = `-- name: GetAttachmentByPublicID :one
 SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size
 FROM calendar_event_attachments a
@@ -183,13 +192,14 @@ func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID [
 const listAbandonedAttachments = `-- name: ListAbandonedAttachments :many
 SELECT a.id, a.storage_object_id
 FROM calendar_event_attachments a
-WHERE a.enabled = FALSE AND a.created_at < ?
+WHERE a.enabled = FALSE AND a.created_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?
 `
 
 type ListAbandonedAttachmentsParams struct {
 	CreatedAt time.Time `json:"createdAt"`
+	ID        uint32    `json:"id"`
 	Limit     int32     `json:"limit"`
 }
 
@@ -198,8 +208,12 @@ type ListAbandonedAttachmentsRow struct {
 	StorageObjectID uint32 `json:"storageObjectId"`
 }
 
+// ListAbandonedAttachments walks by id rather than re-reading the head of the
+// table: a row the delete below cannot remove would otherwise be listed again
+// on the next pass, and the sweep would spend its whole batch budget failing
+// on the same page.
 func (q *Queries) ListAbandonedAttachments(ctx context.Context, arg ListAbandonedAttachmentsParams) ([]ListAbandonedAttachmentsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAbandonedAttachments, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listAbandonedAttachments, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +239,7 @@ const listAttachmentObjectIDsByCalendar = `-- name: ListAttachmentObjectIDsByCal
 SELECT a.storage_object_id
 FROM calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
-WHERE e.calendar_id = ?
+WHERE e.calendar_id = ? AND a.enabled = TRUE
 `
 
 func (q *Queries) ListAttachmentObjectIDsByCalendar(ctx context.Context, calendarID uint32) ([]uint32, error) {
@@ -252,9 +266,15 @@ func (q *Queries) ListAttachmentObjectIDsByCalendar(ctx context.Context, calenda
 }
 
 const listAttachmentObjectIDsByEvent = `-- name: ListAttachmentObjectIDsByEvent :many
-SELECT storage_object_id FROM calendar_event_attachments WHERE event_id = ?
+SELECT storage_object_id FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE
 `
 
+// Only a confirmed row holds a reference: an unconfirmed reservation never
+// incremented one, and a row already soft-deleted released its own. Listing
+// either would decrement a count nobody took, and because objects are
+// content-addressed and shared, that drives a blob another calendar is still
+// using down to zero and into the sweep.
 func (q *Queries) ListAttachmentObjectIDsByEvent(ctx context.Context, eventID sql.NullInt32) ([]uint32, error) {
 	rows, err := q.db.QueryContext(ctx, listAttachmentObjectIDsByEvent, eventID)
 	if err != nil {
@@ -346,11 +366,77 @@ func (q *Queries) ListEventAttachments(ctx context.Context, eventID sql.NullInt3
 	return items, nil
 }
 
+const listRetiredAttachments = `-- name: ListRetiredAttachments :many
+SELECT a.id
+FROM calendar_event_attachments a
+WHERE a.enabled = FALSE AND a.updated_at < ? AND a.id > ?
+ORDER BY a.id
+LIMIT ?
+`
+
+type ListRetiredAttachmentsParams struct {
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	ID        uint32       `json:"id"`
+	Limit     int32        `json:"limit"`
+}
+
+// ListRetiredAttachments walks soft-deleted rows whose retention has run out.
+//
+// A soft-deleted row keeps the file's name and uploader for the activity
+// history, but it still points at the blob through a RESTRICT foreign key, so
+// the object cannot be collected while it exists. Removing the row after a
+// retention window is what finally lets the sweep reclaim the bytes; the
+// reference itself was released when the row was soft-deleted.
+func (q *Queries) ListRetiredAttachments(ctx context.Context, arg ListRetiredAttachmentsParams) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listRetiredAttachments, arg.UpdatedAt, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var id uint32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteAttachment = `-- name: SoftDeleteAttachment :exec
 UPDATE calendar_event_attachments SET enabled = FALSE WHERE id = ?
 `
 
 func (q *Queries) SoftDeleteAttachment(ctx context.Context, id uint32) error {
 	_, err := q.db.ExecContext(ctx, softDeleteAttachment, id)
+	return err
+}
+
+const softDeleteAttachmentsByCalendar = `-- name: SoftDeleteAttachmentsByCalendar :exec
+UPDATE calendar_event_attachments a
+INNER JOIN calendar_events e ON e.id = a.event_id
+SET a.enabled = FALSE
+WHERE e.calendar_id = ? AND a.enabled = TRUE
+`
+
+func (q *Queries) SoftDeleteAttachmentsByCalendar(ctx context.Context, calendarID uint32) error {
+	_, err := q.db.ExecContext(ctx, softDeleteAttachmentsByCalendar, calendarID)
+	return err
+}
+
+const softDeleteAttachmentsByEvent = `-- name: SoftDeleteAttachmentsByEvent :exec
+UPDATE calendar_event_attachments SET enabled = FALSE
+WHERE event_id = ? AND enabled = TRUE
+`
+
+func (q *Queries) SoftDeleteAttachmentsByEvent(ctx context.Context, eventID sql.NullInt32) error {
+	_, err := q.db.ExecContext(ctx, softDeleteAttachmentsByEvent, eventID)
 	return err
 }

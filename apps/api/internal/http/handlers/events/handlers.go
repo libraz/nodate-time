@@ -1124,7 +1124,14 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			// Release the blobs this event's attachments were holding. The
 			// objects themselves are swept once nothing refers to them, so
 			// the only thing to do here is drop the references.
-			objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
+			//
+			// Retiring the rows in the same transaction is what makes the
+			// release exactly once: the listing counts only live rows, so a
+			// second delete of the same event finds none and cannot decrement
+			// a shared, content-addressed object a live attachment elsewhere
+			// still depends on.
+			eventRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
+			objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, eventRef)
 			if err != nil {
 				return err
 			}
@@ -1132,6 +1139,9 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 				if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
 					return err
 				}
+			}
+			if err := q.SoftDeleteAttachmentsByEvent(ctx, eventRef); err != nil {
+				return err
 			}
 			// Whole-series delete. Soft delete keeps the row, so its override
 			// rows keep their parent and the history stays readable.

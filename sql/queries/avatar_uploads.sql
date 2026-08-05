@@ -21,8 +21,13 @@ FOR UPDATE;
 -- name: DeleteAvatarUpload :exec
 DELETE FROM avatar_uploads WHERE id = ?;
 
+-- The cursor keeps a row the delete below cannot remove from heading every
+-- page and consuming the sweep's whole batch budget.
 -- name: ListExpiredAvatarUploads :many
-SELECT * FROM avatar_uploads WHERE expires_at <= ? ORDER BY id LIMIT 500;
+SELECT * FROM avatar_uploads
+WHERE expires_at <= ? AND id > ?
+ORDER BY id
+LIMIT 500;
 
 -- name: DeleteExpiredAvatarUpload :execresult
 DELETE FROM avatar_uploads WHERE id = ? AND expires_at <= ?;

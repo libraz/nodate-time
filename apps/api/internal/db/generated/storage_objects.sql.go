@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+const countStorageObjectsByKey = `-- name: CountStorageObjectsByKey :one
+SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?
+`
+
+// CountStorageObjectsByKey answers whether any object claims a storage key,
+// ignoring enabled: a disabled row still describes bytes this table is the
+// index for, and deleting them would leave it pointing at nothing.
+func (q *Queries) CountStorageObjectsByKey(ctx context.Context, storageKey string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countStorageObjectsByKey, storageKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createStorageObject = `-- name: CreateStorageObject :execresult
 
 INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count)
@@ -129,18 +143,24 @@ func (q *Queries) IncrementStorageObjectRefs(ctx context.Context, id uint32) err
 
 const listUnreferencedStorageObjects = `-- name: ListUnreferencedStorageObjects :many
 SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
-WHERE ref_count = 0 AND created_at < ?
+WHERE ref_count = 0 AND created_at < ? AND id > ?
 ORDER BY id
 LIMIT ?
 `
 
 type ListUnreferencedStorageObjectsParams struct {
 	CreatedAt time.Time `json:"createdAt"`
+	ID        uint32    `json:"id"`
 	Limit     int32     `json:"limit"`
 }
 
+// The cursor matters more than the limit. The attachments foreign key is
+// RESTRICT, so an object a row still points at cannot be deleted; reading each
+// page from the head of the table would put that same object first every time
+// and the sweep would spend its whole batch budget on it, never reaching the
+// rest of the backlog.
 func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUnreferencedStorageObjectsParams) ([]StorageObject, error) {
-	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
