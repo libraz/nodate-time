@@ -34,11 +34,6 @@ const MembersPanel = lazy(() =>
 const MobileMenu = lazy(() =>
   import('@/components/mobile-menu').then((module) => ({ default: module.MobileMenu })),
 );
-const NotificationsPanel = lazy(() =>
-  import('@/components/notifications-panel').then((module) => ({
-    default: module.NotificationsPanel,
-  })),
-);
 const SearchPanel = lazy(() =>
   import('@/components/search-panel').then((module) => ({ default: module.SearchPanel })),
 );
@@ -473,13 +468,6 @@ export function App() {
       {rightPanel === 'members' && (
         <Deferred>
           <MembersPanel />
-        </Deferred>
-      )}
-
-      {/* Notifications overlay */}
-      {rightPanel === 'notifications' && (
-        <Deferred>
-          <NotificationsPanel />
         </Deferred>
       )}
 

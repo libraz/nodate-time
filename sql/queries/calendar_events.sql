@@ -142,16 +142,11 @@ UPDATE calendar_events SET recurrence_exceptions = ? WHERE id = ?;
 -- name: SoftDeleteCalendarEvent :exec
 UPDATE calendar_events SET enabled = FALSE WHERE id = ?;
 
--- name: ListCalendarEventsDueForNotification :many
-SELECT * FROM calendar_events
-WHERE enabled = TRUE
-  AND notification_offset IS NOT NULL
-  AND notified_at IS NULL
-  AND start_at IS NOT NULL
-  AND TIMESTAMPADD(MINUTE, -notification_offset, start_at) <= sqlc.arg(now)
-  AND start_at > sqlc.arg(now)
-ORDER BY start_at
-LIMIT ?;
-
--- name: MarkCalendarEventNotified :exec
-UPDATE calendar_events SET notified_at = ? WHERE id = ?;
+-- A reminder is delivered by whatever client holds the calendar, as the
+-- iCalendar alarm the export writes. Nothing here dispatches one, so the
+-- queries that would drive a dispatcher are absent rather than sitting unused
+-- and reading as a delivery path that exists.
+--
+-- notification_offset is stored per event; a per-occurrence sent/not-sent
+-- record is what a dispatcher would have to add first, since a series has one
+-- row and many occurrences to remind about.

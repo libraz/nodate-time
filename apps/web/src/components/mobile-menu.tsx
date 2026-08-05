@@ -16,7 +16,7 @@ interface MenuAction {
 /**
  * Mobile-only slide-in drawer that surfaces controls living in the desktop
  * sidebars: the calendar list (visibility + create) plus the shared-calendar
- * panels (album, members, share, notifications), the activity feed, and the
+ * panels (album, members, share), the activity feed, and the
  * account controls — settings and sign-out have no other route on a phone.
  */
 export function MobileMenu() {
@@ -95,24 +95,6 @@ export function MobileMenu() {
         </svg>
       ),
       onSelect: () => openPanel('share'),
-    },
-    {
-      key: 'notifications',
-      labelKey: 'panel.notifications',
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          width="20"
-          height="20"
-        >
-          <path d="M18 8A6 6 0 106 8c0 7-3 9-3 9h18s-3-2-3-9z" />
-          <path d="M13.73 21a2 2 0 01-3.46 0" />
-        </svg>
-      ),
-      onSelect: () => openPanel('notifications'),
     },
     {
       key: 'activity',
