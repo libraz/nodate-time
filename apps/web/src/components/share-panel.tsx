@@ -15,7 +15,16 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { type InviteData, isPublicLink, mergeInviteTokens } from '@/types/invite';
+import {
+  INVITE_EXPIRY_HOURS,
+  INVITE_MAX_USES,
+  type InviteData,
+  inviteCreateBody,
+  inviteExpiryLabelKey,
+  inviteUsesLabelKey,
+  isPublicLink,
+  mergeInviteTokens,
+} from '@/types/invite';
 
 export function SharePanel() {
   const t = useT();
@@ -48,6 +57,10 @@ export function SharePanel() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
   const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
+  // Bounded by default: a link that never expires and admits anyone is the
+  // one you cannot take back once it has been forwarded.
+  const [inviteExpiry, setInviteExpiry] = useState<number>(168);
+  const [inviteUses, setInviteUses] = useState<number>(1);
 
   // Several single-use invite links may coexist; the public link is at most one.
   const joinInvites = invites.filter((i) => !i.isPublic);
@@ -86,17 +99,17 @@ export function SharePanel() {
     if (!calendarId) return;
     setBusy('invite');
     try {
-      const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
-        role: inviteRole,
-        maxUses: 1,
-      });
+      const data = await api.post<InviteData>(
+        `/calendars/${calendarId}/invites`,
+        inviteCreateBody(inviteRole, inviteExpiry, inviteUses),
+      );
       setInvites((cur) => [data, ...cur]);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setBusy(null);
     }
-  }, [calendarId, inviteRole]);
+  }, [calendarId, inviteRole, inviteExpiry, inviteUses]);
 
   const createPublic = useCallback(async () => {
     if (!calendarId) return;
@@ -225,6 +238,28 @@ export function SharePanel() {
                   }))}
                   triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
                 />
+                <div className="flex gap-2">
+                  <CustomSelect
+                    className="flex-1"
+                    value={String(inviteExpiry)}
+                    onChange={(v) => setInviteExpiry(Number(v))}
+                    options={INVITE_EXPIRY_HOURS.map((h) => ({
+                      value: String(h),
+                      label: t(inviteExpiryLabelKey(h)),
+                    }))}
+                    triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                  />
+                  <CustomSelect
+                    className="flex-1"
+                    value={String(inviteUses)}
+                    onChange={(v) => setInviteUses(Number(v))}
+                    options={INVITE_MAX_USES.map((u) => ({
+                      value: String(u),
+                      label: t(inviteUsesLabelKey(u)),
+                    }))}
+                    triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                  />
+                </div>
                 {joinInvites.length > 0 && (
                   <div className="space-y-3">
                     {joinInvites.map((inv) => {

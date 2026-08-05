@@ -8,6 +8,15 @@ WHERE token_hash = ?
   AND (expires_at IS NULL OR expires_at > NOW(3))
   AND (max_uses IS NULL OR use_count < max_uses);
 
+-- GetLiveInviteByTokenHash matches a link that still exists, whether or not it
+-- is still usable, so the person following it can be told which of the two it
+-- is. Distinguishing gives nothing away: they are holding the token already,
+-- and "this link has expired" is what makes them ask for another rather than
+-- conclude the calendar is gone.
+-- name: GetLiveInviteByTokenHash :one
+SELECT * FROM calendar_invites
+WHERE token_hash = ? AND enabled = TRUE;
+
 -- GetInviteByTokenHashWithCalendar backs the page a link opens. It matches
 -- both kinds of link, because a join link has to show what is being joined
 -- -- but it exposes only the calendar's name and colour, never its
