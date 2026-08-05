@@ -12,7 +12,7 @@ type ActorBrief struct {
 
 // HistoryItem is one audit-log entry for a single entity's history.
 type HistoryItem struct {
-	ID        uint64      `json:"id"`
+	ID        string      `json:"id"`
 	Action    string      `json:"action"`
 	Summary   string      `json:"summary"`
 	CreatedAt time.Time   `json:"createdAt"`

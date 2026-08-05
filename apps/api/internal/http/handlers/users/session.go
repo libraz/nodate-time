@@ -64,9 +64,9 @@ func newRefreshToken() (string, error) {
 // startSession records a sign-in and issues the pair of tokens for it.
 //
 // The session row is created before the access token is signed, because the
-// token has to carry the row's id: that is what lets a later request ask
-// whether this particular sign-in is still good, and what makes signing one
-// device out leave the others alone.
+// token has to name the row: that is what lets a later request ask whether
+// this particular sign-in is still good, and what makes signing one device
+// out leave the others alone.
 func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAddress string) (Credentials, error) {
 	refresh, err := newRefreshToken()
 	if err != nil {
@@ -78,9 +78,8 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 	}
 	expiresAt := time.Now().Add(refreshTokenTTL)
 
-	var sessionID uint32
 	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-		res, err := q.CreateSession(ctx, generated.CreateSessionParams{
+		_, err := q.CreateSession(ctx, generated.CreateSessionParams{
 			PublicID:    pubID[:],
 			UserID:      userID,
 			RefreshHash: hashRefreshToken(refresh),
@@ -91,18 +90,13 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 		if err != nil {
 			return err
 		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		sessionID = uint32(id)
 		return q.TouchUserLastLogin(ctx, userID)
 	})
 	if err != nil {
 		return Credentials{}, err
 	}
 
-	token, err := auth.GenerateToken(userID, sessionID, deps.JWTSecret)
+	token, err := auth.GenerateToken(pubID.String(), deps.JWTSecret)
 	if err != nil {
 		return Credentials{}, err
 	}
@@ -131,7 +125,7 @@ func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credent
 		return Credentials{}, 0, err
 	}
 
-	token, err := auth.GenerateToken(session.UserID, session.ID, deps.JWTSecret)
+	token, err := auth.GenerateToken(pubIDToHex(session.PublicID), deps.JWTSecret)
 	if err != nil {
 		return Credentials{}, 0, err
 	}

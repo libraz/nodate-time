@@ -16,17 +16,21 @@ const AccessTokenTTL = 24 * time.Hour
 // the others alone -- a counter can only invalidate every token a user
 // holds at once, which turns "log out this browser" into "log out
 // everywhere".
+//
+// The session is named by its public id, and the user is not named at all:
+// the session row says whose it is, so carrying the user as well would add a
+// second answer that could disagree with the first. Internal ids stay out of
+// the token because a token is a value a client holds, and those ids are one
+// sequence per deployment.
 type Claims struct {
-	UserID    uint32 `json:"uid"`
-	SessionID uint32 `json:"sid"`
+	SessionID string `json:"sid"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID, sessionID uint32, secret string) (string, error) {
+func GenerateToken(sessionPublicID string, secret string) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID:    userID,
-		SessionID: sessionID,
+		SessionID: sessionPublicID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(AccessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),

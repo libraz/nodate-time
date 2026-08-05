@@ -1395,6 +1395,29 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 	}
 }
 
+// logEventActivity records something that happened to an event -- a comment, a
+// checklist item, an attachment -- against the event itself.
+//
+// The subject is the event's public id rather than the comment's, because the
+// history a person reads is the event's: an entry filed under the comment
+// would be findable only by somebody who already knew the comment existed.
+// What changed is carried alongside it.
+func logEventActivity(ctx context.Context, q *generated.Queries, deps Deps, calID, actorID uint32, evt generated.CalendarEvent, eventType, summary string, subjectID []byte) error {
+	extra := map[string]any{"event": pubIDToHex(evt.PublicID)}
+	if len(subjectID) > 0 {
+		extra["subject"] = pubIDToHex(subjectID)
+	}
+	return eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  calID,
+		ActorUserID: actorID,
+		Type:        eventType,
+		Summary:     summary,
+		Subject:     evt.PublicID,
+		Extra:       extra,
+	})
+}
+
 func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCommentsOutput, error) {
 	return func(ctx context.Context, in *ListCommentsInput) (*ListCommentsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -1445,12 +1468,18 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if _, err := deps.Queries.CreateEventComment(ctx, generated.CreateEventCommentParams{
-			PublicID:    pubID[:],
-			WorkspaceID: deps.WorkspaceID,
-			EventID:     sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-			AuthorID:    userID,
-			Body:        in.Body.Content,
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.CreateEventComment(ctx, generated.CreateEventCommentParams{
+				PublicID:    pubID[:],
+				WorkspaceID: deps.WorkspaceID,
+				EventID:     sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+				AuthorID:    userID,
+				Body:        in.Body.Content,
+			}); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeCommentAdded, in.Body.Content, pubID[:])
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -1511,9 +1540,15 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			return nil, apierrors.ToHuma(apierrors.CommentAccessDenied)
 		}
 
-		if err := deps.Queries.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
-			Body: in.Body.Content,
-			ID:   comment.ID,
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
+				Body: in.Body.Content,
+				ID:   comment.ID,
+			}); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeCommentEdited, in.Body.Content, comment.PublicID)
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -1558,7 +1593,13 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 			return nil, apierrors.ToHuma(apierrors.CommentAccessDenied)
 		}
 
-		if err := deps.Queries.SoftDeleteEventComment(ctx, comment.ID); err != nil {
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.SoftDeleteEventComment(ctx, comment.ID); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeCommentRemoved, comment.Body, comment.PublicID)
+		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &DeleteCommentOutput{}, nil

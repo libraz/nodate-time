@@ -3,12 +3,10 @@ package albums
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -125,33 +123,30 @@ func photoDownloadFilename(p generated.AlbumPhoto) string {
 	return name + photoExtensions[strings.ToLower(p.ContentType)]
 }
 
-// encodeCursor turns a (takenAt, id) tuple into an opaque base64 cursor.
-func encodeCursor(takenAt time.Time, id uint32) string {
-	raw := fmt.Sprintf("%d:%d", takenAt.UnixMilli(), id)
-	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+// encodeCursor names the last photo of a page by its public id.
+//
+// The page is ordered by (takenAt, id) and both are needed to resume, but the
+// id is an internal sequence and a base64 wrapper is not an opaque cursor --
+// it is the same number, spelled differently. Naming the row instead lets the
+// server look the pair up, and tells the holder nothing but which photo they
+// have already seen.
+func encodeCursor(publicID []byte) string {
+	return pubIDToHex(publicID)
 }
 
-func decodeCursor(s string) (time.Time, uint32, error) {
-	if s == "" {
-		return time.Time{}, 0, fmt.Errorf("empty cursor")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(s)
+// resolveCursor turns a cursor back into the ordering pair it names. A cursor
+// naming a photo from another calendar is refused rather than silently paging
+// through this one from an unrelated position.
+func resolveCursor(ctx context.Context, deps Deps, calendarID uint32, cursor string) (time.Time, uint32, error) {
+	pub, err := parseUUID(cursor)
 	if err != nil {
-		return time.Time{}, 0, err
+		return time.Time{}, 0, fmt.Errorf("invalid cursor")
 	}
-	parts := strings.SplitN(string(raw), ":", 2)
-	if len(parts) != 2 {
-		return time.Time{}, 0, fmt.Errorf("malformed cursor")
+	photo, err := deps.Queries.GetAlbumPhotoByPublicID(ctx, pub)
+	if err != nil || photo.CalendarID != calendarID {
+		return time.Time{}, 0, fmt.Errorf("invalid cursor")
 	}
-	ms, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return time.Time{}, 0, err
-	}
-	idVal, err := strconv.ParseUint(parts[1], 10, 32)
-	if err != nil {
-		return time.Time{}, 0, err
-	}
-	return time.UnixMilli(ms).UTC(), uint32(idVal), nil
+	return photo.TakenAt, photo.ID, nil
 }
 
 func eventPubIDForResponse(ctx context.Context, deps Deps, evtID sql.NullInt32) string {
@@ -365,7 +360,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 			err = qerr
 			photos = firstPagePhotoRows(rows)
 		} else {
-			takenAt, idBefore, derr := decodeCursor(in.Cursor)
+			takenAt, idBefore, derr := resolveCursor(ctx, deps, cal.ID, in.Cursor)
 			if derr != nil {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
@@ -395,7 +390,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		}
 		if hasMore && len(photos) > 0 {
 			last := photos[len(photos)-1]
-			out.Body.NextCursor = encodeCursor(last.takenAt, last.id)
+			out.Body.NextCursor = encodeCursor(last.publicID)
 		}
 		return out, nil
 	}

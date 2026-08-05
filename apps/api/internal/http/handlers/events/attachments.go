@@ -15,6 +15,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -270,7 +271,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 	return func(ctx context.Context, in *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -295,7 +296,11 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 			if err := q.SoftDeleteAttachment(ctx, att.ID); err != nil {
 				return err
 			}
-			return q.DecrementStorageObjectRefs(ctx, att.StorageObjectID)
+			if err := q.DecrementStorageObjectRefs(ctx, att.StorageObjectID); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeAttachmentGone, att.Filename, att.PublicID)
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -312,7 +317,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -382,7 +387,11 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			if affected != 1 {
 				return apierrors.AttachmentNotFound
 			}
-			return q.IncrementStorageObjectRefs(ctx, att.StorageObjectID)
+			if err := q.IncrementStorageObjectRefs(ctx, att.StorageObjectID); err != nil {
+				return err
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+				eventlog.TypeAttachmentAdded, att.Filename, att.PublicID)
 		})
 		if err != nil {
 			return nil, toAPIError(err)

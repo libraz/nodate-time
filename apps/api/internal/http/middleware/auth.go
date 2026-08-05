@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
@@ -64,14 +65,20 @@ func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler
 			// some point. The session row is what says it is still good, so
 			// a revoked session stops the token here rather than when it
 			// eventually expires.
-			session, err := queries.GetLiveSession(r.Context(), claims.SessionID)
-			if err != nil || session.UserID != claims.UserID {
+			sessionPub, err := uuid.Parse(claims.SessionID)
+			if err != nil {
+				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
+				return
+			}
+			session, err := queries.GetLiveSession(r.Context(), sessionPub[:])
+			if err != nil {
 				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
 				return
 			}
 
-			ctx := WithActor(r.Context(), claims.UserID)
-			ctx = WithSession(ctx, claims.SessionID)
+			// Whose session it is comes from the row, not from the token.
+			ctx := WithActor(r.Context(), session.UserID)
+			ctx = WithSession(ctx, session.ID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

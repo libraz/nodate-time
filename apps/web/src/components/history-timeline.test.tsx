@@ -19,10 +19,13 @@ import { HistoryTimeline } from './history-timeline';
 
 const mockApi = vi.mocked(api);
 
+// The action is the server's own value. The earlier fixture used 'update',
+// which the API has never sent -- and because the test cast it into place, it
+// certified a contract that did not exist.
 function item(id: number, summary: string, createdAt: string): HistoryItem {
   return {
-    id,
-    action: 'update',
+    id: `00000000-0000-7000-8000-00000000000${id}`,
+    action: 'calendar.event.updated',
     summary,
     createdAt,
     actor: { id: `u${id}`, name: `User ${id}`, icon: 'A' },
@@ -38,7 +41,7 @@ describe('HistoryTimeline', () => {
       item(3, 'newest', '2026-04-22T10:00:00+09:00'),
       item(2, 'middle', '2026-04-21T10:00:00+09:00'),
       item(1, 'oldest', '2026-04-20T10:00:00+09:00'),
-    ] as never);
+    ]);
 
     const { container } = render(
       <HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />,

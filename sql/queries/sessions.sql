@@ -9,9 +9,12 @@ VALUES (?, ?, ?, ?, ?, ?);
 -- token carries the session id, so revoking one device signs out that
 -- device and no other -- which a version counter on the user row cannot
 -- express, since it can only invalidate all of them at once.
+--
+-- The token names the session by its public id. The internal ids are one
+-- deployment-wide sequence, and an access token is a value a client holds.
 -- name: GetLiveSession :one
 SELECT * FROM sessions
-WHERE id = ?
+WHERE public_id = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
   AND expires_at > NOW(3);
