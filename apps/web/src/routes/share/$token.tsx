@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { ApiError, api, hasToken } from '@/lib/api';
 import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
-import { publicEventOccursOnDay } from '@/lib/public-calendar';
+import { publicEventOccursOnDay, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
 import { useUiStore } from '@/stores/ui-store';
 
 interface PublicCalendar {
@@ -40,6 +40,7 @@ function SharedCalendarView() {
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ShareFailure | null>(null);
   const [currentMonth, setCurrentMonth] = useState(DateTime.now().startOf('month'));
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -71,12 +72,23 @@ function SharedCalendarView() {
     }
   }, [token, navigate, t]);
 
-  useEffect(() => {
+  const loadCalendar = useCallback(() => {
     api
       .get<PublicCalendar>(`/share/${token}`, true)
-      .then(setCalendar)
-      .catch(() => setError(t('share.calendarNotFound')));
+      .then((cal) => {
+        setCalendar(cal);
+        setError(null);
+        setFailure(null);
+      })
+      .catch((e: unknown) => {
+        setFailure(shareFailureOf(e));
+        setError(t('share.calendarNotFound'));
+      });
   }, [token, t]);
+
+  useEffect(() => {
+    loadCalendar();
+  }, [loadCalendar]);
 
   useEffect(() => {
     if (!calendar) return;
@@ -107,11 +119,24 @@ function SharedCalendarView() {
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
           <p className="text-subhead font-medium text-[var(--color-text-primary)]">
-            {t('share.invalidLink')}
+            {failure === 'busy' ? t('share.temporarilyUnavailable') : t('share.invalidLink')}
           </p>
           <p className="mt-2 text-body text-[var(--color-text-secondary)]">
-            {t('share.linkExpired')}
+            {failure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
           </p>
+          {failure === 'busy' && (
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setFailure(null);
+                loadCalendar();
+              }}
+              className="mt-4 rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-default text-[var(--color-accent)]"
+            >
+              {t('share.retry')}
+            </button>
+          )}
         </div>
       </div>
     );

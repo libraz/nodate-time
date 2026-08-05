@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { api } from '@/lib/api';
 import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
-import { publicEventOccursOnDay } from '@/lib/public-calendar';
+import { publicEventOccursOnDay, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
 import { useUiStore } from '@/stores/ui-store';
 
 interface PublicCalendar {
@@ -42,13 +42,17 @@ function EmbeddedCalendarView() {
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [error, setError] = useState(false);
+  const [failure, setFailure] = useState<ShareFailure | null>(null);
   const [currentMonth, setCurrentMonth] = useState(DateTime.now().startOf('month'));
 
   useEffect(() => {
     api
       .get<PublicCalendar>(`/share/${token}`, true)
       .then(setCalendar)
-      .catch(() => setError(true));
+      .catch((e: unknown) => {
+        setFailure(shareFailureOf(e));
+        setError(true);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -67,7 +71,7 @@ function EmbeddedCalendarView() {
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-surface)] px-6 text-center text-body text-[var(--color-text-secondary)]">
-        {t('share.linkExpired')}
+        {failure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
       </div>
     );
   }

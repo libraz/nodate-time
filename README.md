@@ -144,6 +144,9 @@ for the full list and defaults.
 | `TC_JWT_SECRET` | JWT signing key (≥32 bytes required in prod) | dev fallback |
 | `TC_PASSWORD_LOGIN_ENABLED` | enable email+password auth | `true` |
 | `TC_CORS_ALLOWED_ORIGINS` | allowed CORS origins (no wildcard in prod) | localhost:5173 |
+| `TC_TRUSTED_PROXIES` | reverse-proxy hops allowed to set `X-Forwarded-For` (CIDR or bare IP, comma-separated). Unset behind a proxy collapses every client onto one rate-limit bucket | none trusted |
+| `TC_AUTH_RATE_LIMIT` | per-IP requests/min for sign-in, registration, password reset and OAuth | `60` |
+| `TC_SHARE_RATE_LIMIT` | per-IP requests/min for public share links, counted separately from sign-in | `600` |
 | `TC_WEB_URL` / `TC_API_PUBLIC_URL` | public URLs for web / API | localhost |
 | `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage | MinIO defaults |
 | `TC_SMTP_HOST` and other `TC_SMTP_*` | mail delivery (stdout when unset; required in prod) | console output |

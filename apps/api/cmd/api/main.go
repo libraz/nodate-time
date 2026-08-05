@@ -137,6 +137,8 @@ func main() {
 		DevMode:              cfg.IsDev(),
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
 		TrustedProxies:       cfg.TrustedProxyList(),
+		AuthRateLimit:        cfg.AuthRateLimit,
+		ShareRateLimit:       cfg.ShareRateLimit,
 	}, app.Options{CORSAllowedOrigins: cfg.CORSAllowedOriginList()})
 	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
 		slog.Info("Google sign-in restricted to domains", "domains", domains)
