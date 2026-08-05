@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,19 @@ type Credentials struct {
 	// token. Only its hash is stored.
 	RefreshToken string
 	ExpiresAt    time.Time
+}
+
+// packIP converts a client address to the 16-byte form the column stores.
+// IPv4 goes in as its IPv4-mapped IPv6 address, so every row has one width
+// and unpacking needs no length check. An address that does not parse — or
+// an empty one, which is what a request with no usable remote address
+// yields — is stored as NULL rather than failing the sign-in.
+func packIP(ip string) []byte {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return nil
+	}
+	return parsed.To16()
 }
 
 // hashRefreshToken is what the sessions table stores. Reading every row
@@ -71,7 +85,7 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 			UserID:      userID,
 			RefreshHash: hashRefreshToken(refresh),
 			UserAgent:   nullString(userAgent),
-			IpAddress:   nullString(ipAddress),
+			IpAddress:   packIP(ipAddress),
 			ExpiresAt:   expiresAt,
 		})
 		if err != nil {

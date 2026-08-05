@@ -11,8 +11,12 @@ type UserResponse struct {
 	Timezone  string `json:"timezone"`
 	// IsAdmin reflects a live grant in instance_admins, not a column on the
 	// user: revoking it leaves the record that it was ever held.
-	IsAdmin   bool      `json:"isAdmin"`
-	CreatedAt time.Time `json:"createdAt"`
+	IsAdmin bool `json:"isAdmin"`
+	// EmailVerified reports whether this address has been confirmed by
+	// following a link sent to it. Provider sign-in refuses to link to an
+	// account that has not, so the client surfaces it.
+	EmailVerified bool      `json:"emailVerified"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // RefreshInput trades a refresh token for a new pair.
@@ -222,4 +226,26 @@ type DeleteAvatarInput struct{}
 
 type DeleteAvatarOutput struct {
 	Body UserResponse
+}
+
+// ResendVerificationInput carries no fields: the address is whichever one the
+// signed-in account currently holds, never one the caller names.
+type ResendVerificationInput struct{}
+
+type ResendVerificationOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
+type ConfirmVerificationInput struct {
+	Body struct {
+		Token string `json:"token" minLength:"16" maxLength:"128"`
+	}
+}
+
+type ConfirmVerificationOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
 }

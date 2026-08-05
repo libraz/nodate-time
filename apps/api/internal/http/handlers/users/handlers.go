@@ -15,6 +15,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -39,6 +40,11 @@ type Deps struct {
 	// AllowedDomains restricts which email domains may register a password
 	// account, mirroring the Google OIDC policy. Empty means unrestricted.
 	AllowedDomains []string
+	// Mailer and WebURL deliver the address-confirmation link a registration
+	// sends. A nil Mailer leaves the account unconfirmed rather than failing
+	// the registration.
+	Mailer mailer.Mailer
+	WebURL string
 }
 
 func pubIDToHex(b []byte) string {
@@ -79,12 +85,13 @@ func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
 
 func mapUser(u generated.User) UserResponse {
 	return UserResponse{
-		ID:        pubIDToHex(u.PublicID),
-		Name:      u.DisplayName,
-		Email:     u.Email,
-		Locale:    u.Locale,
-		Timezone:  u.Timezone,
-		CreatedAt: u.CreatedAt,
+		ID:            pubIDToHex(u.PublicID),
+		Name:          u.DisplayName,
+		Email:         u.Email,
+		Locale:        u.Locale,
+		Timezone:      u.Timezone,
+		EmailVerified: u.EmailVerifiedAt.Valid,
+		CreatedAt:     u.CreatedAt,
 	}
 }
 
@@ -203,6 +210,12 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+
+		// Registration does not prove the registrant reads this mailbox, so the
+		// account starts unconfirmed and gets a link that proves it. Sign-in is
+		// not held up by this: what an unconfirmed address blocks is provider
+		// sign-in linking to the account, not the account itself.
+		sendEmailVerification(ctx, deps, created)
 
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, created.ID, userAgent, ipAddress)
