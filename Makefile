@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc web api build-api create-user test-api test-e2e test-e2e-storage test-conformance check-core minio-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-conformance check-core minio-up format lint
 
 # Local dev defaults: enable dev-login (admin rights come from the users.is_admin
 # flag, seeded for admin@example.com). Respects values already set in the shell.
@@ -40,6 +40,11 @@ db-seed-users:
 # Code generation
 sqlc:
 	cd sql && sqlc generate
+
+# Fail when the composed schema or the sqlc output no longer matches the
+# layered sources they are generated from.
+verify-codegen:
+	bash scripts/check-codegen-drift.sh
 
 # API
 api:

@@ -9,6 +9,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GO_VERSION: "1.26.0"
+  BUN_VERSION: "1.3.14"
+
 jobs:
   web:
     name: Web (typecheck, lint, test)
@@ -18,7 +22,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -46,7 +50,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: apps/api/go.sum
 
       # sql/core is a copy of the shared schema contract. This asserts
@@ -57,8 +61,20 @@ jobs:
       - name: Vendored contract unedited
         run: bash scripts/check-vendored-core.sh --local-only
 
-      - name: Build schema
-        run: bash sql/build-schema.sh
+      # A schema change and the code generated from it are one change, but
+      # nothing else in the pipeline can tell them apart: a field the
+      # generator never emitted simply does not exist, so the build succeeds
+      # and the tests pass while the column is unreachable.
+      - name: Install sqlc
+        # The version is read from the checker so the two cannot disagree;
+        # different sqlc versions emit different code from the same input.
+        run: |
+          version=$(grep -m1 '^SQLC_VERSION=' scripts/check-codegen-drift.sh | cut -d'"' -f2)
+          go install "github.com/sqlc-dev/sqlc/cmd/sqlc@$version"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Schema and generated data layer agree
+        run: make verify-codegen
 
       - name: Start MySQL
         run: |
