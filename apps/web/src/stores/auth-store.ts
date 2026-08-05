@@ -44,10 +44,9 @@ interface AuthState {
 
 interface AuthResponse {
   token: string;
-  // Returned by every sign-in path. The client does not use it yet -- the
-  // access token is checked against its session on each request, so it is
-  // revocable without one -- but discarding it would make a signed-in
-  // browser unrecoverable once the access token expires.
+  // Returned by every sign-in path and kept beside the access token: the
+  // access token lasts a day, the session thirty, and without this the
+  // shorter of the two would decide when everyone signs in again.
   refreshToken: string;
   user: User;
 }
@@ -70,7 +69,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const data = await api.post<AuthResponse>('/auth/login', { email, password });
-      setToken(data.token);
+      setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
@@ -82,7 +81,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const data = await api.post<AuthResponse>('/auth/dev-login', { email });
-      setToken(data.token);
+      setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
@@ -94,7 +93,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const data = await api.post<AuthResponse>('/auth/register', { name, email, password });
-      setToken(data.token);
+      setToken(data.token, data.refreshToken);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
     } catch (e) {
       set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.registerFailed')) });
@@ -103,8 +102,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    // Drop the auth token and per-session calendar state, but keep user
-    // preferences (theme, locale, timezone) that are not tied to the account.
+    // End the session on the server as well, best effort. Dropping the local
+    // token only makes this browser forget: anyone who copied the storage of a
+    // shared machine keeps working access until the token expires on its own,
+    // which is the whole day the user believed they had just ended.
+    //
+    // Not awaited: signing out must not depend on the network being up, and
+    // the local state is cleared either way.
+    if (hasToken()) {
+      void api.post('/auth/logout').catch(() => {});
+    }
     clearToken();
     set({
       user: null,
@@ -141,11 +148,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   changePassword: async (currentPassword, newPassword) => {
     // The server rotates the token on a password change; persist the fresh one
     // so the current device stays signed in instead of failing the next request.
-    const { token } = await api.put<{ token: string }>('/user/password', {
-      currentPassword,
-      newPassword,
-    });
-    setToken(token);
+    const { token, refreshToken } = await api.put<{ token: string; refreshToken?: string }>(
+      '/user/password',
+      { currentPassword, newPassword },
+    );
+    setToken(token, refreshToken);
   },
 
   updateProfile: async (data) => {

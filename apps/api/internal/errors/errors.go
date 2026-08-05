@@ -54,6 +54,7 @@ var (
 	AuthOAuthFailed         = &Spec{Status: 400, Code: "AUTH.OAUTH_FAILED", Message: "OAuth authentication failed"}
 	AuthSignupNotAllowed    = &Spec{Status: 403, Code: "AUTH.SIGNUP_NOT_ALLOWED", Message: "This email address is not permitted to sign up. Contact an administrator."}
 	AuthAdminRequired       = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
+	AuthSessionNotFound     = &Spec{Status: 404, Code: "AUTH.SESSION_NOT_FOUND", Message: "Session not found"}
 	SecretsUnavailable      = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
 )
 

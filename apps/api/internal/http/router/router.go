@@ -268,6 +268,23 @@ func Build(deps Deps) http.Handler {
 		}, users.Logout(userDeps))
 
 		huma.Register(api, huma.Operation{
+			OperationID: "list-sessions",
+			Method:      http.MethodGet,
+			Path:        "/user/sessions",
+			Summary:     "List the caller's live sign-ins",
+			Tags:        []string{"User"},
+		}, users.ListSessions(userDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "revoke-session",
+			Method:        http.MethodDelete,
+			Path:          "/user/sessions/{sessionId}",
+			Summary:       "End one of the caller's sign-ins",
+			Tags:          []string{"User"},
+			DefaultStatus: 204,
+		}, users.RevokeSession(userDeps))
+
+		huma.Register(api, huma.Operation{
 			OperationID: "change-password",
 			Method:      http.MethodPut,
 			Path:        "/user/password",

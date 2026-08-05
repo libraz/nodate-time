@@ -16,12 +16,14 @@ export const Route = createFileRoute('/oauth-complete')({
   component: OAuthCompletePage,
 });
 
-function readTokenFromHash(): string | null {
+function readTokensFromHash(): { token: string; refreshToken: string } | null {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash.replace(/^#/, '');
   if (!hash) return null;
   const params = new URLSearchParams(hash);
-  return params.get('token');
+  const token = params.get('token');
+  if (!token) return null;
+  return { token, refreshToken: params.get('refresh') ?? '' };
 }
 
 function OAuthCompletePage() {
@@ -33,14 +35,14 @@ function OAuthCompletePage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const token = readTokenFromHash();
-      if (!token) {
+      const tokens = readTokensFromHash();
+      if (!tokens) {
         navigate({ to: '/login' });
         return;
       }
-      // Strip token from URL hash so it does not stay in browser history.
+      // Strip the tokens from the URL hash so they do not stay in history.
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      setToken(token);
+      setToken(tokens.token, tokens.refreshToken);
       try {
         await fetchMe();
       } catch {

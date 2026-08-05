@@ -38,6 +38,67 @@ describe('token helpers', () => {
   });
 });
 
+describe('session renewal', () => {
+  const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+
+  it('keeps the sign-in alive past the access token', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const renewed = live();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ token: renewed, refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(api.get('/calendars')).resolves.toEqual({ ok: true });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/refresh');
+    expect(localStorage.getItem('tt_token')).toBe(renewed);
+    // The refresh token rotates; keeping the old one would present a retired
+    // value on the next renewal.
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-2');
+  });
+
+  it('retries the request once after a 401 rather than signing the user out', async () => {
+    localStorage.setItem('tt_token', live());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ token: live(), refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(api.get('/calendars')).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  // Renewal rotates the refresh token, so two concurrent renewals would race
+  // and the loser would present one that had just been retired.
+  it('renews once for concurrent requests', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    let refreshCalls = 0;
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/auth/refresh')) {
+        refreshCalls += 1;
+        return Promise.resolve(jsonResponse({ token: live(), refreshToken: 'refresh-2' }));
+      }
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+
+    await Promise.all([api.get('/calendars'), api.get('/user'), api.get('/user/sessions')]);
+
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('gives up when there is no refresh token to renew with', async () => {
+    localStorage.setItem('tt_token', live());
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 401));
+
+    await expect(api.get('/calendars', true)).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('JWT expiry helpers', () => {
   it('decodes the exp claim from a well-formed token', () => {
     expect(decodeJwtExp(makeJwt({ exp: 1700000000 }))).toBe(1700000000);

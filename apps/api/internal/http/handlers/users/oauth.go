@@ -501,16 +501,18 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			slog.ErrorContext(ctx, "oauth user upsert failed", "provider", in.Provider, "error", err)
 			return oauthRedirect(deps, "oauth_failed"), nil
 		}
-		token, err := startOAuthSession(ctx, deps, userID)
+		creds, err := startOAuthSession(ctx, deps, userID)
 		if err != nil {
 			slog.ErrorContext(ctx, "oauth session start failed", "provider", in.Provider, "error", err)
 			return oauthRedirect(deps, "oauth_failed"), nil
 		}
 
-		// Token is delivered via URL fragment (#token=...) so it is not sent
-		// to the server, recorded in access logs, or leaked via Referer header.
+		// Both tokens are delivered via URL fragment (#token=...) so they are
+		// not sent to the server, recorded in access logs, or leaked via a
+		// Referer header.
 		dest := strings.TrimRight(deps.WebURL, "/") + "/oauth-complete?redirect=" +
-			url.QueryEscape(redirectPath) + "#token=" + url.QueryEscape(token)
+			url.QueryEscape(redirectPath) + "#token=" + url.QueryEscape(creds.Token) +
+			"&refresh=" + url.QueryEscape(creds.RefreshToken)
 		return &OAuthCallbackOutput{
 			Status:    http.StatusFound,
 			URL:       dest,
@@ -663,14 +665,15 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 // startOAuthSession records the sign-in and returns the access token. It
 // mirrors what the password path does, so a provider sign-in is revocable
 // through the same session row rather than being a token nothing tracks.
-func startOAuthSession(ctx context.Context, deps OAuthDeps, userID uint32) (string, error) {
-	creds, err := startSession(ctx, Deps{
+// startOAuthSession opens a session for a provider sign-in and returns both
+// tokens. The refresh token matters as much here as on the password path: a
+// session opened through a provider expires on the same clock, and dropping
+// it would force everyone who signs in that way to do it again every day.
+func startOAuthSession(ctx context.Context, deps OAuthDeps, userID uint32) (Credentials, error) {
+	userAgent, ipAddress := requestOrigin(ctx)
+	return startSession(ctx, Deps{
 		DB:        deps.DB,
 		Queries:   deps.Queries,
 		JWTSecret: deps.JWTSecret,
-	}, userID, "", "")
-	if err != nil {
-		return "", err
-	}
-	return creds.Token, nil
+	}, userID, userAgent, ipAddress)
 }

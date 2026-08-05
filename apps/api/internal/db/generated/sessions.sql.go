@@ -180,6 +180,23 @@ func (q *Queries) RevokeSession(ctx context.Context, id uint32) error {
 	return err
 }
 
+const revokeSessionByPublicID = `-- name: RevokeSessionByPublicID :execresult
+UPDATE sessions SET revoked_at = NOW(3)
+WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL
+`
+
+type RevokeSessionByPublicIDParams struct {
+	PublicID []byte `json:"publicId"`
+	UserID   uint32 `json:"userId"`
+}
+
+// RevokeSessionByPublicID is scoped to the owning user: a session is named by
+// a value its holder was given, and one person's list must not reach another's
+// devices.
+func (q *Queries) RevokeSessionByPublicID(ctx context.Context, arg RevokeSessionByPublicIDParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeSessionByPublicID, arg.PublicID, arg.UserID)
+}
+
 const rotateSession = `-- name: RotateSession :exec
 UPDATE sessions
 SET refresh_hash = ?, expires_at = ?, last_used_at = NOW(3)
