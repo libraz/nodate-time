@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, clearToken, decodeJwtExp, hasToken, isTokenExpired, setToken } from './api';
+import { ja } from '@/i18n/ja';
+import {
+  ApiError,
+  api,
+  clearToken,
+  decodeJwtExp,
+  errorMessage,
+  hasToken,
+  isTokenExpired,
+  setToken,
+} from './api';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -247,5 +257,66 @@ describe('401 handling', () => {
 
     expect(hasToken()).toBe(true);
     expect(window.location.pathname).toBe('/calendar');
+  });
+});
+
+describe('error envelopes', () => {
+  it('reads the application envelope', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { status: 403, code: 'CALENDAR.ROLE_REQUIRED', message: 'Insufficient role' },
+        403,
+      ),
+    );
+
+    const err = await api.get('/calendars/x/events').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe('CALENDAR.ROLE_REQUIRED');
+    expect(errorMessage(err)).toBe(ja['apiError.CALENDAR.ROLE_REQUIRED']);
+  });
+
+  it('reads the validator envelope, which carries no code of its own', async () => {
+    // A schema rejection used to arrive with nothing to branch on and its
+    // field complaints unread, so the interface could say only that something
+    // was wrong.
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'validation failed',
+          errors: [{ message: 'expected required property', location: 'body.title' }],
+        },
+        422,
+      ),
+    );
+
+    const err = (await api.post('/calendars/x/events', {}).catch((e: unknown) => e)) as ApiError;
+    expect(err.code).toBe('REQUEST.INVALID');
+    expect(err.issues).toHaveLength(1);
+    expect(err.issues[0]?.location).toBe('body.title');
+    expect(errorMessage(err)).toBe(ja['apiError.REQUEST.INVALID']);
+  });
+
+  it('says something when the response carries no reason phrase and no body', async () => {
+    // Over HTTP/2 there is no reason phrase at all. Starting from it left a
+    // gateway error rendering as a toast with nothing written in it.
+    fetchMock.mockResolvedValue(new Response('<html>bad gateway</html>', { status: 502 }));
+
+    const err = (await api.get('/calendars').catch((e: unknown) => e)) as ApiError;
+    expect(err.detail).not.toBe('');
+    expect(errorMessage(err)).toBe(ja['error.serverUnavailable']);
+  });
+
+  it('falls back to the server sentence for a code it has no message for', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { status: 418, code: 'SOMETHING.NEW', message: 'A newer server said this' },
+        418,
+      ),
+    );
+
+    const err = (await api.get('/calendars').catch((e: unknown) => e)) as ApiError;
+    expect(errorMessage(err)).toBe('A newer server said this');
   });
 });

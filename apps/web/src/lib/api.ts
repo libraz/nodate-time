@@ -1,4 +1,5 @@
 import { getT } from '@/i18n';
+import { errorMessageKey } from '@/lib/error-codes';
 import { toast } from '@/lib/toast';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -115,26 +116,28 @@ export class ApiError extends Error {
     public detail: string,
     /** Machine-readable error code from the API envelope (e.g. `CALENDAR.ROLE_REQUIRED`). */
     public code = '',
+    /** Field-level complaints, when the failure was a schema rejection. */
+    public issues: { message?: string; location?: string }[] = [],
   ) {
     super(detail);
   }
 }
 
-/** Maps known API error codes to localized message keys for user-facing toasts. */
+/**
+ * The message to show for an API failure, in the reader's language.
+ *
+ * Driven by the error code, which every failure the application raises
+ * carries. What is left over -- a proxy's own error page, a gateway timeout --
+ * has no code, and falls back to the status rather than to a sentence written
+ * in a language the reader may not have.
+ */
 function localizeError(err: ApiError): string {
   const t = getT();
-  switch (err.code) {
-    case 'CALENDAR.ROLE_REQUIRED':
-    case 'CALENDAR.ACCESS_DENIED':
-      return t('error.noPermission');
-    case 'MEMBER.SELF_MODIFY':
-      return t('members.selfModify');
-    case 'AUTH.TOKEN_INVALID':
-      return t('error.sessionExpired');
-    default:
-      if (err.status === 403) return t('error.noPermission');
-      return err.detail;
-  }
+  const key = errorMessageKey(err.code);
+  if (key) return t(key);
+  if (err.status === 403) return t('error.noPermission');
+  if (err.status >= 500) return t('error.serverUnavailable');
+  return err.detail;
 }
 
 /** Returns a localized, user-facing message for any thrown error. */
@@ -143,17 +146,44 @@ export function errorMessage(e: unknown, fallback?: string): string {
   return fallback ?? getT()('error.generic');
 }
 
+/** A field-level complaint from the schema validator. */
+interface FieldIssue {
+  message?: string;
+  location?: string;
+}
+
+/**
+ * Turns a failed response into one error shape.
+ *
+ * The API answers in two envelopes: the application's own `{status, code,
+ * message}`, and the schema validator's `{title, status, detail, errors[]}`.
+ * Reading only the first leaves a rejected request with no code to branch on
+ * and nothing to say about which field was wrong.
+ *
+ * The status text is a last resort rather than the starting point: over HTTP/2
+ * there is no reason phrase at all, so a gateway error with a non-JSON body
+ * used to produce a toast with nothing written in it.
+ */
 async function buildError(res: Response): Promise<ApiError> {
-  let detail = res.statusText;
+  let detail = '';
   let code = '';
+  let issues: FieldIssue[] = [];
   try {
     const body = await res.json();
-    detail = body.detail ?? body.message ?? detail;
+    detail = body.message ?? body.detail ?? '';
     code = typeof body.code === 'string' ? body.code : '';
+    if (Array.isArray(body.errors)) issues = body.errors as FieldIssue[];
   } catch {
-    // ignore non-JSON bodies
+    // A body that is not JSON says nothing beyond the status line.
   }
-  return new ApiError(res.status, detail, code);
+  if (!code && issues.length > 0) {
+    // The validator has no code of its own, but the failure is always the
+    // same kind: the request did not match the schema.
+    code = 'REQUEST.INVALID';
+  }
+
+  if (!detail) detail = res.statusText || `HTTP ${res.status}`;
+  return new ApiError(res.status, detail, code, issues);
 }
 
 function redirectTarget(): string | null {
