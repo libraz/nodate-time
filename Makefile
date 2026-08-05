@@ -39,6 +39,7 @@ db-seed-users:
 
 # Code generation
 sqlc:
+	@bash scripts/check-codegen-drift.sh --check-tool
 	cd sql && sqlc generate
 
 # Fail when the composed schema or the sqlc output no longer matches the

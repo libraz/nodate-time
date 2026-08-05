@@ -36,9 +36,11 @@ SQLC_CONFIG="$ROOT_DIR/sql/sqlc.yaml"
 SQLC_VERSION="v1.30.0"
 
 staged_only=0
+tool_only=0
 for arg in "$@"; do
   case "$arg" in
     --staged) staged_only=1 ;;
+    --check-tool) tool_only=1 ;;
     -h | --help)
       sed -n '2,26p' "${BASH_SOURCE[0]}"
       exit 0
@@ -49,6 +51,32 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# Generating with the wrong version rewrites every generated file, which
+# reads as a huge legitimate-looking diff rather than as a mistake. The
+# generate targets assert this before running, so the mistake is refused
+# instead of reviewed.
+assert_sqlc_version() {
+  if ! command -v sqlc >/dev/null 2>&1; then
+    echo "ERROR: sqlc is not installed." >&2
+    echo "  go install github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION" >&2
+    exit 2
+  fi
+  local installed
+  installed="$(sqlc version 2>/dev/null | tr -d '[:space:]')"
+  if [[ "$installed" != "$SQLC_VERSION" ]]; then
+    echo "ERROR: sqlc $installed is installed but this repository generates with $SQLC_VERSION." >&2
+    echo "  Different versions emit different code from identical input." >&2
+    echo "    go install github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION" >&2
+    exit 2
+  fi
+}
+
+if [[ $tool_only -eq 1 ]]; then
+  assert_sqlc_version
+  echo "sqlc $SQLC_VERSION"
+  exit 0
+fi
 
 # ── staged mode: only run when an input to the generators is staged ──
 
@@ -79,20 +107,9 @@ echo "sql/schema.sql is in sync with sql/core/ and sql/time/"
 
 # ── the generated Go matches the schema and queries ──
 
-if ! command -v sqlc >/dev/null 2>&1; then
-  echo "ERROR: sqlc is not installed, so the generated code cannot be checked." >&2
-  echo "  go install github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION" >&2
-  exit 2
-fi
-
-installed="$(sqlc version 2>/dev/null | tr -d '[:space:]')"
-if [[ "$installed" != "$SQLC_VERSION" ]]; then
-  echo "ERROR: sqlc $installed is installed but this repository generates with $SQLC_VERSION." >&2
-  echo "  Different versions emit different code, so a comparison across them" >&2
-  echo "  would report drift that does not exist. Install the pinned version:" >&2
-  echo "    go install github.com/sqlc-dev/sqlc/cmd/sqlc@$SQLC_VERSION" >&2
-  exit 2
-fi
+# A comparison across versions would report drift that is not there, so
+# this must hold before the scratch generation means anything.
+assert_sqlc_version
 
 SCRATCH="$(mktemp -d)"
 # The config lives beside the schema and queries it names by relative path,
