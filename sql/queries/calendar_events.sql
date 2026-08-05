@@ -86,6 +86,21 @@ UPDATE calendar_events
 SET recurrence_original_start = ?, start_at = ?, end_at = ?
 WHERE id = ?;
 
+-- ExtendRecurrenceEnd widens a series' end boundary to cover an occurrence
+-- that was moved past it.
+--
+-- recurrence_end is what range queries filter masters on, and a moved
+-- occurrence is a row hanging off the master rather than one the rule
+-- produces. Left alone, the master stops being selected for the window the
+-- occurrence now falls in, so the row survives but appears in no view,
+-- export or share -- indistinguishable from a deletion.
+-- name: ExtendRecurrenceEnd :exec
+UPDATE calendar_events
+SET recurrence_end = sqlc.arg(recurrence_end)
+WHERE id = sqlc.arg(id)
+  AND recurrence_end IS NOT NULL
+  AND recurrence_end < sqlc.arg(boundary);
+
 -- name: CreateCalendarEvent :execresult
 INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
