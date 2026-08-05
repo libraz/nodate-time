@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -12,7 +13,9 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 	"github.com/libraz/nodate-time/apps/api/internal/workspace"
@@ -119,6 +122,23 @@ func buildHandler(db *sql.DB, mc *CapturingMailer, sc *storage.Client) *router.D
 		// Parallel tenants register from one loopback IP; the per-IP limiter would
 		// otherwise reject them with 429.
 		AuthRateLimit: -1,
+		// The test client is the only peer, so treating loopback as a proxy hop
+		// lets a test present an arbitrary client address — including a
+		// full-length IPv6 one, which an httptest listener never produces on its
+		// own — the way a real deployment behind a reverse proxy would.
+		TrustedProxies: LoopbackProxies(),
+	}
+}
+
+// testAppOptions mirrors a same-origin deployment: the test client is not a
+// browser, so no origin needs allowing.
+func testAppOptions() app.Options { return app.Options{} }
+
+// LoopbackProxies is the trusted-proxy set the test server runs with.
+func LoopbackProxies() []netip.Prefix {
+	return []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
 	}
 }
 
@@ -132,7 +152,7 @@ func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	}
 
 	deps := buildHandler(db, mc, sc)
-	srv := httptest.NewServer(router.Build(*deps))
+	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
 	t.Cleanup(func() { srv.Close() })
 
 	return &TestServer{
@@ -154,7 +174,21 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	if port == "" {
 		port = "33306"
 	}
-	dsn := fmt.Sprintf("ttuser:ttpw@tcp(127.0.0.1:%s)/timetree_clone?parseTime=true", port)
+	name := os.Getenv("TC_DB_NAME")
+	if name == "" {
+		name = "timetree_clone"
+	}
+	// Same normalization the server applies, so tests observe the production
+	// time semantics rather than the driver's defaults.
+	dsn, err := config.NormalizeDSN(
+		fmt.Sprintf("ttuser:ttpw@tcp(127.0.0.1:%s)/%s", port, name),
+	)
+	if err != nil {
+		if t != nil {
+			t.Fatalf("test db dsn: %v", err)
+		}
+		return nil
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		if t != nil {
@@ -187,6 +221,6 @@ func NewTestServerForMain(db *sql.DB) *TestServer {
 		fmt.Fprintf(os.Stderr, "warn: test storage unavailable: %v\n", err)
 	}
 	deps := buildHandler(db, mc, sc)
-	srv := httptest.NewServer(router.Build(*deps))
+	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
 	return &TestServer{BaseURL: srv.URL, Server: srv, DB: db, Mailer: mc, Storage: sc, Bucket: bucket}
 }

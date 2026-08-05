@@ -11,14 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/cors"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
-	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
@@ -124,7 +122,7 @@ func main() {
 		slog.Warn("TC_SECRETS_KEY is empty; admin OAuth provider edits will be rejected")
 	}
 
-	appRouter := router.Build(router.Deps{
+	appHandler := app.NewHandler(router.Deps{
 		DB:                   db,
 		Queries:              queries,
 		JWTSecret:            cfg.JWTSecret,
@@ -139,7 +137,7 @@ func main() {
 		DevMode:              cfg.IsDev(),
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
 		TrustedProxies:       cfg.TrustedProxyList(),
-	})
+	}, app.Options{CORSAllowedOrigins: cfg.CORSAllowedOriginList()})
 	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
 		slog.Info("Google sign-in restricted to domains", "domains", domains)
 	} else {
@@ -152,23 +150,10 @@ func main() {
 		slog.Warn("development mode enabled; /auth/dev-login is exposed (password-less login for @example.com accounts)")
 	}
 
-	// Outer router with global middleware
-	outer := chi.NewRouter()
-	outer.Use(middleware.SecurityHeaders())
-	outer.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   cfg.CORSAllowedOriginList(),
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		ExposedHeaders:   []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
-	outer.Mount("/", appRouter)
-
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      outer,
+		Handler:      appHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

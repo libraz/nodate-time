@@ -1,6 +1,7 @@
 package apierrors
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -42,17 +43,18 @@ var _ huma.StatusError = (*HumaError)(nil)
 // --- Auth errors ---
 
 var (
-	AuthTokenMissing     = &Spec{Status: 401, Code: "AUTH.TOKEN_MISSING", Message: "Authorization header is required"}
-	AuthTokenInvalid     = &Spec{Status: 401, Code: "AUTH.TOKEN_INVALID", Message: "Bearer token is invalid or expired"}
-	AuthEmailExists      = &Spec{Status: 409, Code: "AUTH.EMAIL_EXISTS", Message: "Email address is already registered"}
-	AuthRegisterFailed   = &Spec{Status: 400, Code: "AUTH.REGISTER_FAILED", Message: "Unable to register with the supplied information"}
-	AuthBadCredentials   = &Spec{Status: 401, Code: "AUTH.BAD_CREDENTIALS", Message: "Invalid email or password"}
-	AuthWrongPassword    = &Spec{Status: 400, Code: "AUTH.WRONG_PASSWORD", Message: "Current password is incorrect"}
-	AuthResetInvalid     = &Spec{Status: 400, Code: "AUTH.RESET_INVALID", Message: "Reset token is invalid or expired"}
-	AuthOAuthFailed      = &Spec{Status: 400, Code: "AUTH.OAUTH_FAILED", Message: "OAuth authentication failed"}
-	AuthSignupNotAllowed = &Spec{Status: 403, Code: "AUTH.SIGNUP_NOT_ALLOWED", Message: "This email address is not permitted to sign up. Contact an administrator."}
-	AuthAdminRequired    = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
-	SecretsUnavailable   = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
+	AuthTokenMissing        = &Spec{Status: 401, Code: "AUTH.TOKEN_MISSING", Message: "Authorization header is required"}
+	AuthTokenInvalid        = &Spec{Status: 401, Code: "AUTH.TOKEN_INVALID", Message: "Bearer token is invalid or expired"}
+	AuthEmailExists         = &Spec{Status: 409, Code: "AUTH.EMAIL_EXISTS", Message: "Email address is already registered"}
+	AuthRegisterFailed      = &Spec{Status: 400, Code: "AUTH.REGISTER_FAILED", Message: "Unable to register with the supplied information"}
+	AuthBadCredentials      = &Spec{Status: 401, Code: "AUTH.BAD_CREDENTIALS", Message: "Invalid email or password"}
+	AuthWrongPassword       = &Spec{Status: 400, Code: "AUTH.WRONG_PASSWORD", Message: "Current password is incorrect"}
+	AuthResetInvalid        = &Spec{Status: 400, Code: "AUTH.RESET_INVALID", Message: "Reset token is invalid or expired"}
+	AuthVerificationInvalid = &Spec{Status: 400, Code: "AUTH.VERIFICATION_INVALID", Message: "Verification link is invalid or expired"}
+	AuthOAuthFailed         = &Spec{Status: 400, Code: "AUTH.OAUTH_FAILED", Message: "OAuth authentication failed"}
+	AuthSignupNotAllowed    = &Spec{Status: 403, Code: "AUTH.SIGNUP_NOT_ALLOWED", Message: "This email address is not permitted to sign up. Contact an administrator."}
+	AuthAdminRequired       = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
+	SecretsUnavailable      = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
 )
 
 // --- Calendar errors ---
@@ -141,4 +143,17 @@ var (
 	BadRequest         = &Spec{Status: http.StatusBadRequest, Code: "REQUEST.INVALID", Message: "Invalid request"}
 	NotFound           = &Spec{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "Resource not found"}
 	Conflict           = &Spec{Status: http.StatusConflict, Code: "CONFLICT", Message: "Resource already exists"}
+	RateLimited        = &Spec{Status: http.StatusTooManyRequests, Code: "RATE.LIMITED", Message: "Too many requests, please try again later"}
 )
+
+// WriteSpec renders a Spec straight onto a ResponseWriter, for the layers that
+// run outside Huma's error handling — middleware and the panic recovery — so a
+// client sees the same envelope no matter where the failure came from. Handlers
+// inside Huma use ToHuma instead.
+func WriteSpec(w http.ResponseWriter, s *Spec) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(s.Status)
+	// Encoding cannot fail for this shape, and the status line is already
+	// written, so there is nothing useful to do with an error here.
+	_ = json.NewEncoder(w).Encode(HumaError{Status: s.Status, Code: s.Code, Message: s.Message})
+}
