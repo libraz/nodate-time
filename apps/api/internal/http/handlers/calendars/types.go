@@ -95,6 +95,17 @@ type UpdateMemberRoleOutput struct {
 	Body MemberResponse
 }
 
+type UpdateMemberColorInput struct {
+	CalendarID string `path:"calendarId"`
+	UserID     string `path:"userId"`
+	Body       struct {
+		Color string `json:"color" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$"`
+	}
+}
+type UpdateMemberColorOutput struct {
+	Body MemberResponse
+}
+
 // Labels
 
 type ListLabelsInput struct {

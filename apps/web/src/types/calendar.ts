@@ -174,6 +174,14 @@ export interface Label {
 
 export const FALLBACK_LABEL_COLOR = '#47B2F7';
 
+/**
+ * The palette a calendar's layers are drawn from.
+ *
+ * The same ten colours the API serves at `/calendars/{id}/labels`. They are
+ * repeated here because the first calendar is created before there is one to
+ * ask, and the two lists are pinned by a test on each side: a palette that
+ * drifts hands out a colour the calendar's own list does not contain.
+ */
 export const MEMBER_COLORS = [
   '#47B2F7',
   '#F35F8C',
@@ -182,7 +190,7 @@ export const MEMBER_COLORS = [
   '#E73B3B',
   '#2ECC87',
   '#F5A623',
-  '#26C6DA',
   '#8F8F8F',
-  '#26A69A',
+  '#42A5F5',
+  '#FF7043',
 ] as const;
