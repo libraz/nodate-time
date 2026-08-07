@@ -25,6 +25,8 @@ export function ListView() {
     () => grouped.map(([date]) => Number(date.slice(0, 4))).filter(Number.isFinite),
     [grouped],
   );
+  // The rows are drawn here rather than by a memoised child, so re-rendering on
+  // the load is enough and the revision itself has no reader.
   useHolidayLoader(holidaysCountry, holidayYears);
 
   return (

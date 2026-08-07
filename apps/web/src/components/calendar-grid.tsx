@@ -5,7 +5,7 @@ import { fromISOInZone, getMonthDays, getWeekDays, getWeekdayLabel } from '@/lib
 import { buildMovedEvent } from '@/lib/event-move';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
-import { useHolidayRevision } from '@/lib/use-holiday-revision';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
@@ -19,7 +19,7 @@ export function CalendarGrid() {
   const selectedDate = useUiStore((s) => s.selectedDate);
   const calendarView = useUiStore((s) => s.calendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
-  const holidayRevision = useHolidayRevision(holidaysCountry, [
+  const holidayRevision = useHolidayLoader(holidaysCountry, [
     currentMonth.year - 1,
     currentMonth.year,
     currentMonth.year + 1,

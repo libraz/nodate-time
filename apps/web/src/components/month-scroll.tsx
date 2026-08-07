@@ -13,7 +13,7 @@ import { formatMonthYear, fromISOInZone, getWeekdayLabel, nowInZone } from '@/li
 import { buildMovedEvent } from '@/lib/event-move';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
-import { useHolidayRevision } from '@/lib/use-holiday-revision';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
@@ -98,7 +98,7 @@ export function MonthScroll() {
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
   const [anchorMonth, setAnchorMonth] = useState(() => nowInZone(timezone).startOf('month'));
-  const holidayRevision = useHolidayRevision(holidaysCountry, [
+  const holidayRevision = useHolidayLoader(holidaysCountry, [
     anchorMonth.year - 2,
     anchorMonth.year - 1,
     anchorMonth.year,
