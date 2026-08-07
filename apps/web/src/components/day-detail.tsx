@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
-import { fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { formatTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -120,7 +120,7 @@ export function DayDetail() {
                       <p className="mt-1 text-default text-[var(--color-text-secondary)]">
                         {evt.allDay
                           ? t('calendar.allDay')
-                          : `${fromISOInZone(evt.startAt, timezone).toFormat('HH:mm')} - ${fromISOInZone(evt.endAt, timezone).toFormat('HH:mm')}`}
+                          : `${formatTime(evt.startAt, timezone)} - ${formatTime(evt.endAt, timezone)}`}
                       </p>
                       {evt.location && (
                         <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">

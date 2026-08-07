@@ -2,15 +2,14 @@ import { DateTime, Settings } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchWindow,
-  formatDateKey,
   formatMonthYear,
+  formatRelativeTime,
   formatTime,
   fromISOInZone,
   getMonthDays,
   getWeekDays,
   getWeekdayLabel,
   gridRange,
-  isSameDay,
   isToday,
   jsDayOfWeek,
   nowInZone,
@@ -47,16 +46,6 @@ describe('getWeekDays', () => {
     expect(week).toHaveLength(7);
     expect(week[0]?.toISODate()).toBe('2026-04-19'); // Sunday
     expect(week[6]?.toISODate()).toBe('2026-04-25'); // Saturday
-  });
-});
-
-describe('isSameDay', () => {
-  it('ignores the time component', () => {
-    const a = DateTime.local(2026, 4, 20, 9, 0);
-    const b = DateTime.local(2026, 4, 20, 23, 59);
-    const c = DateTime.local(2026, 4, 21, 0, 0);
-    expect(isSameDay(a, b)).toBe(true);
-    expect(isSameDay(a, c)).toBe(false);
   });
 });
 
@@ -137,9 +126,30 @@ describe('fromISOInZone', () => {
   });
 });
 
-describe('formatDateKey', () => {
-  it('formats as yyyy-MM-dd', () => {
-    expect(formatDateKey(DateTime.local(2026, 4, 5))).toBe('2026-04-05');
+describe('formatRelativeTime', () => {
+  const originalZone = Settings.defaultZone;
+
+  beforeEach(() => {
+    Settings.defaultZone = 'UTC';
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T16:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Settings.defaultZone = originalZone;
+  });
+
+  it('falls back to Japanese when no locale is given', () => {
+    expect(formatRelativeTime('2026-03-10T15:30:00Z')).toBe('30分前');
+    expect(formatRelativeTime('2026-03-08T16:00:00Z')).toBe('2日前');
+    expect(formatRelativeTime('2026-03-10T15:59:30Z')).toBe('たった今');
+  });
+
+  it('reads in English when the locale is en', () => {
+    expect(formatRelativeTime('2026-03-10T15:30:00Z', 'en')).toBe('30m ago');
+    expect(formatRelativeTime('2026-03-10T13:00:00Z', 'en')).toBe('3h ago');
+    expect(formatRelativeTime('2026-03-10T15:59:30Z', 'en')).toBe('just now');
   });
 });
 
