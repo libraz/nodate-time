@@ -347,6 +347,70 @@ describe('retryFailedLoads', () => {
   });
 });
 
+describe('fetchMemos', () => {
+  it('reads the paged answer and walks it to the end', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars/cal-1/memos') {
+        return { items: [memo('m1', 'cal-1')], nextCursor: 'next' } as never;
+      }
+      if (url === '/calendars/cal-1/memos?cursor=next') {
+        return { items: [memo('m2', 'cal-1')] } as never;
+      }
+      return { items: [] } as never;
+    });
+
+    await useCalendarStore.getState().fetchMemos();
+
+    // The panel shows one arranged list, so stopping at the first page would
+    // silently drop the rest of it -- and nothing else would say so.
+    expect(useCalendarStore.getState().memos.map((m) => m.id)).toEqual(['m1', 'm2']);
+  });
+
+  it('stamps the calendarId on every memo it collects', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1'), cal('cal-2')] });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url.startsWith('/calendars/cal-1/memos')) {
+        return { items: [memo('m1', 'cal-1')] } as never;
+      }
+      if (url.startsWith('/calendars/cal-2/memos')) {
+        return { items: [memo('m2', 'cal-2')] } as never;
+      }
+      return { items: [] } as never;
+    });
+
+    await useCalendarStore.getState().fetchMemos();
+
+    const byCalendar = useCalendarStore
+      .getState()
+      .memos.map((m) => m.calendarId)
+      .sort();
+    expect(byCalendar).toEqual(['cal-1', 'cal-2']);
+  });
+
+  it('leaves a calendar that did not answer showing what it had', async () => {
+    useCalendarStore.setState({
+      calendars: [cal('cal-1'), cal('cal-2')],
+      memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
+    });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url.startsWith('/calendars/cal-1/memos')) {
+        return { items: [memo('m1b', 'cal-1')] } as never;
+      }
+      throw new Error('cal-2 failed');
+    });
+
+    await useCalendarStore.getState().fetchMemos();
+
+    expect(
+      useCalendarStore
+        .getState()
+        .memos.map((m) => m.id)
+        .sort(),
+    ).toEqual(['m1b', 'm2']);
+  });
+});
+
 describe('deleteCalendar', () => {
   it('removes the calendar and cascades its events, memos, and members', async () => {
     mockApi.delete.mockResolvedValue(undefined as never);

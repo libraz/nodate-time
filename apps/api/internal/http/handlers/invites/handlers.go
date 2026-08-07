@@ -34,6 +34,11 @@ type Deps struct {
 // with; they can change it afterwards.
 const defaultMemberColor = "#42A5F5"
 
+// maxInvitesListed caps one response. Revoking a link takes it out of this
+// answer, so the list is what an administrator is currently managing rather
+// than a history, and a ceiling is enough.
+const maxInvitesListed = 500
+
 func isDuplicateKey(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
@@ -368,7 +373,10 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListInvitesByCalendar(ctx, cal.ID)
+		rows, err := deps.Queries.ListInvitesByCalendar(ctx, generated.ListInvitesByCalendarParams{
+			CalendarID: cal.ID,
+			Limit:      maxInvitesListed,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

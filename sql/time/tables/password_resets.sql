@@ -25,6 +25,9 @@ CREATE TABLE password_resets (
   UNIQUE KEY uniq_password_resets_public_id (public_id),
   UNIQUE KEY uniq_password_resets_token_hash (token_hash),
   KEY idx_password_resets_user (user_id, expires_at),
+  -- The expiry sweep names no user, and idx_password_resets_user cannot be
+  -- entered from its second column, so that lookup needs its own index.
+  KEY idx_password_resets_expires_at (expires_at),
 
   CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Single-use password reset tokens';

@@ -27,6 +27,12 @@ const avatarUploadListBatchSize = 500
 // storageSweepBatchSize bounds one pass over unreferenced blobs.
 const storageSweepBatchSize = 500
 
+// tokenSweepBatchSize bounds one DELETE over a table of expiring credentials.
+// These tables grow with traffic rather than with content -- every sign-in
+// adds a session -- so an unbounded statement would lock a backlog whose size
+// nothing in the product controls.
+const tokenSweepBatchSize = 500
+
 // maxBatches bounds how many pages a single cleanup tick will drain, so a
 // persistent per-row failure cannot turn this into an infinite loop.
 const maxBatches = 1000
@@ -63,20 +69,50 @@ func RunOnce(ctx context.Context, q *generated.Queries, storageClient *storage.C
 
 func runOnce(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
 	now := time.Now()
-	if err := q.DeleteExpiredPasswordResets(ctx, now); err != nil {
-		slog.Warn("cleanup: delete expired password resets failed", "error", err)
-	}
-	if err := q.DeleteExpiredSigninStates(ctx, now); err != nil {
-		slog.Warn("cleanup: delete expired sign-in states failed", "error", err)
-	}
+	drainExpired(ctx, "expired password resets", func(ctx context.Context) (sql.Result, error) {
+		return q.DeleteExpiredPasswordResets(ctx, generated.DeleteExpiredPasswordResetsParams{
+			ExpiresAt: now,
+			Limit:     tokenSweepBatchSize,
+		})
+	})
+	drainExpired(ctx, "expired sign-in states", func(ctx context.Context) (sql.Result, error) {
+		return q.DeleteExpiredSigninStates(ctx, generated.DeleteExpiredSigninStatesParams{
+			ExpiresAt: now,
+			Limit:     tokenSweepBatchSize,
+		})
+	})
 	// Expired sessions are removed rather than left revoked: the row's only
 	// job is to answer "is this token still good", and a row past its expiry
 	// already answers no through the query's own predicate.
-	if err := q.DeleteExpiredSessions(ctx, now); err != nil {
-		slog.Warn("cleanup: delete expired sessions failed", "error", err)
-	}
+	drainExpired(ctx, "expired sessions", func(ctx context.Context) (sql.Result, error) {
+		return q.DeleteExpiredSessions(ctx, generated.DeleteExpiredSessionsParams{
+			ExpiresAt: now,
+			Limit:     tokenSweepBatchSize,
+		})
+	})
 	cleanupAbandonedUploads(ctx, q, storageClient, now.Add(-abandonedUploadAge))
 	sweepUnreferencedObjects(ctx, q, storageClient, now.Add(-abandonedUploadAge))
+}
+
+// drainExpired runs a bounded DELETE until it comes back short, which is what
+// says the backlog is gone. No cursor is needed the way the storage sweeps
+// need one: every row this removes stops matching the predicate, so a row it
+// cannot delete does not exist and nothing can head every page.
+//
+// maxBatches bounds one tick regardless, so a statement that somehow keeps
+// reporting a full batch cannot turn the cleanup goroutine into a spin.
+func drainExpired(ctx context.Context, what string, deleteBatch func(context.Context) (sql.Result, error)) {
+	for range maxBatches {
+		res, err := deleteBatch(ctx)
+		if err != nil {
+			slog.Warn("cleanup: delete "+what+" failed", "error", err)
+			return
+		}
+		affected, err := res.RowsAffected()
+		if err != nil || affected < tokenSweepBatchSize {
+			return
+		}
+	}
 }
 
 func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageClient *storage.Client, olderThan time.Time) {

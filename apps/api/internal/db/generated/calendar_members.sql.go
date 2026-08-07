@@ -142,7 +142,13 @@ FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.created_at
+LIMIT ?
 `
+
+type ListCalendarMembersParams struct {
+	CalendarID uint32 `json:"calendarId"`
+	Limit      int32  `json:"limit"`
+}
 
 type ListCalendarMembersRow struct {
 	ID              uint32              `json:"id"`
@@ -164,8 +170,13 @@ type ListCalendarMembersRow struct {
 	UserAvatarURL   sql.NullString      `json:"userAvatarUrl"`
 }
 
-func (q *Queries) ListCalendarMembers(ctx context.Context, calendarID uint32) ([]ListCalendarMembersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listCalendarMembers, calendarID)
+// The LIMIT is a cap rather than a page. Membership is a list of people, and
+// every caller of this -- the member sheet, the participant picker, the
+// colour legend -- wants all of them at once; paging it would mean a picker
+// that cannot offer somebody who is in the calendar. The cap is a ceiling on
+// what one response can cost, not a page size.
+func (q *Queries) ListCalendarMembers(ctx context.Context, arg ListCalendarMembersParams) ([]ListCalendarMembersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCalendarMembers, arg.CalendarID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

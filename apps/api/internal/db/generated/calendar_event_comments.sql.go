@@ -141,21 +141,29 @@ func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg Get
 	return i, err
 }
 
-const listEventComments = `-- name: ListEventComments :many
+const listEventCommentsBefore = `-- name: ListEventCommentsBefore :many
 SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
 WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
-ORDER BY ec.created_at
+  AND (
+    ec.created_at < ?
+    OR (ec.created_at = ? AND ec.id < ?)
+  )
+ORDER BY ec.created_at DESC, ec.id DESC
+LIMIT ?
 `
 
-type ListEventCommentsParams struct {
-	WorkspaceID uint32        `json:"workspaceId"`
-	EventID     sql.NullInt32 `json:"eventId"`
+type ListEventCommentsBeforeParams struct {
+	WorkspaceID     uint32        `json:"workspaceId"`
+	EventID         sql.NullInt32 `json:"eventId"`
+	BeforeCreatedAt time.Time     `json:"beforeCreatedAt"`
+	BeforeID        uint32        `json:"beforeId"`
+	Limit           int32         `json:"limit"`
 }
 
-type ListEventCommentsRow struct {
+type ListEventCommentsBeforeRow struct {
 	ID              uint32         `json:"id"`
 	PublicID        []byte         `json:"publicId"`
 	WorkspaceID     uint32         `json:"workspaceId"`
@@ -174,19 +182,110 @@ type ListEventCommentsRow struct {
 	UserPublicID    []byte         `json:"userPublicId"`
 }
 
-// ListEventComments names the workspace as well as the event because the
-// index over this table is (workspace_id, event_id, created_at). Leaving the
-// leading column out makes the whole index unusable, so opening an event --
-// the most frequent read there is -- scanned every comment on the deployment.
-func (q *Queries) ListEventComments(ctx context.Context, arg ListEventCommentsParams) ([]ListEventCommentsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listEventComments, arg.WorkspaceID, arg.EventID)
+func (q *Queries) ListEventCommentsBefore(ctx context.Context, arg ListEventCommentsBeforeParams) ([]ListEventCommentsBeforeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventCommentsBefore,
+		arg.WorkspaceID,
+		arg.EventID,
+		arg.BeforeCreatedAt,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListEventCommentsRow
+	var items []ListEventCommentsBeforeRow
 	for rows.Next() {
-		var i ListEventCommentsRow
+		var i ListEventCommentsBeforeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.EventID,
+			&i.AuthorID,
+			&i.Body,
+			&i.EditedAt,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.DeletedAt,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.UserDisplayName,
+			&i.UserAvatarURL,
+			&i.UserPublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventCommentsLatest = `-- name: ListEventCommentsLatest :many
+
+SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       u.public_id AS user_public_id
+FROM calendar_event_comments ec
+INNER JOIN users u ON u.id = ec.author_id
+WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
+ORDER BY ec.created_at DESC, ec.id DESC
+LIMIT ?
+`
+
+type ListEventCommentsLatestParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	EventID     sql.NullInt32 `json:"eventId"`
+	Limit       int32         `json:"limit"`
+}
+
+type ListEventCommentsLatestRow struct {
+	ID              uint32         `json:"id"`
+	PublicID        []byte         `json:"publicId"`
+	WorkspaceID     uint32         `json:"workspaceId"`
+	EventID         sql.NullInt32  `json:"eventId"`
+	AuthorID        uint32         `json:"authorId"`
+	Body            string         `json:"body"`
+	EditedAt        sql.NullTime   `json:"editedAt"`
+	SortWeight      int32          `json:"sortWeight"`
+	Notes           sql.NullString `json:"notes"`
+	Enabled         bool           `json:"enabled"`
+	DeletedAt       sql.NullTime   `json:"deletedAt"`
+	UpdatedAt       sql.NullTime   `json:"updatedAt"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UserDisplayName string         `json:"userDisplayName"`
+	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
+	UserPublicID    []byte         `json:"userPublicId"`
+}
+
+// Both listings name the workspace as well as the event because the index
+// over this table is (workspace_id, event_id, created_at). Leaving the
+// leading column out makes the whole index unusable, so opening an event --
+// the most frequent read there is -- scanned every comment on the deployment.
+//
+// They read newest first, which is the opposite of how a thread is displayed
+// and the only order that bounds it usefully: a page taken from the oldest
+// end of a long thread is the part nobody is looking at. The handler turns
+// one page back into reading order, and pages from here go backwards into
+// the history.
+//
+// id closes the order, since two comments can land in the same millisecond.
+func (q *Queries) ListEventCommentsLatest(ctx context.Context, arg ListEventCommentsLatestParams) ([]ListEventCommentsLatestRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventCommentsLatest, arg.WorkspaceID, arg.EventID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventCommentsLatestRow
+	for rows.Next() {
+		var i ListEventCommentsLatestRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,

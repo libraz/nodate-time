@@ -268,10 +268,21 @@ const listInvitesByCalendar = `-- name: ListInvitesByCalendar :many
 SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites
 WHERE calendar_id = ? AND enabled = TRUE
 ORDER BY created_at DESC
+LIMIT ?
 `
 
-func (q *Queries) ListInvitesByCalendar(ctx context.Context, calendarID uint32) ([]CalendarInvite, error) {
-	rows, err := q.db.QueryContext(ctx, listInvitesByCalendar, calendarID)
+type ListInvitesByCalendarParams struct {
+	CalendarID uint32 `json:"calendarId"`
+	Limit      int32  `json:"limit"`
+}
+
+// The LIMIT is a cap rather than a page. Only live links are listed and
+// revoking one takes it out of this answer, so the list is what an
+// administrator is currently managing rather than a history that accumulates.
+// Newest first means the cap, if it is ever reached, drops the oldest links --
+// the ones closest to being revoked anyway.
+func (q *Queries) ListInvitesByCalendar(ctx context.Context, arg ListInvitesByCalendarParams) ([]CalendarInvite, error) {
+	rows, err := q.db.QueryContext(ctx, listInvitesByCalendar, arg.CalendarID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

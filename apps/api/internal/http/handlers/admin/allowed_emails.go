@@ -37,7 +37,9 @@ type ListAllowedEmailsOutput struct {
 type CreateAllowedEmailInput struct {
 	Body struct {
 		Email string `json:"email" format:"email" maxLength:"255"`
-		Note  string `json:"note,omitempty" maxLength:"255" required:"false" doc:"why this address is allowed"`
+		// Named for the column and for the field the list returns: a value
+		// stored under one name and read back under another is never shown.
+		Reason string `json:"reason,omitempty" maxLength:"255" required:"false" doc:"why this address is allowed"`
 	}
 }
 
@@ -96,7 +98,7 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		reason := strings.TrimSpace(in.Body.Note)
+		reason := strings.TrimSpace(in.Body.Reason)
 		if _, err := deps.Queries.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
 			PublicID:        pubID[:],
 			Email:           email,

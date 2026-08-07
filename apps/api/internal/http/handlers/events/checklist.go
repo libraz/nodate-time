@@ -11,6 +11,12 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
+// maxChecklistItemsListed caps one event's checklist. The list is read as a
+// whole -- it is what somebody ticks off -- so splitting it across pages
+// would be a worse answer than the ceiling; this only keeps a runaway writer
+// from making one modal unbounded.
+const maxChecklistItemsListed = 500
+
 func mapChecklistItem(item generated.CalendarEventChecklistItem) ChecklistItemResponse {
 	return ChecklistItemResponse{
 		ID:        pubIDToHex(item.PublicID),
@@ -38,6 +44,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 		rows, err := deps.Queries.ListChecklistItems(ctx, generated.ListChecklistItemsParams{
 			WorkspaceID: deps.WorkspaceID,
 			EventID:     evt.ID,
+			Limit:       maxChecklistItemsListed,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)

@@ -14,5 +14,9 @@ FROM signin_states WHERE state_hash = ?;
 -- name: DeleteSigninState :execresult
 DELETE FROM signin_states WHERE state_hash = ?;
 
--- name: DeleteExpiredSigninStates :exec
-DELETE FROM signin_states WHERE expires_at < ?;
+-- DeleteExpiredSigninStates removes one batch of abandoned round trips and
+-- reports how many, so the caller can loop until the backlog is drained.
+-- idx_signin_states_expires already leads on expires_at, so the bound here
+-- only limits how long one statement holds its rows.
+-- name: DeleteExpiredSigninStates :execresult
+DELETE FROM signin_states WHERE expires_at < ? ORDER BY expires_at LIMIT ?;

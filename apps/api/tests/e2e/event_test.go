@@ -144,13 +144,15 @@ func TestEventComments(t *testing.T) {
 		map[string]any{"content": "資料を準備します"}, nil)
 
 	// List comments
-	var comments []struct {
-		Body string `json:"body"`
+	var comments struct {
+		Items []struct {
+			Body string `json:"body"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/activities", tt.AccessToken, nil, &comments)
-	require.Len(t, comments, 2)
-	require.Equal(t, "了解です！", comments[0].Body)
-	require.Equal(t, "資料を準備します", comments[1].Body)
+	require.Len(t, comments.Items, 2)
+	require.Equal(t, "了解です！", comments.Items[0].Body)
+	require.Equal(t, "資料を準備します", comments.Items[1].Body)
 }
 
 func TestRecurringEventWeekly(t *testing.T) {
