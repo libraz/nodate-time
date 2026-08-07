@@ -135,7 +135,8 @@ func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client) *router.Deps
 }
 
 // testAppOptions mirrors a same-origin deployment: the test client is not a
-// browser, so no origin needs allowing.
+// browser, so every origin is denied and no test sends one. A test about CORS
+// itself brings its own options through NewTestServerWithOptions.
 func testAppOptions() app.Options { return app.Options{} }
 
 // LoopbackProxies is the trusted-proxy set the test server runs with.
@@ -166,6 +167,25 @@ func NewTestServerWithMailer(t *testing.T, db *sql.DB, m mailer.Mailer) *TestSer
 		DB:      db,
 		Storage: sc,
 		Bucket:  bucket,
+	}
+}
+
+// NewTestServerWithOptions boots a test server with a specific outer-stack
+// configuration. The CORS origin list is not observable through any route, so
+// a test about it has to run a server of its own. Storage is left out: what is
+// under test sits outside the routes entirely.
+func NewTestServerWithOptions(t *testing.T, db *sql.DB, opts app.Options) *TestServer {
+	t.Helper()
+	mc := NewCapturingMailer()
+	deps := buildHandler(db, mc, nil)
+	srv := httptest.NewServer(app.NewHandler(*deps, opts))
+	t.Cleanup(func() { srv.Close() })
+
+	return &TestServer{
+		BaseURL: srv.URL,
+		Server:  srv,
+		DB:      db,
+		Mailer:  mc,
 	}
 }
 

@@ -154,13 +154,7 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      appHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	srv := app.NewServer(addr, appHandler, app.DefaultTimeouts())
 
 	// Graceful shutdown
 	serverErr := make(chan error, 1)
