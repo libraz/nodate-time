@@ -57,7 +57,7 @@ func (c *CountingDB) Count() int { return int(c.queries.Load()) }
 // a test using it must not run in parallel with itself.
 func NewCountingTestServer(t *testing.T, db *sql.DB) (*TestServer, *CountingDB) {
 	t.Helper()
-	mc := &CapturingMailer{}
+	mc := NewCapturingMailer()
 	sc, bucket, err := newTestStorage(context.Background())
 	if err != nil {
 		t.Fatalf("storage init: %v", err)
