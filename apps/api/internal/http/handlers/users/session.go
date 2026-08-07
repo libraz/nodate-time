@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -103,25 +106,57 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 	return Credentials{Token: token, RefreshToken: refresh, ExpiresAt: expiresAt}, nil
 }
 
-// rotateSession trades a refresh token for a new pair. The old refresh
-// token stops working: the row's hash is replaced rather than added to, so
-// a stolen token cannot be used alongside the legitimate one.
-func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credentials, uint32, error) {
-	session, err := deps.Queries.GetSessionByRefreshHash(ctx, hashRefreshToken(refreshToken))
-	if err != nil {
-		return Credentials{}, 0, err
-	}
+// errRefreshReplayed reports a refresh token presented after it was already
+// traded in. It is distinct from sql.ErrNoRows so the caller can tell a
+// token that was once real from one that never was, even though both end
+// the same way for whoever sent it.
+var errRefreshReplayed = errors.New("refresh token already spent")
 
+// rotateSession trades a refresh token for a new pair.
+//
+// The exchange is one statement matching on the hash being spent, so two
+// requests carrying the same token cannot both succeed: whichever reaches
+// the row first replaces the hash, and the other matches nothing. Reading
+// the row and then updating it -- which is what this did -- let both pass,
+// and the loser's credentials were revoked by the winner's write with
+// nothing recording that it had happened.
+//
+// A token that matches nothing may still be one this session already spent.
+// That is the shape a leaked refresh token takes: the copy is used and then
+// the original, or the other way round. It cannot be told apart from a
+// client retrying an exchange whose reply it never received, and both mean
+// the token is in more hands than one place can account for, so the session
+// is closed rather than continued.
+func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credentials, uint32, error) {
+	spent := hashRefreshToken(refreshToken)
 	next, err := newRefreshToken()
 	if err != nil {
 		return Credentials{}, 0, err
 	}
+	nextHash := hashRefreshToken(next)
 	expiresAt := time.Now().Add(refreshTokenTTL)
-	if err := deps.Queries.RotateSession(ctx, generated.RotateSessionParams{
-		RefreshHash: hashRefreshToken(next),
-		ExpiresAt:   expiresAt,
-		ID:          session.ID,
-	}); err != nil {
+
+	res, err := deps.Queries.RotateSessionByHash(ctx, generated.RotateSessionByHashParams{
+		RefreshHash:   nextHash,
+		ExpiresAt:     expiresAt,
+		RefreshHash_2: spent,
+	})
+	if err != nil {
+		return Credentials{}, 0, err
+	}
+	rotated, err := res.RowsAffected()
+	if err != nil {
+		return Credentials{}, 0, err
+	}
+	if rotated == 0 {
+		return Credentials{}, 0, closeReplayedSession(ctx, deps, spent)
+	}
+
+	// Read back by the hash just written. Nobody else can hold that value --
+	// it has not left this function yet -- so no second exchange can be
+	// between the two statements.
+	session, err := deps.Queries.GetSessionByRefreshHash(ctx, nextHash)
+	if err != nil {
 		return Credentials{}, 0, err
 	}
 
@@ -130,4 +165,29 @@ func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credent
 		return Credentials{}, 0, err
 	}
 	return Credentials{Token: token, RefreshToken: next, ExpiresAt: expiresAt}, session.UserID, nil
+}
+
+// closeReplayedSession decides what a refresh token that opened no session
+// was. If it is the one a live session last traded in, it is being presented
+// a second time: that session is revoked, which stops the access tokens
+// naming it at their next request and makes the refresh token issued in its
+// place worthless too.
+//
+// The refusal handed back is the same either way. Telling the sender that
+// their replay was recognised only informs whoever is holding a token they
+// should not have.
+func closeReplayedSession(ctx context.Context, deps Deps, spent string) error {
+	session, err := deps.Queries.GetSessionByPrevRefreshHash(ctx,
+		sql.NullString{String: spent, Valid: true})
+	if err != nil {
+		// Including sql.ErrNoRows, which is the ordinary case: a value no
+		// session ever issued.
+		return err
+	}
+	if err := deps.Queries.RevokeSession(ctx, session.ID); err != nil {
+		return err
+	}
+	slog.WarnContext(ctx, "refresh token replayed, session revoked",
+		"sessionID", session.ID, "userID", session.UserID)
+	return errRefreshReplayed
 }
