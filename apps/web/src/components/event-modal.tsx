@@ -17,6 +17,7 @@ import {
 } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -223,6 +224,15 @@ function CommentsSection({
   const [isSending, setIsSending] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  // A thread that could not be read is reported in place of the list: a toast
+  // would be gone by the time the reader reaches this far down the modal, and
+  // an empty section otherwise reads as "no comments yet".
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Set while there are older comments than the ones on screen. They are
+  // fetched on request rather than up front: a long-running event's thread is
+  // unbounded, and the newest is what someone opening the event is after.
+  const [olderCursor, setOlderCursor] = useState('');
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
   const mayEdit = (c: EventComment) => canEditComment(c, user?.id);
   const mayDelete = (c: EventComment) => canDeleteComment(c, moderatorRole, user?.id);
@@ -230,16 +240,39 @@ function CommentsSection({
   const fetchComments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.get<EventComment[]>(
+      // The thread is paged: the first page is the newest run of comments,
+      // already oldest-first within itself, and the cursor reaches the older
+      // ones before it.
+      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
         `/calendars/${calendarId}/events/${eventId}/activities`,
       );
-      setComments(data);
-    } catch {
-      // silently ignore fetch errors
+      setComments(page.items ?? []);
+      setOlderCursor(page.nextCursor ?? '');
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
   }, [calendarId, eventId]);
+
+  // Older comments go in front of what is already shown, because that is where
+  // they belong in the reading order.
+  const loadOlderComments = useCallback(async () => {
+    if (!olderCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
+        `/calendars/${calendarId}/events/${eventId}/activities?cursor=${encodeURIComponent(olderCursor)}`,
+      );
+      setComments((cur) => [...(page.items ?? []), ...cur]);
+      setOlderCursor(page.nextCursor ?? '');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [calendarId, eventId, olderCursor, loadingOlder]);
 
   useEffect(() => {
     fetchComments();
@@ -261,11 +294,24 @@ function CommentsSection({
       await api.post(`/calendars/${calendarId}/events/${eventId}/activities`, { content });
       setNewComment('');
       await fetchComments();
-    } catch {
-      // silently ignore send errors
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       setIsSending(false);
     }
+  };
+
+  const saveEdit = async (commentId: string) => {
+    try {
+      await api.put(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`, {
+        content: editContent,
+      });
+    } catch (err) {
+      toast.error(errorMessage(err));
+      return;
+    }
+    setEditingId(null);
+    await fetchComments();
   };
 
   return (
@@ -292,7 +338,11 @@ function CommentsSection({
         </p>
       )}
 
-      {!isLoading && comments.length === 0 && (
+      {loadError && comments.length === 0 && (
+        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
+      )}
+
+      {!isLoading && !loadError && comments.length === 0 && (
         <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('event.noComments')}
         </p>
@@ -300,6 +350,16 @@ function CommentsSection({
 
       {comments.length > 0 && (
         <div className="mb-3 max-h-[240px] space-y-3 overflow-y-auto">
+          {olderCursor && (
+            <button
+              type="button"
+              onClick={loadOlderComments}
+              disabled={loadingOlder}
+              className="w-full py-1 text-center text-footnote text-[var(--color-text-secondary)]"
+            >
+              {loadingOlder ? t('common.loading') : t('event.loadEarlierComments')}
+            </button>
+          )}
           {comments.map((c) => (
             <div key={c.id} className="group flex gap-2">
               <span
@@ -360,31 +420,18 @@ function CommentsSection({
                       onChange={(e) => setEditContent(e.target.value)}
                       className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-body text-[var(--color-text-primary)] outline-none"
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          api
-                            .put(`/calendars/${calendarId}/events/${eventId}/activities/${c.id}`, {
-                              content: editContent,
-                            })
-                            .then(() => {
-                              setEditingId(null);
-                              fetchComments();
-                            });
+                        if (e.key === 'Enter') saveEdit(c.id);
+                        if (e.key === 'Escape') {
+                          // Leaving the edit box is all this Escape means; let
+                          // it reach the modal and the whole editor would close.
+                          e.stopPropagation();
+                          setEditingId(null);
                         }
-                        if (e.key === 'Escape') setEditingId(null);
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        api
-                          .put(`/calendars/${calendarId}/events/${eventId}/activities/${c.id}`, {
-                            content: editContent,
-                          })
-                          .then(() => {
-                            setEditingId(null);
-                            fetchComments();
-                          });
-                      }}
+                      onClick={() => saveEdit(c.id)}
                       className="bg-[var(--color-accent)] px-2 py-1 text-caption text-white"
                       style={{ borderRadius: 'var(--radius-sm)' }}
                     >
@@ -450,6 +497,9 @@ function ChecklistSection({
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [newTitle, setNewTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // A list that could not be read says so where the list would be, rather than
+  // passing for an event that simply has no checklist.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
@@ -458,8 +508,9 @@ function ChecklistSection({
         `/calendars/${calendarId}/events/${eventId}/checklist`,
       );
       setItems(data);
-    } catch {
-      // ignore
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -479,8 +530,8 @@ function ChecklistSection({
       });
       setNewTitle('');
       await fetchItems();
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -492,8 +543,8 @@ function ChecklistSection({
         sortOrder: item.sortOrder,
       });
       await fetchItems();
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -501,8 +552,8 @@ function ChecklistSection({
     try {
       await api.delete(`/calendars/${calendarId}/events/${eventId}/checklist/${id}`);
       await fetchItems();
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -529,6 +580,10 @@ function ChecklistSection({
         <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('common.loading')}
         </p>
+      )}
+
+      {loadError && items.length === 0 && (
+        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
       )}
 
       {items.length > 0 && (
@@ -624,6 +679,9 @@ function AttachmentsSection({
   const t = useT();
   const [attachments, setAttachments] = useState<EventAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  // A listing that could not be read says so where the files would be: an
+  // empty section otherwise claims the event has no attachments.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchAttachments = useCallback(async () => {
@@ -632,8 +690,9 @@ function AttachmentsSection({
         `/calendars/${calendarId}/events/${eventId}/attachments`,
       );
       setAttachments(data);
-    } catch {
-      // ignore
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     }
   }, [calendarId, eventId]);
 
@@ -675,8 +734,8 @@ function AttachmentsSection({
         `/calendars/${calendarId}/events/${eventId}/attachments/${att.id}/download`,
       );
       window.open(downloadUrl, '_blank');
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -684,8 +743,8 @@ function AttachmentsSection({
     try {
       await api.delete(`/calendars/${calendarId}/events/${eventId}/attachments/${id}`);
       await fetchAttachments();
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(errorMessage(err));
     }
   };
 
@@ -712,6 +771,10 @@ function AttachmentsSection({
           {t('event.attachments')}
         </span>
       </div>
+
+      {loadError && attachments.length === 0 && (
+        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
+      )}
 
       {attachments.length > 0 && (
         <div className="mb-3 space-y-2">
@@ -820,6 +883,29 @@ interface FormState {
   recurrenceRule: RecurrenceRule | null;
 }
 
+/**
+ * Whether the viewport is at or past Tailwind's `sm` breakpoint.
+ *
+ * The modal's layout is CSS's job; only its motion is not expressible as a
+ * class, because the sheet is dragged by an inline transform while the desktop
+ * panel springs in on a keyframe, and the two would fight each other.
+ */
+function useIsDesktop(): boolean {
+  const query = '(min-width: 640px)';
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia?.(query);
+    if (!mql) return;
+    setIsDesktop(mql.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return isDesktop;
+}
+
 export function EventModal() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -922,6 +1008,7 @@ export function EventModal() {
   const reduceMotion =
     typeof window !== 'undefined' &&
     window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  const isDesktop = useIsDesktop();
 
   const [form, setForm] = useState<FormState>({
     title: '',
@@ -1099,12 +1186,6 @@ export function EventModal() {
     };
   }, [showEventModal, editingEvent]);
 
-  useEffect(() => {
-    if (showEventModal) {
-      setTimeout(() => titleRef.current?.focus(), 100);
-    }
-  }, [showEventModal]);
-
   // Recurring events are always opened as an expanded instance (composite id),
   // so editing or deleting one must ask whether it applies to just this
   // occurrence or the whole series.
@@ -1158,6 +1239,8 @@ export function EventModal() {
           toast.error(errorMessage(e));
           setScopePrompt(null);
           const { start, end } = visibleRange();
+          // The refusal has already been reported; a reload that also fails
+          // leaves the grid as it was rather than raising a second complaint.
           await fetchEvents(start, end).catch(() => {});
           return;
         }
@@ -1205,9 +1288,23 @@ export function EventModal() {
     [editingEvent, isRecurringInstance, deleteEvent, requestClose, saving, editable, t],
   );
 
+  // Escape belongs to the innermost surface that is open. The pickers portal
+  // their dropdowns out of this subtree and close themselves on Escape, so the
+  // modal stands down while one is up; the scope chooser is answered first too.
+  const dismiss = () => {
+    if (document.querySelector('.dropdown-panel')) return;
+    if (scopePrompt) {
+      setScopePrompt(null);
+      return;
+    }
+    requestClose();
+  };
+  const panelRef = useModalA11y<HTMLDivElement>(showEventModal, dismiss, titleRef);
+
   if (!showEventModal && !closing) return null;
 
-  // Shared form content used by both mobile and desktop layouts
+  // The body of the modal. It is mounted once and placed by CSS, so every
+  // section below asks the server for its contents once rather than per layout.
   const formContent = (
     <>
       {/* Header */}
@@ -2180,46 +2277,62 @@ export function EventModal() {
 
   return (
     <>
-      {/* Mobile: bottom sheet */}
-      <div className="sm:hidden">
-        <button
-          type="button"
-          aria-label={t('common.close')}
-          className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
-            closing ? 'backdrop-out' : ''
-          }`}
-          onClick={requestClose}
-        />
+      <button
+        type="button"
+        aria-label={t('common.close')}
+        className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
+          closing ? 'backdrop-out' : ''
+        }`}
+        onClick={requestClose}
+      />
+      {/* One panel for both layouts: CSS rests it on the bottom edge as a sheet
+          and centres it as a dialog from `sm` up. */}
+      <div className="pointer-events-none fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-4">
         <div
-          className="glass-surface-heavy bottom-sheet event-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col overflow-hidden"
-          style={{
-            // At rest, drop the transform entirely: a lingering transform makes
-            // this a containing block and mis-positions native <select> popups.
-            transform: closing
-              ? 'translateY(100%)'
-              : sheetDragY
-                ? `translateY(${sheetDragY}px)`
-                : sheetIn
-                  ? 'none'
-                  : 'translateY(100%)',
-            transition: sheetDragY
-              ? 'none'
-              : reduceMotion
-                ? 'none'
-                : closing
-                  ? 'transform 0.24s cubic-bezier(0.4, 0, 1, 1)'
-                  : 'transform 0.42s cubic-bezier(0.34, 1.5, 0.5, 1)',
-          }}
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={editingEvent ? t('event.editEvent') : t('event.createEvent')}
+          className={`glass-surface-heavy pointer-events-auto flex w-full flex-col overflow-hidden ${
+            isDesktop
+              ? `modal-panel ${
+                  closing ? 'modal-exit' : 'modal-enter'
+                } max-h-[90dvh] max-w-[480px] ring-1 ring-[var(--color-border)]`
+              : 'bottom-sheet event-sheet max-h-[92dvh]'
+          }`}
+          style={
+            isDesktop
+              ? undefined
+              : {
+                  // At rest, drop the transform entirely: a lingering transform makes
+                  // this a containing block and mis-positions native <select> popups.
+                  transform: closing
+                    ? 'translateY(100%)'
+                    : sheetDragY
+                      ? `translateY(${sheetDragY}px)`
+                      : sheetIn
+                        ? 'none'
+                        : 'translateY(100%)',
+                  transition: sheetDragY
+                    ? 'none'
+                    : reduceMotion
+                      ? 'none'
+                      : closing
+                        ? 'transform 0.24s cubic-bezier(0.4, 0, 1, 1)'
+                        : 'transform 0.42s cubic-bezier(0.34, 1.5, 0.5, 1)',
+                }
+          }
         >
           {/* Grab zone: drag down to hold/dismiss. Generous height for easy grab. */}
           <div
-            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing"
+            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing sm:hidden"
             onPointerDown={onSheetDown}
           >
             <div className="drag-handle mx-auto h-1.5 w-11 rounded-full bg-[var(--color-text-tertiary)] opacity-40" />
           </div>
           <div className="flex-1 overflow-y-auto">{formContent}</div>
-          {/* Sticky action bar (clears the home-indicator safe area) */}
+          {/* Sticky action bar (clears the home-indicator safe area, which is
+              zero on a desktop viewport and leaves a plain 1rem there) */}
           <div
             className="flex gap-3 border-t border-[var(--color-border)] px-6 pt-4"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)' }}
@@ -2241,47 +2354,6 @@ export function EventModal() {
                 {saving ? t('common.saving') : t('common.save')}
               </button>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop: centered modal */}
-      <div className="hidden sm:contents">
-        <button
-          type="button"
-          aria-label={t('common.close')}
-          className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
-            closing ? 'backdrop-out' : ''
-          }`}
-          onClick={requestClose}
-        />
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div
-            className={`glass-surface-heavy modal-panel ${
-              closing ? 'modal-exit' : 'modal-enter'
-            } pointer-events-auto flex w-full max-w-[480px] max-h-[90dvh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]`}
-          >
-            <div className="flex-1 overflow-y-auto">{formContent}</div>
-            {/* Action bar */}
-            <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
-              <button
-                type="button"
-                onClick={requestClose}
-                className="btn-secondary flex-1 py-3 text-default font-medium"
-              >
-                {editable ? t('common.cancel') : t('common.close')}
-              </button>
-              {editable && (
-                <button
-                  type="button"
-                  onClick={() => handleSave()}
-                  disabled={saving || !form.title.trim()}
-                  className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
-                >
-                  {saving ? t('common.saving') : t('common.save')}
-                </button>
-              )}
-            </div>
           </div>
         </div>
       </div>
