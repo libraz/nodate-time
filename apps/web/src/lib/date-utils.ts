@@ -88,10 +88,6 @@ export function getWeekDays(date: DateTime, zone?: string): DateTime[] {
   return days;
 }
 
-export function isSameDay(a: DateTime, b: DateTime): boolean {
-  return a.hasSame(b, 'day');
-}
-
 /**
  * True when `date` falls on today's date in `zone` (the local zone when `zone`
  * is empty).
@@ -143,18 +139,6 @@ export function fromISOInZone(iso: string, zone?: string): DateTime {
   return DateTime.fromISO(iso);
 }
 
-export function formatDateKey(date: DateTime): string {
-  return date.toFormat('yyyy-MM-dd');
-}
-
-export function getDayStart(date: DateTime): number {
-  return date.startOf('day').toMillis();
-}
-
-export function getDayEnd(date: DateTime): number {
-  return date.endOf('day').toMillis() + 1;
-}
-
 export function getWeekdayLabel(dayIndex: number, locale: Locale = 'ja'): string {
   const labels = locale === 'en' ? WEEKDAY_LABELS_EN : WEEKDAY_LABELS_JA;
   return labels[dayIndex] ?? '';
@@ -165,14 +149,6 @@ export function formatMonthYear(date: DateTime, locale: Locale = 'ja'): string {
     return `${MONTH_NAMES_EN[date.month - 1]} ${date.year}`;
   }
   return `${date.year}年${date.month}月`;
-}
-
-export function toDateTime(date: Date): DateTime {
-  return DateTime.fromJSDate(date);
-}
-
-export function toJsDate(dt: DateTime): Date {
-  return dt.toJSDate();
 }
 
 export function jsDayOfWeek(dt: DateTime): number {
