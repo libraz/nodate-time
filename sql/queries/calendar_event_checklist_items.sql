@@ -1,6 +1,9 @@
+-- ListChecklistItems names the workspace as well as the event: the index is
+-- (workspace_id, event_id, sort_weight), and a query that skips its leading
+-- column cannot use it at all.
 -- name: ListChecklistItems :many
 SELECT * FROM calendar_event_checklist_items
-WHERE event_id = ? AND enabled = TRUE
+WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
 ORDER BY sort_weight, id;
 
 -- name: GetChecklistItemByPublicID :one

@@ -146,9 +146,14 @@ SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
-WHERE ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
+WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 ORDER BY ec.created_at
 `
+
+type ListEventCommentsParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	EventID     sql.NullInt32 `json:"eventId"`
+}
 
 type ListEventCommentsRow struct {
 	ID              uint32         `json:"id"`
@@ -169,8 +174,12 @@ type ListEventCommentsRow struct {
 	UserPublicID    []byte         `json:"userPublicId"`
 }
 
-func (q *Queries) ListEventComments(ctx context.Context, eventID sql.NullInt32) ([]ListEventCommentsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listEventComments, eventID)
+// ListEventComments names the workspace as well as the event because the
+// index over this table is (workspace_id, event_id, created_at). Leaving the
+// leading column out makes the whole index unusable, so opening an event --
+// the most frequent read there is -- scanned every comment on the deployment.
+func (q *Queries) ListEventComments(ctx context.Context, arg ListEventCommentsParams) ([]ListEventCommentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEventComments, arg.WorkspaceID, arg.EventID)
 	if err != nil {
 		return nil, err
 	}

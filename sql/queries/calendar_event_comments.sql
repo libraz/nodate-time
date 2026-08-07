@@ -1,9 +1,13 @@
+-- ListEventComments names the workspace as well as the event because the
+-- index over this table is (workspace_id, event_id, created_at). Leaving the
+-- leading column out makes the whole index unusable, so opening an event --
+-- the most frequent read there is -- scanned every comment on the deployment.
 -- name: ListEventComments :many
 SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
-WHERE ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
+WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 ORDER BY ec.created_at;
 
 -- name: CreateEventComment :execresult

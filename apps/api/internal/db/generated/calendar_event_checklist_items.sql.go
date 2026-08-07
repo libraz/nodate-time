@@ -64,12 +64,20 @@ func (q *Queries) GetChecklistItemByPublicID(ctx context.Context, publicID []byt
 
 const listChecklistItems = `-- name: ListChecklistItems :many
 SELECT id, public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_checklist_items
-WHERE event_id = ? AND enabled = TRUE
+WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
 ORDER BY sort_weight, id
 `
 
-func (q *Queries) ListChecklistItems(ctx context.Context, eventID uint32) ([]CalendarEventChecklistItem, error) {
-	rows, err := q.db.QueryContext(ctx, listChecklistItems, eventID)
+type ListChecklistItemsParams struct {
+	WorkspaceID uint32 `json:"workspaceId"`
+	EventID     uint32 `json:"eventId"`
+}
+
+// ListChecklistItems names the workspace as well as the event: the index is
+// (workspace_id, event_id, sort_weight), and a query that skips its leading
+// column cannot use it at all.
+func (q *Queries) ListChecklistItems(ctx context.Context, arg ListChecklistItemsParams) ([]CalendarEventChecklistItem, error) {
+	rows, err := q.db.QueryContext(ctx, listChecklistItems, arg.WorkspaceID, arg.EventID)
 	if err != nil {
 		return nil, err
 	}

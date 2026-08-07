@@ -6,6 +6,17 @@ INNER JOIN users u ON u.id = a.user_id
 WHERE a.event_id = ? AND a.enabled = TRUE
 ORDER BY a.created_at;
 
+-- ListEventAttendeesByEvents answers for a whole listing in one round trip.
+-- Every event in a month carries a participant list, and asking per event made
+-- rendering a calendar cost one query per event on it.
+-- name: ListEventAttendeesByEvents :many
+SELECT a.event_id, a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
+       u.display_name, u.avatar_url
+FROM calendar_event_attendees a
+INNER JOIN users u ON u.id = a.user_id
+WHERE a.event_id IN (sqlc.slice('event_ids')) AND a.enabled = TRUE
+ORDER BY a.event_id, a.created_at;
+
 -- AddEventAttendee revives a removed row rather than inserting beside it,
 -- so re-adding somebody does not leave two rows for one person.
 -- name: AddEventAttendee :exec

@@ -537,6 +537,12 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		seriesIDs := make([]uint32, 0, len(recurringRows))
+		for _, e := range recurringRows {
+			seriesIDs = append(seriesIDs, e.ID)
+		}
+		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+
 		truncated := false
 		for _, e := range recurringRows {
 			if !publishedToLink(e) {
@@ -547,7 +553,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 				break
 			}
 			parentID := pubIDToHex(e.PublicID)
-			for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+			for _, inst := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
 				// This endpoint takes no token beyond the link itself, so the
 				// cost of one request is whatever the link's holder asks for.
 				if len(results) >= daterange.MaxInstances {

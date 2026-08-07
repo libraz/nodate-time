@@ -29,6 +29,45 @@ type OverrideLoader interface {
 	ListRecurrenceOverridesByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]generated.CalendarEvent, error)
 }
 
+// BatchOverrideLoader reads them for several series at once.
+type BatchOverrideLoader interface {
+	ListRecurrenceOverridesByParents(ctx context.Context, parentIDs []sql.NullInt32) ([]generated.CalendarEvent, error)
+}
+
+// Overrides holds the changed occurrences of a set of series, keyed by the
+// series they belong to.
+type Overrides map[uint32][]generated.CalendarEvent
+
+// LoadOverrides reads every series' overrides in one round trip.
+//
+// A listing expands each series in the window, so loading per series made the
+// query count a function of how many recurring events a calendar holds. A
+// failure yields an empty set rather than an error: the caller falls back to
+// showing the series as the rule describes it, which is what it did before
+// any override existed.
+func LoadOverrides(ctx context.Context, loader BatchOverrideLoader, seriesIDs []uint32) Overrides {
+	if len(seriesIDs) == 0 {
+		return Overrides{}
+	}
+	keys := make([]sql.NullInt32, 0, len(seriesIDs))
+	for _, id := range seriesIDs {
+		keys = append(keys, sql.NullInt32{Int32: int32(id), Valid: true})
+	}
+	rows, err := loader.ListRecurrenceOverridesByParents(ctx, keys)
+	if err != nil {
+		return Overrides{}
+	}
+	out := make(Overrides, len(seriesIDs))
+	for _, r := range rows {
+		if !r.RecurrenceParentID.Valid {
+			continue
+		}
+		parent := uint32(r.RecurrenceParentID.Int32)
+		out[parent] = append(out[parent], r)
+	}
+	return out
+}
+
 type Instance struct {
 	Event      generated.CalendarEvent
 	Occurrence recurrence.Occurrence
@@ -45,7 +84,14 @@ type overrideSet struct {
 
 func loadOverrides(ctx context.Context, loader OverrideLoader, parentID uint32) overrideSet {
 	rows, err := loader.ListRecurrenceOverridesByParent(ctx, sql.NullInt32{Int32: int32(parentID), Valid: true})
-	if err != nil || len(rows) == 0 {
+	if err != nil {
+		return overrideSet{}
+	}
+	return indexOverrides(rows)
+}
+
+func indexOverrides(rows []generated.CalendarEvent) overrideSet {
+	if len(rows) == 0 {
 		return overrideSet{}
 	}
 	set := overrideSet{byInstant: make(map[int64]generated.CalendarEvent, len(rows))}
@@ -65,6 +111,9 @@ func inWindow(start, windowStart, windowEnd time.Time) bool {
 
 // ExpandRecurringEvent returns the occurrences of event between windowStart
 // and windowEnd, with cancellations removed and overrides substituted in.
+//
+// It reads this one series' overrides itself. A caller expanding several
+// series should load them together and use ExpandWithOverrides instead.
 func ExpandRecurringEvent(
 	ctx context.Context,
 	loader OverrideLoader,
@@ -75,13 +124,36 @@ func ExpandRecurringEvent(
 	if event.RecurrenceRule == nil || !event.StartAt.Valid || !event.EndAt.Valid {
 		return nil
 	}
+	return expand(event, loadOverrides(ctx, loader, event.ID), windowStart, windowEnd)
+}
+
+// ExpandWithOverrides is ExpandRecurringEvent over overrides already in hand,
+// so a listing reads them once for every series it is about to expand rather
+// than once per series.
+func ExpandWithOverrides(
+	event generated.CalendarEvent,
+	overrides []generated.CalendarEvent,
+	windowStart time.Time,
+	windowEnd time.Time,
+) []Instance {
+	if event.RecurrenceRule == nil || !event.StartAt.Valid || !event.EndAt.Valid {
+		return nil
+	}
+	return expand(event, indexOverrides(overrides), windowStart, windowEnd)
+}
+
+func expand(
+	event generated.CalendarEvent,
+	overrides overrideSet,
+	windowStart time.Time,
+	windowEnd time.Time,
+) []Instance {
 	rule := recurrence.ParseRule(*event.RecurrenceRule)
 	if rule == nil {
 		return nil
 	}
 
 	cancelled := recurrence.ParseExceptions(event.RecurrenceExceptions)
-	overrides := loadOverrides(ctx, loader, event.ID)
 	consumed := make(map[int64]bool, len(overrides.byInstant))
 
 	occurrences := recurrence.ExpandInZone(rule, event.StartAt.Time, event.EndAt.Time, windowStart, windowEnd, event.Timezone)

@@ -43,7 +43,7 @@ func TestOneEventsHistoryIsFoundByIndexNotByReadingTheLog(t *testing.T) {
 		WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.subject_public_id = ?
 		ORDER BY e.id DESC LIMIT 200`
 
-	keyUsed, rowsRead := explainOne(t, query, workspaceID, calendarID, subject)
+	keyUsed, rowsRead, _ := explainOne(t, query, workspaceID, calendarID, subject)
 	require.True(t, strings.Contains(keyUsed, "subject"),
 		"the subject history must be found through an index, got key=%q", keyUsed)
 	require.Less(t, rowsRead, int64(1000),
@@ -84,9 +84,10 @@ func seedSubjectHistory(t *testing.T, workspaceID, calendarID uint32, subject st
 	}
 }
 
-// explainOne reports the index the optimiser chose and how many rows it
-// expects to examine.
-func explainOne(t *testing.T, query string, args ...any) (string, int64) {
+// explainOne reports the index the optimiser chose, how many rows it expects
+// to examine, and what it says it will do beyond the lookup -- a sort it has
+// to perform itself being the part that does not show up in the row count.
+func explainOne(t *testing.T, query string, args ...any) (string, int64, string) {
 	t.Helper()
 	rows, err := testDB.Query("EXPLAIN "+query, args...)
 	require.NoError(t, err)
@@ -95,7 +96,7 @@ func explainOne(t *testing.T, query string, args ...any) (string, int64) {
 	cols, err := rows.Columns()
 	require.NoError(t, err)
 
-	var key string
+	var key, extra string
 	var examined int64
 	found := false
 	for rows.Next() {
@@ -113,11 +114,13 @@ func explainOne(t *testing.T, query string, args ...any) (string, int64) {
 				var n int64
 				_, _ = fmt.Sscanf(holders[i].String, "%d", &n)
 				examined = n
+			case "Extra":
+				extra = holders[i].String
 			}
 		}
 		found = true
 	}
 	require.NoError(t, rows.Err())
 	require.True(t, found, "EXPLAIN returned no rows")
-	return key, examined
+	return key, examined, extra
 }

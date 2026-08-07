@@ -35,7 +35,10 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListChecklistItems(ctx, evt.ID)
+		rows, err := deps.Queries.ListChecklistItems(ctx, generated.ListChecklistItemsParams{
+			WorkspaceID: deps.WorkspaceID,
+			EventID:     evt.ID,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

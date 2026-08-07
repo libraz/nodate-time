@@ -8,6 +8,7 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const addEventAttendee = `-- name: AddEventAttendee :exec
@@ -94,6 +95,69 @@ func (q *Queries) ListEventAttendees(ctx context.Context, eventID sql.NullInt32)
 	for rows.Next() {
 		var i ListEventAttendeesRow
 		if err := rows.Scan(
+			&i.UserID,
+			&i.Rsvp,
+			&i.CanEdit,
+			&i.UserPublicID,
+			&i.DisplayName,
+			&i.AvatarURL,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventAttendeesByEvents = `-- name: ListEventAttendeesByEvents :many
+SELECT a.event_id, a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
+       u.display_name, u.avatar_url
+FROM calendar_event_attendees a
+INNER JOIN users u ON u.id = a.user_id
+WHERE a.event_id IN (/*SLICE:event_ids*/?) AND a.enabled = TRUE
+ORDER BY a.event_id, a.created_at
+`
+
+type ListEventAttendeesByEventsRow struct {
+	EventID      sql.NullInt32              `json:"eventId"`
+	UserID       uint32                     `json:"userId"`
+	Rsvp         CalendarEventAttendeesRsvp `json:"rsvp"`
+	CanEdit      bool                       `json:"canEdit"`
+	UserPublicID []byte                     `json:"userPublicId"`
+	DisplayName  string                     `json:"displayName"`
+	AvatarURL    sql.NullString             `json:"avatarUrl"`
+}
+
+// ListEventAttendeesByEvents answers for a whole listing in one round trip.
+// Every event in a month carries a participant list, and asking per event made
+// rendering a calendar cost one query per event on it.
+func (q *Queries) ListEventAttendeesByEvents(ctx context.Context, eventIds []sql.NullInt32) ([]ListEventAttendeesByEventsRow, error) {
+	query := listEventAttendeesByEvents
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventAttendeesByEventsRow
+	for rows.Next() {
+		var i ListEventAttendeesByEventsRow
+		if err := rows.Scan(
+			&i.EventID,
 			&i.UserID,
 			&i.Rsvp,
 			&i.CanEdit,

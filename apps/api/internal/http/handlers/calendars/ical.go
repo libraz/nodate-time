@@ -250,11 +250,16 @@ func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, window ex
 	// Expansion goes through eventexpand so both departures from the rule are
 	// honored: cancelled occurrences stay out and changed ones carry their
 	// override's values, matching what the app displays.
+	seriesIDs := make([]uint32, 0, len(recurringRows))
+	for _, e := range recurringRows {
+		seriesIDs = append(seriesIDs, e.ID)
+	}
+	overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
 	for _, e := range recurringRows {
 		if e.RecurrenceRule == nil {
 			continue
 		}
-		for _, inst := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, window.start, window.end) {
+		for _, inst := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], window.start, window.end) {
 			if inst.IsOverride {
 				if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
 					continue
