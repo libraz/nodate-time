@@ -1517,6 +1517,35 @@ CREATE TABLE signin_states (
   KEY idx_signin_states_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='In-flight OAuth sign-in state';
 
+-- >>> calendar_event_comments_thread.sql
+-- ====================================
+-- calendar_event_comments — read a thread from its newest end without sorting
+--
+-- The contract's (workspace_id, event_id, created_at) index carries the order
+-- a thread is read in, and on a small table the optimizer uses it. Past a few
+-- tens of thousands of rows it stops: it intersects the event foreign key with
+-- the single-column deleted_at index instead, because it scores `deleted_at IS
+-- NULL` as matching a twentieth of the table when in practice it matches
+-- nearly all of it. The intersection looks cheaper by row count and is not --
+-- it discards the ordering, so the plan gains a filesort over every comment on
+-- the event, and LIMIT can no longer stop the scan early.
+--
+-- Nothing about the query changed; the table got bigger. That is the failure
+-- mode worth naming here, because it does not appear during development and
+-- arrives on whichever calendar first accumulates a long thread.
+--
+-- Spelling the whole predicate into one index settles it: workspace, event and
+-- enabled are equalities, `deleted_at IS NULL` is matched as one too, and
+-- created_at then supplies the order directly, so the read becomes a backward
+-- scan that stops at the page size. Trailing id makes the index cover the
+-- select as well, so no rows are visited at all.
+--
+-- It lives here rather than in core/ because the contract has already said
+-- what a comment is. This is one product's reading pattern over it.
+-- ====================================
+ALTER TABLE calendar_event_comments
+  ADD KEY idx_calendar_event_comments_thread (workspace_id, event_id, enabled, deleted_at, created_at, id);
+
 -- >>> events_subject.sql
 -- ====================================
 -- events.subject_public_id — product-layer index for one entity's history

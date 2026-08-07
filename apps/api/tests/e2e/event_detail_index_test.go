@@ -56,10 +56,17 @@ func TestOpeningAnEventReadsItsThreadWithoutSortingIt(t *testing.T) {
 		WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 		ORDER BY ec.created_at DESC, ec.id DESC LIMIT 51`
 	key, rows, extra := explainOne(t, comments, workspaceID, eventIDs[0])
-	require.Equal(t, "idx_calendar_event_comments_event", key,
+	require.Equal(t, "idx_calendar_event_comments_thread", key,
 		"an event's comments must come from the index that also holds their order")
+	// A comma-separated key here means an index merge, which is how this
+	// regressed once before: the optimizer intersected the event key with the
+	// one on deleted_at, scoring `IS NULL` as selective when nearly every row
+	// matches it. That plan reads fewer rows and sorts all of them, so it wins
+	// on the estimate and loses on the page.
 	require.NotContains(t, extra, "filesort",
 		"the thread is being sorted after the fact: %s", extra)
+	require.NotContains(t, extra, "intersect",
+		"the plan merged indexes instead of using the one that carries the order: %s", extra)
 	require.Less(t, rows, int64(events*perEvent/2),
 		"the plan still reads much of the table: %d rows for one event's comments", rows)
 
