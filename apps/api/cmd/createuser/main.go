@@ -30,7 +30,7 @@ import (
 
 func main() {
 	email := flag.String("email", "", "email address (required)")
-	password := flag.String("password", "", "plaintext password (required, min 8 chars)")
+	password := flag.String("password", "", "plaintext password (required, 8-128 characters)")
 	name := flag.String("name", "", "display name (defaults to the email local part)")
 	locale := flag.String("locale", "ja", "BCP 47 locale tag")
 	timezone := flag.String("timezone", "Asia/Tokyo", "IANA timezone")
@@ -44,12 +44,38 @@ func main() {
 	}
 }
 
+// reportSkipped closes out a -skip-existing run against an address that
+// already has an account. Nothing about the account is changed either way:
+// that flag says it is not this command's to rewrite. What the admin request
+// changes is the exit code -- a run that was asked for an administrator has
+// not done what it was asked unless the account already holds the grant, and
+// a seeding script reads a zero exit as though it had.
+func reportSkipped(ctx context.Context, queries *generated.Queries, existing generated.User, admin bool) error {
+	if !admin {
+		fmt.Printf("skipped %s (already exists)\n", existing.Email)
+		return nil
+	}
+	isAdmin, err := queries.IsInstanceAdmin(ctx, existing.ID)
+	if err != nil {
+		return fmt.Errorf("check instance admin: %w", err)
+	}
+	if isAdmin {
+		fmt.Printf("skipped %s (already exists, already an instance admin)\n", existing.Email)
+		return nil
+	}
+	return fmt.Errorf("skipped %s (already exists) and the requested admin rights were not "+
+		"granted: the account is not an instance admin. Grant them deliberately, or re-run "+
+		"without -skip-existing to see the account creation fail", existing.Email)
+}
+
 func run(email, password, name, locale, timezone string, admin, skipExisting bool) error {
 	if email == "" || password == "" {
 		return errors.New("-email and -password are required")
 	}
-	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters")
+	// An account this command writes is one the API then has to live with, so
+	// the password it accepts is the one /auth/register would have accepted.
+	if err := auth.ValidatePassword(password); err != nil {
+		return err
 	}
 	if name == "" {
 		name = email
@@ -88,10 +114,11 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 	queries := generated.New(db)
 
 	if skipExisting {
-		if _, err := queries.GetUserByEmail(ctx, email); err == nil {
-			fmt.Printf("skipped %s (already exists)\n", email)
-			return nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
+		existing, err := queries.GetUserByEmail(ctx, email)
+		switch {
+		case err == nil:
+			return reportSkipped(ctx, queries, existing, admin)
+		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("look up existing user: %w", err)
 		}
 	}
