@@ -12,6 +12,8 @@ interface PublicCalendar {
   name: string;
   color: string;
   joinable: boolean;
+  /** The link was a join link, but it has been followed as often as it allowed. */
+  spent: boolean;
 }
 
 interface PublicEvent {
@@ -319,6 +321,16 @@ function SharedCalendarView() {
             </div>
           ))}
         </div>
+
+        {/* A used-up join link still shows the calendar it named, so say why
+            the button is gone rather than leaving the visitor to guess. */}
+        {calendar.spent && (
+          <div className="bg-[var(--color-surface)] px-4 py-5 shadow-inner sm:px-6">
+            <p className="text-center text-body text-[var(--color-text-secondary)]">
+              {t('share.linkUsedUp')}
+            </p>
+          </div>
+        )}
 
         {/* Join section — hidden for public, read-only links that cannot be joined */}
         {calendar.joinable && (
