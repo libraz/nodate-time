@@ -890,8 +890,10 @@ export function CalendarsSection() {
   }, [selectedId, fetchMembers]);
 
   const members = (selectedId && membersMap[selectedId]) || [];
-  const myMembership = members.find((m) => m.email === me?.email);
-  const isAdmin = canManageRole(myMembership?.role);
+  // The caller's own role arrives with the calendar, so the invite section is
+  // gated before the member list it would otherwise have been read from.
+  const myRole = calendars.find((c) => c.id === selectedId)?.role;
+  const isAdmin = canManageRole(myRole);
 
   // Only a manager may read a calendar's invites. Asking regardless meant an
   // editor or viewer got a permission error for opening a screen, once per
@@ -900,8 +902,8 @@ export function CalendarsSection() {
     if (selectedId && isAdmin) loadInvites(selectedId);
     else setInvites([]);
   }, [selectedId, isAdmin, loadInvites]);
-  const amOwner = canOwn(myMembership?.role);
-  const roleOptions = assignableRoles(myMembership?.role);
+  const amOwner = canOwn(myRole);
+  const roleOptions = assignableRoles(myRole);
   const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   const handleRoleChange = async (member: Member, role: string) => {
@@ -919,7 +921,7 @@ export function CalendarsSection() {
   };
 
   const handleRemoveMember = async (member: Member) => {
-    const leaving = member.email === me?.email;
+    const leaving = member.id === me?.id;
     if (!confirm(leaving ? t('members.leaveConfirm') : t('members.removeConfirm'))) return;
     try {
       if (leaving) {
@@ -998,7 +1000,7 @@ export function CalendarsSection() {
         ) : (
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
             {members.map((m) => {
-              const isMe = m.email === me?.email;
+              const isMe = m.id === me?.id;
               const cannotChange = m.role === 'owner' && ownerCount <= 1;
               // An owner's role and membership are the owner's own business;
               // a manager sees the row without the controls.

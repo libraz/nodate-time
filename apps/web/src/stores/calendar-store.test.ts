@@ -32,6 +32,8 @@ function cal(id: string, overrides: Partial<Calendar> = {}): Calendar {
     coverUrl: '',
     createdAt: '',
     publicShared: false,
+    role: 'owner',
+    memberColor: '#47B2F7',
     ...overrides,
   };
 }
@@ -98,8 +100,8 @@ describe('fetchEvents', () => {
   it('aggregates events from every calendar and stamps the calendarId', async () => {
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
-        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
+        cal('cal-1', { name: 'A', color: '#000' }),
+        cal('cal-2', { name: 'B', color: '#111' }),
       ],
     });
     mockApi.get.mockImplementation(async (url: string) => {
@@ -190,12 +192,9 @@ describe('fetchCalendars', () => {
     expect(localStorage.getItem('tt_activeCalendarIds')).toBe('["cal-1","cal-2"]');
   });
 
-  it('keeps calendar loading successful when a member request fails', async () => {
+  it('does not ask for a member list per calendar', async () => {
     mockApi.get.mockImplementation(async (url: string) => {
       if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
-      if (url === '/calendars/cal-1/members') return [] as never;
-      if (url === '/calendars/cal-2/members') throw new Error('members failed');
-      if (url === '/calendars/cal-1/labels') return [] as never;
       return [] as never;
     });
 
@@ -203,8 +202,10 @@ describe('fetchCalendars', () => {
 
     const s = useCalendarStore.getState();
     expect(s.calendars.map((c) => c.id)).toEqual(['cal-1', 'cal-2']);
-    expect(s.memberErrors['cal-2']).toBe('members failed');
-    expect(s.memberErrors['cal-1']).toBeUndefined();
+    // The caller's role arrives with the calendar, so startup costs the same
+    // whether the account has two calendars or twenty.
+    expect(mockApi.get.mock.calls.map((c) => c[0])).not.toContain('/calendars/cal-1/members');
+    expect(mockApi.get.mock.calls.map((c) => c[0])).not.toContain('/calendars/cal-2/members');
   });
 
   it('records why the calendar list is missing instead of leaving an empty grid', async () => {
@@ -257,6 +258,8 @@ describe('retryFailedLoads', () => {
     });
 
     await useCalendarStore.getState().fetchCalendars();
+    await useCalendarStore.getState().fetchMembers('cal-1');
+    await useCalendarStore.getState().fetchMembers('cal-2');
     expect(useCalendarStore.getState().memberErrors['cal-2']).toBe('members failed');
 
     mockApi.get.mockClear();
@@ -276,8 +279,8 @@ describe('deleteCalendar', () => {
     mockApi.delete.mockResolvedValue(undefined as never);
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
-        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
+        cal('cal-1', { name: 'A', color: '#000' }),
+        cal('cal-2', { name: 'B', color: '#111' }),
       ],
       events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
       memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
@@ -302,8 +305,8 @@ describe('leaveCalendar', () => {
     mockApi.delete.mockResolvedValue(undefined as never);
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
-        { id: 'cal-2', name: 'B', color: '#111', coverUrl: '', createdAt: '', publicShared: false },
+        cal('cal-1', { name: 'A', color: '#000' }),
+        cal('cal-2', { name: 'B', color: '#111' }),
       ],
       events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
       memos: [memo('m1', 'cal-1'), memo('m2', 'cal-2')],
@@ -329,9 +332,7 @@ describe('leaveCalendar', () => {
   it('keeps the calendar when the departure itself fails', async () => {
     mockApi.delete.mockRejectedValue(new Error('nope'));
     useCalendarStore.setState({
-      calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
-      ],
+      calendars: [cal('cal-1', { name: 'A', color: '#000' })],
       activeCalendarIds: ['cal-1'],
     });
 

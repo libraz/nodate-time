@@ -1,5 +1,5 @@
 import type { TranslationKey } from '@/i18n';
-import type { Attendee, CalendarEvent, Member } from '@/types/calendar';
+import type { Attendee, Calendar, CalendarEvent, Member } from '@/types/calendar';
 
 /**
  * Calendar member roles, mirroring the shared schema's ordering:
@@ -173,6 +173,9 @@ export function membershipFor(
  * Returns undefined when there is no role to report -- either because the
  * membership is unknown or because there is none. Callers that need to tell
  * those apart want {@link membershipFor}.
+ *
+ * Callers holding the calendar list want {@link roleOnCalendar} instead: the
+ * server states the role there, so there is no account to recognise.
  */
 export function roleForCalendar(
   members: Member[] | undefined,
@@ -180,4 +183,26 @@ export function roleForCalendar(
 ): Role | undefined {
   const membership = membershipFor(members, userEmail);
   return membership.status === 'member' ? membership.role : undefined;
+}
+
+/**
+ * The signed-in user's own role on a calendar, as the server reported it with
+ * the calendar itself.
+ *
+ * The server resolves the caller's membership to answer the request at all,
+ * so the role travels with the calendar and there is no account to recognise
+ * here. That matters: the member list carries an address only on the rows the
+ * caller is allowed to see one on, and an address is not an identity in any
+ * case.
+ *
+ * Returns undefined when the calendar is not in the list: one the caller is
+ * not a member of is not there to have a role on.
+ */
+export function roleOnCalendar(
+  calendars: readonly Pick<Calendar, 'id' | 'role'>[] | undefined,
+  calendarId: string | undefined,
+): Role | undefined {
+  if (!calendars || !calendarId) return undefined;
+  const calendar = calendars.find((c) => c.id === calendarId);
+  return calendar?.role ? (calendar.role as Role) : undefined;
 }

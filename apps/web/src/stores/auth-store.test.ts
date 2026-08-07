@@ -142,7 +142,16 @@ describe('logout', () => {
     localStorage.setItem('unrelated', 'keep');
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+        {
+          id: 'cal-1',
+          name: 'A',
+          color: '#000',
+          coverUrl: '',
+          createdAt: '',
+          publicShared: false,
+          role: 'owner',
+          memberColor: '#000',
+        },
       ],
       events: [],
       memos: [],
@@ -193,7 +202,16 @@ describe('logout', () => {
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
     useCalendarStore.setState({
       calendars: [
-        { id: 'cal-1', name: 'A', color: '#000', coverUrl: '', createdAt: '', publicShared: false },
+        {
+          id: 'cal-1',
+          name: 'A',
+          color: '#000',
+          coverUrl: '',
+          createdAt: '',
+          publicShared: false,
+          role: 'owner',
+          memberColor: '#000',
+        },
       ],
       events: [],
       memos: [],

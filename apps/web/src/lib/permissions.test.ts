@@ -13,6 +13,7 @@ import {
   ROLE_OPTIONS,
   roleForCalendar,
   roleLabelKey,
+  roleOnCalendar,
 } from './permissions';
 
 describe('invite roles', () => {
@@ -129,6 +130,31 @@ describe('roleForCalendar', () => {
   it('reports unknown rather than guessing when members are not loaded', () => {
     expect(roleForCalendar(undefined, 'a@example.com')).toBeUndefined();
     expect(roleForCalendar(members, undefined)).toBeUndefined();
+  });
+});
+
+describe('roleOnCalendar', () => {
+  const calendars = [
+    { id: 'cal-1', role: 'owner' },
+    { id: 'cal-2', role: 'viewer' },
+  ];
+
+  it('reports the role the server stated for the calendar', () => {
+    expect(roleOnCalendar(calendars, 'cal-1')).toBe('owner');
+    expect(roleOnCalendar(calendars, 'cal-2')).toBe('viewer');
+  });
+
+  it('does not fall back to the role of another calendar', () => {
+    // Each membership stands alone: administering one calendar says nothing
+    // about the next one, and a lookup that missed used to leave the caller
+    // holding whatever the member list happened to answer.
+    expect(canManage(roleOnCalendar(calendars, 'cal-2'))).toBe(false);
+  });
+
+  it('has nothing to report for a calendar the caller is not on', () => {
+    expect(roleOnCalendar(calendars, 'cal-3')).toBeUndefined();
+    expect(roleOnCalendar(undefined, 'cal-1')).toBeUndefined();
+    expect(roleOnCalendar(calendars, undefined)).toBeUndefined();
   });
 });
 
