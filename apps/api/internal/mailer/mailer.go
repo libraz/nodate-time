@@ -2,9 +2,12 @@ package mailer
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,7 +51,16 @@ type SMTPConfig struct {
 	Username string
 	Password string
 	From     string
+	// Timeout bounds one whole SMTP conversation. Zero selects
+	// defaultSMTPTimeout.
+	Timeout time.Duration
 }
+
+// defaultSMTPTimeout bounds a conversation when neither the config nor the
+// caller's context sets a shorter one. A relay that accepts the connection and
+// then goes silent would otherwise hold the sender for the OS TCP timeout,
+// which is minutes.
+const defaultSMTPTimeout = 20 * time.Second
 
 // SMTPMailer sends mail via a real SMTP server using STARTTLS when the server
 // advertises it (the common submission setup on port 587).
@@ -56,12 +68,13 @@ type SMTPMailer struct {
 	cfg SMTPConfig
 }
 
-func (m SMTPMailer) Send(_ context.Context, msg Message) error {
-	addr := fmt.Sprintf("%s:%d", m.cfg.Host, m.cfg.Port)
-	var auth smtp.Auth
-	if m.cfg.Username != "" {
-		auth = smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)
+func (m SMTPMailer) Send(ctx context.Context, msg Message) error {
+	timeout := m.cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultSMTPTimeout
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// Build a minimal RFC 5322 message. Header values are sanitized to prevent
 	// header injection via attacker-controlled recipient/subject.
@@ -79,10 +92,79 @@ func (m SMTPMailer) Send(_ context.Context, msg Message) error {
 	b.WriteString("\r\n")
 	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
 
-	if err := smtp.SendMail(addr, auth, m.cfg.From, []string{msg.To}, []byte(b.String())); err != nil {
+	if err := m.deliver(ctx, msg.To, []byte(b.String())); err != nil {
+		// A context that ended mid-conversation surfaces as whatever I/O error
+		// the connection reported; report the cause the caller can act on.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("smtp send: %w", ctxErr)
+		}
 		return fmt.Errorf("smtp send: %w", err)
 	}
 	return nil
+}
+
+// deliver runs the SMTP conversation under ctx. net/smtp has no context-aware
+// API, so ctx is enforced on the connection instead: its deadline covers every
+// read and write, and a cancellation closes the connection, which is the only
+// thing that unblocks a call already waiting on the relay.
+func (m SMTPMailer) deliver(ctx context.Context, to string, body []byte) error {
+	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", addr, err)
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return fmt.Errorf("set deadline: %w", err)
+		}
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.Close()
+		case <-done:
+		}
+	}()
+
+	c, err := smtp.NewClient(conn, m.cfg.Host)
+	if err != nil {
+		return fmt.Errorf("greeting: %w", err)
+	}
+	defer c.Close()
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: m.cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("starttls: %w", err)
+		}
+	}
+	if m.cfg.Username != "" {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err := c.Auth(smtp.PlainAuth("", m.cfg.Username, m.cfg.Password, m.cfg.Host)); err != nil {
+				return fmt.Errorf("auth: %w", err)
+			}
+		}
+	}
+	if err := c.Mail(m.cfg.From); err != nil {
+		return fmt.Errorf("mail from: %w", err)
+	}
+	if err := c.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to: %w", err)
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("data: %w", err)
+	}
+	if _, err := w.Write(body); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close body: %w", err)
+	}
+	return c.Quit()
 }
 
 // sanitizeHeader strips CR/LF so a value cannot inject additional headers.

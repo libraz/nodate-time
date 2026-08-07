@@ -85,14 +85,15 @@ func main() {
 	defer cancelCleanup()
 	cleanup.Run(cleanupCtx, queries, storageClient, 15*time.Minute)
 
-	// Build app router
-	mailerClient := mailer.New(mailer.SMTPConfig{
+	// Build app router. Mail goes out through a dispatcher so a slow relay
+	// costs a background goroutine instead of the request that triggered it.
+	mailerClient := mailer.NewDispatcher(mailer.New(mailer.SMTPConfig{
 		Host:     cfg.SMTPHost,
 		Port:     cfg.SMTPPort,
 		Username: cfg.SMTPUsername,
 		Password: cfg.SMTPPassword,
 		From:     cfg.SMTPFrom,
-	}, cfg.IsDev())
+	}, cfg.IsDev()), mailer.DispatcherOptions{})
 	oauthCfg := users.OAuthConfig{
 		RedirectBase: cfg.APIPublic,
 		Google: users.OAuthProviderConfig{
@@ -184,6 +185,19 @@ func main() {
 		if err := srv.Shutdown(ctx); err != nil {
 			slog.Error("shutdown error", "error", err)
 			os.Exit(1)
+		}
+		// Give mail already handed to the dispatcher a chance to leave, but do
+		// not let it hold shutdown open: an undelivered link is recoverable by
+		// asking for another one, a process that will not exit is not.
+		drained := make(chan struct{})
+		go func() {
+			mailerClient.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+		case <-time.After(5 * time.Second):
+			slog.Warn("shutting down with mail still in flight")
 		}
 		slog.Info("server stopped")
 	}

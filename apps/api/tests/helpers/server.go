@@ -17,6 +17,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
+	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
@@ -105,7 +106,7 @@ func TestWorkspacePublicID(db *sql.DB) string {
 	return u.String()
 }
 
-func buildHandler(db *sql.DB, mc *CapturingMailer, sc *storage.Client) *router.Deps {
+func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client) *router.Deps {
 	queries := generated.New(db)
 	ws := TestWorkspace(queries)
 	return &router.Deps{
@@ -145,10 +146,33 @@ func LoopbackProxies() []netip.Prefix {
 	}
 }
 
+// NewTestServerWithMailer boots a test server that sends through the given
+// mailer, for a test about delivery itself rather than about message content.
+// The returned server has no CapturingMailer -- the test brought its own.
+func NewTestServerWithMailer(t *testing.T, db *sql.DB, m mailer.Mailer) *TestServer {
+	t.Helper()
+	sc, bucket, err := newTestStorage(context.Background())
+	if err != nil {
+		t.Fatalf("storage init: %v", err)
+	}
+
+	deps := buildHandler(db, m, sc)
+	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
+	t.Cleanup(func() { srv.Close() })
+
+	return &TestServer{
+		BaseURL: srv.URL,
+		Server:  srv,
+		DB:      db,
+		Storage: sc,
+		Bucket:  bucket,
+	}
+}
+
 // NewTestServer boots an httptest.Server with the full router against a real DB.
 func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	t.Helper()
-	mc := &CapturingMailer{}
+	mc := NewCapturingMailer()
 	sc, bucket, err := newTestStorage(context.Background())
 	if err != nil {
 		t.Fatalf("storage init: %v", err)
@@ -216,7 +240,7 @@ func OpenTestDB(t *testing.T) *sql.DB {
 
 // NewTestServerForMain is like NewTestServer but for use in TestMain (no *testing.T).
 func NewTestServerForMain(db *sql.DB) *TestServer {
-	mc := &CapturingMailer{}
+	mc := NewCapturingMailer()
 	sc, bucket, err := newTestStorage(context.Background())
 	if err != nil {
 		// We deliberately do not abort the process — when MinIO is not running
