@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Calendar, Member } from '@/types/calendar';
 
@@ -76,16 +76,18 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 import { api } from '@/lib/api';
-import { CalendarsSection } from './settings';
+import { AllowedEmailsSection, CalendarsSection } from './settings';
 
 const apiGet = vi.mocked(api.get);
+const apiPost = vi.mocked(api.post);
 
-function member(role: string, email = 'me@example.com'): Member {
-  return { id: 'm1', name: 'Me', email, role, color: '#000' } as Member;
+function member(role: string, email = 'me@example.com', id = 'm1', name = 'Me'): Member {
+  return { id, name, email, role, color: '#000' } as Member;
 }
 
 beforeEach(() => {
   apiGet.mockReset();
+  apiPost.mockReset();
   apiGet.mockResolvedValue([]);
 });
 
@@ -138,6 +140,92 @@ describe('CalendarsSection invites', () => {
 
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('/calendars/cal-1/invites')),
+    );
+  });
+});
+
+/**
+ * You manage other members, not yourself. The server refuses a self role
+ * change outright, so a picker on your own row could only ever produce an
+ * error message for having used a control the screen offered.
+ */
+describe('CalendarsSection own membership', () => {
+  function row(name: string) {
+    return screen.getByText(name).closest('li') as HTMLElement;
+  }
+
+  beforeEach(() => {
+    calendarState.calendars = [calendar('owner')];
+    // Two owners, so the last-owner rule is not what hides the control.
+    calendarState.membersMap = {
+      'cal-1': [
+        member('owner', 'me@example.com', 'u1', 'Me'),
+        member('owner', 'other@example.com', 'm2', 'Other'),
+      ],
+    };
+  });
+
+  it('offers no role picker on the signed-in user own row', async () => {
+    render(<CalendarsSection />);
+
+    await waitFor(() => expect(screen.getByText('Me')).toBeTruthy());
+    expect(within(row('Me')).queryByRole('button', { name: 'members.roleOwner' })).toBeNull();
+  });
+
+  it('still offers one on another member row', async () => {
+    render(<CalendarsSection />);
+
+    await waitFor(() => expect(screen.getByText('Other')).toBeTruthy());
+    expect(within(row('Other')).getByRole('button', { name: 'members.roleOwner' })).toBeTruthy();
+  });
+});
+
+/**
+ * An administrator states why an address is excepted from the domain
+ * restriction. The list is what makes that statement worth typing, so the
+ * value has to be sent and read back under the same name the server uses.
+ */
+describe('AllowedEmailsSection', () => {
+  it('shows the reason stored against an allowed address', async () => {
+    apiGet.mockResolvedValue({
+      allowedDomains: ['example.com'],
+      restricted: true,
+      emails: [
+        {
+          id: '0198f0c2-0000-7000-8000-000000000001',
+          email: 'contractor@gmail.com',
+          reason: 'contractor until March',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    render(<AllowedEmailsSection />);
+
+    await waitFor(() => expect(screen.getByText('contractor@gmail.com')).toBeTruthy());
+    expect(screen.getByText('contractor until March')).toBeTruthy();
+  });
+
+  it('sends the typed reason under the name the server stores it as', async () => {
+    apiGet.mockResolvedValue({ allowedDomains: [], restricted: false, emails: [] });
+    apiPost.mockResolvedValue({});
+
+    render(<AllowedEmailsSection />);
+
+    const add = await screen.findByRole('button', { name: 'settings.adminAllowedEmailsAdd' });
+    fireEvent.change(screen.getByPlaceholderText('settings.adminAllowedEmailsEmailPlaceholder'), {
+      target: { value: 'contractor@gmail.com' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('settings.adminAllowedEmailsNotePlaceholder'), {
+      target: { value: 'contractor until March' },
+    });
+    fireEvent.submit(add.closest('form') as HTMLElement);
+
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith('/admin/allowed-emails', {
+        email: 'contractor@gmail.com',
+        reason: 'contractor until March',
+      }),
     );
   });
 });

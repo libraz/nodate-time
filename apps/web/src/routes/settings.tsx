@@ -1005,6 +1005,9 @@ export function CalendarsSection() {
               // An owner's role and membership are the owner's own business;
               // a manager sees the row without the controls.
               const mayTouch = isAdmin && (m.role !== 'owner' || amOwner);
+              // You manage other members, not yourself: the server refuses a
+              // self role change, so offering the picker only produced an error.
+              const canChangeRole = mayTouch && !isMe && !cannotChange;
               return (
                 <li key={m.id} className="flex items-center gap-3 py-3">
                   <span
@@ -1027,7 +1030,7 @@ export function CalendarsSection() {
                       {m.email}
                     </p>
                   </div>
-                  {mayTouch && !cannotChange ? (
+                  {canChangeRole ? (
                     <CustomSelect
                       value={m.role}
                       onChange={(v) => handleRoleChange(m, v)}
@@ -1365,9 +1368,9 @@ function AdminSection() {
 }
 
 interface AllowedEmail {
-  id: number;
+  id: string;
   email: string;
-  note: string;
+  reason: string;
   createdAt: string;
 }
 
@@ -1377,11 +1380,11 @@ interface AllowedEmailsResponse {
   emails: AllowedEmail[];
 }
 
-function AllowedEmailsSection() {
+export function AllowedEmailsSection() {
   const t = useT();
   const [data, setData] = useState<AllowedEmailsResponse | null>(null);
   const [email, setEmail] = useState('');
-  const [note, setNote] = useState('');
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -1401,9 +1404,9 @@ function AllowedEmailsSection() {
     if (!email.trim()) return;
     setSaving(true);
     try {
-      await api.post('/admin/allowed-emails', { email: email.trim(), note: note.trim() });
+      await api.post('/admin/allowed-emails', { email: email.trim(), reason: reason.trim() });
       setEmail('');
-      setNote('');
+      setReason('');
       await refresh();
       toast.success(t('panel.updated'));
     } catch (err) {
@@ -1413,7 +1416,7 @@ function AllowedEmailsSection() {
     }
   };
 
-  const remove = async (id: number) => {
+  const remove = async (id: string) => {
     try {
       await api.delete(`/admin/allowed-emails/${id}`);
       await refresh();
@@ -1446,8 +1449,8 @@ function AllowedEmailsSection() {
         />
         <input
           type="text"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
           placeholder={t('settings.adminAllowedEmailsNotePlaceholder')}
           className="input-modern min-w-[160px] flex-1"
         />
@@ -1468,9 +1471,9 @@ function AllowedEmailsSection() {
                 <p className="truncate text-default text-[var(--color-text-primary)]">
                   {row.email}
                 </p>
-                {row.note && (
+                {row.reason && (
                   <p className="truncate text-footnote text-[var(--color-text-tertiary)]">
-                    {row.note}
+                    {row.reason}
                   </p>
                 )}
               </div>
