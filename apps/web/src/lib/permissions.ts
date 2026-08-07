@@ -103,6 +103,35 @@ export function canManage(role: string | undefined | null): boolean {
 }
 
 /**
+ * Returns true when the caller may take this comment off the thread.
+ *
+ * Comments are open to every member of a shared calendar, so removal has to
+ * reach further than authorship: otherwise the only remedy for something
+ * posted on a family calendar is deleting the event it hangs off. Rewriting
+ * stays with the author -- see {@link canEditComment}. This mirrors the
+ * server's rule.
+ */
+export function canDeleteComment(
+  comment: { userPublicId: string },
+  role: string | undefined | null,
+  myUserId: string | undefined,
+): boolean {
+  return canEditComment(comment, myUserId) || canManage(role);
+}
+
+/**
+ * Returns true when the caller may rewrite this comment. Only its author may:
+ * taking words off the wall and putting different words in someone's mouth
+ * are not the same power.
+ */
+export function canEditComment(
+  comment: { userPublicId: string },
+  myUserId: string | undefined,
+): boolean {
+  return !!myUserId && comment.userPublicId === myUserId;
+}
+
+/**
  * Returns true when the role may grant or revoke ownership, remove an owner,
  * and delete the calendar. Managing membership does not carry these.
  */

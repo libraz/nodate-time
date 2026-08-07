@@ -260,10 +260,18 @@ func mapOverrideInstance(master, child generated.CalendarEvent, calPubID []byte,
 // eventAttendees reads the participant rows once and returns both shapes the
 // response carries: the id-only list, which is also the write format, and the
 // per-participant state that only a read can tell you.
-func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, []AttendeeResponse) {
+//
+// A failed read is reported rather than rendered as "nobody is attending". The
+// participant list is also the write format, so a client that receives an
+// empty one and later saves the event sends that emptiness back as the
+// authoritative list and every attendee is removed.
+func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, []AttendeeResponse, error) {
 	rows, err := deps.Queries.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(eventID), Valid: true})
-	if err != nil || len(rows) == 0 {
-		return []string{}, []AttendeeResponse{}
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(rows) == 0 {
+		return []string{}, []AttendeeResponse{}, nil
 	}
 	ids := make([]string, 0, len(rows))
 	attendees := make([]AttendeeResponse, 0, len(rows))
@@ -276,12 +284,17 @@ func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, [
 			CanEdit: p.CanEdit,
 		})
 	}
-	return ids, attendees
+	return ids, attendees, nil
 }
 
 // setAttendees fills both attendee-derived fields of a response from one read.
-func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID uint32) {
-	resp.Participants, resp.Attendees = eventAttendees(ctx, deps, eventID)
+func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID uint32) error {
+	participants, attendees, err := eventAttendees(ctx, deps, eventID)
+	if err != nil {
+		return err
+	}
+	resp.Participants, resp.Attendees = participants, attendees
+	return nil
 }
 
 type eventParticipant struct {
@@ -676,7 +689,9 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		var results []EventResponse
 		for _, e := range rows {
 			ev := mapEvent(e, cal.PublicID)
-			setAttendees(ctx, deps, &ev, e.ID)
+			if err := setAttendees(ctx, deps, &ev, e.ID); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			decorate(ctx, deps, &ev, e, cal.ID, userCache, colorCache)
 			results = append(results, ev)
 		}
@@ -696,7 +711,10 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				truncated = true
 				break
 			}
-			masterParticipants, masterAttendees := eventAttendees(ctx, deps, e.ID)
+			masterParticipants, masterAttendees, err := eventAttendees(ctx, deps, e.ID)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
 				// The window bounds one series; the number of series does not
 				// bound itself, and every one of them expands per occurrence.
@@ -706,7 +724,9 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				}
 				if expanded.IsOverride {
 					inst := mapOverrideInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
-					setAttendees(ctx, deps, &inst, expanded.Event.ID)
+					if err := setAttendees(ctx, deps, &inst, expanded.Event.ID); err != nil {
+						return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+					}
 					decorate(ctx, deps, &inst, expanded.Event, cal.ID, userCache, colorCache)
 					results = append(results, inst)
 					continue
@@ -768,7 +788,9 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				} else {
 					resp = mapRecurringInstance(evt, cal.PublicID, expanded.Occurrence)
 				}
-				setAttendees(ctx, deps, &resp, source.ID)
+				if err := setAttendees(ctx, deps, &resp, source.ID); err != nil {
+					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				}
 				decorate(ctx, deps, &resp, source, cal.ID, nil, nil)
 				return &GetEventOutput{Body: resp}, nil
 			}
@@ -781,7 +803,9 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		}
 
 		resp := mapEvent(evt, cal.PublicID)
-		setAttendees(ctx, deps, &resp, evt.ID)
+		if err := setAttendees(ctx, deps, &resp, evt.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		decorate(ctx, deps, &resp, evt, cal.ID, nil, nil)
 		return &GetEventOutput{Body: resp}, nil
 	}
@@ -893,7 +917,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		}
 
 		resp := mapEvent(created, cal.PublicID)
-		setAttendees(ctx, deps, &resp, created.ID)
+		if err := setAttendees(ctx, deps, &resp, created.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		decorate(ctx, deps, &resp, created, cal.ID, nil, nil)
 
 		return &CreateEventOutput{Body: resp}, nil
@@ -1078,7 +1104,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			}
 
 			resp := mapOverrideInstance(evt, child, cal.PublicID, originalStart)
-			setAttendees(ctx, deps, &resp, child.ID)
+			if err := setAttendees(ctx, deps, &resp, child.ID); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 			decorate(ctx, deps, &resp, child, cal.ID, nil, nil)
 			return &UpdateEventOutput{Body: resp}, nil
 		}
@@ -1180,7 +1208,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		}
 
 		resp := mapEvent(updated, cal.PublicID)
-		setAttendees(ctx, deps, &resp, updated.ID)
+		if err := setAttendees(ctx, deps, &resp, updated.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		decorate(ctx, deps, &resp, updated, cal.ID, nil, nil)
 		return &UpdateEventOutput{Body: resp}, nil
 	}
@@ -1588,9 +1618,12 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*DeleteCommentOutput, error) {
 	return func(ctx context.Context, in *DeleteCommentInput) (*DeleteCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
+		cal, member, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
+		}
+		if !calresolve.CanWrite(member.Role) {
+			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
@@ -1608,7 +1641,12 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
 		}
-		if comment.AuthorID != userID {
+		// Removing a comment is moderation as well as authorship: whoever
+		// administers a shared calendar has to be able to take down what
+		// someone else posted on it. Editing stays the author's alone -- the
+		// two are not the same power, since an edit puts words in someone's
+		// mouth while a removal only takes them off the wall.
+		if comment.AuthorID != userID && !calresolve.CanManage(member.Role) {
 			return nil, apierrors.ToHuma(apierrors.CommentAccessDenied)
 		}
 
