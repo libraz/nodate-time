@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/libraz/nodate-time/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/nodate-time/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Bun](https://img.shields.io/badge/Bun-1.3-000000?logo=bun&logoColor=white)
@@ -11,7 +11,7 @@ A shared calendar app for running one calendar across multiple people — famili
 teams, talent agencies. It blends TimeTree's shared-calendar simplicity with a
 Google Calendar–style permission model. Monorepo: a Go REST API plus a React SPA.
 
-**Stack:** Go 1.25 · Huma v2 · MySQL 8.4 · React 19 · Bun
+**Stack:** Go 1.26 · Huma v2 · MySQL 8.4 · React 19 · Bun
 
 ---
 
@@ -31,7 +31,7 @@ Responsive mobile layout (vertical month scroll):
 
 ## Features
 
-- **Shared calendars** — per-member roles (owner / editor / viewer), invite links,
+- **Shared calendars** — per-member roles (owner / manager / editor / viewer), invite links,
   public share tokens, and an embeddable (embed) view
 - **Events** — all-day & timed, recurrence (RRULE) with per-occurrence exception
   editing, drag to move/resize, attendees, checklists, attachments, comments
@@ -50,7 +50,7 @@ Responsive mobile layout (vertical month scroll):
 
 | Area | Technology |
 | --- | --- |
-| API | Go 1.25 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
+| API | Go 1.26 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
 | DB | MySQL 8.4 (Docker Compose) |
 | Object storage | S3-compatible (MinIO locally) |
 | Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
@@ -88,7 +88,7 @@ compose.yml            local stack: MySQL + MinIO
 ### Prerequisites
 
 - [Bun](https://bun.sh)
-- Go 1.25+
+- Go 1.26+
 - Docker (for MySQL / MinIO)
 - [sqlc](https://sqlc.dev) (only when regenerating DB code)
 
