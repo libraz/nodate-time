@@ -1,6 +1,9 @@
 package e2e
 
 import (
+	"bytes"
+	"image"
+	"image/png"
 	"net/http"
 	"strings"
 	"testing"
@@ -207,40 +210,95 @@ func TestAvatarDeleteLeavesTheAccountIntact(t *testing.T) {
 	assert.NotEmpty(t, deleted.Name, "the account must survive deleting its avatar")
 }
 
-func TestAvatarReplaceClearsOldKey(t *testing.T) {
+// solidPNG returns a valid PNG that is not helpers.TinyPNG(). Replacement is
+// only exercised by a picture whose bytes differ: the storage key is the digest
+// of the bytes, so uploading the same image twice lands on the key the account
+// already serves and nothing is ever replaced.
+func solidPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for i := range img.Pix {
+		img.Pix[i] = 0xFF
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
+}
+
+// avatarObjectKey reads the storage key the account's avatar currently points
+// at, which is what replacement has to move.
+func avatarObjectKey(t *testing.T, email string) string {
+	t.Helper()
+	var key string
+	require.NoError(t, testDB.QueryRow(`
+		SELECT so.storage_key FROM users u
+		INNER JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+		WHERE u.email = ?`, email).Scan(&key))
+	return key
+}
+
+func storageObjectRefCount(t *testing.T, storageKey string) int {
+	t.Helper()
+	var refs int
+	require.NoError(t, testDB.QueryRow(
+		"SELECT ref_count FROM storage_objects WHERE storage_key = ?", storageKey).Scan(&refs))
+	return refs
+}
+
+// Replacing an avatar has to actually swap the picture: the account serves the
+// new bytes and lets go of the old object. The blob itself stays until the
+// sweep, because the same bytes may still be somebody else's avatar -- so what
+// replacement owes is the reference, not the deletion.
+func TestAvatarReplaceServesTheNewImageAndReleasesTheOld(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	png := helpers.TinyPNG()
+	first := helpers.TinyPNG()
+	second := solidPNG(t)
+	firstKey := helpers.AvatarStorageKey(tt.UserID, helpers.SHA256Hex(first))
+	secondKey := helpers.AvatarStorageKey(tt.UserID, helpers.SHA256Hex(second))
+	require.NotEqual(t, firstKey, secondKey, "the two pictures must be different ones")
 
-	// First upload
 	var pres1 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres1)
-	helpers.UploadToPresignedURL(t, pres1.UploadURL, "image/png", png)
+		map[string]any{"contentType": "image/png", "byteSize": len(first), "sha256": helpers.SHA256Hex(first)}, &pres1)
+	helpers.UploadToPresignedURL(t, pres1.UploadURL, "image/png", first)
 	var u1 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
 		map[string]any{"avatarId": pres1.AvatarID}, &u1)
 	require.NotEmpty(t, u1.AvatarURL)
+	require.Equal(t, firstKey, avatarObjectKey(t, tt.Email))
+	require.Equal(t, first, helpers.FetchURL(t, u1.AvatarURL))
 
-	// Second upload — should replace and leave only the new object.
+	// Second upload -- a different picture, so a different key to move to.
 	var pres2 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres2)
+		map[string]any{"contentType": "image/png", "byteSize": len(second), "sha256": helpers.SHA256Hex(second)}, &pres2)
 	require.NotEqual(t, pres1.AvatarID, pres2.AvatarID)
-	helpers.UploadToPresignedURL(t, pres2.UploadURL, "image/png", png)
+	helpers.UploadToPresignedURL(t, pres2.UploadURL, "image/png", second)
 	var u2 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
 		map[string]any{"avatarId": pres2.AvatarID}, &u2)
 	require.NotEmpty(t, u2.AvatarURL)
 
-	// The first object should now be gone from MinIO. We assert via StatObject.
+	// What a client sees: the replacement, not the picture it replaced.
+	var me userResp
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &me)
+	assert.Equal(t, secondKey, avatarObjectKey(t, tt.Email), "the account should point at the new picture")
+	assert.Equal(t, second, helpers.FetchURL(t, me.AvatarURL), "the account must serve the new picture")
+
+	// And the old object is nobody's now, which is what makes it collectable.
+	assert.Equal(t, 0, storageObjectRefCount(t, firstKey), "replacing an avatar must release the old object")
+	assert.Equal(t, 1, storageObjectRefCount(t, secondKey))
+
+	// Its bytes stay put until the sweep judges them; dropping them here would
+	// break every other account holding the same picture.
 	if testStorageClient := getTestStorage(); testStorageClient != nil {
-		_, exists, err := testStorageClient.StatObject(testCtx(), helpers.AvatarStorageKey(tt.UserID, pres1.AvatarID))
+		_, exists, err := testStorageClient.StatObject(testCtx(), firstKey)
 		require.NoError(t, err)
-		assert.False(t, exists, "previous avatar object should be removed")
+		assert.True(t, exists, "the released blob is the sweep's to collect, not the handler's")
 	}
 }
 
