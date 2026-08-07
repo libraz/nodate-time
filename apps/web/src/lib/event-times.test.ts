@@ -1,9 +1,15 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
-import { eventTimesForSave, shiftStartKeepingDuration } from './event-times';
+import {
+  atMinutesIntoDay,
+  eventTimesForSave,
+  minutesIntoDay,
+  shiftStartKeepingDuration,
+} from './event-times';
 
 const TOKYO = 'Asia/Tokyo';
 const NEW_YORK = 'America/New_York';
+const BERLIN = 'Europe/Berlin';
 
 describe('eventTimesForSave', () => {
   // A member in New York opening a Tokyo all-day event and pressing save
@@ -107,5 +113,67 @@ describe('shiftStartKeepingDuration', () => {
       NEW_YORK,
     );
     expect(moved.endAt).toBe('2026-03-10T09:00');
+  });
+});
+
+// New York springs forward at 02:00 on 2026-03-08 and Berlin falls back at
+// 03:00 on 2026-10-25, so each of those days is 23 or 25 elapsed hours against
+// 24 on the wall clock. Every case below is chosen to straddle the transition:
+// in a fixed-offset zone the two measures are the same number and no
+// implementation can be told from the other.
+describe('minutesIntoDay', () => {
+  it('counts the wall clock across a spring-forward', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    const at5 = DateTime.fromISO('2026-03-08T05:00:00-04:00', { zone: NEW_YORK });
+    // Four hours have elapsed since midnight, but 05:00 belongs on hour five.
+    expect(minutesIntoDay(at5, dayStart)).toBe(300);
+  });
+
+  it('counts the wall clock across a fall-back', () => {
+    const dayStart = DateTime.fromISO('2026-10-25', { zone: BERLIN });
+    const at3 = DateTime.fromISO('2026-10-25T03:00:00+01:00', { zone: BERLIN });
+    expect(minutesIntoDay(at3, dayStart)).toBe(180);
+  });
+
+  it('clamps a time outside the day to its edges', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    const before = DateTime.fromISO('2026-03-07T22:00', { zone: NEW_YORK });
+    const after = DateTime.fromISO('2026-03-09T02:00', { zone: NEW_YORK });
+    expect(minutesIntoDay(before, dayStart)).toBe(0);
+    expect(minutesIntoDay(after, dayStart)).toBe(24 * 60);
+  });
+
+  it('reads a time given in another zone in the day’s own zone', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    const at5 = DateTime.fromISO('2026-03-08T09:00:00Z');
+    expect(minutesIntoDay(at5, dayStart)).toBe(300);
+  });
+});
+
+describe('atMinutesIntoDay', () => {
+  it('reads a position as wall-clock time across a spring-forward', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    // Adding 300 elapsed minutes to midnight lands on 06:00 instead.
+    expect(atMinutesIntoDay(dayStart, 300).toFormat('yyyy-MM-dd HH:mm')).toBe('2026-03-08 05:00');
+  });
+
+  it('reads a position as wall-clock time across a fall-back', () => {
+    const dayStart = DateTime.fromISO('2026-10-25', { zone: BERLIN });
+    expect(atMinutesIntoDay(dayStart, 180).toFormat('yyyy-MM-dd HH:mm')).toBe('2026-10-25 03:00');
+  });
+
+  it('ends the day on the next midnight, not 24 hours later', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    expect(atMinutesIntoDay(dayStart, 24 * 60).toFormat('yyyy-MM-dd HH:mm')).toBe(
+      '2026-03-09 00:00',
+    );
+  });
+
+  it('clamps a position outside the day to its edges', () => {
+    const dayStart = DateTime.fromISO('2026-03-08', { zone: NEW_YORK });
+    expect(atMinutesIntoDay(dayStart, -60).toFormat('HH:mm')).toBe('00:00');
+    expect(atMinutesIntoDay(dayStart, 30 * 60).toFormat('yyyy-MM-dd HH:mm')).toBe(
+      '2026-03-09 00:00',
+    );
   });
 });
