@@ -16,6 +16,25 @@ WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE;
 -- name: GetCalendarEventByID :one
 SELECT * FROM calendar_events WHERE id = ? AND enabled = TRUE;
 
+-- ListCalendarEventsByCalendarAndRange returns the non-recurring events a
+-- window covers.
+--
+-- The overlap test is the usual one for half-open intervals -- starts before
+-- the window ends, ends after it starts -- and it is right for every event
+-- that occupies time. It is wrong for an event that occupies none. An event
+-- whose end equals its start is a marker at a moment, which this API accepts
+-- and the contract's chronology check allows, and `end_at > range_start`
+-- treats it as the empty interval it literally is: overlapping nothing.
+--
+-- Inside a day that costs nothing, because the marker still starts after the
+-- window opens. On the boundary it costs the event outright: a marker at
+-- midnight is not after the start of the day it opens, and not before the end
+-- of the day that closes there, so it is returned by neither and appears in no
+-- view at all. Midnight is where a marker is most likely to sit.
+--
+-- The extra term reads a zero-length event as the point it means rather than
+-- the empty span it is, so it belongs to the window it opens. Events with a
+-- duration are untouched.
 -- name: ListCalendarEventsByCalendarAndRange :many
 SELECT * FROM calendar_events
 WHERE calendar_id = ?
@@ -23,7 +42,7 @@ WHERE calendar_id = ?
   AND recurrence_rule IS NULL
   AND recurrence_parent_id IS NULL
   AND start_at < sqlc.arg(range_end)
-  AND end_at > sqlc.arg(range_start)
+  AND (end_at > sqlc.arg(range_start) OR (end_at = start_at AND end_at >= sqlc.arg(range_start)))
 ORDER BY start_at;
 
 -- name: ListRecurringCalendarEventsByCalendarAndRange :many
