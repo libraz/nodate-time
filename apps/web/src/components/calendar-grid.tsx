@@ -1,41 +1,25 @@
 import { DateTime } from 'luxon';
-import { useCallback, useMemo, useRef } from 'react';
-import { useT } from '@/i18n';
-import {
-  fromISOInZone,
-  getMonthDays,
-  getWeekDays,
-  getWeekdayLabel,
-  isToday,
-  jsDayOfWeek,
-} from '@/lib/date-utils';
+import { type PointerEvent as ReactPointerEvent, useCallback, useMemo, useRef } from 'react';
+import { type DragLanding, MonthWeekRow } from '@/components/month-week-row';
+import { fromISOInZone, getMonthDays, getWeekDays, getWeekdayLabel } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
-import { getHoliday } from '@/lib/holidays';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
-import { useHolidayLoader } from '@/lib/use-holidays';
+import { useHolidayRevision } from '@/lib/use-holiday-revision';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import {
-  eventEndDay,
-  eventStartDay,
-  isMultiDay,
-  layoutDayCell,
-  layoutWeek,
-  MAX_VISIBLE_TRACKS,
-} from '@/lib/week-layout';
+import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
 
 export function CalendarGrid() {
-  const t = useT();
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
   const selectedDate = useUiStore((s) => s.selectedDate);
   const calendarView = useUiStore((s) => s.calendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
-  useHolidayLoader(holidaysCountry, [
+  const holidayRevision = useHolidayRevision(holidaysCountry, [
     currentMonth.year - 1,
     currentMonth.year,
     currentMonth.year + 1,
@@ -97,7 +81,7 @@ export function CalendarGrid() {
 
   // Where the dragged event would land after dropping. Used both to highlight
   // the full span of destination cells and to draw a real-width ghost bar.
-  const dragLanding = useMemo(() => {
+  const dragLanding = useMemo<DragLanding | null>(() => {
     if (!drag?.hoverKey || !drag.originKey) return null;
     const startDay = fromISOInZone(drag.event.startAt, timezone).startOf('day');
     const endDay = eventEndDay(drag.event, timezone);
@@ -109,6 +93,13 @@ export function CalendarGrid() {
     const end = start.plus({ days: span - 1 });
     return { event: drag.event, start, end };
   }, [drag, timezone]);
+
+  // Only the rows the ghost crosses need it; every other row keeps the same
+  // (null) prop and stays out of the re-render a pointer sample causes.
+  const landingWeeks = useMemo(
+    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end) : null),
+    [dragLanding],
+  );
 
   const days = useMemo(() => {
     if (calendarView === 'week') {
@@ -122,21 +113,24 @@ export function CalendarGrid() {
     [events, activeCalendarIds],
   );
 
-  const weeks = useMemo(() => {
-    const result: DateTime[][] = [];
+  const weekStarts = useMemo(() => {
+    const result: DateTime[] = [];
     for (let i = 0; i < days.length; i += 7) {
-      result.push(days.slice(i, i + 7));
+      const first = days[i];
+      if (first) result.push(first.startOf('day'));
     }
     return result;
   }, [days]);
 
-  const weekLayouts = useMemo(
-    () =>
-      weeks.map((week) => {
-        const first = week[0];
-        return first ? layoutWeek(first.startOf('day'), visibleEvents, timezone) : [];
-      }),
-    [weeks, visibleEvents, timezone],
+  const buckets = useMemo(
+    () => bucketEventsByWeek(visibleEvents, timezone),
+    [visibleEvents, timezone],
+  );
+
+  // The week view shows one week wherever it falls, so nothing is out of month.
+  const pagedMonth = useMemo(
+    () => (calendarView === 'week' ? null : { year: currentMonth.year, month: currentMonth.month }),
+    [calendarView, currentMonth],
   );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -162,16 +156,28 @@ export function CalendarGrid() {
     [calendarView, setCalendarView, navigateMonth],
   );
 
-  const isCurrentMonth = useCallback(
-    (date: DateTime) => date.month === currentMonth.month && date.year === currentMonth.year,
-    [currentMonth],
+  const handleDayDoubleClick = useCallback(
+    (date: DateTime) => {
+      setSelectedDate(date);
+      openEventModal();
+    },
+    [setSelectedDate, openEventModal],
   );
 
-  const getDateColor = (dow: number, isHoliday: boolean): string => {
-    if (isHoliday || dow === 0) return 'var(--color-sunday)';
-    if (dow === 6) return 'var(--color-saturday)';
-    return 'var(--color-text-primary)';
-  };
+  const handleEventClick = useCallback(
+    (eventId: string) => {
+      if (consumeClick()) return;
+      openEventModal(eventId);
+    },
+    [consumeClick, openEventModal],
+  );
+
+  const handleEventPointerDown = useCallback(
+    (evt: CalendarEvent, e: ReactPointerEvent) => {
+      if (canMove(evt)) startDrag(evt, e);
+    },
+    [canMove, startDrag],
+  );
 
   return (
     <div
@@ -183,7 +189,7 @@ export function CalendarGrid() {
         {[0, 1, 2, 3, 4, 5, 6].map((i) => (
           <div
             key={i}
-            className="py-2.5 text-center text-body font-medium uppercase tracking-wide text-[var(--color-text-secondary)] max-sm:text-caption"
+            className="py-2.5 text-center text-body font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
           >
             {getWeekdayLabel(i, locale)}
           </div>
@@ -193,264 +199,31 @@ export function CalendarGrid() {
       <div
         key={`${currentMonth.year}-${currentMonth.month}-${calendarView}`}
         className="calendar-enter grid flex-1"
-        style={{ gridTemplateRows: `repeat(${weeks.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateRows: `repeat(${weekStarts.length}, minmax(0, 1fr))` }}
       >
-        {weeks.map((week, wIdx) => {
-          const weekKey = week[0]?.toISO() ?? `w-${wIdx}`;
-          const positioned = weekLayouts[wIdx] ?? [];
-
-          // Single-day events grouped by yyyy-MM-dd
-          const singleDayMap = new Map<string, CalendarEvent[]>();
-          for (const evt of visibleEvents) {
-            if (isMultiDay(evt, timezone)) continue;
-            const startDt = eventStartDay(evt, timezone);
-            const inWeek = week.find((d) => d.hasSame(startDt, 'day'));
-            if (!inWeek) continue;
-            const key = inWeek.toFormat('yyyy-MM-dd');
-            const arr = singleDayMap.get(key) ?? [];
-            arr.push(evt);
-            singleDayMap.set(key, arr);
-          }
-
-          const cells = week.map((dt) =>
-            layoutDayCell(
-              jsDayOfWeek(dt),
-              positioned,
-              singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? [],
-            ),
-          );
-
-          // Segment of the drag ghost that falls inside this week (the ghost
-          // is grid-aligned and spans the event's real length, wrapping weeks).
-          let previewSeg: { startCol: number; span: number } | null = null;
-          if (dragLanding) {
-            const weekStart = week[0]?.startOf('day');
-            const weekEnd = week[6]?.startOf('day');
-            if (
-              weekStart &&
-              weekEnd &&
-              dragLanding.end >= weekStart &&
-              dragLanding.start <= weekEnd
-            ) {
-              const segStart = dragLanding.start < weekStart ? weekStart : dragLanding.start;
-              const segEnd = dragLanding.end > weekEnd ? weekEnd : dragLanding.end;
-              previewSeg = {
-                startCol: jsDayOfWeek(segStart),
-                span: Math.round(segEnd.diff(segStart, 'days').days) + 1,
-              };
-            }
-          }
-
+        {weekStarts.map((weekStart) => {
+          const key = weekStart.toFormat('yyyy-MM-dd');
           return (
-            <div key={weekKey} className="relative grid grid-cols-7">
-              {week.map((dt, dIdx) => {
-                const today = isToday(dt, timezone);
-                const inMonth = calendarView === 'week' || isCurrentMonth(dt);
-                const dow = jsDayOfWeek(dt);
-                const isoDate = dt.toFormat('yyyy-MM-dd');
-                const holiday = getHoliday(holidaysCountry, isoDate);
-                const { reserved = [], singleSlots = [], overflow = 0 } = cells[dIdx] ?? {};
-                const isSelected = dt.hasSame(selectedDate, 'day');
-
-                return (
-                  <div
-                    key={isoDate}
-                    data-day={isoDate}
-                    className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1.5 pb-1 ${
-                      isSelected ? 'day-selected' : ''
-                    }`}
-                    style={!inMonth ? { opacity: 0.4 } : undefined}
-                  >
-                    {/* Background target: click selects the day, double-click
-                        starts a new event on it. */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDate(dt)}
-                      onDoubleClick={() => {
-                        setSelectedDate(dt);
-                        openEventModal();
-                      }}
-                      className="absolute inset-0 z-0 transition-colors hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)] focus-visible:outline-none"
-                      aria-label={`${dt.toFormat('yyyy-MM-dd')}${holiday ? ` (${holiday.name})` : ''}`}
-                    />
-
-                    {/* Content passes pointer events through to the day button, except event chips. */}
-                    <div className="pointer-events-none relative z-10 flex w-full flex-col">
-                      <div className="flex w-full items-center justify-between pl-0.5">
-                        {today ? (
-                          <span className="today-badge flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-accent)] text-callout font-medium tabular-nums text-white max-sm:text-body">
-                            {dt.day}
-                          </span>
-                        ) : (
-                          <span
-                            className="flex h-7 w-7 items-center justify-center text-callout font-medium tabular-nums max-sm:text-body"
-                            style={{ color: getDateColor(dow, !!holiday) }}
-                          >
-                            {dt.day}
-                          </span>
-                        )}
-                        {holiday && (
-                          <span
-                            className="ml-1 truncate rounded-full bg-[var(--color-sunday-bg,rgba(244,67,54,0.12))] px-1.5 text-micro font-medium text-[var(--color-sunday)] max-sm:hidden"
-                            title={holiday.name}
-                          >
-                            {holiday.name}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="mt-0.5 flex w-full flex-col gap-px">
-                        {(['t0', 't1', 't2'] as const).map((slotKey, slot) => {
-                          if (reserved.includes(slot)) {
-                            return (
-                              <div
-                                key={`${isoDate}-spacer-${slotKey}`}
-                                className="h-[20px] max-sm:h-[15px]"
-                              />
-                            );
-                          }
-                          const filler = singleSlots.find((s) => s.track === slot);
-                          if (filler) {
-                            const evt = filler.evt;
-                            const start = fromISOInZone(evt.startAt, timezone);
-                            return (
-                              <button
-                                key={evt.id}
-                                type="button"
-                                onPointerDown={(e) => {
-                                  if (canMove(evt)) startDrag(evt, e);
-                                }}
-                                onClick={() => {
-                                  if (consumeClick()) return;
-                                  openEventModal(evt.id);
-                                }}
-                                className={`pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[5px] px-1.5 text-left text-caption font-semibold leading-[20px] tabular-nums hover:brightness-95 max-sm:gap-0.5 max-sm:text-micro max-sm:leading-[15px] ${
-                                  canMove(evt)
-                                    ? 'cursor-grab active:cursor-grabbing'
-                                    : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: `${evt.color}1f`,
-                                  color: evt.color,
-                                  opacity: drag?.event.id === evt.id ? 0.4 : undefined,
-                                }}
-                              >
-                                <span
-                                  aria-hidden
-                                  className="h-1.5 w-1.5 shrink-0 rounded-full max-sm:h-1 max-sm:w-1"
-                                  style={{ backgroundColor: evt.color }}
-                                />
-                                <span className="truncate">
-                                  {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
-                                  {evt.title}
-                                </span>
-                              </button>
-                            );
-                          }
-                          return (
-                            <div
-                              key={`${isoDate}-empty-${slotKey}`}
-                              className="h-[20px] max-sm:h-[15px]"
-                            />
-                          );
-                        })}
-                        {/* The cell only has room for three tracks, so the rest
-                            of the day is reachable through the day detail. The
-                            chip has to opt back into pointer events: its
-                            container passes them to the day button behind it. */}
-                        {overflow > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => openDayDetail(dt)}
-                            aria-label={t('calendar.moreEvents', { count: overflow })}
-                            className="pointer-events-auto mt-px text-center text-caption font-medium text-[var(--color-accent)] hover:underline max-sm:text-micro"
-                          >
-                            +{overflow}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Multi-day bar overlay */}
-              <div className="pointer-events-none absolute inset-x-0 top-[34px] grid grid-cols-7 px-0.5 max-sm:top-[28px]">
-                {positioned.map((p) => {
-                  if (p.track >= MAX_VISIBLE_TRACKS) return null;
-                  const left = `calc(${(p.startCol * 100) / 7}% + 2px)`;
-                  const width = `calc(${(p.span * 100) / 7}% - 4px)`;
-                  const top = `${p.track * 22}px`;
-                  const start = fromISOInZone(p.event.startAt, timezone);
-                  const radius =
-                    p.continuesLeft && p.continuesRight
-                      ? '0'
-                      : p.continuesLeft
-                        ? '0 5px 5px 0'
-                        : p.continuesRight
-                          ? '5px 0 0 5px'
-                          : '5px';
-                  return (
-                    <button
-                      key={`${p.event.id}-${p.startCol}`}
-                      type="button"
-                      onPointerDown={(e) => {
-                        if (canMove(p.event)) startDrag(p.event, e);
-                      }}
-                      onClick={() => {
-                        if (consumeClick()) return;
-                        openEventModal(p.event.id);
-                      }}
-                      className={`event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-caption font-semibold leading-[20px] tabular-nums text-white hover:brightness-95 max-sm:text-micro max-sm:leading-[15px] ${
-                        canMove(p.event) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-                      }`}
-                      style={{
-                        left,
-                        width,
-                        top,
-                        backgroundColor: p.event.color,
-                        borderRadius: radius,
-                        opacity: drag?.event.id === p.event.id ? 0.4 : undefined,
-                      }}
-                      title={p.event.title}
-                    >
-                      {p.continuesLeft && (
-                        <span aria-hidden className="opacity-80">
-                          ‹
-                        </span>
-                      )}
-                      <span className="truncate">
-                        {!p.event.allDay && !p.continuesLeft && (
-                          <span className="mr-1 opacity-90">{start.toFormat('H:mm')}</span>
-                        )}
-                        {p.event.title}
-                      </span>
-                      {p.continuesRight && (
-                        <span aria-hidden className="ml-auto opacity-80">
-                          ›
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
-              {previewSeg && dragLanding && (
-                <div
-                  className="pointer-events-none absolute top-[34px] z-20 flex h-[20px] items-center truncate px-2 text-caption font-semibold text-white shadow-lg max-sm:top-[28px] max-sm:h-[15px] max-sm:text-micro"
-                  style={{
-                    left: `calc(${(previewSeg.startCol * 100) / 7}% + 2px)`,
-                    width: `calc(${(previewSeg.span * 100) / 7}% - 4px)`,
-                    backgroundColor: dragLanding.event.color,
-                    borderRadius: '5px',
-                    opacity: 0.85,
-                  }}
-                >
-                  {dragLanding.event.title}
-                </div>
-              )}
-            </div>
+            <MonthWeekRow
+              key={key}
+              weekStart={weekStart}
+              events={buckets.get(key) ?? NO_EVENTS}
+              zone={timezone}
+              holidaysCountry={holidaysCountry}
+              holidayRevision={holidayRevision}
+              selectedDate={selectedDate}
+              density="comfortable"
+              pagedMonth={pagedMonth}
+              showHolidayName
+              draggingEventId={drag?.event.id ?? null}
+              dragLanding={landingWeeks?.has(key) ? dragLanding : null}
+              onDayClick={setSelectedDate}
+              onDayDoubleClick={handleDayDoubleClick}
+              onOverflowClick={openDayDetail}
+              onEventClick={handleEventClick}
+              onEventPointerDown={handleEventPointerDown}
+              canMoveEvent={canMove}
+            />
           );
         })}
       </div>

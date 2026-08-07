@@ -53,6 +53,63 @@ export function eventOccupiesDay(evt: CalendarEvent, day: DateTime, zone: string
   return eventStartDay(evt, zone) <= target && eventEndDay(evt, zone) >= target;
 }
 
+/** The empty bucket, shared so a week with no events keeps one stable identity. */
+export const NO_EVENTS: CalendarEvent[] = [];
+
+/** The Sunday that starts the week row a day belongs to. */
+export function startOfWeek(day: DateTime): DateTime {
+  return day.startOf('day').minus({ days: day.weekday % 7 });
+}
+
+/** Identifies a week row: the yyyy-MM-dd of its Sunday. */
+export function weekKey(day: DateTime): string {
+  return startOfWeek(day).toFormat('yyyy-MM-dd');
+}
+
+/**
+ * Groups events by the week rows they touch, keyed by {@link weekKey}.
+ *
+ * A month view holds far more weeks than a month has events, so every row
+ * filtering the whole list costs weeks x events on each render. Bucketing walks
+ * the list once and hands each row the events it can actually draw; a multi-day
+ * event lands in every week it crosses, which is what the bar layout needs.
+ */
+export function bucketEventsByWeek(
+  events: CalendarEvent[],
+  zone: string,
+): Map<string, CalendarEvent[]> {
+  const buckets = new Map<string, CalendarEvent[]>();
+  for (const evt of events) {
+    const endDay = eventEndDay(evt, zone);
+    let ws = startOfWeek(eventStartDay(evt, zone));
+    while (ws <= endDay) {
+      const key = ws.toFormat('yyyy-MM-dd');
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(evt);
+      else buckets.set(key, [evt]);
+      ws = ws.plus({ weeks: 1 });
+    }
+  }
+  return buckets;
+}
+
+/**
+ * The keys of the week rows a date range crosses.
+ *
+ * Lets a drag hand its landing preview only to the rows that draw it, so a
+ * pointer sample re-renders two rows instead of every mounted week.
+ */
+export function weekKeysInRange(start: DateTime, end: DateTime): Set<string> {
+  const keys = new Set<string>();
+  let ws = startOfWeek(start);
+  const last = end.startOf('day');
+  while (ws <= last) {
+    keys.add(ws.toFormat('yyyy-MM-dd'));
+    ws = ws.plus({ weeks: 1 });
+  }
+  return keys;
+}
+
 /**
  * Lays out multi-day events for a single Sunday-aligned week into non-overlapping
  * horizontal tracks, returning each event's column span and track index. Single-day
