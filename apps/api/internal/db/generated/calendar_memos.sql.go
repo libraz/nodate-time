@@ -8,6 +8,7 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const createMemo = `-- name: CreateMemo :execresult
@@ -68,14 +69,97 @@ func (q *Queries) GetMemoByPublicID(ctx context.Context, arg GetMemoByPublicIDPa
 	return i, err
 }
 
-const listMemosByCalendar = `-- name: ListMemosByCalendar :many
+const listMemosByCalendarAfter = `-- name: ListMemosByCalendarAfter :many
 SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, title, body, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_memos
 WHERE calendar_id = ? AND enabled = TRUE
-ORDER BY sort_weight, created_at
+  AND (
+    sort_weight > ?
+    OR (sort_weight = ?
+        AND created_at > ?)
+    OR (sort_weight = ?
+        AND created_at = ?
+        AND id > ?)
+  )
+ORDER BY sort_weight, created_at, id
+LIMIT ?
 `
 
-func (q *Queries) ListMemosByCalendar(ctx context.Context, calendarID uint32) ([]CalendarMemo, error) {
-	rows, err := q.db.QueryContext(ctx, listMemosByCalendar, calendarID)
+type ListMemosByCalendarAfterParams struct {
+	CalendarID      uint32    `json:"calendarId"`
+	AfterSortWeight int32     `json:"afterSortWeight"`
+	AfterCreatedAt  time.Time `json:"afterCreatedAt"`
+	AfterID         uint32    `json:"afterId"`
+	Limit           int32     `json:"limit"`
+}
+
+func (q *Queries) ListMemosByCalendarAfter(ctx context.Context, arg ListMemosByCalendarAfterParams) ([]CalendarMemo, error) {
+	rows, err := q.db.QueryContext(ctx, listMemosByCalendarAfter,
+		arg.CalendarID,
+		arg.AfterSortWeight,
+		arg.AfterSortWeight,
+		arg.AfterCreatedAt,
+		arg.AfterSortWeight,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CalendarMemo
+	for rows.Next() {
+		var i CalendarMemo
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.CalendarID,
+			&i.CreatedByUserID,
+			&i.Title,
+			&i.Body,
+			&i.Done,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemosByCalendarFirstPage = `-- name: ListMemosByCalendarFirstPage :many
+
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, title, body, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_memos
+WHERE calendar_id = ? AND enabled = TRUE
+ORDER BY sort_weight, created_at, id
+LIMIT ?
+`
+
+type ListMemosByCalendarFirstPageParams struct {
+	CalendarID uint32 `json:"calendarId"`
+	Limit      int32  `json:"limit"`
+}
+
+// Memos are paged in the order the list is kept in, not by recency: the
+// weight is what the owner arranged, so a page boundary has to fall inside
+// that arrangement rather than across a second one.
+//
+// id closes the order. Two memos can share a weight and a creation instant,
+// and a keyset cursor over an order that is not total either repeats a row
+// at the seam or steps over one.
+func (q *Queries) ListMemosByCalendarFirstPage(ctx context.Context, arg ListMemosByCalendarFirstPageParams) ([]CalendarMemo, error) {
+	rows, err := q.db.QueryContext(ctx, listMemosByCalendarFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

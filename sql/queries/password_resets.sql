@@ -19,5 +19,14 @@ WHERE id = ? AND used_at IS NULL;
 UPDATE password_resets SET used_at = CURRENT_TIMESTAMP(3)
 WHERE user_id = ? AND used_at IS NULL;
 
--- name: DeleteExpiredPasswordResets :exec
-DELETE FROM password_resets WHERE expires_at < ? OR used_at IS NOT NULL;
+-- DeleteExpiredPasswordResets removes one batch of tokens past their expiry
+-- and reports how many, so the caller can loop until the backlog is drained.
+--
+-- Spent tokens are not collected early any more. `used_at IS NOT NULL` cannot
+-- be answered from an expiry index, so keeping it in the same statement meant
+-- the whole table was read on every tick to save a redeemed row an hour of
+-- shelf life -- and the row is already inert, because
+-- GetPasswordResetByTokenHash refuses a token with a redemption time. It is
+-- collected on its own expiry along with everything else.
+-- name: DeleteExpiredPasswordResets :execresult
+DELETE FROM password_resets WHERE expires_at < ? ORDER BY expires_at LIMIT ?;

@@ -70,13 +70,21 @@ func (q *Queries) CreateSigninState(ctx context.Context, arg CreateSigninStatePa
 	return err
 }
 
-const deleteExpiredSigninStates = `-- name: DeleteExpiredSigninStates :exec
-DELETE FROM signin_states WHERE expires_at < ?
+const deleteExpiredSigninStates = `-- name: DeleteExpiredSigninStates :execresult
+DELETE FROM signin_states WHERE expires_at < ? ORDER BY expires_at LIMIT ?
 `
 
-func (q *Queries) DeleteExpiredSigninStates(ctx context.Context, expiresAt time.Time) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredSigninStates, expiresAt)
-	return err
+type DeleteExpiredSigninStatesParams struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	Limit     int32     `json:"limit"`
+}
+
+// DeleteExpiredSigninStates removes one batch of abandoned round trips and
+// reports how many, so the caller can loop until the backlog is drained.
+// idx_signin_states_expires already leads on expires_at, so the bound here
+// only limits how long one statement holds its rows.
+func (q *Queries) DeleteExpiredSigninStates(ctx context.Context, arg DeleteExpiredSigninStatesParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteExpiredSigninStates, arg.ExpiresAt, arg.Limit)
 }
 
 const deleteSigninState = `-- name: DeleteSigninState :execresult

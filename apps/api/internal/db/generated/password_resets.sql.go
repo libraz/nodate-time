@@ -32,13 +32,26 @@ func (q *Queries) CreatePasswordReset(ctx context.Context, arg CreatePasswordRes
 	)
 }
 
-const deleteExpiredPasswordResets = `-- name: DeleteExpiredPasswordResets :exec
-DELETE FROM password_resets WHERE expires_at < ? OR used_at IS NOT NULL
+const deleteExpiredPasswordResets = `-- name: DeleteExpiredPasswordResets :execresult
+DELETE FROM password_resets WHERE expires_at < ? ORDER BY expires_at LIMIT ?
 `
 
-func (q *Queries) DeleteExpiredPasswordResets(ctx context.Context, expiresAt time.Time) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredPasswordResets, expiresAt)
-	return err
+type DeleteExpiredPasswordResetsParams struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	Limit     int32     `json:"limit"`
+}
+
+// DeleteExpiredPasswordResets removes one batch of tokens past their expiry
+// and reports how many, so the caller can loop until the backlog is drained.
+//
+// Spent tokens are not collected early any more. `used_at IS NOT NULL` cannot
+// be answered from an expiry index, so keeping it in the same statement meant
+// the whole table was read on every tick to save a redeemed row an hour of
+// shelf life -- and the row is already inert, because
+// GetPasswordResetByTokenHash refuses a token with a redemption time. It is
+// collected on its own expiry along with everything else.
+func (q *Queries) DeleteExpiredPasswordResets(ctx context.Context, arg DeleteExpiredPasswordResetsParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteExpiredPasswordResets, arg.ExpiresAt, arg.Limit)
 }
 
 const getPasswordResetByTokenHash = `-- name: GetPasswordResetByTokenHash :one

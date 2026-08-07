@@ -61,11 +61,13 @@ func TestWhoeverRunsTheCalendarCanTakeACommentDown(t *testing.T) {
 		eventURL+"/activities/"+first, owner.AccessToken, nil)
 	require.True(t, byOwner >= 200 && byOwner < 300, "owner should be able to moderate, got %d", byOwner)
 
-	var remaining []struct {
-		ID string `json:"id"`
+	var remaining struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, eventURL+"/activities", owner.AccessToken, nil, &remaining)
-	for _, c := range remaining {
+	for _, c := range remaining.Items {
 		require.NotEqual(t, first, c.ID, "the removed comment should be gone from the thread")
 	}
 

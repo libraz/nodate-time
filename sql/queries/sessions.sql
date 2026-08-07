@@ -52,5 +52,14 @@ ORDER BY created_at DESC;
 UPDATE sessions SET revoked_at = NOW(3)
 WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL;
 
--- name: DeleteExpiredSessions :exec
-DELETE FROM sessions WHERE expires_at < ?;
+-- DeleteExpiredSessions removes one batch and reports how many it took, so
+-- the caller can loop until a short batch says the backlog is drained.
+--
+-- The bound is what keeps a single statement from locking every expired row
+-- at once: this table grows with every sign-in on the deployment, and the
+-- sweep that collects it must not hold the table for as long as the backlog
+-- happens to be. Ordering by expiry makes each batch the oldest rows, so a
+-- run that is cut short still leaves the newest -- and enters the expiry
+-- index rather than sorting what it read.
+-- name: DeleteExpiredSessions :execresult
+DELETE FROM sessions WHERE expires_at < ? ORDER BY expires_at LIMIT ?;

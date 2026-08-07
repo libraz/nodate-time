@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -1633,6 +1634,42 @@ func logEventActivity(ctx context.Context, q *generated.Queries, deps Deps, calI
 	})
 }
 
+// defaultCommentPageSize and maxCommentPageSize bound one page of a thread.
+const (
+	defaultCommentPageSize = 50
+	maxCommentPageSize     = 200
+)
+
+// commentListRow is the shape both comment listings share, so one mapping
+// serves the newest page and the pages behind it.
+type commentListRow struct {
+	id            uint32
+	publicID      []byte
+	userPublicID  []byte
+	userName      string
+	userAvatarURL sql.NullString
+	body          string
+	createdAt     time.Time
+}
+
+// resolveCommentCursor turns a cursor back into the ordering pair it names.
+// It is looked up within the event the caller has already proved access to,
+// so a comment id from elsewhere does not resolve.
+func resolveCommentCursor(ctx context.Context, deps Deps, eventID uint32, cursor string) (time.Time, uint32, error) {
+	pub, err := parseUUID(cursor)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	c, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
+		PublicID: pub,
+		EventID:  sql.NullInt32{Int32: int32(eventID), Valid: true},
+	})
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	return c.CreatedAt, c.ID, nil
+}
+
 func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCommentsOutput, error) {
 	return func(ctx context.Context, in *ListCommentsInput) (*ListCommentsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -1646,23 +1683,85 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListEventComments(ctx, generated.ListEventCommentsParams{
-			WorkspaceID: deps.WorkspaceID,
-			EventID:     sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-		})
+		limit := int32(in.Limit)
+		if limit <= 0 {
+			limit = defaultCommentPageSize
+		}
+		if limit > maxCommentPageSize {
+			limit = maxCommentPageSize
+		}
+		// One extra row is what says whether there is more thread behind this
+		// page, without counting the whole of it.
+		fetchLimit := limit + 1
+
+		eventID := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
+		var rows []commentListRow
+		if in.Cursor == "" {
+			latest, qerr := deps.Queries.ListEventCommentsLatest(ctx, generated.ListEventCommentsLatestParams{
+				WorkspaceID: deps.WorkspaceID,
+				EventID:     eventID,
+				Limit:       fetchLimit,
+			})
+			err = qerr
+			rows = make([]commentListRow, 0, len(latest))
+			for _, c := range latest {
+				rows = append(rows, commentListRow{
+					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
+					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
+					body: c.Body, createdAt: c.CreatedAt,
+				})
+			}
+		} else {
+			before, beforeID, cerr := resolveCommentCursor(ctx, deps, evt.ID, in.Cursor)
+			if cerr != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			older, qerr := deps.Queries.ListEventCommentsBefore(ctx, generated.ListEventCommentsBeforeParams{
+				WorkspaceID:     deps.WorkspaceID,
+				EventID:         eventID,
+				BeforeCreatedAt: before,
+				BeforeID:        beforeID,
+				Limit:           fetchLimit,
+			})
+			err = qerr
+			rows = make([]commentListRow, 0, len(older))
+			for _, c := range older {
+				rows = append(rows, commentListRow{
+					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
+					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
+					body: c.Body, createdAt: c.CreatedAt,
+				})
+			}
+		}
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		out := &ListCommentsOutput{Body: make([]CommentResponse, 0, len(rows))}
+		hasMore := int32(len(rows)) > limit
+		if hasMore {
+			rows = rows[:limit]
+		}
+		// The rows arrive newest first, because that is the end of a thread
+		// worth bounding. A page is read oldest first, so the cursor comes off
+		// the last row before the page is turned round.
+		nextCursor := ""
+		if hasMore && len(rows) > 0 {
+			nextCursor = pubIDToHex(rows[len(rows)-1].publicID)
+		}
+		slices.Reverse(rows)
+
+		out := &ListCommentsOutput{Body: ListCommentsPage{
+			Items:      make([]CommentResponse, 0, len(rows)),
+			NextCursor: nextCursor,
+		}}
 		for _, c := range rows {
-			out.Body = append(out.Body, CommentResponse{
-				ID:           pubIDToHex(c.PublicID),
-				UserPublicID: pubIDToHex(c.UserPublicID),
-				UserName:     c.UserDisplayName,
-				UserAvatar:   nullStringValue(c.UserAvatarURL),
-				Body:         c.Body,
-				CreatedAt:    c.CreatedAt,
+			out.Body.Items = append(out.Body.Items, CommentResponse{
+				ID:           pubIDToHex(c.publicID),
+				UserPublicID: pubIDToHex(c.userPublicID),
+				UserName:     c.userName,
+				UserAvatar:   nullStringValue(c.userAvatarURL),
+				Body:         c.body,
+				CreatedAt:    c.createdAt,
 			})
 		}
 		return out, nil

@@ -63,10 +63,16 @@ UPDATE calendar_invites SET enabled = FALSE WHERE id = ?;
 -- name: RevokeInviteByPublicIDAndCalendar :execresult
 UPDATE calendar_invites SET enabled = FALSE WHERE public_id = ? AND calendar_id = ?;
 
+-- The LIMIT is a cap rather than a page. Only live links are listed and
+-- revoking one takes it out of this answer, so the list is what an
+-- administrator is currently managing rather than a history that accumulates.
+-- Newest first means the cap, if it is ever reached, drops the oldest links --
+-- the ones closest to being revoked anyway.
 -- name: ListInvitesByCalendar :many
 SELECT * FROM calendar_invites
 WHERE calendar_id = ? AND enabled = TRUE
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT ?;
 
 -- name: ListPublicSharedCalendarIDs :many
 SELECT DISTINCT ci.calendar_id

@@ -33,13 +33,17 @@ func TestMemoLifecycle(t *testing.T) {
 		map[string]any{"title": "経費精算", "sortOrder": 1}, nil)
 
 	// List memos
-	var memos []struct {
-		Title string `json:"title"`
+	var memos struct {
+		Items []struct {
+			Title string `json:"title"`
+		} `json:"items"`
+		NextCursor string `json:"nextCursor"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/memos", tt.AccessToken, nil, &memos)
-	require.Len(t, memos, 2)
-	require.Equal(t, "シフト表作成", memos[0].Title)
-	require.Equal(t, "経費精算", memos[1].Title)
+	require.Len(t, memos.Items, 2)
+	require.Equal(t, "シフト表作成", memos.Items[0].Title)
+	require.Equal(t, "経費精算", memos.Items[1].Title)
+	require.Empty(t, memos.NextCursor, "two memos fit in one page")
 }
 
 func TestMemoBodyLengthLimit(t *testing.T) {
@@ -82,21 +86,25 @@ func TestMemoUpdateDelete(t *testing.T) {
 	require.True(t, updated.Done)
 
 	// The update is reflected in the list
-	var memos []struct {
-		Title string `json:"title"`
-		Done  bool   `json:"done"`
+	var memos struct {
+		Items []struct {
+			Title string `json:"title"`
+			Done  bool   `json:"done"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/memos", tt.AccessToken, nil, &memos)
-	require.Len(t, memos, 1)
-	require.Equal(t, "備品発注（完了）", memos[0].Title)
-	require.True(t, memos[0].Done)
+	require.Len(t, memos.Items, 1)
+	require.Equal(t, "備品発注（完了）", memos.Items[0].Title)
+	require.True(t, memos.Items[0].Done)
 
 	// Delete memo
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/memos/"+memo.ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// List is now empty
-	var after []struct{ Title string }
+	var after struct {
+		Items []struct{ Title string } `json:"items"`
+	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/memos", tt.AccessToken, nil, &after)
-	require.Len(t, after, 0)
+	require.Len(t, after.Items, 0)
 }

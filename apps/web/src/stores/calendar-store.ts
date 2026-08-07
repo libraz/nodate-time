@@ -136,6 +136,20 @@ function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
   };
 }
 
+/** One page of a paged list endpoint. */
+interface MemoPage {
+  items: Memo[];
+  nextCursor?: string;
+}
+
+/**
+ * How many memo pages one calendar is walked for. A backstop, not a limit
+ * anyone should reach: at the server's default page size this is far more
+ * memos than a calendar accumulates, and it only exists so a cursor that
+ * somehow stopped advancing cannot spin here forever.
+ */
+const maxMemoPages = 20;
+
 let accountGeneration = 0;
 let calendarRequestGeneration = 0;
 let eventRequestGeneration = 0;
@@ -274,11 +288,23 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const answered = new Set<string>();
     const results = await Promise.allSettled(
       calendars.map(async (cal) => {
-        const ms = await api.get<Memo[]>(`/calendars/${cal.id}/memos`);
-        answered.add(cal.id);
-        for (const m of ms) {
-          allMemos.push({ ...m, calendarId: cal.id });
+        // The list is paged. The panel shows a calendar's memos as one
+        // arranged list, so the pages are walked to the end rather than
+        // stopping at the first -- the bound is there to keep one response
+        // from being unbounded, not to hide the rest.
+        const collected: Memo[] = [];
+        let cursor = '';
+        for (let page = 0; page < maxMemoPages; page++) {
+          const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+          const res = await api.get<MemoPage>(`/calendars/${cal.id}/memos${query}`);
+          for (const m of res.items ?? []) {
+            collected.push({ ...m, calendarId: cal.id });
+          }
+          cursor = res.nextCursor ?? '';
+          if (!cursor) break;
         }
+        answered.add(cal.id);
+        allMemos.push(...collected);
       }),
     );
     if (

@@ -102,6 +102,36 @@ func loadMemo(ctx context.Context, deps Deps, calID uint32, memoID string) (gene
 	return memo, nil
 }
 
+// defaultMemoPageSize and maxMemoPageSize bound one page of memos.
+const (
+	defaultMemoPageSize = 100
+	maxMemoPageSize     = 200
+)
+
+// encodeMemoCursor names the last memo of a page by its public id.
+//
+// Resuming needs the whole ordering triple, but two of its parts are the
+// list's internal arrangement and the row's internal id, and a client is
+// given neither. Naming the row lets the server look the triple up again and
+// tells the holder only which memo they have already seen.
+func encodeMemoCursor(publicID []byte) string {
+	return pubIDToHex(publicID)
+}
+
+// resolveMemoCursor turns a cursor back into the ordering triple it names. A
+// cursor from another calendar does not resolve here, so it is refused rather
+// than silently paging through this one from an unrelated position.
+func resolveMemoCursor(ctx context.Context, deps Deps, calID uint32, cursor string) (generated.CalendarMemo, error) {
+	pub, err := parseUUID(cursor)
+	if err != nil {
+		return generated.CalendarMemo{}, err
+	}
+	return deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+		PublicID:   pub,
+		CalendarID: calID,
+	})
+}
+
 func ListMemos(deps Deps) func(context.Context, *ListMemosInput) (*ListMemosOutput, error) {
 	return func(ctx context.Context, in *ListMemosInput) (*ListMemosOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -110,14 +140,51 @@ func ListMemos(deps Deps) func(context.Context, *ListMemosInput) (*ListMemosOutp
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListMemosByCalendar(ctx, cal.ID)
+		limit := int32(in.Limit)
+		if limit <= 0 {
+			limit = defaultMemoPageSize
+		}
+		if limit > maxMemoPageSize {
+			limit = maxMemoPageSize
+		}
+		// One extra row is what says whether there is a page after this one,
+		// without a second count of the whole list.
+		fetchLimit := limit + 1
+
+		var rows []generated.CalendarMemo
+		if in.Cursor == "" {
+			rows, err = deps.Queries.ListMemosByCalendarFirstPage(ctx, generated.ListMemosByCalendarFirstPageParams{
+				CalendarID: cal.ID,
+				Limit:      fetchLimit,
+			})
+		} else {
+			after, cerr := resolveMemoCursor(ctx, deps, cal.ID, in.Cursor)
+			if cerr != nil {
+				return nil, apierrors.ToHuma(apierrors.BadRequest)
+			}
+			rows, err = deps.Queries.ListMemosByCalendarAfter(ctx, generated.ListMemosByCalendarAfterParams{
+				CalendarID:      cal.ID,
+				AfterSortWeight: after.SortWeight,
+				AfterCreatedAt:  after.CreatedAt,
+				AfterID:         after.ID,
+				Limit:           fetchLimit,
+			})
+		}
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		out := &ListMemosOutput{Body: make([]MemoResponse, 0, len(rows))}
+		hasMore := int32(len(rows)) > limit
+		if hasMore {
+			rows = rows[:limit]
+		}
+
+		out := &ListMemosOutput{Body: ListMemosPage{Items: make([]MemoResponse, 0, len(rows))}}
 		for _, m := range rows {
-			out.Body = append(out.Body, mapMemo(m))
+			out.Body.Items = append(out.Body.Items, mapMemo(m))
+		}
+		if hasMore && len(rows) > 0 {
+			out.Body.NextCursor = encodeMemoCursor(rows[len(rows)-1].PublicID)
 		}
 		return out, nil
 	}

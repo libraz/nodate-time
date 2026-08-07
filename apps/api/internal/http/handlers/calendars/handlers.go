@@ -27,6 +27,12 @@ type Deps struct {
 // defaultCalendarColor is applied when a client sends no colour.
 const defaultCalendarColor = "#4CAF50"
 
+// maxMembersListed caps one membership response. Callers want the whole list
+// -- a participant picker that cannot offer somebody who is in the calendar
+// is worse than a ceiling -- so this is a ceiling on cost rather than a page
+// size, set well above any membership a shared calendar plausibly has.
+const maxMembersListed = 500
+
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
@@ -370,7 +376,10 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListCalendarMembers(ctx, cal.ID)
+		rows, err := deps.Queries.ListCalendarMembers(ctx, generated.ListCalendarMembersParams{
+			CalendarID: cal.ID,
+			Limit:      maxMembersListed,
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

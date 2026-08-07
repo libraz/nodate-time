@@ -50,9 +50,11 @@ func TestOpeningAnEventReadsItsThreadWithoutSortingIt(t *testing.T) {
 	}
 	seedEventChildRows(t, workspaceID, tenant.UserID, eventIDs, perEvent)
 
+	// The thread is read from its newest end, which the index serves by being
+	// walked backwards -- it must not fall back to sorting what it read.
 	const comments = `SELECT ec.id FROM calendar_event_comments ec
 		WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
-		ORDER BY ec.created_at`
+		ORDER BY ec.created_at DESC, ec.id DESC LIMIT 51`
 	key, rows, extra := explainOne(t, comments, workspaceID, eventIDs[0])
 	require.Equal(t, "idx_calendar_event_comments_event", key,
 		"an event's comments must come from the index that also holds their order")
@@ -63,7 +65,7 @@ func TestOpeningAnEventReadsItsThreadWithoutSortingIt(t *testing.T) {
 
 	const checklist = `SELECT id FROM calendar_event_checklist_items
 		WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
-		ORDER BY sort_weight, id`
+		ORDER BY sort_weight, id LIMIT 500`
 	key, rows, extra = explainOne(t, checklist, workspaceID, eventIDs[0])
 	require.Equal(t, "idx_calendar_event_checklist_items_event", key,
 		"a checklist must come from the index that also holds its order")

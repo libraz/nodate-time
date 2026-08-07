@@ -387,13 +387,15 @@ func TestCommentEditDelete(t *testing.T) {
 	assert.Equal(t, "Original comment", comment.Body)
 
 	// List comments, verify 1 comment
-	var comments1 []struct {
-		ID   string `json:"id"`
-		Body string `json:"body"`
+	var comments1 struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Body string `json:"body"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, activityURL, tt.AccessToken, nil, &comments1)
-	require.Len(t, comments1, 1)
-	assert.Equal(t, "Original comment", comments1[0].Body)
+	require.Len(t, comments1.Items, 1)
+	assert.Equal(t, "Original comment", comments1.Items[0].Body)
 
 	// Update the comment
 	var updated struct {
@@ -404,23 +406,27 @@ func TestCommentEditDelete(t *testing.T) {
 	assert.Equal(t, "Edited comment", updated.Body)
 
 	// List comments, verify body is updated
-	var comments2 []struct {
-		Body string `json:"body"`
+	var comments2 struct {
+		Items []struct {
+			Body string `json:"body"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, activityURL, tt.AccessToken, nil, &comments2)
-	require.Len(t, comments2, 1)
-	assert.Equal(t, "Edited comment", comments2[0].Body)
+	require.Len(t, comments2.Items, 1)
+	assert.Equal(t, "Edited comment", comments2.Items[0].Body)
 
 	// Delete the comment
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, activityURL+"/"+comment.ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// List comments, verify 0 comments
-	var comments3 []struct {
-		ID string `json:"id"`
+	var comments3 struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, activityURL, tt.AccessToken, nil, &comments3)
-	require.Len(t, comments3, 0)
+	require.Len(t, comments3.Items, 0)
 }
 
 func TestCommentEditDenied(t *testing.T) {

@@ -6,13 +6,19 @@ WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE;
 SELECT * FROM calendar_members
 WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE FOR UPDATE;
 
+-- The LIMIT is a cap rather than a page. Membership is a list of people, and
+-- every caller of this -- the member sheet, the participant picker, the
+-- colour legend -- wants all of them at once; paging it would mean a picker
+-- that cannot offer somebody who is in the calendar. The cap is a ceiling on
+-- what one response can cost, not a page size.
 -- name: ListCalendarMembers :many
 SELECT cm.*, u.public_id AS user_public_id, u.display_name AS user_display_name,
        u.email AS user_email, u.avatar_url AS user_avatar_url
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
-ORDER BY cm.created_at;
+ORDER BY cm.created_at
+LIMIT ?;
 
 -- AddCalendarMember revives a revoked grant rather than inserting beside
 -- it: the unique key spans revoked rows precisely so a re-add cannot leave

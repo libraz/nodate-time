@@ -62,6 +62,10 @@ type SMTPConfig struct {
 // which is minutes.
 const defaultSMTPTimeout = 20 * time.Second
 
+// deadlineGrace is how much later than the context the connection's own
+// deadline is set. See deliver.
+const deadlineGrace = time.Second
+
 // SMTPMailer sends mail via a real SMTP server using STARTTLS when the server
 // advertises it (the common submission setup on port 587).
 type SMTPMailer struct {
@@ -116,7 +120,13 @@ func (m SMTPMailer) deliver(ctx context.Context, to string, body []byte) error {
 	}
 	defer conn.Close()
 	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetDeadline(deadline); err != nil {
+		// A hair past the context's own deadline, so the two cannot race to
+		// end the same send: the watchdog below reaches the connection first
+		// and the caller is told the deadline passed, rather than being handed
+		// whichever of "i/o timeout" and "context deadline exceeded" the
+		// scheduler happened to produce. The connection deadline stays as the
+		// backstop for a watchdog that never gets to run.
+		if err := conn.SetDeadline(deadline.Add(deadlineGrace)); err != nil {
 			return fmt.Errorf("set deadline: %w", err)
 		}
 	}

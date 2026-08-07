@@ -208,9 +208,20 @@ type DeleteEventOutput struct{}
 type ListCommentsInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
+	Cursor     string `query:"cursor" required:"false" doc:"Opaque cursor from a previous response; pages backwards into older comments"`
+	Limit      int    `query:"limit" required:"false" minimum:"1" maximum:"200" default:"50"`
 }
+
+// ListCommentsPage carries one page in reading order, oldest first. The page
+// itself is taken from the newest end of the thread, and nextCursor asks for
+// the one before it.
+type ListCommentsPage struct {
+	Items      []CommentResponse `json:"items"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
 type ListCommentsOutput struct {
-	Body []CommentResponse
+	Body ListCommentsPage
 }
 
 type CreateCommentInput struct {

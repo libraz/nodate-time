@@ -14,9 +14,17 @@ type MemoResponse struct {
 
 type ListMemosInput struct {
 	CalendarID string `path:"calendarId"`
+	Cursor     string `query:"cursor" required:"false" doc:"Opaque cursor from a previous response"`
+	Limit      int    `query:"limit" required:"false" minimum:"1" maximum:"200" default:"100"`
 }
+
+type ListMemosPage struct {
+	Items      []MemoResponse `json:"items"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+}
+
 type ListMemosOutput struct {
-	Body []MemoResponse
+	Body ListMemosPage
 }
 
 type CreateMemoInput struct {
