@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   assignableRoles,
+  canDeleteComment,
   canEdit,
+  canEditComment,
   canEditEvent,
   canManage,
   canOwn,
@@ -145,5 +147,32 @@ describe('membershipFor', () => {
     // collapsing them is what made one failed fetch look like a lost role.
     expect(membershipFor(undefined, 'a@example.com')).toEqual({ status: 'unknown' });
     expect(membershipFor(members, 'nobody@example.com')).toEqual({ status: 'none' });
+  });
+});
+
+describe('comment moderation', () => {
+  const theirs = { userPublicId: 'u-them' };
+  const mine = { userPublicId: 'u-me' };
+
+  it('lets the author edit and remove their own comment', () => {
+    expect(canEditComment(mine, 'u-me')).toBe(true);
+    expect(canDeleteComment(mine, 'editor', 'u-me')).toBe(true);
+  });
+
+  it('does not let one editor touch another member’s comment', () => {
+    expect(canEditComment(theirs, 'u-me')).toBe(false);
+    expect(canDeleteComment(theirs, 'editor', 'u-me')).toBe(false);
+  });
+
+  it('lets whoever runs the calendar take a comment down', () => {
+    // The only remedy for something posted on a shared calendar, short of
+    // deleting the event it hangs off.
+    expect(canDeleteComment(theirs, 'manager', 'u-me')).toBe(true);
+    expect(canDeleteComment(theirs, 'owner', 'u-me')).toBe(true);
+  });
+
+  it('still refuses to let them rewrite it', () => {
+    // Removing words and substituting different ones are not the same power.
+    expect(canEditComment(theirs, 'u-me')).toBe(false);
   });
 });

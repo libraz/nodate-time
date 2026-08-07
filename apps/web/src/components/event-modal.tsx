@@ -7,7 +7,9 @@ import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { api, errorMessage } from '@/lib/api';
 import { eventTimesForSave } from '@/lib/event-times';
 import {
+  canDeleteComment,
   canEdit,
+  canEditComment,
   canEditEvent,
   roleForCalendar,
   showAsLabelKey,
@@ -196,11 +198,20 @@ function recurrenceLabel(
 function CommentsSection({
   calendarId,
   eventId,
-  editable,
+  canPost,
+  moderatorRole,
 }: {
   calendarId: string;
   eventId: string;
-  editable: boolean;
+  /**
+   * Whether the viewer may add to the thread. This follows writing to the
+   * calendar, not editing this event: commenting on somebody else's plan is
+   * what a shared calendar is for, so it is deliberately wider than the
+   * event-level grant that governs the form above.
+   */
+  canPost: boolean;
+  /** The viewer's role on the calendar, which is what decides moderation. */
+  moderatorRole: string | undefined;
 }) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -212,6 +223,8 @@ function CommentsSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const listEndRef = useRef<HTMLDivElement>(null);
+  const mayEdit = (c: EventComment) => canEditComment(c, user?.id);
+  const mayDelete = (c: EventComment) => canDeleteComment(c, moderatorRole, user?.id);
 
   const fetchComments = useCallback(async () => {
     setIsLoading(true);
@@ -302,30 +315,39 @@ function CommentsSection({
                   <span className="text-caption text-[var(--color-text-tertiary)]">
                     {formatRelativeTime(c.createdAt, locale)}
                   </span>
-                  {editable && c.userPublicId === user?.id && editingId !== c.id && (
+                  {editingId !== c.id && (mayEdit(c) || mayDelete(c)) && (
                     <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(c.id);
-                          setEditContent(eventCommentText(c));
-                        }}
-                        className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
-                      >
-                        {t('event.editComment')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await api.delete(
-                            `/calendars/${calendarId}/events/${eventId}/activities/${c.id}`,
-                          );
-                          fetchComments();
-                        }}
-                        className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-                      >
-                        {t('event.deleteComment')}
-                      </button>
+                      {mayEdit(c) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(c.id);
+                            setEditContent(eventCommentText(c));
+                          }}
+                          className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
+                        >
+                          {t('event.editComment')}
+                        </button>
+                      )}
+                      {mayDelete(c) && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await api.delete(
+                                `/calendars/${calendarId}/events/${eventId}/activities/${c.id}`,
+                              );
+                            } catch (err) {
+                              toast.error(errorMessage(err));
+                              return;
+                            }
+                            fetchComments();
+                          }}
+                          className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
+                        >
+                          {t('event.deleteComment')}
+                        </button>
+                      )}
                     </span>
                   )}
                 </div>
@@ -380,7 +402,7 @@ function CommentsSection({
         </div>
       )}
 
-      {editable && (
+      {canPost && (
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -2060,7 +2082,8 @@ export function EventModal() {
         <CommentsSection
           calendarId={editingEvent.calendarId}
           eventId={editingEvent.id}
-          editable={editable}
+          canPost={canEdit(myRole)}
+          moderatorRole={myRole}
         />
       )}
 
