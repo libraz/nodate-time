@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
+import { fromISOInZone } from '@/lib/date-utils';
 import { readCaptureTime } from '@/lib/exif';
 import { prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
@@ -14,6 +16,8 @@ interface AlbumPhoto {
   imageUrl: string;
   createdAt: string;
   takenAt: string;
+  /** Public id of the event this photo belongs to, empty when it belongs to none. */
+  eventId?: string;
   uploadedBy: { id: string; name: string; avatarUrl?: string };
 }
 
@@ -33,6 +37,8 @@ export function AlbumPanel() {
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const events = useCalendarStore((s) => s.events);
+  const timezone = useUiStore((s) => s.timezone);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
   const [nextCursor, setNextCursor] = useState('');
@@ -43,6 +49,7 @@ export function AlbumPanel() {
   const [lightbox, setLightbox] = useState<AlbumPhoto | null>(null);
   const [captionDraft, setCaptionDraft] = useState('');
   const [savingCaption, setSavingCaption] = useState(false);
+  const [linkingEvent, setLinkingEvent] = useState(false);
   // The cursors of the pages currently on screen, in order. An image URL is
   // signed for a limited time, and thumbnails load as they are scrolled to, so
   // one can expire while the panel is still open; re-listing these same pages
@@ -214,6 +221,48 @@ export function AlbumPanel() {
       setSavingCaption(false);
     }
   }, [activeCalendarId, lightbox, captionDraft]);
+
+  /**
+   * Events the open photo could belong to: the ones on the day it was taken.
+   *
+   * Offering every loaded event would be a list of hundreds ordered by nothing
+   * the viewer can see. A photo belongs to what was happening when it was
+   * taken, and the capture time is read off the file precisely so this list
+   * can be short enough to pick from.
+   */
+  const linkableEvents = useMemo(() => {
+    if (!lightbox) return [];
+    const day = fromISOInZone(lightbox.takenAt, timezone).toISODate();
+    return events
+      .filter(
+        (evt) =>
+          evt.calendarId === activeCalendarId &&
+          fromISOInZone(evt.startAt, timezone).toISODate() === day,
+      )
+      .sort((a, b) => a.startAt.localeCompare(b.startAt));
+  }, [lightbox, events, activeCalendarId, timezone]);
+
+  const handleLinkEvent = useCallback(
+    async (eventId: string) => {
+      if (!activeCalendarId || !lightbox) return;
+      setLinkingEvent(true);
+      try {
+        // An empty string is how the API is told to clear the link, so a photo
+        // can be detached from an event without being deleted and re-uploaded.
+        const updated = await api.put<AlbumPhoto>(
+          `/calendars/${activeCalendarId}/albums/${lightbox.id}`,
+          { caption: lightbox.caption, eventId },
+        );
+        setPhotos((cur) => cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)));
+        setLightbox((cur) => (cur ? { ...cur, ...updated } : cur));
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setLinkingEvent(false);
+      }
+    },
+    [activeCalendarId, lightbox],
+  );
 
   const handleDownload = useCallback(
     async (photo: AlbumPhoto) => {
@@ -402,6 +451,34 @@ export function AlbumPanel() {
                 lightbox.caption && (
                   <p className="flex-1 text-body text-white">{lightbox.caption}</p>
                 )
+              )}
+            </div>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: wrapper only stops event propagation so using the picker does not trigger the parent photo click */}
+            <div
+              className="mt-2 flex items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              role="presentation"
+            >
+              <span className="shrink-0 text-footnote text-white/70">{t('album.event')}</span>
+              {editable ? (
+                <CustomSelect
+                  value={lightbox.eventId ?? ''}
+                  onChange={handleLinkEvent}
+                  triggerClassName="flex-1 bg-black/50 text-white"
+                  options={[
+                    { value: '', label: t('album.noEvent') },
+                    ...linkableEvents.map((evt) => ({ value: evt.id, label: evt.title })),
+                  ]}
+                />
+              ) : (
+                <span className="text-footnote text-white">
+                  {linkableEvents.find((evt) => evt.id === lightbox.eventId)?.title ??
+                    t('album.noEvent')}
+                </span>
+              )}
+              {linkingEvent && (
+                <span className="shrink-0 text-footnote text-white/70">{t('profile.saving')}</span>
               )}
             </div>
           </div>

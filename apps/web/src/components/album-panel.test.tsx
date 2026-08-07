@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -11,18 +11,33 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/stores/ui-store', () => ({
-  useUiStore: (selector: (s: { rightPanel: string; toggleRightPanel: () => void }) => unknown) =>
-    selector({ rightPanel: 'album', toggleRightPanel: () => {} }),
+  useUiStore: (
+    selector: (s: {
+      rightPanel: string;
+      toggleRightPanel: () => void;
+      timezone: string;
+    }) => unknown,
+  ) => selector({ rightPanel: 'album', toggleRightPanel: () => {}, timezone: 'Asia/Tokyo' }),
 }));
 
+/**
+ * Mutable so a test can say what the reader is allowed to do. Most of this
+ * file reads an album it cannot edit; the event picker only exists for a
+ * calendar the reader can write to.
+ */
+const calendarState = {
+  calendars: [{ id: 'cal-1' }] as { id: string; role?: string }[],
+  activeCalendarIds: ['cal-1'],
+  membersMap: {} as Record<string, never[]>,
+  // A photo is offered the events of the day it was taken, so the store has to
+  // carry one for the picker to have anything to show.
+  events: [
+    { id: 'evt-1', calendarId: 'cal-1', title: 'Sports day', startAt: '2026-04-20T09:00:00+09:00' },
+  ],
+};
+
 vi.mock('@/stores/calendar-store', () => ({
-  useCalendarStore: (
-    selector: (s: {
-      calendars: { id: string }[];
-      activeCalendarIds: string[];
-      membersMap: Record<string, never[]>;
-    }) => unknown,
-  ) => selector({ calendars: [{ id: 'cal-1' }], activeCalendarIds: ['cal-1'], membersMap: {} }),
+  useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
 vi.mock('@/stores/auth-store', () => ({
@@ -177,5 +192,78 @@ describe('AlbumPanel', () => {
     fireEvent.click(closers[closers.length - 1] as HTMLElement);
 
     await waitFor(() => expect(screen.getAllByAltText('a photo')).toHaveLength(1));
+  });
+});
+
+/**
+ * The album table has carried an event link and a capture time since it was
+ * created, and the API accepts both, but nothing on screen could set either --
+ * while the README advertised attaching photos to an event as a feature.
+ *
+ * The picker is offered the events of the day the photo was taken, which is
+ * what makes it a list somebody can pick from rather than every event loaded.
+ */
+describe('AlbumPanel event link', () => {
+  beforeEach(() => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner' }];
+  });
+
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+  });
+
+  it('offers the events of the day the photo was taken', async () => {
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+
+    // The dropdown renders through a portal, so it is queried from the
+    // document rather than from the render container.
+    const trigger = await screen.findByText('album.noEvent');
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText('Sports day')).toBeInTheDocument();
+  });
+
+  it('attaches the photo to the event that was chosen', async () => {
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+    mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: 'evt-1' });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+    fireEvent.click(await screen.findByText('album.noEvent'));
+    fireEvent.click(await screen.findByText('Sports day'));
+
+    await waitFor(() =>
+      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
+        caption: 'a photo',
+        eventId: 'evt-1',
+      }),
+    );
+  });
+
+  it('detaches a photo without deleting it', async () => {
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({
+      items: [{ ...photo('https://storage/one'), eventId: 'evt-1' }],
+    });
+    mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: '' });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+    fireEvent.click(await screen.findByText('Sports day'));
+    fireEvent.click(await screen.findByText('album.noEvent'));
+
+    // An empty string is how the API is told to clear the link; omitting the
+    // field would leave the photo attached.
+    await waitFor(() =>
+      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
+        caption: 'a photo',
+        eventId: '',
+      }),
+    );
   });
 });
