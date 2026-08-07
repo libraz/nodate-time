@@ -52,17 +52,49 @@ func ComputeEnd(rule *Rule, eventStart, eventEnd time.Time) time.Time {
 	}
 	if rule.Until != nil {
 		if t, err := time.Parse(time.RFC3339, *rule.Until); err == nil {
-			return t.Add(duration)
+			return clampEnd(t.Add(duration))
 		}
 		if t, err := time.ParseInLocation("2006-01-02", *rule.Until, eventStart.Location()); err == nil {
-			return t.AddDate(0, 0, 1).Add(duration)
+			return clampEnd(t.AddDate(0, 0, 1).Add(duration))
 		}
 	}
 	if rule.Count > 0 {
-		return computeNthOccurrence(rule, eventStart, rule.Count).Add(duration)
+		return clampEnd(computeNthOccurrence(rule, eventStart, rule.Count).Add(duration))
 	}
-	// Infinite recurrence: use far-future sentinel
-	return time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
+	return farFutureEnd
+}
+
+// farFutureEnd is the boundary recorded for a series that does not end within
+// reach. It is deliberately the same answer for two different questions.
+//
+// recurrence_end exists so a range query can skip series that cannot reach the
+// window; it is not the series' last occurrence, which the expander works out
+// from the rule. A series running to the year 300,000 and one running forever
+// are therefore the same series to everything that reads this column, and
+// answering both the same way is what lets the column stay storable.
+var farFutureEnd = time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
+
+// clampEnd keeps a computed boundary inside what the column can hold.
+//
+// interval and count are validated independently -- up to 999 and up to 1000 --
+// so their product is not. A yearly rule at both limits puts the last
+// occurrence past the year 1,000,000, and DATETIME stops at 9999: the insert
+// fails and a rule the validator had just accepted comes back as a server
+// error. Weekly and monthly overflow too.
+//
+// Daily does not: 999,000 days is the year 4762, inside the column. That is
+// worth knowing before choosing a case to test with, because the one
+// frequency a reader is most likely to reach for is the one that hides this.
+//
+// Clamping does not narrow what the user asked for. The occurrences still come
+// from the rule, and a window past the sentinel already finds no infinite
+// series either, so this makes the two behave alike rather than making one of
+// them fail.
+func clampEnd(t time.Time) time.Time {
+	if t.After(farFutureEnd) {
+		return farFutureEnd
+	}
+	return t
 }
 
 // ComputeEndInZone is ComputeEnd anchored in the event's IANA timezone, with the
@@ -184,8 +216,15 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		if allDaySpan > 0 {
 			candidateEnd = candidate.AddDate(0, 0, allDaySpan)
 		}
-		// Check overlap with window
-		if candidateEnd.After(windowStart) {
+		// Check overlap with window. An occurrence with no duration is a marker
+		// at a moment rather than an empty span, so it belongs to the window
+		// that opens on it -- otherwise one landing exactly on a day boundary
+		// is too late for the day that closes there and too early for the day
+		// that opens there, and shows up in neither. This mirrors the same
+		// allowance in ListCalendarEventsByCalendarAndRange, which the
+		// non-recurring events go through.
+		zeroLength := candidateEnd.Equal(candidate)
+		if candidateEnd.After(windowStart) || (zeroLength && !candidate.Before(windowStart)) {
 			results = append(results, Occurrence{StartAt: candidate, EndAt: candidateEnd})
 		}
 	}
@@ -229,7 +268,14 @@ func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Dura
 	}
 	for {
 		candidate := eventStart.AddDate(0, 0, step*rule.Interval)
-		if candidate.Add(duration).After(windowStart) {
+		// The same allowance the overlap check makes: an occurrence with no
+		// duration is a point, so one landing exactly on the window start is
+		// inside the window. Skipping it here would step the iterator past it
+		// before the overlap check ever saw it, which is a harder failure to
+		// find than the check being wrong -- the occurrence is not rejected,
+		// it is never offered.
+		if candidate.Add(duration).After(windowStart) ||
+			(duration == 0 && !candidate.Before(windowStart)) {
 			break
 		}
 		step++
@@ -306,19 +352,23 @@ func addYearsClamped(t time.Time, years int) time.Time {
 	return time.Date(year, t.Month(), day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
 }
 
+// weekdayByCode maps the two-letter day codes a rule carries onto weekdays.
+// It is fixed, so it is built once rather than per candidate: the iterators
+// below are called once for every date the expander steps through, and a
+// window of a year over a daily series steps through a few hundred.
+var weekdayByCode = map[string]time.Weekday{
+	"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday,
+	"WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday,
+}
+
 // nextWeeklyByDay iterates weekly byDay occurrences. The week starts on Sunday
 // (WKST=SU): with interval > 1, the skipped weeks are counted from each Sunday
 // boundary. This intentionally diverges from the RFC 5545 default of WKST=MO
 // and is part of the documented API contract for recurrence rules.
 func (it *iterator) nextWeeklyByDay() time.Time {
-	dayMap := map[string]time.Weekday{
-		"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday,
-		"WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday,
-	}
-
 	targetDays := make(map[time.Weekday]bool)
 	for _, d := range it.rule.ByDay {
-		if wd, ok := dayMap[d]; ok {
+		if wd, ok := weekdayByCode[d]; ok {
 			targetDays[wd] = true
 		}
 	}
@@ -373,12 +423,7 @@ func (it *iterator) nextMonthlyByDay() time.Time {
 }
 
 func (it *iterator) nextMonthlyBySetPos() time.Time {
-	dayMap := map[string]time.Weekday{
-		"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday,
-		"WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday,
-	}
-
-	targetDay, ok := dayMap[it.rule.ByDay[0]]
+	targetDay, ok := weekdayByCode[it.rule.ByDay[0]]
 	if !ok {
 		return time.Time{}
 	}
