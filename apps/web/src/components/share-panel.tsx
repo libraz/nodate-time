@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
 import {
   canManage,
   DEFAULT_INVITE_ROLE,
@@ -9,19 +8,15 @@ import {
   type Role,
   roleLabelKey,
 } from '@/lib/permissions';
-import { toast } from '@/lib/toast';
+import { useInvites } from '@/lib/use-invites';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import {
   INVITE_EXPIRY_HOURS,
   INVITE_MAX_USES,
-  type InviteData,
-  inviteCreateBody,
   inviteExpiryLabelKey,
   inviteUsesLabelKey,
-  isPublicLink,
-  mergeInviteTokens,
 } from '@/types/invite';
 
 export function SharePanel() {
@@ -44,9 +39,7 @@ export function SharePanel() {
   const target = adminCalendars.find((c) => c.id === targetId) ?? adminCalendars[0] ?? null;
   const calendarId = target?.id ?? '';
 
-  const [invites, setInvites] = useState<InviteData[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
   const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
   // Bounded by default: a link that never expires and admits anyone is the
   // one you cannot take back once it has been forwarded.
@@ -54,8 +47,8 @@ export function SharePanel() {
   const [inviteUses, setInviteUses] = useState<number>(1);
 
   // Several single-use invite links may coexist; the public link is at most one.
-  const joinInvites = invites.filter((i) => !i.isPublic);
-  const publicLink = invites.find(isPublicLink) ?? null;
+  const { joinInvites, publicLink, busy, createInvite, createPublicLink, revokeInvite } =
+    useInvites(calendarId, rightPanel === 'share');
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
   const publicUrl = publicLink?.token ? `${origin}/embed/${publicLink.token}` : '';
@@ -63,74 +56,15 @@ export function SharePanel() {
     ? `<iframe src="${publicUrl}" width="100%" height="640" style="border:1px solid #e5e7eb;border-radius:12px" loading="lazy"></iframe>`
     : '';
 
+  // A copied-link acknowledgement outlives neither the panel nor the link it
+  // was shown against.
   useEffect(() => {
-    if (rightPanel !== 'share') {
-      setInvites([]);
-      setCopiedKey(null);
-      return;
-    }
-    if (!calendarId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await api.get<InviteData[]>(`/calendars/${calendarId}/invites`);
-        // Listing cannot return tokens, so keep the ones created in this
-        // session rather than blanking a link the user has not copied yet.
-        if (!cancelled) setInvites((cur) => mergeInviteTokens(list, cur));
-      } catch (e) {
-        if (!cancelled) toast.error(errorMessage(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [rightPanel, calendarId]);
+    if (rightPanel !== 'share') setCopiedKey(null);
+  }, [rightPanel]);
 
-  const createInvite = useCallback(async () => {
-    if (!calendarId) return;
-    setBusy('invite');
-    try {
-      const data = await api.post<InviteData>(
-        `/calendars/${calendarId}/invites`,
-        inviteCreateBody(inviteRole, inviteExpiry, inviteUses),
-      );
-      setInvites((cur) => [data, ...cur]);
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }, [calendarId, inviteRole, inviteExpiry, inviteUses]);
-
-  const createPublic = useCallback(async () => {
-    if (!calendarId) return;
-    // Guard against accidental external exposure.
-    if (!window.confirm(t('share.publicConfirm'))) return;
-    setBusy('public');
-    try {
-      const data = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
-        role: 'viewer',
-        isPublic: true,
-      });
-      setInvites((cur) => [data, ...cur.filter((i) => !isPublicLink(i))]);
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }, [calendarId, t]);
-
-  const revoke = useCallback(
-    async (id: string) => {
-      if (!calendarId) return;
-      try {
-        await api.delete(`/calendars/${calendarId}/invites/${id}`);
-        setInvites((cur) => cur.filter((i) => i.id !== id));
-      } catch (e) {
-        toast.error(errorMessage(e));
-      }
-    },
-    [calendarId],
+  const handleCreateInvite = useCallback(
+    () => createInvite({ role: inviteRole, expiryHours: inviteExpiry, maxUses: inviteUses }),
+    [createInvite, inviteRole, inviteExpiry, inviteUses],
   );
 
   const copy = useCallback((key: string, text: string) => {
@@ -295,7 +229,7 @@ export function SharePanel() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => revoke(inv.id)}
+                              onClick={() => revokeInvite(inv.id)}
                               className="text-footnote text-[var(--color-danger)] hover:underline"
                             >
                               {t('share.revokeLink')}
@@ -308,7 +242,7 @@ export function SharePanel() {
                 )}
                 <button
                   type="button"
-                  onClick={createInvite}
+                  onClick={handleCreateInvite}
                   disabled={busy === 'invite'}
                   className={`${joinInvites.length > 0 ? 'btn-secondary' : 'btn-primary'} w-full text-body disabled:opacity-50`}
                 >
@@ -360,7 +294,7 @@ export function SharePanel() {
                 {!publicLink ? (
                   <button
                     type="button"
-                    onClick={createPublic}
+                    onClick={createPublicLink}
                     disabled={busy === 'public'}
                     className="btn-secondary w-full text-body disabled:opacity-50"
                   >
@@ -407,7 +341,7 @@ export function SharePanel() {
                     )}
                     <button
                       type="button"
-                      onClick={() => revoke(publicLink.id)}
+                      onClick={() => revokeInvite(publicLink.id)}
                       className="text-footnote text-[var(--color-danger)] hover:underline"
                     >
                       {t('share.revokeLink')}

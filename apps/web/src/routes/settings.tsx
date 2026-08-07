@@ -6,17 +6,17 @@ import { type Locale, useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { detectHolidayCountry } from '@/lib/holidays';
 import {
-  assignableRoles,
-  canManage as canManageRole,
-  canOwn,
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
+  type Role,
   roleLabelKey,
 } from '@/lib/permissions';
 import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useHolidayCountries } from '@/lib/use-holidays';
+import { useInvites } from '@/lib/use-invites';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -24,11 +24,8 @@ import type { Member } from '@/types/calendar';
 import {
   INVITE_EXPIRY_HOURS,
   INVITE_MAX_USES,
-  type InviteData,
-  inviteCreateBody,
   inviteExpiryLabelKey,
   inviteUsesLabelKey,
-  mergeInviteTokens,
 } from '@/types/invite';
 
 export interface SettingsSearch {
@@ -852,16 +849,10 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
 export function CalendarsSection() {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
-  const fetchMembers = useCalendarStore((s) => s.fetchMembers);
-  const leaveCalendar = useCalendarStore((s) => s.leaveCalendar);
-  const membersMap = useCalendarStore((s) => s.membersMap);
   const me = useAuthStore((s) => s.user);
 
   const [selectedId, setSelectedId] = useState<string>(calendars[0]?.id ?? '');
-  const [invites, setInvites] = useState<InviteData[]>([]);
-  const [loadingInvites, setLoadingInvites] = useState(false);
-  const [creatingInvite, setCreatingInvite] = useState(false);
-  const [inviteRole, setInviteRole] = useState(DEFAULT_INVITE_ROLE);
+  const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
   // Bounded by default: an unbounded link cannot be taken back once forwarded.
   const [inviteExpiry, setInviteExpiry] = useState<number>(168);
   const [inviteUses, setInviteUses] = useState<number>(1);
@@ -873,98 +864,50 @@ export function CalendarsSection() {
     }
   }, [calendars, selectedId]);
 
-  const loadInvites = useCallback(async (calId: string) => {
-    setLoadingInvites(true);
-    try {
-      const list = await api.get<InviteData[]>(`/calendars/${calId}/invites`);
-      // A listing carries no tokens; keep the ones this session created so a
-      // freshly made link does not vanish on the next reload of the section.
-      setInvites((cur) => mergeInviteTokens(list, cur));
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
-    } finally {
-      setLoadingInvites(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (selectedId) fetchMembers(selectedId);
-  }, [selectedId, fetchMembers]);
-
-  const members = (selectedId && membersMap[selectedId]) || [];
-  // The caller's own role arrives with the calendar, so the invite section is
-  // gated before the member list it would otherwise have been read from.
-  const myRole = calendars.find((c) => c.id === selectedId)?.role;
-  const isAdmin = canManageRole(myRole);
+  // The caller's own role arrives with the calendar, so what this screen may
+  // offer is settled before the member list it would otherwise be read from.
+  const {
+    members,
+    canManageMembers: isAdmin,
+    amOwner,
+    roleOptions,
+    ownerCount,
+    changeRole,
+    removeMember,
+  } = useCalendarMembers(selectedId);
 
   // Only a manager may read a calendar's invites. Asking regardless meant an
   // editor or viewer got a permission error for opening a screen, once per
-  // calendar they selected, having done nothing wrong.
-  useEffect(() => {
-    if (selectedId && isAdmin) loadInvites(selectedId);
-    else setInvites([]);
-  }, [selectedId, isAdmin, loadInvites]);
-  const amOwner = canOwn(myRole);
-  const roleOptions = assignableRoles(myRole);
-  const ownerCount = members.filter((m) => m.role === 'owner').length;
-
-  const handleRoleChange = async (member: Member, role: string) => {
-    if (member.role === 'owner' && role !== 'owner' && ownerCount <= 1) {
-      toast.error(t('members.lastOwner'));
-      return;
-    }
-    try {
-      await api.put(`/calendars/${selectedId}/members/${member.id}/role`, { role });
-      await fetchMembers(selectedId);
-      toast.success(t('panel.updated'));
-    } catch (e) {
-      toast.error(errorMessage(e));
-    }
-  };
+  // calendar they selected, having done nothing wrong. Public embed links are
+  // managed in the share panel with their own /embed URL, so only the joinable
+  // ones are taken here.
+  const {
+    joinInvites,
+    loading: loadingInvites,
+    busy,
+    createInvite,
+    revokeInvite,
+  } = useInvites(selectedId, isAdmin);
 
   const handleRemoveMember = async (member: Member) => {
-    const leaving = member.id === me?.id;
-    if (!confirm(leaving ? t('members.leaveConfirm') : t('members.removeConfirm'))) return;
-    try {
-      if (leaving) {
-        const leftId = selectedId;
-        await leaveCalendar(leftId, member.id);
-        setSelectedId(calendars.find((c) => c.id !== leftId)?.id ?? '');
-        toast.success(t('members.leftCalendar'));
-        return;
-      }
-      await api.delete(`/calendars/${selectedId}/members/${member.id}`);
-      await fetchMembers(selectedId);
-      toast.success(t('panel.updated'));
-    } catch (e) {
-      toast.error(errorMessage(e));
+    // Leaving takes the calendar with it, so what is left of the list is what
+    // the section has to show rather than a selection pointing at nothing.
+    if (await removeMember(member)) {
+      setSelectedId(calendars.find((c) => c.id !== selectedId)?.id ?? '');
     }
   };
 
   const handleCreateInvite = async () => {
-    setCreatingInvite(true);
-    try {
-      const inv = await api.post<InviteData>(
-        `/calendars/${selectedId}/invites`,
-        inviteCreateBody(inviteRole, inviteExpiry, inviteUses),
-      );
-      setInvites((cur) => [inv, ...cur]);
-      toast.success(t('invites.create'));
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setCreatingInvite(false);
-    }
+    const created = await createInvite({
+      role: inviteRole,
+      expiryHours: inviteExpiry,
+      maxUses: inviteUses,
+    });
+    if (created) toast.success(t('invites.create'));
   };
 
   const handleRevokeInvite = async (id: string) => {
-    try {
-      await api.delete(`/calendars/${selectedId}/invites/${id}`);
-      setInvites((cur) => cur.filter((i) => i.id !== id));
-      toast.success(t('invites.revoke'));
-    } catch (e) {
-      toast.error(errorMessage(e));
-    }
+    if (await revokeInvite(id)) toast.success(t('invites.revoke'));
   };
 
   const copyInvite = (token: string) => {
@@ -972,10 +915,6 @@ export function CalendarsSection() {
     void navigator.clipboard?.writeText(url);
     toast.success(t('common.copied'));
   };
-
-  // Public, read-only embed links are managed in the Share panel with their own
-  // /embed URL; only show joinable invites here.
-  const joinInvites = invites.filter((i) => !i.isPublic);
 
   return (
     <>
@@ -1035,7 +974,7 @@ export function CalendarsSection() {
                   {canChangeRole ? (
                     <CustomSelect
                       value={m.role}
-                      onChange={(v) => handleRoleChange(m, v)}
+                      onChange={(v) => changeRole(m, v)}
                       className="shrink-0"
                       triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
                       options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
@@ -1082,7 +1021,7 @@ export function CalendarsSection() {
           </p>
           <CustomSelect
             value={inviteRole}
-            onChange={(role) => setInviteRole(role as typeof inviteRole)}
+            onChange={(role) => setInviteRole(role as Role)}
             options={INVITE_ROLE_OPTIONS.map((role) => ({
               value: role,
               label: t(roleLabelKey(role)),
@@ -1115,10 +1054,10 @@ export function CalendarsSection() {
           <button
             type="button"
             onClick={handleCreateInvite}
-            disabled={creatingInvite || !isAdmin}
+            disabled={busy === 'invite' || !isAdmin}
             className="btn-primary mb-4 px-5 text-default disabled:opacity-50"
           >
-            {creatingInvite ? t('share.creating') : t('invites.create')}
+            {busy === 'invite' ? t('share.creating') : t('invites.create')}
           </button>
           {loadingInvites ? (
             <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
@@ -1167,10 +1106,12 @@ export function CalendarsSection() {
   );
 }
 
-function ExportSection() {
+/** Exported for testing: an import refreshes the range the app is showing. */
+export function ExportSection() {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
+  const visibleRange = useCalendarStore((s) => s.visibleRange);
   const [selectedId, setSelectedId] = useState<string>(calendars[0]?.id ?? '');
   const [icsText, setIcsText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -1234,9 +1175,12 @@ function ExportSection() {
         toast.error(t('settings.importTruncated', { count: String(res.truncated) }));
       }
       setIcsText('');
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
-      const end = new Date(now.getFullYear(), now.getMonth() + 2, 1).toISOString().slice(0, 10);
+      // The window the app is already showing, sized by the view and read in
+      // the calendar's own zone. A range built here from the browser clock
+      // answered with a different day for anyone whose machine sits on the
+      // other side of midnight from the calendar, so the imported events at
+      // the edge of the span did not appear.
+      const { start, end } = visibleRange();
       await fetchEvents(start, end);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.detail : 'Import failed');

@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Calendar, Member } from '@/types/calendar';
+import type { InviteData } from '@/types/invite';
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => () => ({ useSearch: () => ({}) }),
@@ -54,6 +56,7 @@ const calendarState = {
   fetchMembers: vi.fn(),
   leaveCalendar: vi.fn(),
   fetchEvents: vi.fn(),
+  visibleRange: vi.fn(() => ({ start: '', end: '' })),
 };
 
 vi.mock('@/stores/calendar-store', () => ({
@@ -86,18 +89,40 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 import { api } from '@/lib/api';
-import { AllowedEmailsSection, AppearanceSection, CalendarsSection } from './settings';
+import { fetchWindow } from '@/lib/date-utils';
+import { toast } from '@/lib/toast';
+import {
+  AllowedEmailsSection,
+  AppearanceSection,
+  CalendarsSection,
+  ExportSection,
+} from './settings';
 
 const apiGet = vi.mocked(api.get);
 const apiPost = vi.mocked(api.post);
+const toastError = vi.mocked(toast.error);
 
 function member(role: string, email = 'me@example.com', id = 'm1', name = 'Me'): Member {
   return { id, name, email, role, color: '#000' } as Member;
 }
 
+function invite(id: string, token: string): InviteData {
+  return {
+    id,
+    token,
+    role: 'editor',
+    maxUses: 1,
+    useCount: 0,
+    isPublic: false,
+    expiresAt: null,
+    createdAt: '2026-08-01T00:00:00Z',
+  };
+}
+
 beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
+  toastError.mockReset();
   apiGet.mockResolvedValue([]);
 });
 
@@ -151,6 +176,81 @@ describe('CalendarsSection invites', () => {
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('/calendars/cal-1/invites')),
     );
+  });
+});
+
+/**
+ * The settings tab and the share panel offer the same operations on a
+ * calendar's links, and used to implement them apart. What they disagreed on
+ * is what these cover: which requests are allowed to land, and what a failure
+ * is allowed to say.
+ */
+describe('CalendarsSection invite listing', () => {
+  it('does not let a superseded listing land under another calendar', async () => {
+    calendarState.calendars = [calendar('owner'), { ...calendar('owner'), id: 'cal-2', name: 'B' }];
+    calendarState.membersMap = {};
+
+    // The first calendar answers slowly, so its listing comes back after the
+    // selection has already moved on.
+    let landFirst: (invites: InviteData[]) => void = () => {};
+    apiGet.mockImplementation((path) => {
+      if (String(path).startsWith('/calendars/cal-1/invites')) {
+        return new Promise((resolve) => {
+          landFirst = resolve;
+        });
+      }
+      if (String(path).startsWith('/calendars/cal-2/invites')) {
+        return Promise.resolve([invite('inv-b', 'token-b')]);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(<CalendarsSection />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'A' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'B' }));
+    expect(await screen.findByText('/share/token-b')).toBeTruthy();
+
+    await act(async () => {
+      landFirst([invite('inv-a', 'token-a')]);
+    });
+
+    expect(screen.queryByText('/share/token-a')).toBeNull();
+    expect(screen.getByText('/share/token-b')).toBeTruthy();
+  });
+
+  it('says why the listing failed in the language the reader chose', async () => {
+    calendarState.calendars = [calendar('owner')];
+    calendarState.membersMap = {};
+    apiGet.mockImplementation((path) =>
+      String(path).includes('/invites')
+        ? Promise.reject(new Error('error.serverUnavailable'))
+        : Promise.resolve([]),
+    );
+
+    render(<CalendarsSection />);
+
+    // The localised message, not a bare English word assembled at the call site.
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('error.serverUnavailable'));
+  });
+
+  /**
+   * A link that could hand out management would let whoever holds it widen its
+   * own reach, so the API accepts only editor and viewer. Offering any other
+   * role produces a rejected request for having used the control on offer.
+   */
+  it('offers only the roles an invite link may grant', async () => {
+    calendarState.calendars = [calendar('owner')];
+    calendarState.membersMap = {};
+
+    render(<CalendarsSection />);
+
+    // The dropdown renders through a portal, so it is queried from the
+    // document rather than from the render container.
+    fireEvent.click(await screen.findByRole('button', { name: 'members.roleEditor' }));
+    expect(await screen.findByRole('button', { name: 'members.roleViewer' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'members.roleOwner' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'members.roleManager' })).toBeNull();
   });
 });
 
@@ -237,6 +337,51 @@ describe('AllowedEmailsSection', () => {
         reason: 'contractor until March',
       }),
     );
+  });
+});
+
+/**
+ * An import is only visible once the grid has been asked for the events it
+ * created, and the span to ask for is the one the app is already showing.
+ * Computing it here from the browser clock gave a different answer to anyone
+ * whose machine sits on the other side of midnight from the calendar, so the
+ * events at the edge of the span stayed invisible until a reload.
+ */
+describe('ExportSection', () => {
+  // A browser east of UTC: local midnight on the first of the month converts
+  // back to the previous day, which is the day the old computation lost.
+  const browserZone = 'Asia/Tokyo';
+  const viewedMonth = DateTime.fromISO('2026-08-07T21:00', { zone: browserZone });
+
+  beforeEach(() => {
+    vi.stubEnv('TZ', browserZone);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(viewedMonth.toJSDate());
+    calendarState.calendars = [calendar('owner')];
+    calendarState.visibleRange = vi.fn(() => fetchWindow('month', viewedMonth));
+    calendarState.fetchEvents.mockReset();
+    apiPost.mockResolvedValue({ imported: 1, skipped: 0, failed: 0, truncated: 0 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  it('refreshes the span the app is showing, not one recomputed from the clock', async () => {
+    const { start, end } = fetchWindow('month', viewedMonth);
+    // The boundary the old arithmetic moved: the first of the month, not the
+    // last day of the one before it.
+    expect(start).toBe('2026-07-01');
+
+    render(<ExportSection />);
+
+    fireEvent.change(screen.getByPlaceholderText('settings.importPlaceholder'), {
+      target: { value: 'BEGIN:VCALENDAR\nEND:VCALENDAR' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'settings.importPasted' }));
+
+    await waitFor(() => expect(calendarState.fetchEvents).toHaveBeenCalledWith(start, end));
   });
 });
 
