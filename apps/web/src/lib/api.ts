@@ -223,11 +223,16 @@ async function send(path: string, options: RequestInit): Promise<Response> {
   return fetch(`${API_BASE}${path}`, { ...options, headers });
 }
 
-async function request<T>(
+/**
+ * Runs a request through the session handling (pre-emptive renewal, one retry
+ * after a 401, the shared error envelope) and hands back the raw response, for
+ * the callers that need something out of its headers.
+ */
+async function requestRaw(
   path: string,
-  options: RequestInit = {},
+  options: RequestInit,
   skipAuthRedirect = false,
-): Promise<T> {
+): Promise<Response> {
   // An expired access token is not an ended session while a refresh token
   // remains. Renewing before the request saves a guaranteed 401.
   if (!getToken() && getRefreshToken() && !path.startsWith('/auth/')) {
@@ -247,17 +252,40 @@ async function request<T>(
     }
     throw await buildError(res);
   }
+  return res;
+}
 
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  skipAuthRedirect = false,
+): Promise<T> {
+  const res = await requestRaw(path, options, skipAuthRedirect);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
 export const api = {
   get: <T>(path: string, skipAuthRedirect = false) => request<T>(path, {}, skipAuthRedirect),
+  /**
+   * A GET that also reports the entity tag the server sent. An endpoint whose
+   * updates are full replacements needs the caller to be able to say which
+   * copy it is replacing, and that identity lives in the header rather than
+   * in the body.
+   */
+  getWithRevision: async <T>(path: string): Promise<{ data: T; revision: string | null }> => {
+    const res = await requestRaw(path, {});
+    const revision = res.headers.get('ETag');
+    return { data: (await res.json()) as T, revision };
+  },
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', ...(body != null ? { body: JSON.stringify(body) } : {}) }),
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PUT', ...(body != null ? { body: JSON.stringify(body) } : {}) }),
+  put: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, {
+      method: 'PUT',
+      ...(headers ? { headers } : {}),
+      ...(body != null ? { body: JSON.stringify(body) } : {}),
+    }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   /** Fetches a binary response through the central client (auth + 401 handling). */
   getBlob: async (path: string): Promise<Blob> => {

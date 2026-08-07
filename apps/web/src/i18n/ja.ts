@@ -519,6 +519,7 @@ export const ja = {
   'apiError.EVENT.ACCESS_DENIED': 'この予定にアクセスする権限がありません',
   'apiError.EVENT.EDIT_DENIED': 'この予定を編集する権限がありません',
   'apiError.EVENT.NOT_ATTENDEE': 'この予定の参加者ではありません',
+  'apiError.EVENT.STALE': '開いている間に他の人がこの予定を変更しました。読み込み直してください',
   'apiError.COMMENT.NOT_FOUND': 'コメントが見つかりません',
   'apiError.COMMENT.ACCESS_DENIED': '編集できるのは自分のコメントだけです',
   'apiError.CHECKLIST.NOT_FOUND': 'チェックリストの項目が見つかりません',

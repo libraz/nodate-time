@@ -128,6 +128,9 @@ type GetEventInput struct {
 	EventID    string `path:"eventId"`
 }
 type GetEventOutput struct {
+	// ETag names this exact revision of the event, so a later full-replace
+	// update can say which copy it is replacing.
+	ETag string `header:"ETag" required:"false"`
 	Body EventResponse
 }
 
@@ -152,6 +155,7 @@ type CreateEventInput struct {
 	}
 }
 type CreateEventOutput struct {
+	ETag string `header:"ETag" required:"false"`
 	Body EventResponse
 }
 
@@ -163,7 +167,13 @@ type UpdateEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
 	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"For recurring events: 'this' edits only this occurrence, 'all' edits the whole series"`
-	Body       struct {
+	// IfMatch carries the entity tag of the copy being replaced. Because the
+	// update is a full replace, an unconditional save from a stale copy undoes
+	// whatever the other writer stored in between without either of them
+	// seeing it happen. Omitting the header keeps the old last-write-wins
+	// behaviour, so an existing integration is not broken by the addition.
+	IfMatch string `header:"If-Match" required:"false" doc:"entity tag from the copy being replaced; a mismatch answers 409"`
+	Body    struct {
 		Title              string           `json:"title" minLength:"1" maxLength:"500"`
 		AllDay             bool             `json:"allDay"`
 		StartAt            string           `json:"startAt"`
@@ -182,6 +192,7 @@ type UpdateEventInput struct {
 	}
 }
 type UpdateEventOutput struct {
+	ETag string `header:"ETag" required:"false"`
 	Body EventResponse
 }
 
