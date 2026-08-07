@@ -41,6 +41,7 @@ export function CalendarGrid() {
   ]);
   const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
+  const openDayDetail = useUiStore((s) => s.openDayDetail);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const navigateMonth = useUiStore((s) => s.navigateMonth);
@@ -170,8 +171,6 @@ export function CalendarGrid() {
     if (dow === 6) return 'var(--color-saturday)';
     return 'var(--color-text-primary)';
   };
-
-  void t;
 
   return (
     <div
@@ -371,10 +370,19 @@ export function CalendarGrid() {
                             />
                           );
                         })}
+                        {/* The cell only has room for three tracks, so the rest
+                            of the day is reachable through the day detail. The
+                            chip has to opt back into pointer events: its
+                            container passes them to the day button behind it. */}
                         {overflow > 0 && (
-                          <span className="mt-px text-center text-caption font-medium text-[var(--color-accent)] max-sm:text-micro">
+                          <button
+                            type="button"
+                            onClick={() => openDayDetail(dt)}
+                            aria-label={t('calendar.moreEvents', { count: overflow })}
+                            className="pointer-events-auto mt-px text-center text-caption font-medium text-[var(--color-accent)] hover:underline max-sm:text-micro"
+                          >
                             +{overflow}
-                          </span>
+                          </button>
                         )}
                       </div>
                     </div>
