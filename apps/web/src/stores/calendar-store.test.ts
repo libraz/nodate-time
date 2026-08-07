@@ -133,6 +133,41 @@ describe('fetchEvents', () => {
     expect(mockToast.error).toHaveBeenCalledWith('cal-2 failed');
   });
 
+  it('leaves a calendar that did not answer showing what it had', async () => {
+    useCalendarStore.setState({
+      calendars: [cal('cal-1'), cal('cal-2')],
+      events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
+    });
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url.includes('/calendars/cal-1/events')) return [evt('e1b', 'cal-1')] as never;
+      if (url.includes('/calendars/cal-2/events')) throw new Error('cal-2 failed');
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+
+    // cal-1 answered, so its events are replaced; cal-2 did not, and blanking
+    // it would read as a series someone had just deleted.
+    expect(
+      useCalendarStore
+        .getState()
+        .events.map((e) => e.id)
+        .sort(),
+    ).toEqual(['e1b', 'e2']);
+  });
+
+  it('drops what belonged to a calendar that is no longer in the list', async () => {
+    useCalendarStore.setState({
+      calendars: [cal('cal-1')],
+      events: [evt('e1', 'cal-1'), evt('gone', 'cal-removed')],
+    });
+    mockApi.get.mockImplementation(async () => [] as never);
+
+    await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+
+    expect(useCalendarStore.getState().events).toEqual([]);
+  });
+
   it('ignores an older range response that finishes after the latest request', async () => {
     useCalendarStore.setState({ calendars: [cal('cal-1')] });
     let resolveOlder: ((events: CalendarEvent[]) => void) | undefined;
@@ -190,6 +225,44 @@ describe('fetchCalendars', () => {
 
     expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-1', 'cal-2']);
     expect(localStorage.getItem('tt_activeCalendarIds')).toBe('["cal-1","cal-2"]');
+  });
+
+  it('keeps every calendar hidden when that is what the user chose', async () => {
+    localStorage.setItem('tt_activeCalendarIds', JSON.stringify([]));
+    localStorage.setItem('tt_seenCalendarIds', JSON.stringify(['cal-1', 'cal-2']));
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    // Hiding everything is a choice, not an absence of one.
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual([]);
+  });
+
+  it('shows a calendar that appeared since the last visit, even with the rest hidden', async () => {
+    localStorage.setItem('tt_activeCalendarIds', JSON.stringify([]));
+    localStorage.setItem('tt_seenCalendarIds', JSON.stringify(['cal-1']));
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-2']);
+  });
+
+  it('shows everything on a first visit, which has made no choice yet', async () => {
+    mockApi.get.mockImplementation(async (url: string) => {
+      if (url === '/calendars') return [cal('cal-1'), cal('cal-2')] as never;
+      return [] as never;
+    });
+
+    await useCalendarStore.getState().fetchCalendars();
+
+    expect(useCalendarStore.getState().activeCalendarIds).toEqual(['cal-1', 'cal-2']);
   });
 
   it('does not ask for a member list per calendar', async () => {

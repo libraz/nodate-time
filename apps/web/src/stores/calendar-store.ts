@@ -175,13 +175,29 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       )
         return;
       set({ loadError: null });
-      const saved = loadJson<string[]>('activeCalendarIds', []);
+      // Which calendars are shown is the user's choice, and "none of them" is
+      // one of the choices. It is told apart from "has not chosen yet" by the
+      // key being absent rather than by the selection being empty.
+      //
+      // Which calendars are new is a separate question, kept separately: a
+      // calendar the user has hidden is not new, so deciding newness from the
+      // shown ones is what turned hiding everything into showing everything
+      // again on the next load.
+      const saved = loadJson<string[] | null>('activeCalendarIds', null);
       const calendarIDs = cals.map((c) => c.id);
-      const savedActive = saved.filter((id) => calendarIDs.includes(id));
-      const newIDs = calendarIDs.filter((id) => !saved.includes(id));
-      const ids = saved.length > 0 ? [...savedActive, ...newIDs] : calendarIDs;
+      let ids: string[];
+      if (saved === null) {
+        ids = calendarIDs;
+      } else {
+        // A session that predates the seen list has only its selection to go
+        // on, which is what the old behaviour assumed anyway.
+        const seen = loadJson<string[] | null>('seenCalendarIds', null) ?? saved;
+        const fresh = calendarIDs.filter((id) => !seen.includes(id));
+        ids = [...saved.filter((id) => calendarIDs.includes(id)), ...fresh];
+      }
       set({ calendars: cals, activeCalendarIds: ids });
       saveJson('activeCalendarIds', ids);
+      saveJson('seenCalendarIds', calendarIDs);
 
       // Member lists are not fetched here. They are only needed where members
       // are shown -- the member panel and the participant picker -- and each
@@ -211,6 +227,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
     const allEvents: CalendarEvent[] = [];
+    // Calendars that answered. Only their events are replaced: a calendar that
+    // did not answer is one we have no news about, and treating silence as an
+    // empty month wiped the grid over a single failed request -- most visibly
+    // right after editing a recurring event, where the series disappeared and
+    // looked deleted.
+    const answered = new Set<string>();
     const results = await Promise.allSettled(
       calendars.map(async (cal) => {
         // The dates are days, and which instants a day spans depends on where
@@ -220,6 +242,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         const evts = await api.get<CalendarEvent[]>(
           `/calendars/${cal.id}/events?start=${start}&end=${end}&tz=${tz}`,
         );
+        answered.add(cal.id);
         for (const evt of evts) {
           allEvents.push({ ...evt, calendarId: cal.id });
         }
@@ -233,12 +256,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     for (const result of results) {
       if (result.status === 'rejected') toast.error(errorMessage(result.reason));
     }
-    if (
-      requestGeneration === eventRequestGeneration &&
-      currentAccountGeneration === accountGeneration
-    ) {
-      set({ events: allEvents });
-    }
+    const known = new Set(calendars.map((c) => c.id));
+    set((s) => ({
+      events: [
+        ...s.events.filter((e) => known.has(e.calendarId) && !answered.has(e.calendarId)),
+        ...allEvents,
+      ],
+    }));
   },
 
   async fetchMemos() {
@@ -246,9 +270,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
     const allMemos: Memo[] = [];
+    // As in fetchEvents: a calendar that did not answer keeps what it had.
+    const answered = new Set<string>();
     const results = await Promise.allSettled(
       calendars.map(async (cal) => {
         const ms = await api.get<Memo[]>(`/calendars/${cal.id}/memos`);
+        answered.add(cal.id);
         for (const m of ms) {
           allMemos.push({ ...m, calendarId: cal.id });
         }
@@ -262,12 +289,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     for (const result of results) {
       if (result.status === 'rejected') toast.error(errorMessage(result.reason));
     }
-    if (
-      requestGeneration === memoRequestGeneration &&
-      currentAccountGeneration === accountGeneration
-    ) {
-      set({ memos: allMemos });
-    }
+    const known = new Set(calendars.map((c) => c.id));
+    set((s) => ({
+      memos: [
+        ...s.memos.filter((m) => known.has(m.calendarId) && !answered.has(m.calendarId)),
+        ...allMemos,
+      ],
+    }));
   },
 
   async fetchMembers(calendarId) {
@@ -480,6 +508,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     eventRequestGeneration++;
     memoRequestGeneration++;
     localStorage.removeItem('tt_activeCalendarIds');
+    localStorage.removeItem('tt_seenCalendarIds');
     set({
       calendars: [],
       events: [],
