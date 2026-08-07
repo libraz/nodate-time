@@ -69,6 +69,11 @@ export function AlbumPanel() {
   // The innermost open surface owns the keyboard. The lightbox answers first
   // while it is up, and the event picker portals its list out of the lightbox
   // and closes itself on Escape, so the lightbox stands down while one is open.
+  //
+  // Asking for it by class name couples this to markup pickers.tsx owns, which
+  // is deliberate rather than overlooked: a portalled list is not in this
+  // subtree, so there is nothing else here to ask. It stops being necessary the
+  // day CustomSelect can report its own open state.
   const dismissLightbox = () => {
     if (document.querySelector('.dropdown-panel')) return;
     setLightbox(null);
