@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone } from '@/lib/date-utils';
 import { filterEventsForSearch } from '@/lib/search';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -18,25 +19,10 @@ export function SearchPanel() {
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (showSearch) {
-      // Small delay to let the panel render before focusing
-      const timer = setTimeout(() => inputRef.current?.focus(), 50);
-      return () => clearTimeout(timer);
-    }
-  }, [showSearch]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!showSearch) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') toggleSearch();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [showSearch, toggleSearch]);
+  // Both layouts are in the document at once, so the trap is anchored above
+  // them: it walks whichever one CSS has painted, and the search box of that
+  // layout is the first focusable inside it.
+  const panelRef = useModalA11y<HTMLDivElement>(showSearch, toggleSearch);
 
   const filtered = useMemo(
     () => filterEventsForSearch(events, activeCalendarIds, searchQuery),
@@ -137,7 +123,6 @@ export function SearchPanel() {
           <line x1="16.65" y1="16.65" x2="21" y2="21" />
         </svg>
         <input
-          ref={inputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -171,22 +156,23 @@ export function SearchPanel() {
 
   return (
     <>
-      {/* SP: fullscreen overlay */}
-      <div className="glass-surface-heavy fixed inset-0 z-50 flex flex-col sm:hidden">
-        {searchInput}
-        {resultsList}
-      </div>
+      {/* PC: backdrop, outside the trap so it is not a stop on the way round */}
+      <button
+        type="button"
+        aria-label={t('common.close')}
+        className="fixed inset-0 z-40 hidden sm:block"
+        onClick={toggleSearch}
+      />
 
-      {/* PC: dropdown panel */}
-      <div className="hidden sm:block">
-        {/* backdrop */}
-        <button
-          type="button"
-          aria-label={t('common.close')}
-          className="fixed inset-0 z-40"
-          onClick={toggleSearch}
-        />
-        <div className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 flex max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t('search.searchEvents')}>
+        {/* SP: fullscreen overlay */}
+        <div className="glass-surface-heavy fixed inset-0 z-50 flex flex-col sm:hidden">
+          {searchInput}
+          {resultsList}
+        </div>
+
+        {/* PC: dropdown panel */}
+        <div className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 hidden max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)] sm:flex">
           {searchInput}
           {resultsList}
         </div>

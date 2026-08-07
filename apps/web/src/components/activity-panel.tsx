@@ -6,6 +6,7 @@ import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -50,6 +51,8 @@ interface ActivityPanelProps {
 /** Calendar-wide activity feed listing recent event/memo changes, including deletions. */
 export function ActivityPanel({ onClose }: ActivityPanelProps) {
   const t = useT();
+  // Mounted only while the feed is open, so the trap is live for as long as it is.
+  const panelRef = useModalA11y<HTMLDivElement>(true, onClose);
   const locale = useUiStore((s) => s.locale);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
@@ -118,7 +121,13 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
         className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={onClose}
       />
-      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('activity.title')}
+        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <h2 className="truncate text-subhead font-semibold">{t('activity.title')}</h2>
           <button
