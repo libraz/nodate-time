@@ -13,14 +13,18 @@ UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? 
 -- name: GetAlbumPhotoByPublicID :one
 SELECT * FROM album_photos WHERE public_id = ?;
 
+-- Both listings join the uploader's avatar object, so a page carries the key
+-- its pictures are signed from rather than costing a lookup per photo.
 -- name: ListAlbumPhotosFirstPage :many
 SELECT ap.*,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
+       so.storage_key AS uploader_avatar_storage_key,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
@@ -31,9 +35,11 @@ SELECT ap.*,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
+       so.storage_key AS uploader_avatar_storage_key,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE

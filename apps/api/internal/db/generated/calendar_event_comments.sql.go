@@ -36,29 +36,32 @@ func (q *Queries) CreateEventComment(ctx context.Context, arg CreateEventComment
 
 const getEventCommentByPublicID = `-- name: GetEventCommentByPublicID :one
 SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.public_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 `
 
 type GetEventCommentByPublicIDRow struct {
-	ID              uint32         `json:"id"`
-	PublicID        []byte         `json:"publicId"`
-	WorkspaceID     uint32         `json:"workspaceId"`
-	EventID         sql.NullInt32  `json:"eventId"`
-	AuthorID        uint32         `json:"authorId"`
-	Body            string         `json:"body"`
-	EditedAt        sql.NullTime   `json:"editedAt"`
-	SortWeight      int32          `json:"sortWeight"`
-	Notes           sql.NullString `json:"notes"`
-	Enabled         bool           `json:"enabled"`
-	DeletedAt       sql.NullTime   `json:"deletedAt"`
-	UpdatedAt       sql.NullTime   `json:"updatedAt"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
-	UserPublicID    []byte         `json:"userPublicId"`
+	ID                   uint32         `json:"id"`
+	PublicID             []byte         `json:"publicId"`
+	WorkspaceID          uint32         `json:"workspaceId"`
+	EventID              sql.NullInt32  `json:"eventId"`
+	AuthorID             uint32         `json:"authorId"`
+	Body                 string         `json:"body"`
+	EditedAt             sql.NullTime   `json:"editedAt"`
+	SortWeight           int32          `json:"sortWeight"`
+	Notes                sql.NullString `json:"notes"`
+	Enabled              bool           `json:"enabled"`
+	DeletedAt            sql.NullTime   `json:"deletedAt"`
+	UpdatedAt            sql.NullTime   `json:"updatedAt"`
+	CreatedAt            time.Time      `json:"createdAt"`
+	UserDisplayName      string         `json:"userDisplayName"`
+	UserAvatarURL        sql.NullString `json:"userAvatarUrl"`
+	UserAvatarStorageKey sql.NullString `json:"userAvatarStorageKey"`
+	UserPublicID         []byte         `json:"userPublicId"`
 }
 
 func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte) (GetEventCommentByPublicIDRow, error) {
@@ -80,6 +83,7 @@ func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte
 		&i.CreatedAt,
 		&i.UserDisplayName,
 		&i.UserAvatarURL,
+		&i.UserAvatarStorageKey,
 		&i.UserPublicID,
 	)
 	return i, err
@@ -87,9 +91,11 @@ func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte
 
 const getEventCommentByPublicIDAndEvent = `-- name: GetEventCommentByPublicIDAndEvent :one
 SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.public_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 `
 
@@ -99,22 +105,23 @@ type GetEventCommentByPublicIDAndEventParams struct {
 }
 
 type GetEventCommentByPublicIDAndEventRow struct {
-	ID              uint32         `json:"id"`
-	PublicID        []byte         `json:"publicId"`
-	WorkspaceID     uint32         `json:"workspaceId"`
-	EventID         sql.NullInt32  `json:"eventId"`
-	AuthorID        uint32         `json:"authorId"`
-	Body            string         `json:"body"`
-	EditedAt        sql.NullTime   `json:"editedAt"`
-	SortWeight      int32          `json:"sortWeight"`
-	Notes           sql.NullString `json:"notes"`
-	Enabled         bool           `json:"enabled"`
-	DeletedAt       sql.NullTime   `json:"deletedAt"`
-	UpdatedAt       sql.NullTime   `json:"updatedAt"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
-	UserPublicID    []byte         `json:"userPublicId"`
+	ID                   uint32         `json:"id"`
+	PublicID             []byte         `json:"publicId"`
+	WorkspaceID          uint32         `json:"workspaceId"`
+	EventID              sql.NullInt32  `json:"eventId"`
+	AuthorID             uint32         `json:"authorId"`
+	Body                 string         `json:"body"`
+	EditedAt             sql.NullTime   `json:"editedAt"`
+	SortWeight           int32          `json:"sortWeight"`
+	Notes                sql.NullString `json:"notes"`
+	Enabled              bool           `json:"enabled"`
+	DeletedAt            sql.NullTime   `json:"deletedAt"`
+	UpdatedAt            sql.NullTime   `json:"updatedAt"`
+	CreatedAt            time.Time      `json:"createdAt"`
+	UserDisplayName      string         `json:"userDisplayName"`
+	UserAvatarURL        sql.NullString `json:"userAvatarUrl"`
+	UserAvatarStorageKey sql.NullString `json:"userAvatarStorageKey"`
+	UserPublicID         []byte         `json:"userPublicId"`
 }
 
 func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg GetEventCommentByPublicIDAndEventParams) (GetEventCommentByPublicIDAndEventRow, error) {
@@ -136,6 +143,7 @@ func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg Get
 		&i.CreatedAt,
 		&i.UserDisplayName,
 		&i.UserAvatarURL,
+		&i.UserAvatarStorageKey,
 		&i.UserPublicID,
 	)
 	return i, err
@@ -143,9 +151,11 @@ func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg Get
 
 const listEventCommentsBefore = `-- name: ListEventCommentsBefore :many
 SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
   AND (
     ec.created_at < ?
@@ -164,22 +174,23 @@ type ListEventCommentsBeforeParams struct {
 }
 
 type ListEventCommentsBeforeRow struct {
-	ID              uint32         `json:"id"`
-	PublicID        []byte         `json:"publicId"`
-	WorkspaceID     uint32         `json:"workspaceId"`
-	EventID         sql.NullInt32  `json:"eventId"`
-	AuthorID        uint32         `json:"authorId"`
-	Body            string         `json:"body"`
-	EditedAt        sql.NullTime   `json:"editedAt"`
-	SortWeight      int32          `json:"sortWeight"`
-	Notes           sql.NullString `json:"notes"`
-	Enabled         bool           `json:"enabled"`
-	DeletedAt       sql.NullTime   `json:"deletedAt"`
-	UpdatedAt       sql.NullTime   `json:"updatedAt"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
-	UserPublicID    []byte         `json:"userPublicId"`
+	ID                   uint32         `json:"id"`
+	PublicID             []byte         `json:"publicId"`
+	WorkspaceID          uint32         `json:"workspaceId"`
+	EventID              sql.NullInt32  `json:"eventId"`
+	AuthorID             uint32         `json:"authorId"`
+	Body                 string         `json:"body"`
+	EditedAt             sql.NullTime   `json:"editedAt"`
+	SortWeight           int32          `json:"sortWeight"`
+	Notes                sql.NullString `json:"notes"`
+	Enabled              bool           `json:"enabled"`
+	DeletedAt            sql.NullTime   `json:"deletedAt"`
+	UpdatedAt            sql.NullTime   `json:"updatedAt"`
+	CreatedAt            time.Time      `json:"createdAt"`
+	UserDisplayName      string         `json:"userDisplayName"`
+	UserAvatarURL        sql.NullString `json:"userAvatarUrl"`
+	UserAvatarStorageKey sql.NullString `json:"userAvatarStorageKey"`
+	UserPublicID         []byte         `json:"userPublicId"`
 }
 
 func (q *Queries) ListEventCommentsBefore(ctx context.Context, arg ListEventCommentsBeforeParams) ([]ListEventCommentsBeforeRow, error) {
@@ -214,6 +225,7 @@ func (q *Queries) ListEventCommentsBefore(ctx context.Context, arg ListEventComm
 			&i.CreatedAt,
 			&i.UserDisplayName,
 			&i.UserAvatarURL,
+			&i.UserAvatarStorageKey,
 			&i.UserPublicID,
 		); err != nil {
 			return nil, err
@@ -232,9 +244,11 @@ func (q *Queries) ListEventCommentsBefore(ctx context.Context, arg ListEventComm
 const listEventCommentsLatest = `-- name: ListEventCommentsLatest :many
 
 SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 ORDER BY ec.created_at DESC, ec.id DESC
 LIMIT ?
@@ -247,22 +261,23 @@ type ListEventCommentsLatestParams struct {
 }
 
 type ListEventCommentsLatestRow struct {
-	ID              uint32         `json:"id"`
-	PublicID        []byte         `json:"publicId"`
-	WorkspaceID     uint32         `json:"workspaceId"`
-	EventID         sql.NullInt32  `json:"eventId"`
-	AuthorID        uint32         `json:"authorId"`
-	Body            string         `json:"body"`
-	EditedAt        sql.NullTime   `json:"editedAt"`
-	SortWeight      int32          `json:"sortWeight"`
-	Notes           sql.NullString `json:"notes"`
-	Enabled         bool           `json:"enabled"`
-	DeletedAt       sql.NullTime   `json:"deletedAt"`
-	UpdatedAt       sql.NullTime   `json:"updatedAt"`
-	CreatedAt       time.Time      `json:"createdAt"`
-	UserDisplayName string         `json:"userDisplayName"`
-	UserAvatarURL   sql.NullString `json:"userAvatarUrl"`
-	UserPublicID    []byte         `json:"userPublicId"`
+	ID                   uint32         `json:"id"`
+	PublicID             []byte         `json:"publicId"`
+	WorkspaceID          uint32         `json:"workspaceId"`
+	EventID              sql.NullInt32  `json:"eventId"`
+	AuthorID             uint32         `json:"authorId"`
+	Body                 string         `json:"body"`
+	EditedAt             sql.NullTime   `json:"editedAt"`
+	SortWeight           int32          `json:"sortWeight"`
+	Notes                sql.NullString `json:"notes"`
+	Enabled              bool           `json:"enabled"`
+	DeletedAt            sql.NullTime   `json:"deletedAt"`
+	UpdatedAt            sql.NullTime   `json:"updatedAt"`
+	CreatedAt            time.Time      `json:"createdAt"`
+	UserDisplayName      string         `json:"userDisplayName"`
+	UserAvatarURL        sql.NullString `json:"userAvatarUrl"`
+	UserAvatarStorageKey sql.NullString `json:"userAvatarStorageKey"`
+	UserPublicID         []byte         `json:"userPublicId"`
 }
 
 // Both listings name the workspace as well as the event because the index
@@ -277,6 +292,9 @@ type ListEventCommentsLatestRow struct {
 // the history.
 //
 // id closes the order, since two comments can land in the same millisecond.
+//
+// Every one of these joins the author's avatar object, so a thread carries the
+// key its pictures are signed from instead of costing a lookup per comment.
 func (q *Queries) ListEventCommentsLatest(ctx context.Context, arg ListEventCommentsLatestParams) ([]ListEventCommentsLatestRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventCommentsLatest, arg.WorkspaceID, arg.EventID, arg.Limit)
 	if err != nil {
@@ -302,6 +320,7 @@ func (q *Queries) ListEventCommentsLatest(ctx context.Context, arg ListEventComm
 			&i.CreatedAt,
 			&i.UserDisplayName,
 			&i.UserAvatarURL,
+			&i.UserAvatarStorageKey,
 			&i.UserPublicID,
 		); err != nil {
 			return nil, err

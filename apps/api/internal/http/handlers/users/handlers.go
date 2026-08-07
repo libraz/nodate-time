@@ -14,12 +14,11 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
-
-const avatarDownloadTTL = 5 * time.Minute
 
 // dummyPasswordHash is compared against when a login is attempted for an
 // account with no local identity, so the response time does not reveal
@@ -66,23 +65,6 @@ func nullStringValue(n sql.NullString) string {
 	return n.String
 }
 
-// avatarURLFor prefers an uploaded picture over an external one: a user who
-// uploaded an avatar has said which they want, and the provider URL they
-// signed up with may since have gone stale.
-func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
-	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
-		obj, err := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32))
-		if err == nil {
-			url, err := deps.Storage.PresignGet(ctx, obj.StorageKey, avatarDownloadTTL)
-			if err == nil {
-				return url
-			}
-			slog.WarnContext(ctx, "failed to presign avatar URL", "userID", u.ID, "error", err)
-		}
-	}
-	return nullStringValue(u.AvatarURL)
-}
-
 func mapUser(u generated.User) UserResponse {
 	return UserResponse{
 		ID:            pubIDToHex(u.PublicID),
@@ -99,7 +81,7 @@ func mapUser(u generated.User) UserResponse {
 // instance-admin grant, both of which live outside the user row.
 func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserResponse {
 	resp := mapUser(u)
-	resp.AvatarURL = avatarURLFor(ctx, deps, u)
+	resp.AvatarURL = avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u)
 	if isAdmin, err := deps.Queries.IsInstanceAdmin(ctx, u.ID); err == nil {
 		resp.IsAdmin = isAdmin
 	}

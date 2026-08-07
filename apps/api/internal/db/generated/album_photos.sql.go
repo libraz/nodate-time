@@ -175,9 +175,11 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
+       so.storage_key AS uploader_avatar_storage_key,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE
@@ -197,28 +199,29 @@ type ListAlbumPhotosAfterParams struct {
 }
 
 type ListAlbumPhotosAfterRow struct {
-	ID                  uint32         `json:"id"`
-	PublicID            []byte         `json:"publicId"`
-	WorkspaceID         uint32         `json:"workspaceId"`
-	CalendarID          uint32         `json:"calendarId"`
-	CalendarEventID     sql.NullInt32  `json:"calendarEventId"`
-	UploadedByUserID    uint32         `json:"uploadedByUserId"`
-	Caption             string         `json:"caption"`
-	ContentType         string         `json:"contentType"`
-	ByteSize            uint64         `json:"byteSize"`
-	Width               sql.NullInt32  `json:"width"`
-	Height              sql.NullInt32  `json:"height"`
-	StorageKey          string         `json:"storageKey"`
-	TakenAt             time.Time      `json:"takenAt"`
-	SortWeight          int32          `json:"sortWeight"`
-	Notes               sql.NullString `json:"notes"`
-	Enabled             bool           `json:"enabled"`
-	UpdatedAt           sql.NullTime   `json:"updatedAt"`
-	CreatedAt           time.Time      `json:"createdAt"`
-	UploaderPublicID    []byte         `json:"uploaderPublicId"`
-	UploaderDisplayName string         `json:"uploaderDisplayName"`
-	UploaderAvatarURL   sql.NullString `json:"uploaderAvatarUrl"`
-	EventPublicID       sql.NullString `json:"eventPublicId"`
+	ID                       uint32         `json:"id"`
+	PublicID                 []byte         `json:"publicId"`
+	WorkspaceID              uint32         `json:"workspaceId"`
+	CalendarID               uint32         `json:"calendarId"`
+	CalendarEventID          sql.NullInt32  `json:"calendarEventId"`
+	UploadedByUserID         uint32         `json:"uploadedByUserId"`
+	Caption                  string         `json:"caption"`
+	ContentType              string         `json:"contentType"`
+	ByteSize                 uint64         `json:"byteSize"`
+	Width                    sql.NullInt32  `json:"width"`
+	Height                   sql.NullInt32  `json:"height"`
+	StorageKey               string         `json:"storageKey"`
+	TakenAt                  time.Time      `json:"takenAt"`
+	SortWeight               int32          `json:"sortWeight"`
+	Notes                    sql.NullString `json:"notes"`
+	Enabled                  bool           `json:"enabled"`
+	UpdatedAt                sql.NullTime   `json:"updatedAt"`
+	CreatedAt                time.Time      `json:"createdAt"`
+	UploaderPublicID         []byte         `json:"uploaderPublicId"`
+	UploaderDisplayName      string         `json:"uploaderDisplayName"`
+	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
+	UploaderAvatarStorageKey sql.NullString `json:"uploaderAvatarStorageKey"`
+	EventPublicID            sql.NullString `json:"eventPublicId"`
 }
 
 func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosAfterParams) ([]ListAlbumPhotosAfterRow, error) {
@@ -258,6 +261,7 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
+			&i.UploaderAvatarStorageKey,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err
@@ -278,9 +282,11 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
+       so.storage_key AS uploader_avatar_storage_key,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
@@ -293,30 +299,33 @@ type ListAlbumPhotosFirstPageParams struct {
 }
 
 type ListAlbumPhotosFirstPageRow struct {
-	ID                  uint32         `json:"id"`
-	PublicID            []byte         `json:"publicId"`
-	WorkspaceID         uint32         `json:"workspaceId"`
-	CalendarID          uint32         `json:"calendarId"`
-	CalendarEventID     sql.NullInt32  `json:"calendarEventId"`
-	UploadedByUserID    uint32         `json:"uploadedByUserId"`
-	Caption             string         `json:"caption"`
-	ContentType         string         `json:"contentType"`
-	ByteSize            uint64         `json:"byteSize"`
-	Width               sql.NullInt32  `json:"width"`
-	Height              sql.NullInt32  `json:"height"`
-	StorageKey          string         `json:"storageKey"`
-	TakenAt             time.Time      `json:"takenAt"`
-	SortWeight          int32          `json:"sortWeight"`
-	Notes               sql.NullString `json:"notes"`
-	Enabled             bool           `json:"enabled"`
-	UpdatedAt           sql.NullTime   `json:"updatedAt"`
-	CreatedAt           time.Time      `json:"createdAt"`
-	UploaderPublicID    []byte         `json:"uploaderPublicId"`
-	UploaderDisplayName string         `json:"uploaderDisplayName"`
-	UploaderAvatarURL   sql.NullString `json:"uploaderAvatarUrl"`
-	EventPublicID       sql.NullString `json:"eventPublicId"`
+	ID                       uint32         `json:"id"`
+	PublicID                 []byte         `json:"publicId"`
+	WorkspaceID              uint32         `json:"workspaceId"`
+	CalendarID               uint32         `json:"calendarId"`
+	CalendarEventID          sql.NullInt32  `json:"calendarEventId"`
+	UploadedByUserID         uint32         `json:"uploadedByUserId"`
+	Caption                  string         `json:"caption"`
+	ContentType              string         `json:"contentType"`
+	ByteSize                 uint64         `json:"byteSize"`
+	Width                    sql.NullInt32  `json:"width"`
+	Height                   sql.NullInt32  `json:"height"`
+	StorageKey               string         `json:"storageKey"`
+	TakenAt                  time.Time      `json:"takenAt"`
+	SortWeight               int32          `json:"sortWeight"`
+	Notes                    sql.NullString `json:"notes"`
+	Enabled                  bool           `json:"enabled"`
+	UpdatedAt                sql.NullTime   `json:"updatedAt"`
+	CreatedAt                time.Time      `json:"createdAt"`
+	UploaderPublicID         []byte         `json:"uploaderPublicId"`
+	UploaderDisplayName      string         `json:"uploaderDisplayName"`
+	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
+	UploaderAvatarStorageKey sql.NullString `json:"uploaderAvatarStorageKey"`
+	EventPublicID            sql.NullString `json:"eventPublicId"`
 }
 
+// Both listings join the uploader's avatar object, so a page carries the key
+// its pictures are signed from rather than costing a lookup per photo.
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAlbumPhotosFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -348,6 +357,7 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
+			&i.UploaderAvatarStorageKey,
 			&i.EventPublicID,
 		); err != nil {
 			return nil, err

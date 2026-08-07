@@ -217,6 +217,34 @@ describe('EventModal body', () => {
     expect(rendered).toEqual(['older thing', 'newer thing']);
   });
 
+  // userAvatar is a URL, and rendering it as the contents of the avatar box
+  // put the signed link on screen as text where the face should be.
+  it('draws a comment author as their picture, not as the URL of it', async () => {
+    const avatar = 'https://storage.example/avatars/u2?signature=abc';
+    mockApi.get.mockImplementation((path: string) =>
+      path.endsWith('/activities')
+        ? Promise.resolve({
+            items: [
+              {
+                id: 'c1',
+                body: 'first thing',
+                userName: 'Someone',
+                userPublicId: 'u2',
+                userAvatar: avatar,
+                createdAt: '2026-04-20T10:00:00Z',
+              },
+            ],
+          })
+        : Promise.resolve([]),
+    );
+
+    const { container } = render(<EventModal />);
+    await screen.findByText('first thing');
+
+    expect(container.querySelector(`img[src="${avatar}"]`)).not.toBeNull();
+    expect(screen.queryByText(avatar)).toBeNull();
+  });
+
   it('focuses the title field on open', async () => {
     render(<EventModal />);
 

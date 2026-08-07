@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -89,21 +90,20 @@ func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uin
 }
 
 // resolveActor builds the actor identity from the joined log row fields,
-// returning nil for a system action or an actor who no longer exists. The
-// avatar is whatever URL the user row carries: presigning an uploaded one
-// per row would mean up to 200 signatures for a single feed page.
-func resolveActor(publicID, name, avatarURL sql.NullString) *ActorBrief {
+// returning nil for a system action or an actor who no longer exists.
+//
+// The avatar's storage key rides along on the row and the resolver signs one
+// URL per distinct key, so a page of two hundred entries by a handful of
+// people costs a handful of signatures and no extra reads.
+func resolveActor(ctx context.Context, av *avatars.Resolver, publicID, name, avatarStorageKey, avatarURL sql.NullString) *ActorBrief {
 	if !publicID.Valid {
 		return nil
 	}
-	a := &ActorBrief{
-		ID:   pubIDToHex([]byte(publicID.String)),
-		Name: name.String,
+	return &ActorBrief{
+		ID:        pubIDToHex([]byte(publicID.String)),
+		Name:      name.String,
+		AvatarURL: av.FromKey(ctx, avatarStorageKey, avatarURL),
 	}
-	if avatarURL.Valid && avatarURL.String != "" {
-		a.AvatarURL = avatarURL.String
-	}
-	return a
 }
 
 // payloadFields pulls the summary and subject id back out of a log row.
@@ -201,6 +201,7 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 		return nil, err
 	}
 	items := make([]HistoryItem, 0, len(rows))
+	av := avatars.New(deps.Queries, deps.Storage)
 	for _, r := range rows {
 		payload := readPayload(r.PayloadJSON)
 		items = append(items, HistoryItem{
@@ -208,7 +209,7 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 			Action:    r.Type,
 			Summary:   payload.Summary,
 			CreatedAt: r.OccurredAt,
-			Actor:     resolveActor(r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarURL),
+			Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
 		})
 	}
 	return items, nil
@@ -255,6 +256,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		out := &ActivityOutput{
 			Body: ActivityPage{Items: make([]FeedItem, 0, len(rows)), NextCursor: nextCursor},
 		}
+		av := avatars.New(deps.Queries, deps.Storage)
 		for _, r := range rows {
 			payload := readPayload(r.PayloadJSON)
 			out.Body.Items = append(out.Body.Items, FeedItem{
@@ -263,7 +265,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 					Action:    r.Type,
 					Summary:   payload.Summary,
 					CreatedAt: r.OccurredAt,
-					Actor:     resolveActor(r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarURL),
+					Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
 				},
 				EntityType: entityTypeOf(r.Type),
 				EntityID:   payload.ID,

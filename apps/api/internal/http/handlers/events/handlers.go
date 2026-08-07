@@ -17,6 +17,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
@@ -595,10 +596,6 @@ func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string,
 	return u.ID, nil
 }
 
-// creatorAvatarTTL is generous because event responses are cached client-side,
-// so the presigned avatar URL must outlive a typical browsing session.
-const creatorAvatarTTL = time.Hour
-
 // userBrief is the public identity of a user (creator/owner) for responses.
 type userBrief struct {
 	publicID  string
@@ -616,8 +613,11 @@ func lookupUser(ctx context.Context, deps Deps, id uint32, cache map[uint32]user
 	}
 	var b userBrief
 	if u, err := deps.Queries.GetUserByID(ctx, id); err == nil {
-		b = userBrief{publicID: pubIDToHex(u.PublicID), name: u.DisplayName}
-		b.avatarURL = avatarURLFor(ctx, deps, u)
+		b = userBrief{
+			publicID:  pubIDToHex(u.PublicID),
+			name:      u.DisplayName,
+			avatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u),
+		}
 	}
 	if cache != nil {
 		cache[id] = b
@@ -633,20 +633,6 @@ func actorTimezone(ctx context.Context, deps Deps, userID uint32) string {
 		return ""
 	}
 	return u.Timezone
-}
-
-// avatarURLFor prefers an uploaded avatar over an external one: a user who
-// has uploaded a picture has said which they want, and the provider URL
-// they signed up with may since have gone stale.
-func avatarURLFor(ctx context.Context, deps Deps, u generated.User) string {
-	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
-		if obj, err := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32)); err == nil {
-			if url, err := deps.Storage.PresignGet(ctx, obj.StorageKey, creatorAvatarTTL); err == nil {
-				return url
-			}
-		}
-	}
-	return nullStringValue(u.AvatarURL)
 }
 
 // applyCreator copies an already-resolved brief onto resp.
@@ -1643,13 +1629,14 @@ const (
 // commentListRow is the shape both comment listings share, so one mapping
 // serves the newest page and the pages behind it.
 type commentListRow struct {
-	id            uint32
-	publicID      []byte
-	userPublicID  []byte
-	userName      string
-	userAvatarURL sql.NullString
-	body          string
-	createdAt     time.Time
+	id                   uint32
+	publicID             []byte
+	userPublicID         []byte
+	userName             string
+	userAvatarURL        sql.NullString
+	userAvatarStorageKey sql.NullString
+	body                 string
+	createdAt            time.Time
 }
 
 // resolveCommentCursor turns a cursor back into the ordering pair it names.
@@ -1708,7 +1695,8 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 				rows = append(rows, commentListRow{
 					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
 					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
-					body: c.Body, createdAt: c.CreatedAt,
+					userAvatarStorageKey: c.UserAvatarStorageKey,
+					body:                 c.Body, createdAt: c.CreatedAt,
 				})
 			}
 		} else {
@@ -1729,7 +1717,8 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 				rows = append(rows, commentListRow{
 					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
 					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
-					body: c.Body, createdAt: c.CreatedAt,
+					userAvatarStorageKey: c.UserAvatarStorageKey,
+					body:                 c.Body, createdAt: c.CreatedAt,
 				})
 			}
 		}
@@ -1754,12 +1743,13 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 			Items:      make([]CommentResponse, 0, len(rows)),
 			NextCursor: nextCursor,
 		}}
+		av := avatars.New(deps.Queries, deps.Storage)
 		for _, c := range rows {
 			out.Body.Items = append(out.Body.Items, CommentResponse{
 				ID:           pubIDToHex(c.publicID),
 				UserPublicID: pubIDToHex(c.userPublicID),
 				UserName:     c.userName,
-				UserAvatar:   nullStringValue(c.userAvatarURL),
+				UserAvatar:   av.FromKey(ctx, c.userAvatarStorageKey, c.userAvatarURL),
 				Body:         c.body,
 				CreatedAt:    c.createdAt,
 			})
@@ -1813,7 +1803,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			ID:           pubIDToHex(stored.PublicID),
 			UserPublicID: pubIDToHex(stored.UserPublicID),
 			UserName:     stored.UserDisplayName,
-			UserAvatar:   nullStringValue(stored.UserAvatarURL),
+			UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, stored.UserAvatarStorageKey, stored.UserAvatarURL),
 			Body:         stored.Body,
 			CreatedAt:    stored.CreatedAt,
 		}
@@ -1875,7 +1865,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			ID:           pubIDToHex(comment.PublicID),
 			UserPublicID: pubIDToHex(comment.UserPublicID),
 			UserName:     comment.UserDisplayName,
-			UserAvatar:   nullStringValue(comment.UserAvatarURL),
+			UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, comment.UserAvatarStorageKey, comment.UserAvatarURL),
 			Body:         in.Body.Content,
 			CreatedAt:    comment.CreatedAt,
 		}
