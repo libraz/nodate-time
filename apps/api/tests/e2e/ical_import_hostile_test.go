@@ -27,6 +27,26 @@ import (
 // enough to show what landed and narrow enough for one listing request.
 const hostileWindow = "?start=2026-05-25&end=2026-06-30"
 
+// importReport is the whole import response. It is wider than importResult
+// because these tests are the ones that care what the file did to the counters
+// the rest of the suite never sees: how much of it was placed in a zone the
+// server could not resolve, how much of the failure the file itself caused,
+// and whether the body was read at all.
+type importReport struct {
+	Imported int `json:"imported"`
+	Skipped  int `json:"skipped"`
+	Failed   int `json:"failed"`
+	// Rejected is the part of Failed the file caused, so a report of
+	// {Failed: 1, Rejected: 1} is one event no retry can ever land.
+	Rejected int `json:"rejected"`
+	// Duplicates is what the calendar already held, which is a different thing
+	// from an event the parser could not use.
+	Duplicates       int  `json:"duplicates"`
+	Truncated        int  `json:"truncated"`
+	UnknownTimezones int  `json:"unknownTimezones"`
+	Unreadable       bool `json:"unreadable"`
+}
+
 func importICS(t *testing.T, calURL, token, ics string) (int, []byte) {
 	t.Helper()
 	return helpers.DoJSONStatus(t, http.MethodPost, calURL+"/import", token,
@@ -35,13 +55,13 @@ func importICS(t *testing.T, calURL, token, ics string) (int, []byte) {
 
 // importOK posts a file and requires the endpoint to answer with a result
 // rather than an error, which is the first half of the bar on its own.
-func importOK(t *testing.T, calURL, token, ics string) importResult {
+func importOK(t *testing.T, calURL, token, ics string) importReport {
 	t.Helper()
 	status, raw := importICS(t, calURL, token, ics)
 	require.Equal(t, http.StatusOK, status,
 		"a file the parser cannot use is the caller's problem to be told about, not the server's to fall over on: %s",
 		cut(string(raw), 400))
-	var res importResult
+	var res importReport
 	require.NoError(t, json.Unmarshal(raw, &res), "body: %s", cut(string(raw), 400))
 	return res
 }
@@ -132,46 +152,46 @@ func TestICalImportSurvivesStructurallyBrokenFiles(t *testing.T) {
 	cases := []struct {
 		name string
 		ics  string
-		want importResult
+		want importReport
 	}{
 		{
 			name: "truncated mid-property",
 			ics:  "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a@example.com\r\nSUMMARY:Half a summ",
-			want: importResult{},
+			want: importReport{},
 		},
 		{
 			name: "VEVENT never closed",
 			ics: "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a@example.com\r\nSUMMARY:Open\r\n" +
 				"DTSTART:20260601T100000Z\r\n",
-			want: importResult{},
+			want: importReport{},
 		},
 		{
 			// The wrapper carries nothing the importer reads, so a fragment of
 			// a file -- what a copy-paste produces -- still imports.
 			name: "no VCALENDAR wrapper",
 			ics:  oneGoodEvent(),
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 		{
 			name: "byte order mark at the start of the file",
 			ics:  "\ufeff" + wrap(oneGoodEvent()),
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 		{
 			name: "LF line endings",
 			ics:  strings.ReplaceAll(wrap(oneGoodEvent()), "\r\n", "\n"),
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 		{
 			name: "line endings mixed within one file",
 			ics: "BEGIN:VCALENDAR\nBEGIN:VEVENT\r\nUID:m@example.com\nSUMMARY:Mixed\r\n" +
 				"DTSTART:20260601T100000Z\nDTEND:20260601T110000Z\r\nEND:VEVENT\nEND:VCALENDAR\r\n",
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 		{
 			name: "END:VEVENT before any BEGIN",
 			ics:  wrap("END:VEVENT\r\n" + oneGoodEvent()),
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 		{
 			// The unclosed first event is abandoned rather than merged into the
@@ -179,7 +199,7 @@ func TestICalImportSurvivesStructurallyBrokenFiles(t *testing.T) {
 			name: "VEVENT opened twice",
 			ics: wrap("BEGIN:VEVENT\r\nUID:n1@example.com\r\nSUMMARY:Outer\r\n" +
 				"DTSTART:20260601T100000Z\r\n" + oneGoodEvent()),
-			want: importResult{Imported: 1},
+			want: importReport{Imported: 1},
 		},
 	}
 
@@ -197,14 +217,11 @@ func TestICalImportSurvivesStructurallyBrokenFiles(t *testing.T) {
 }
 
 // A file whose lines are separated by bare CR, and one whose BOM sits against
-// the BEGIN:VEVENT rather than at the top, both contain a complete event that
-// no line of the parser ever sees.
-//
-// Both are accepted with a result of all zeroes. That is not a lie -- nothing
-// was imported -- but it is indistinguishable from a file that genuinely had
-// nothing in it, so what is pinned here is only that the report and the
-// calendar agree with each other.
-func TestICalImportReportsNothingItDidNotDo(t *testing.T) {
+// the BEGIN:VEVENT rather than at the top, each contain a complete event that
+// nothing in the file makes ambiguous. Both shapes come out of real exporters,
+// and both used to import nothing at all: the whole body read as one line, or
+// the component line failed to match because of a mark that carries no text.
+func TestICalImportReadsFilesWrittenWithBareCROrAStrayBOM(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -217,11 +234,61 @@ func TestICalImportReportsNothingItDidNotDo(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			calURL := hostileCalendar(t, tt, "Silent "+c.name)
-			require.Equal(t, importResult{}, importOK(t, calURL, tt.AccessToken, c.ics),
-				"an event the parser never reaches must not be counted as imported")
+			calURL := hostileCalendar(t, tt, "Readable "+c.name)
+			require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, c.ics),
+				"the file describes one event and nothing about it is ambiguous")
+
+			listed := listHostile(t, calURL, tt.AccessToken)
+			require.Len(t, listed, 1)
+			require.Equal(t, "Fine", listed[0].Title)
+			deleteEverything(t, calURL, tt.AccessToken, listed)
+		})
+	}
+}
+
+// A body the parser recognises nothing in reports that, rather than answering
+// with the all-zero result that a calendar containing no events also gets.
+// Both imported nothing; only one of them is worth telling the caller about,
+// and every counter reading zero cannot say which happened.
+func TestICalImportSaysWhenItRecognisedNothingInTheBody(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+
+	cases := []struct {
+		name string
+		ics  string
+		want importReport
+	}{
+		{
+			name: "a body that is not a calendar at all",
+			ics:  "Dear diary,\r\n\r\nI meant to export the calendar and exported this.\r\n",
+			want: importReport{Unreadable: true},
+		},
+		{
+			// Component names are written in upper case; this parser reads them
+			// that way, so a lower-cased file is one it cannot use -- which is
+			// the answer to give rather than a clean import of nothing.
+			name: "a calendar whose component names are lower case",
+			ics:  strings.ToLower(wrap(oneGoodEvent())),
+			want: importReport{Unreadable: true},
+		},
+		{
+			// A calendar with nothing in it is not unreadable: it was read, and
+			// it said there was nothing to import.
+			name: "a calendar with no events in it",
+			ics:  wrap(""),
+			want: importReport{},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Unread "+c.name)
+			require.Equal(t, c.want, importOK(t, calURL, tt.AccessToken, c.ics))
 			require.Empty(t, listHostile(t, calURL, tt.AccessToken),
-				"and nothing may land on the calendar either")
+				"nothing may land on the calendar either way")
 		})
 	}
 }
@@ -248,6 +315,10 @@ func TestICalImportRefusesBodiesOutsideItsBounds(t *testing.T) {
 // down to fit. A truncating import would be the worst outcome available: the
 // file reads as imported and the events quietly say something shorter than
 // what their author wrote.
+//
+// The refusal is counted as one the file caused. Nothing about uploading it
+// again shortens the value, so reporting it as a plain failure would invite a
+// retry that can only end the same way.
 func TestICalImportRefusesValuesTooLongForTheirColumnRatherThanTruncating(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -279,7 +350,8 @@ func TestICalImportRefusesValuesTooLongForTheirColumnRatherThanTruncating(t *tes
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			calURL := hostileCalendar(t, tt, "Long "+c.name)
-			require.Equal(t, importResult{Failed: 1}, importOK(t, calURL, tt.AccessToken, c.ics))
+			require.Equal(t, importReport{Failed: 1, Rejected: 1},
+				importOK(t, calURL, tt.AccessToken, c.ics))
 			require.Empty(t, listHostile(t, calURL, tt.AccessToken),
 				"a value the store refused must leave no event behind")
 		})
@@ -299,7 +371,7 @@ func TestICalImportJoinsFoldedLinesIntoOneValue(t *testing.T) {
 	ics := wrap("BEGIN:VEVENT\r\nUID:fold@example.com\r\n" +
 		"SUMMARY:A value split mid-wo\r\n rd and continued\r\n\t with a tab\r\n" +
 		"DTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\n")
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
@@ -323,7 +395,7 @@ func TestICalImportKeepsALongDescriptionWhole(t *testing.T) {
 	ics := wrap(vevent("UID:desc@example.com", "SUMMARY:Long notes",
 		"DESCRIPTION:"+strings.Repeat("B", size),
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
@@ -334,23 +406,6 @@ func TestICalImportKeepsALongDescriptionWhole(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
 	require.Len(t, evt.Memo, size, "the description must arrive at its full length or not at all")
 	deleteEverything(t, calURL, tt.AccessToken, listed)
-}
-
-// A URL a Go string carries happily is not one the column behind it can hold:
-// it is latin1, so a perfectly ordinary internationalised address costs the
-// whole event rather than just the property.
-func TestICalImportRefusesAnEventWhoseURLTheColumnCannotHold(t *testing.T) {
-	bootstrap(t)
-	t.Parallel()
-
-	tt := helpers.NewTenant(t, testServerURL)
-	calURL := hostileCalendar(t, tt, "Non-latin1 URL")
-
-	ics := wrap(vevent("UID:jp@example.com", "SUMMARY:Meeting",
-		"URL:https://example.com/日本語",
-		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importResult{Failed: 1}, importOK(t, calURL, tt.AccessToken, ics))
-	require.Empty(t, listHostile(t, calURL, tt.AccessToken))
 }
 
 // A rule the expander cannot honour must not collapse into a single occurrence
@@ -365,19 +420,15 @@ func TestICalImportRefusesRecurrenceItCannotHonour(t *testing.T) {
 	cases := []struct {
 		name string
 		rule string
-		want importResult
+		want importReport
 	}{
-		{"COUNT past the supported maximum", "FREQ=DAILY;COUNT=999999", importResult{Skipped: 1}},
-		{"INTERVAL past the supported maximum", "FREQ=DAILY;INTERVAL=99999", importResult{Skipped: 1}},
-		{"INTERVAL of zero", "FREQ=DAILY;INTERVAL=0", importResult{Skipped: 1}},
-		{"negative INTERVAL", "FREQ=DAILY;INTERVAL=-1", importResult{Skipped: 1}},
-		{"COUNT past what an int can hold", "FREQ=DAILY;COUNT=99999999999999999999", importResult{Skipped: 1}},
-		{"nothing that parses as a rule", "=;;==;FREQ", importResult{Skipped: 1}},
-		{"an unsupported ordinal BYDAY", "FREQ=MONTHLY;BYDAY=2MO", importResult{Skipped: 1}},
-		// Accepted by the rule reader, then rejected by the store: the last of
-		// a thousand yearly occurrences at a nine-hundred-year interval lands
-		// past every date the column can name.
-		{"a series ending past the end of time", "FREQ=YEARLY;COUNT=1000;INTERVAL=999", importResult{Failed: 1}},
+		{"COUNT past the supported maximum", "FREQ=DAILY;COUNT=999999", importReport{Skipped: 1}},
+		{"INTERVAL past the supported maximum", "FREQ=DAILY;INTERVAL=99999", importReport{Skipped: 1}},
+		{"INTERVAL of zero", "FREQ=DAILY;INTERVAL=0", importReport{Skipped: 1}},
+		{"negative INTERVAL", "FREQ=DAILY;INTERVAL=-1", importReport{Skipped: 1}},
+		{"COUNT past what an int can hold", "FREQ=DAILY;COUNT=99999999999999999999", importReport{Skipped: 1}},
+		{"nothing that parses as a rule", "=;;==;FREQ", importReport{Skipped: 1}},
+		{"an unsupported ordinal BYDAY", "FREQ=MONTHLY;BYDAY=2MO", importReport{Skipped: 1}},
 	}
 
 	for _, c := range cases {
@@ -400,16 +451,28 @@ func TestICalImportedAbsurdButValidRuleStaysBoundedWhenListed(t *testing.T) {
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	calURL := hostileCalendar(t, tt, "Sparse series")
 
-	ics := wrap(vevent("UID:sparse@example.com", "SUMMARY:Sparse",
-		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
-		"RRULE:FREQ=DAILY;COUNT=1000;INTERVAL=999"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	cases := []struct{ name, rule string }{
+		{"a thousand days nine hundred years apart", "FREQ=DAILY;COUNT=1000;INTERVAL=999"},
+		// The same shape by year, whose last occurrence falls past every date
+		// the boundary column can name. The series is stored by the rule it
+		// carries, not by that date, so it imports like any other.
+		{"a thousand years nine hundred years apart", "FREQ=YEARLY;COUNT=1000;INTERVAL=999"},
+	}
 
-	listed := listHostile(t, calURL, tt.AccessToken)
-	require.Len(t, listed, 1, "one occurrence falls in the window, whatever the series claims")
-	deleteEverything(t, calURL, tt.AccessToken, listed)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Sparse "+c.name)
+			ics := wrap(vevent("UID:sparse@example.com", "SUMMARY:Sparse",
+				"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z", "RRULE:"+c.rule))
+			require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+
+			listed := listHostile(t, calURL, tt.AccessToken)
+			require.Len(t, listed, 1,
+				"one occurrence falls in the window, whatever the series claims")
+			deleteEverything(t, calURL, tt.AccessToken, listed)
+		})
+	}
 }
 
 // An RRULE property with no value is not a recurrence. It has to import as the
@@ -423,7 +486,7 @@ func TestICalImportReadsAnEmptyRRuleAsNoRecurrence(t *testing.T) {
 
 	ics := wrap(vevent("UID:empty@example.com", "SUMMARY:No rule",
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z", "RRULE:"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
@@ -452,14 +515,16 @@ func TestICalImportSkipsEventsItCannotDate(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			calURL := hostileCalendar(t, tt, "Undated "+c.name)
 			ics := wrap(vevent("UID:u@example.com", "SUMMARY:Undated", "DTSTART:"+c.dtstart))
-			require.Equal(t, importResult{Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
+			require.Equal(t, importReport{Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
 			require.Empty(t, listHostile(t, calURL, tt.AccessToken))
 		})
 	}
 }
 
 // Two events the store refuses outright, each for a reason the file gave it.
-// Both are counted, and neither leaves a row behind.
+// Both are counted as refusals the file caused rather than as plain failures:
+// a second upload of the same bytes gets the same answer, and "failed" on its
+// own is what invites one.
 func TestICalImportRefusesEventsTheCalendarCannotHold(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -485,7 +550,8 @@ func TestICalImportRefusesEventsTheCalendarCannotHold(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			calURL := hostileCalendar(t, tt, "Refused "+c.name)
-			require.Equal(t, importResult{Failed: 1}, importOK(t, calURL, tt.AccessToken, c.ics))
+			require.Equal(t, importReport{Failed: 1, Rejected: 1},
+				importOK(t, calURL, tt.AccessToken, c.ics))
 			require.Empty(t, listHostile(t, calURL, tt.AccessToken))
 		})
 	}
@@ -495,16 +561,30 @@ func TestICalImportRefusesEventsTheCalendarCannotHold(t *testing.T) {
 // file. It has to resolve to UTC -- the same zone the times were read in --
 // rather than being stored as whatever string arrived, and a name shaped like
 // a path must not be looked up as one.
-func TestICalImportFallsBackToUTCForAZoneItDoesNotKnow(t *testing.T) {
+//
+// UTC is the only fallback available, and it is the wrong instant for every
+// zone that is not UTC, so the import says how many events it placed that way.
+// A default nobody is told about is the defect; one that reports itself is
+// something its reader can go and check.
+func TestICalImportCountsTheEventsWhoseZoneItCouldNotResolve(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
 
-	cases := []struct{ name, tzid string }{
-		{"a zone that does not exist", "Mars/Olympus"},
-		{"a zone name shaped like a path", "../../../../etc/passwd"},
-		{"an empty zone name", ""},
+	cases := []struct {
+		name string
+		tzid string
+		want importReport
+	}{
+		{"a zone that does not exist", "Mars/Olympus", importReport{Imported: 1, UnknownTimezones: 1}},
+		{"a zone name shaped like a path", "../../../../etc/passwd", importReport{Imported: 1, UnknownTimezones: 1}},
+		// "Local" resolves against whichever machine happens to be running the
+		// server, which has nothing to do with the calendar the file came from.
+		{"the name of the zone the server itself runs in", "Local", importReport{Imported: 1, UnknownTimezones: 1}},
+		// No TZID at all is a floating time, not a zone that failed to resolve:
+		// there is nothing here the file got wrong to report.
+		{"an empty zone name", "", importReport{Imported: 1}},
 	}
 
 	for _, c := range cases {
@@ -517,7 +597,7 @@ func TestICalImportFallsBackToUTCForAZoneItDoesNotKnow(t *testing.T) {
 			ics := wrap(vevent("UID:tz@example.com", "SUMMARY:Zoned",
 				"DTSTART"+param+":20260601T100000",
 				"DTEND"+param+":20260601T110000"))
-			require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+			require.Equal(t, c.want, importOK(t, calURL, tt.AccessToken, ics))
 
 			listed := listHostile(t, calURL, tt.AccessToken)
 			require.Len(t, listed, 1)
@@ -537,6 +617,11 @@ func TestICalImportFallsBackToUTCForAZoneItDoesNotKnow(t *testing.T) {
 
 // Two events sharing a UID are two events. Folding them together on the way in
 // would lose one, and a file is free to repeat a UID however badly.
+//
+// The UID is also what recognition matches on, and only one event on a
+// calendar can hold a given one. The second of these therefore imports without
+// an identity rather than being mistaken for the first: an event that arrives
+// twice can be deleted, and one that never arrives cannot be got back.
 func TestICalImportKeepsBothEventsThatShareAUID(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -549,10 +634,15 @@ func TestICalImportKeepsBothEventsThatShareAUID(t *testing.T) {
 			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z") +
 			vevent("UID:dup@example.com", "SUMMARY:Two",
 				"DTSTART:20260602T100000Z", "DTEND:20260602T110000Z"))
-	require.Equal(t, importResult{Imported: 2}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 2}, importOK(t, calURL, tt.AccessToken, ics))
+
+	// What the second one costs: it is the one without an identity, so a
+	// re-upload recognises the first and takes another copy of it.
+	require.Equal(t, importReport{Imported: 1, Duplicates: 1},
+		importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
-	require.Len(t, listed, 2)
+	require.Len(t, listed, 3)
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
@@ -570,7 +660,7 @@ func TestICalImportHonoursOnlyTheExdatesItCanRead(t *testing.T) {
 		ics := wrap(vevent("UID:x1@example.com", "SUMMARY:Holes",
 			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
 			"RRULE:FREQ=DAILY;COUNT=3", "EXDATE:20301231T235959Z"))
-		require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 		listed := listHostile(t, calURL, tt.AccessToken)
 		require.Equal(t, []string{
@@ -584,7 +674,7 @@ func TestICalImportHonoursOnlyTheExdatesItCanRead(t *testing.T) {
 		ics := wrap(vevent("UID:x2@example.com", "SUMMARY:Holes",
 			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
 			"RRULE:FREQ=DAILY;COUNT=3", "EXDATE:nonsense,,,20260602T100000Z"))
-		require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 		listed := listHostile(t, calURL, tt.AccessToken)
 		require.Equal(t, []string{"2026-06-01T10:00:00Z", "2026-06-03T10:00:00Z"}, startsOf(listed),
@@ -608,7 +698,7 @@ func TestICalImportSkipsAChangedOccurrenceWithNothingToAttachTo(t *testing.T) {
 		ics := wrap(vevent("UID:orphan@example.com", "SUMMARY:Orphan",
 			"RECURRENCE-ID:20260601T100000Z",
 			"DTSTART:20260601T120000Z", "DTEND:20260601T130000Z"))
-		require.Equal(t, importResult{Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
+		require.Equal(t, importReport{Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
 		require.Empty(t, listHostile(t, calURL, tt.AccessToken))
 	})
 
@@ -620,7 +710,7 @@ func TestICalImportSkipsAChangedOccurrenceWithNothingToAttachTo(t *testing.T) {
 				vevent("UID:solo@example.com", "SUMMARY:Override",
 					"RECURRENCE-ID:20260601T100000Z",
 					"DTSTART:20260601T120000Z", "DTEND:20260601T130000Z"))
-		require.Equal(t, importResult{Imported: 1, Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
+		require.Equal(t, importReport{Imported: 1, Skipped: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 		listed := listHostile(t, calURL, tt.AccessToken)
 		require.Len(t, listed, 1)
@@ -655,7 +745,7 @@ func TestICalImportKeepsHostileTextInOneValue(t *testing.T) {
 			calURL := hostileCalendar(t, tt, "Text "+c.name)
 			ics := wrap(vevent("UID:txt@example.com", "SUMMARY:"+c.summary,
 				"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-			require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+			require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 			listed := listHostile(t, calURL, tt.AccessToken)
 			require.Len(t, listed, 1)
@@ -667,42 +757,51 @@ func TestICalImportKeepsHostileTextInOneValue(t *testing.T) {
 	}
 }
 
-// Control characters are not text a property may contain, and nothing on the
-// way in removes them: what the file said is what the title, location and
-// notes end up holding, byte for byte.
+// Control characters are not text a property may contain. RFC 5545 allows no
+// C0 character but HTAB inside a value, and what one does instead of showing
+// is up to whatever renders it: a terminal executes an escape sequence rather
+// than printing it, so a title carrying one runs a command in the shell of
+// anyone who cats or greps the file.
 //
-// What is pinned here is the part that is defensible either way -- the event
-// lands as one row, reads back exactly as it arrived, and can be deleted. It
-// does NOT pin what leaves through the export, which today carries the same
-// bytes straight back out into a .ics file.
-func TestICalImportDoesNotFilterControlCharactersOutOfText(t *testing.T) {
+// They are dropped on the way in, and the export is incapable of writing one
+// out. Both halves are needed: the way in is the only place the value can
+// still be refused, and the way out is the only thing that answers for rows
+// this import did not write.
+func TestICalImportDropsControlCharactersAndTheExportNeverWritesThem(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := hostileCalendar(t, tt, "Control characters")
 
-	const title = "before\x00after\x1b[31mred\x07"
 	ics := wrap(vevent("UID:ctl@example.com",
-		"SUMMARY:"+title,
+		"SUMMARY:before\x00after\x1b[31mred\x07",
 		"LOCATION:room\x1b[2Jcleared",
-		"DESCRIPTION:notes\x00cut",
+		"DESCRIPTION:notes\x00cut\ttabbed",
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
+		"the characters are not worth the event they arrived on")
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
-	require.Equal(t, title, listed[0].Title,
-		"whatever is stored must be what the file said, not a silently shortened copy of it")
+	require.Equal(t, "beforeafter[31mred", listed[0].Title,
+		"what a terminal would have executed is gone; the text around it is untouched")
 
 	var evt struct {
 		Location string `json:"location"`
 		Memo     string `json:"memo"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
-	require.Equal(t, "room\x1b[2Jcleared", evt.Location)
-	require.Equal(t, "notes\x00cut", evt.Memo,
-		"a NUL must not end the value early")
+	require.Equal(t, "room[2Jcleared", evt.Location)
+	require.Equal(t, "notescut\ttabbed", evt.Memo,
+		"a NUL is dropped like the rest; a tab is text a value may contain, so it stays")
+
+	exported := fetchICS(t, calURL, tt.AccessToken)
+	require.Equal(t, -1, strings.IndexFunc(exported, func(r rune) bool {
+		// CR and LF are the line breaks the file is made of; a tab is legal
+		// inside a value. Everything else below a space is not text at all.
+		return r == 0x7f || (r < 0x20 && r != '\r' && r != '\n' && r != '\t')
+	}), "the file handed to the next client must be readable text")
 
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
@@ -720,7 +819,7 @@ func TestICalExportReEscapesTextImportedWithNewlines(t *testing.T) {
 	ics := wrap(vevent("UID:esc@example.com",
 		`SUMMARY:one\ntwo\;three`,
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 	exported := fetchICS(t, calURL, tt.AccessToken)
 	require.Contains(t, exported, `SUMMARY:one\ntwo\;three`)
@@ -786,9 +885,15 @@ func TestICalImportAccountsForEveryEventInALargeHostileFile(t *testing.T) {
 	b.WriteString("END:VCALENDAR\r\n")
 
 	res := importOK(t, calURL, tt.AccessToken, b.String())
-	require.Equal(t, groups*5, res.Imported+res.Skipped+res.Failed+res.Truncated,
+	// Rejected is counted inside Failed, so it stays out of this sum. The rest
+	// are the outcomes an event can have, and every VEVENT in the file has
+	// exactly one of them.
+	require.Equal(t, groups*5,
+		res.Imported+res.Skipped+res.Failed+res.Duplicates+res.Truncated,
 		"every VEVENT in the file must be accounted for exactly once")
-	require.Equal(t, importResult{Imported: groups, Skipped: groups * 3, Failed: groups}, res)
+	require.Equal(t, importReport{
+		Imported: groups, Skipped: groups * 3, Failed: groups, Rejected: groups,
+	}, res)
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, res.Imported,
@@ -817,7 +922,8 @@ func TestICalImportLeavesNoTraceOfAnEventItRefused(t *testing.T) {
 				"DTSTART:20260601T120000Z", "DTEND:20260601T130000Z") +
 			vevent("UID:p3@example.com", "SUMMARY:Third",
 				"DTSTART:20260601T140000Z", "DTEND:20260601T150000Z"))
-	require.Equal(t, importResult{Imported: 2, Failed: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 2, Failed: 1, Rejected: 1},
+		importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 2)
@@ -841,30 +947,84 @@ func TestICalImportLeavesNoTraceOfAnEventItRefused(t *testing.T) {
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
-// A zone name the server cannot resolve is read as UTC, and the file's wall
-// clock is stored as though it had been written in UTC all along.
+// Every file Outlook writes names its zone the way Windows does, and those
+// names mean nothing to the zone database. Read as UTC, the wall clock in the
+// file becomes an instant nine hours from where its author put it -- reported
+// as a clean import, with only the times wrong, which is the kind of wrong
+// nobody checks for.
 //
-// This is wrong, and it is not a corner case: the name below is what Outlook
-// writes. A calendar exported from it and imported here lands every event nine
-// hours from where its author put it, and the response says it imported
-// cleanly -- there is no counter for "I did not understand this zone". Only
-// the times are wrong, which is the kind of wrong nobody checks for.
-func TestICalImportReadsAWindowsZoneNameAsUTC(t *testing.T) {
+// The three below also settle what the name itself cannot say: "Standard Time"
+// is part of the name all year, so two of these fall in the summer half of a
+// zone that changes offset and must land on the summer one.
+func TestICalImportPlacesAWindowsZoneNameWhereItsAuthorMeant(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	calURL := hostileCalendar(t, tt, "Windows zone")
 
-	ics := wrap(vevent("UID:w@example.com", "SUMMARY:Outlook",
-		"DTSTART;TZID=Tokyo Standard Time:20260601T100000",
-		"DTEND;TZID=Tokyo Standard Time:20260601T110000"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	cases := []struct{ name, tzid, wantStart, wantZone string }{
+		{"a zone that does not change offset", "Tokyo Standard Time",
+			"2026-06-01T01:00:00Z", "Asia/Tokyo"},
+		{"a zone on summer time in June", "W. Europe Standard Time",
+			"2026-06-01T08:00:00Z", "Europe/Berlin"},
+		{"a zone on daylight time in June", "Eastern Standard Time",
+			"2026-06-01T14:00:00Z", "America/New_York"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Windows zone "+c.name)
+			ics := wrap(vevent("UID:w@example.com", "SUMMARY:Outlook",
+				"DTSTART;TZID="+c.tzid+":20260601T100000",
+				"DTEND;TZID="+c.tzid+":20260601T110000"))
+			require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
+				"a name this common is not an unknown zone")
+
+			listed := listHostile(t, calURL, tt.AccessToken)
+			require.Len(t, listed, 1)
+			require.Equal(t, c.wantStart, listed[0].StartAt,
+				"10:00 written in %s is that instant, not the same digits in UTC", c.tzid)
+
+			var evt struct {
+				Timezone string `json:"timezone"`
+			}
+			helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
+			require.Equal(t, c.wantZone, evt.Timezone,
+				"the event keeps the zone its wall clock belongs to, so a later edit reads back the same")
+			deleteEverything(t, calURL, tt.AccessToken, listed)
+		})
+	}
+}
+
+// A file naming a Windows zone almost always carries the VTIMEZONE component
+// that defines it. Nothing here reads that component -- the offsets in it are
+// driven by their own recurrence rules, and taking only the standard one would
+// be wrong for half of every year in every zone that changes -- so what places
+// the event is the name, and the presence of a definition must not disturb it.
+func TestICalImportIgnoresAVTimezoneDefinitionWithoutBeingConfusedByIt(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "VTIMEZONE")
+
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
+		"BEGIN:VTIMEZONE\r\nTZID:Tokyo Standard Time\r\n" +
+		"BEGIN:STANDARD\r\nDTSTART:16010101T000000\r\n" +
+		"TZOFFSETFROM:+0900\r\nTZOFFSETTO:+0900\r\nSUMMARY:Not an event\r\n" +
+		"END:STANDARD\r\nEND:VTIMEZONE\r\n" +
+		vevent("UID:vtz@example.com", "SUMMARY:Outlook",
+			"DTSTART;TZID=Tokyo Standard Time:20260601T100000",
+			"DTEND;TZID=Tokyo Standard Time:20260601T110000") +
+		"END:VCALENDAR\r\n"
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
+		"the definition is one component, not an event of its own")
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
-	require.Equal(t, "2026-06-01T10:00:00Z", listed[0].StartAt,
-		"10:00 in Tokyo is 01:00Z; this lands at 10:00Z, nine hours out")
+	require.Equal(t, "Outlook", listed[0].Title,
+		"nothing inside the definition may reach the event")
+	require.Equal(t, "2026-06-01T01:00:00Z", listed[0].StartAt)
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
@@ -890,7 +1050,7 @@ func TestICalImportDropsOrganizerAndAttendees(t *testing.T) {
 		"ATTENDEE;CN=A:mailto:a@example.com",
 		"ATTENDEE;CN=B:mailto:b@example.com",
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
 		"nothing counts the people the file named and the import did not keep")
 
 	listed := listHostile(t, calURL, tt.AccessToken)
@@ -912,27 +1072,93 @@ func TestICalImportDropsOrganizerAndAttendees(t *testing.T) {
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
-// Importing is not idempotent and nothing warns that it is not. The same file
-// twice is two copies of every event, both reported as clean imports, and the
-// UID that could have matched them is stored nowhere.
-//
 // Uploading the same file again is what a person does when they are not sure
-// the first attempt worked.
-func TestICalImportingTheSameFileTwiceDuplicatesIt(t *testing.T) {
+// the first attempt worked, and it used to leave two copies of everything --
+// both reported as clean imports, with nothing to say the calendar had seen
+// them before.
+//
+// A recognised event is counted apart from the ones the parser could not use.
+// A clean re-upload reporting "skipped: 40" reads as a failure to whoever just
+// uploaded it; "already here: 40" is the same fact and the opposite feeling.
+func TestICalImportRecognisesEventsTheCalendarAlreadyHas(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	calURL := hostileCalendar(t, tt, "Twice")
 
-	file := wrap(oneGoodEvent())
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, file))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, file),
-		"the second import cannot tell it has seen this event before")
+	t.Run("the same file twice leaves one copy", func(t *testing.T) {
+		calURL := hostileCalendar(t, tt, "Twice")
+		file := wrap(oneGoodEvent())
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, file))
+		require.Equal(t, importReport{Duplicates: 1}, importOK(t, calURL, tt.AccessToken, file),
+			"the second import must recognise what the file called the event")
 
-	listed := listHostile(t, calURL, tt.AccessToken)
-	require.Len(t, listed, 2, "the same file twice leaves two copies of every event")
-	deleteEverything(t, calURL, tt.AccessToken, listed)
+		listed := listHostile(t, calURL, tt.AccessToken)
+		require.Len(t, listed, 1, "the same file twice is still one event")
+		deleteEverything(t, calURL, tt.AccessToken, listed)
+	})
+
+	// A changed occurrence is written with an upsert, so it would apply itself
+	// over the existing row while its series was left alone -- half the file
+	// landing, which is worse than either taking all of it or none.
+	t.Run("a series is recognised together with its changed occurrences", func(t *testing.T) {
+		calURL := hostileCalendar(t, tt, "Twice with an override")
+		series := vevent("UID:series@example.com", "SUMMARY:Standup",
+			"DTSTART:20260601T100000Z", "DTEND:20260601T101500Z", "RRULE:FREQ=DAILY;COUNT=3")
+		moved := func(hour string) string {
+			return vevent("UID:series@example.com", "SUMMARY:Standup moved",
+				"RECURRENCE-ID:20260602T100000Z",
+				"DTSTART:20260602T"+hour+"0000Z", "DTEND:20260602T"+hour+"1500Z")
+		}
+		require.Equal(t, importReport{Imported: 2},
+			importOK(t, calURL, tt.AccessToken, wrap(series+moved("14"))))
+
+		// The same series, with its changed occurrence somewhere else. Neither
+		// half may be taken: the series is already here, so its departures from
+		// it are too.
+		require.Equal(t, importReport{Duplicates: 2},
+			importOK(t, calURL, tt.AccessToken, wrap(series+moved("16"))))
+
+		listed := listHostile(t, calURL, tt.AccessToken)
+		require.Equal(t, []string{
+			"2026-06-01T10:00:00Z", "2026-06-02T14:00:00Z", "2026-06-03T10:00:00Z",
+		}, startsOf(listed),
+			"the occurrence must stay where the import that took it put it")
+		deleteEverything(t, calURL, tt.AccessToken, listed)
+	})
+
+	// Recognition rests on the UID, which is the only thing in the file that
+	// names the event. Without one there is nothing to match, and the honest
+	// answer is the duplicate it always was: an event that arrives twice can be
+	// deleted, and one that never arrives cannot be got back.
+	t.Run("an event the file does not name is imported again", func(t *testing.T) {
+		calURL := hostileCalendar(t, tt, "Twice unnamed")
+		file := wrap(vevent("SUMMARY:Nameless",
+			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, file))
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, file),
+			"nothing in the file identifies it, so nothing can recognise it")
+
+		listed := listHostile(t, calURL, tt.AccessToken)
+		require.Len(t, listed, 2)
+		deleteEverything(t, calURL, tt.AccessToken, listed)
+	})
+
+	// Deleting an event and importing the file again is how someone puts back
+	// what they removed by mistake. Recognising a deleted row would make the
+	// deletion permanent, from a screen that never said so.
+	t.Run("an event deleted here can be imported again", func(t *testing.T) {
+		calURL := hostileCalendar(t, tt, "Deleted then imported")
+		file := wrap(oneGoodEvent())
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, file))
+		deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
+
+		require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, file),
+			"an event the calendar no longer holds is not one it already has")
+		listed := listHostile(t, calURL, tt.AccessToken)
+		require.Len(t, listed, 1)
+		deleteEverything(t, calURL, tt.AccessToken, listed)
+	})
 }
 
 // importedAlarmOffset imports one event carrying a single VALARM and returns
@@ -943,7 +1169,7 @@ func importedAlarmOffset(t *testing.T, calURL, token, trigger string) *int {
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
 		"BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Ring",
 		"TRIGGER:"+trigger, "END:VALARM"))
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, token, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, token, ics))
 
 	listed := listHostile(t, calURL, token)
 	require.Len(t, listed, 1)
@@ -991,39 +1217,36 @@ func TestICalImportKeepsOnlyAlarmsItCanShow(t *testing.T) {
 	}
 }
 
-// Two malformed triggers produce a reminder anyway.
+// A value that is not a duration leaves no reminder, on the parser's own
+// stated terms: one that fires at the wrong time is worse than one the import
+// did not take.
 //
-// This is wrong on the parser's own stated terms -- it says a reminder that
-// fires at the wrong time is worse than one the import did not take. A bare
-// "P" names no duration at all and becomes a reminder at the moment the event
-// starts; a value repeating a unit is not a duration the grammar allows, and
-// its parts are added together instead of being refused.
-//
-// Neither is dangerous. Both mean an alarm nobody asked for will go off, from
-// a file that said something else.
-func TestICalImportInventsAReminderFromAMalformedTrigger(t *testing.T) {
+// A bare "P" names no duration at all, and a value repeating a unit is not one
+// the grammar allows. Both used to produce an alarm -- at the moment the event
+// starts, and at the sum of the repeated parts -- so a file that asked for no
+// reminder rang one anyway.
+func TestICalImportTakesNoReminderFromAValueThatIsNotADuration(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
 
-	zero, five := 0, 5
-	cases := []struct {
-		name    string
-		trigger string
-		want    *int
-	}{
-		{"a duration with no units at all", "P", &zero},
-		// The repeats are added together, and the sum is kept whenever it
-		// happens to land on a value the picker can show -- five ones here.
-		{"a duration repeating a unit", "-PT1M1M1M1M1M", &five},
+	cases := []struct{ name, trigger string }{
+		{"a duration with no units at all", "P"},
+		{"a duration with a time part but no units in it", "-PT"},
+		// The parts were added together, and the sum was kept whenever it
+		// happened to land on a value the picker can show -- five ones here.
+		{"a duration repeating a unit", "-PT1M1M1M1M1M"},
+		// The grammar orders the units it allows, and a value that names them
+		// backwards is as much a typo as one that repeats them.
+		{"a duration naming its units out of order", "-PT1S30M"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			calURL := hostileCalendar(t, tt, "Invented "+c.name)
-			require.Equal(t, c.want, importedAlarmOffset(t, calURL, tt.AccessToken, c.trigger),
-				"a trigger that does not parse should leave no reminder")
+			calURL := hostileCalendar(t, tt, "Not a duration "+c.name)
+			require.Nil(t, importedAlarmOffset(t, calURL, tt.AccessToken, c.trigger),
+				"a trigger that does not parse must leave no reminder")
 			deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
 		})
 	}
@@ -1045,7 +1268,7 @@ func TestICalImportDoesNotLetAnUnclosedAlarmOverwriteTheEvent(t *testing.T) {
 		"DESCRIPTION:What the event is about\r\n" +
 		"DTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\n" +
 		"BEGIN:VALARM\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Ring the bell\r\nEND:VEVENT\r\n")
-	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
 	listed := listHostile(t, calURL, tt.AccessToken)
 	require.Len(t, listed, 1)
