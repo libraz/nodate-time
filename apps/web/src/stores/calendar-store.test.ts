@@ -514,3 +514,44 @@ describe('deleteEvent', () => {
     ]);
   });
 });
+
+describe('updateEvent revisions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCalendarStore.setState({ calendars: [{ id: 'cal-1' } as never], events: [] });
+  });
+
+  it('names the copy being replaced when the editor knows it', async () => {
+    // The update carries every field, so a save built on a copy someone else
+    // has since replaced erases their work. If-Match turns that into a refusal.
+    mockApi.put.mockResolvedValue(evt('e1', 'cal-1') as never);
+    useCalendarStore.setState({ events: [evt('e1', 'cal-1')] });
+
+    await useCalendarStore
+      .getState()
+      .updateEvent('cal-1', 'e1', { title: 'x' } as never, undefined, '"20260910T040000.000"');
+
+    expect(mockApi.put).toHaveBeenCalledWith(
+      '/calendars/cal-1/events/e1',
+      { title: 'x' },
+      {
+        'If-Match': '"20260910T040000.000"',
+      },
+    );
+  });
+
+  it('saves unconditionally when there is no revision to stand on', async () => {
+    // A drag applies the gesture the user just made, and a revision that could
+    // not be read must not turn every save into a refusal.
+    mockApi.put.mockResolvedValue(evt('e1', 'cal-1') as never);
+    useCalendarStore.setState({ events: [evt('e1', 'cal-1')] });
+
+    await useCalendarStore.getState().updateEvent('cal-1', 'e1', { title: 'x' } as never);
+
+    expect(mockApi.put).toHaveBeenCalledWith(
+      '/calendars/cal-1/events/e1',
+      { title: 'x' },
+      undefined,
+    );
+  });
+});

@@ -4,7 +4,7 @@ import { HistoryTimeline } from '@/components/history-timeline';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
-import { api, errorMessage } from '@/lib/api';
+import { ApiError, api, errorMessage } from '@/lib/api';
 import { eventTimesForSave } from '@/lib/event-times';
 import {
   canDeleteComment,
@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type {
+  CalendarEvent,
   ChecklistItem,
   EventAttachment,
   EventComment,
@@ -836,6 +837,8 @@ export function EventModal() {
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
+  const fetchEvents = useCalendarStore((s) => s.fetchEvents);
+  const visibleRange = useCalendarStore((s) => s.visibleRange);
   const me = useAuthStore((s) => s.user);
 
   const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
@@ -941,6 +944,8 @@ export function EventModal() {
   // Optional fields (location/url/memo/people/reminder) collapse on create and
   // auto-expand when an existing event already uses any of them.
   const [showMore, setShowMore] = useState(false);
+  // The revision this editor was opened on, as the server named it.
+  const [revision, setRevision] = useState<string | null>(null);
 
   // The current user's role for the event's calendar gates all mutating UI,
   // and for an existing event so does whose layer it sits on: a shared
@@ -1062,6 +1067,31 @@ export function EventModal() {
     anchorZone,
   ]);
 
+  // Ask the server which revision this edit starts from. Saving is a full
+  // replace, so without it two people with the editor open overwrite each
+  // other and neither is told. A revision we could not read is left null,
+  // which saves unconditionally -- the behaviour before this existed.
+  useEffect(() => {
+    if (!showEventModal || !editingEvent) {
+      setRevision(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getWithRevision<CalendarEvent>(
+        `/calendars/${editingEvent.calendarId}/events/${editingEvent.id}`,
+      )
+      .then(({ revision: rev }) => {
+        if (!cancelled) setRevision(rev);
+      })
+      .catch(() => {
+        if (!cancelled) setRevision(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showEventModal, editingEvent]);
+
   useEffect(() => {
     if (showEventModal) {
       setTimeout(() => titleRef.current?.focus(), 100);
@@ -1106,13 +1136,24 @@ export function EventModal() {
       setSaving(true);
       try {
         if (editingEvent) {
-          await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope);
+          await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope, revision);
         } else {
           await addEvent(form.calendarId, data);
         }
         setScopePrompt(null);
         requestClose();
       } catch (e) {
+        // A refused save means someone else's version is the current one.
+        // Leaving the editor open with the rejected text in it would invite
+        // the same save again, so the event is reloaded and the form is
+        // rebuilt from what is actually stored.
+        if (e instanceof ApiError && e.code === 'EVENT.STALE') {
+          toast.error(errorMessage(e));
+          setScopePrompt(null);
+          const { start, end } = visibleRange();
+          await fetchEvents(start, end).catch(() => {});
+          return;
+        }
         toast.error(errorMessage(e, t('error.saveFailed')));
       } finally {
         setSaving(false);
@@ -1129,6 +1170,9 @@ export function EventModal() {
       editable,
       timezone,
       anchorZone,
+      revision,
+      fetchEvents,
+      visibleRange,
       t,
     ],
   );

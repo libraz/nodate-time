@@ -87,6 +87,13 @@ interface CalendarState {
     eventId: string,
     evt: EventInput,
     scope?: 'this' | 'all',
+    /**
+     * The revision this edit started from, as the server reported it. Sent as
+     * If-Match so a save built on a copy someone else has since replaced is
+     * refused instead of overwriting them. Omitted where there is nothing to
+     * be stale about -- a drag applies the gesture the user just made.
+     */
+    revision?: string | null,
   ) => Promise<void>;
   deleteEvent: (calendarId: string, eventId: string, scope?: 'this' | 'all') => Promise<void>;
 
@@ -363,11 +370,15 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
-  async updateEvent(calendarId, eventId, evt, scope) {
+  async updateEvent(calendarId, eventId, evt, scope, revision) {
     const query = scope ? `?scope=${scope}` : '';
+    // The update replaces every field, so a save from a copy read before
+    // someone else's save erases theirs rather than merging with it. Naming
+    // the copy being replaced turns that into a refusal the user can see.
     const updated = await api.put<CalendarEvent>(
       `/calendars/${calendarId}/events/${eventId}${query}`,
       evt,
+      revision ? { 'If-Match': revision } : undefined,
     );
     const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
     if (updated.recurrenceRule || wasRecurring) {

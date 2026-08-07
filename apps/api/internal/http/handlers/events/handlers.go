@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -285,6 +286,57 @@ func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, [
 		})
 	}
 	return ids, attendees, nil
+}
+
+// eventETag names one revision of an event.
+//
+// It is built from the row's last write rather than a counter column, because
+// the shared schema owns the events table and the last-write time is already
+// stored at millisecond resolution. Two writes landing in the same millisecond
+// would share a tag; they are serialised by the row lock either way, and the
+// race this guards against -- two people with the editor open -- is separated
+// by seconds, not by fractions of one.
+func eventETag(e generated.CalendarEvent) string {
+	stamp := e.CreatedAt
+	if e.UpdatedAt.Valid {
+		stamp = e.UpdatedAt.Time
+	}
+	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
+}
+
+// occurrenceSeriesETag re-reads a series after one of its occurrences was
+// written, so the response hands back the revision that write produced rather
+// than the one the request started from. Without the re-read the caller would
+// store a tag that is already stale and be refused on its own next save.
+func occurrenceSeriesETag(ctx context.Context, deps Deps, seriesID uint32) string {
+	master, err := deps.Queries.GetCalendarEventByID(ctx, seriesID)
+	if err != nil {
+		// Leaving the tag off says "no opinion", which lets the next save
+		// through unconditionally -- the behaviour before preconditions
+		// existed, and better than handing out one known to be wrong.
+		return ""
+	}
+	return eventETag(master)
+}
+
+// matchesETag reports whether a caller's If-Match names the revision on hand.
+// An empty header means the caller made no claim, which stays allowed: the
+// contract before this existed was last-write-wins, and refusing every
+// unconditional update would break callers that never sent one.
+func matchesETag(ifMatch string, e generated.CalendarEvent) bool {
+	ifMatch = strings.TrimSpace(ifMatch)
+	if ifMatch == "" || ifMatch == "*" {
+		return true
+	}
+	current := eventETag(e)
+	for _, tag := range strings.Split(ifMatch, ",") {
+		tag = strings.TrimSpace(tag)
+		tag = strings.TrimPrefix(tag, "W/")
+		if tag == current {
+			return true
+		}
+	}
+	return false
 }
 
 // setAttendees fills both attendee-derived fields of a response from one read.
@@ -792,7 +844,10 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 				}
 				decorate(ctx, deps, &resp, source, cal.ID, nil, nil)
-				return &GetEventOutput{Body: resp}, nil
+				// The tag names the series row: an occurrence has no address of
+				// its own until it is changed, so one tag has to cover the whole
+				// series or a caller would have nothing to hold.
+				return &GetEventOutput{ETag: eventETag(evt), Body: resp}, nil
 			}
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
@@ -807,7 +862,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		decorate(ctx, deps, &resp, evt, cal.ID, nil, nil)
-		return &GetEventOutput{Body: resp}, nil
+		return &GetEventOutput{ETag: eventETag(evt), Body: resp}, nil
 	}
 }
 
@@ -922,7 +977,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		}
 		decorate(ctx, deps, &resp, created, cal.ID, nil, nil)
 
-		return &CreateEventOutput{Body: resp}, nil
+		return &CreateEventOutput{ETag: eventETag(created), Body: resp}, nil
 	}
 }
 
@@ -941,6 +996,13 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
+		}
+
+		// The precondition is checked against the row the series is stored in.
+		// A per-occurrence edit writes an override that hangs off that row, so
+		// both scopes are answering about the same thing changing underneath.
+		if !matchesETag(in.IfMatch, evt) {
+			return nil, apierrors.ToHuma(apierrors.EventStale)
 		}
 
 		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
@@ -1074,6 +1136,12 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				}); err != nil {
 					return err
 				}
+				// The occurrence lives in its own row, so without this the
+				// series would report the same revision as before the edit and
+				// a second writer holding the older copy would be let through.
+				if err := q.TouchCalendarEvent(ctx, evt.ID); err != nil {
+					return err
+				}
 				var err error
 				child, err = q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
 					RecurrenceParentID:      parentRef,
@@ -1108,7 +1176,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}
 			decorate(ctx, deps, &resp, child, cal.ID, nil, nil)
-			return &UpdateEventOutput{Body: resp}, nil
+			return &UpdateEventOutput{ETag: occurrenceSeriesETag(ctx, deps, evt.ID), Body: resp}, nil
 		}
 
 		var updated generated.CalendarEvent
@@ -1212,7 +1280,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		decorate(ctx, deps, &resp, updated, cal.ID, nil, nil)
-		return &UpdateEventOutput{Body: resp}, nil
+		return &UpdateEventOutput{ETag: eventETag(updated), Body: resp}, nil
 	}
 }
 

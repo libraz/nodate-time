@@ -621,6 +621,25 @@ func (q *Queries) SoftDeleteCalendarEvent(ctx context.Context, id uint32) error 
 	return err
 }
 
+const touchCalendarEvent = `-- name: TouchCalendarEvent :exec
+UPDATE calendar_events
+SET updated_at = NOW(3)
+WHERE id = ?
+`
+
+// TouchCalendarEvent records that a series changed without changing any of its
+// own columns.
+//
+// A per-occurrence edit writes a separate override row, so the series row it
+// hangs off is left untouched. Callers hold one entity tag for the series --
+// there is no separate address to hold one for an occurrence that has no row
+// yet -- and that tag has to stop naming the old state once any occurrence
+// moves, or a second writer replaces the first one's work unnoticed.
+func (q *Queries) TouchCalendarEvent(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, touchCalendarEvent, id)
+	return err
+}
+
 const updateCalendarEvent = `-- name: UpdateCalendarEvent :exec
 UPDATE calendar_events
 SET kind = ?, visibility = ?, show_as = ?, flexibility = ?,

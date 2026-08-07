@@ -499,6 +499,7 @@ export const en: Record<TranslationKey, string> = {
   'apiError.EVENT.ACCESS_DENIED': 'You do not have access to this event',
   'apiError.EVENT.EDIT_DENIED': 'You cannot edit this event',
   'apiError.EVENT.NOT_ATTENDEE': 'You are not a participant of this event',
+  'apiError.EVENT.STALE': 'Someone else changed this event while you had it open. Reload it first',
   'apiError.COMMENT.NOT_FOUND': 'Comment not found',
   'apiError.COMMENT.ACCESS_DENIED': 'You can only edit your own comments',
   'apiError.CHECKLIST.NOT_FOUND': 'Checklist item not found',

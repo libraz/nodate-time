@@ -76,6 +76,10 @@ var (
 	// handing everyone on it the right to rewrite each other's plans.
 	EventEditDenied  = &Spec{Status: 403, Code: "EVENT.EDIT_DENIED", Message: "You cannot edit this event"}
 	EventNotAttendee = &Spec{Status: 403, Code: "EVENT.NOT_ATTENDEE", Message: "You are not a participant of this event"}
+	// EventStale reports that the event changed after the copy the caller is
+	// replacing. An update carries the whole event, so applying it anyway
+	// would silently undo whatever the other writer just saved.
+	EventStale = &Spec{Status: 409, Code: "EVENT.STALE", Message: "This event changed since you opened it"}
 )
 
 // --- Comment errors ---

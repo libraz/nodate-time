@@ -120,6 +120,17 @@ func DoJSONStatusWithHeaders(
 	t *testing.T, method, url, bearer string, body any, headers map[string]string,
 ) (int, []byte) {
 	t.Helper()
+	status, raw, _ := DoJSONFull(t, method, url, bearer, body, headers)
+	return status, raw
+}
+
+// DoJSONFull is DoJSONStatusWithHeaders that also hands back the response
+// headers, for the endpoints whose answer is partly in them -- an entity tag,
+// a truncation flag -- rather than entirely in the body.
+func DoJSONFull(
+	t *testing.T, method, url, bearer string, body any, headers map[string]string,
+) (int, []byte, http.Header) {
+	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -149,7 +160,7 @@ func DoJSONStatusWithHeaders(
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, raw
+	return resp.StatusCode, raw, resp.Header
 }
 
 // SHA256Hex is the digest a presign request declares for the bytes it is
