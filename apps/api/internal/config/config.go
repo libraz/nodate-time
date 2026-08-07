@@ -50,7 +50,13 @@ type Config struct {
 	SMTPPassword       string `env:"TC_SMTP_PASSWORD" envDefault:""`
 	SMTPFrom           string `env:"TC_SMTP_FROM" envDefault:"no-reply@nodate-time.local"`
 	CORSAllowedOrigins string `env:"TC_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:5173,http://127.0.0.1:5173"`
-	CookieSecure       bool   `env:"TC_COOKIE_SECURE" envDefault:"false"`
+
+	// There is deliberately no cookie-security setting. The only cookie this
+	// service sets is the one binding an OAuth flow to the browser that began
+	// it, and whether it carries Secure follows from RedirectBase being an
+	// https URL -- the same value the browser is sent back to. A separate knob
+	// could only ever disagree with that, and the way it would disagree is by
+	// promising Secure on a deployment that is not serving over TLS.
 
 	// TrustedProxies lists reverse-proxy hops (comma-separated CIDR or bare IP)
 	// allowed to set X-Forwarded-For for per-client rate limiting. Empty (the
