@@ -57,6 +57,29 @@ WHERE prev_refresh_hash = ?
   AND revoked_at IS NULL
   AND enabled = TRUE;
 
+-- RevokeReplayedSession ends a session whose retired refresh token has been
+-- presented a second time -- unless the exchange that retired it was seconds
+-- ago, in which case this is one client asking twice rather than two parties
+-- holding the same token.
+--
+-- A browser resuming with several expired requests sends a refresh for each.
+-- Only one can win, and without the interval below every loser would end the
+-- session, so waking a sleeping tab would sign the reader out. That cost is
+-- certain; a thief landing inside the same few seconds is not. The losers are
+-- refused either way -- the window decides whether a refusal also destroys
+-- the session, not whether it grants anything.
+--
+-- The comparison is made here rather than in the caller so that one clock
+-- decides it. Reading rotated_at back and comparing it against the
+-- application's own clock would let a few seconds of skew revoke the very
+-- sessions this is meant to protect.
+-- name: RevokeReplayedSession :execresult
+UPDATE sessions
+SET revoked_at = NOW(3)
+WHERE id = ?
+  AND revoked_at IS NULL
+  AND (rotated_at IS NULL OR rotated_at < NOW(3) - INTERVAL 10 SECOND);
+
 -- name: RevokeSession :exec
 UPDATE sessions SET revoked_at = NOW(3) WHERE id = ?;
 
