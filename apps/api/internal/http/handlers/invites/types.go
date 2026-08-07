@@ -22,7 +22,9 @@ type CreateInviteInput struct {
 		// An invite link may grant editing or reading, never administration:
 		// a link that could hand out management would let whoever holds it
 		// grant themselves the power to hand out more.
-		Role           string `json:"role" enum:"editor,viewer" default:"editor"`
+		// A default only takes effect on a field the schema lets the caller
+		// omit, so role carries required:"false" alongside it.
+		Role           string `json:"role,omitempty" enum:"editor,viewer" default:"editor" required:"false"`
 		MaxUses        *int32 `json:"maxUses,omitempty" required:"false" minimum:"1"`
 		ExpiresInHours *int   `json:"expiresInHours,omitempty" required:"false" minimum:"1" maximum:"8760"`
 		// IsPublic marks a read-only embed link that cannot be joined.

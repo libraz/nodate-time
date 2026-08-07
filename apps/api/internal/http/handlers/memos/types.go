@@ -24,7 +24,7 @@ type CreateMemoInput struct {
 	Body       struct {
 		Title     string `json:"title" minLength:"1" maxLength:"500"`
 		Body      string `json:"body" maxLength:"16000" required:"false"`
-		SortOrder int32  `json:"sortOrder"`
+		SortOrder int32  `json:"sortOrder,omitempty" required:"false" doc:"omitted means first"`
 	}
 }
 type CreateMemoOutput struct {

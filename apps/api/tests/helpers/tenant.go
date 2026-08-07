@@ -3,6 +3,7 @@ package helpers
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -74,6 +75,22 @@ func NewTenant(t *testing.T, baseURL string) *TestTenant {
 	tt.CalendarColor = TenantCalendarColor
 
 	return tt
+}
+
+// MakeInstanceAdmin grants the instance-admin role to an already-registered
+// tenant. There is no API that hands this out -- the first admin is created by
+// the bootstrap CLI -- so a test that needs to reach the admin surface writes
+// the grant the same way that CLI does.
+func MakeInstanceAdmin(t *testing.T, db *sql.DB, userPublicID string) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO instance_admins (public_id, user_id)
+		 SELECT UUID_TO_BIN(UUID()), id FROM users WHERE public_id = UUID_TO_BIN(?)
+		 ON DUPLICATE KEY UPDATE revoked_at = NULL, enabled = TRUE`,
+		userPublicID)
+	if err != nil {
+		t.Fatalf("grant instance admin: %v", err)
+	}
 }
 
 // DoJSON makes an HTTP request with JSON body, attaches Bearer token, asserts 2xx, unmarshals response.

@@ -37,7 +37,7 @@ type ListAllowedEmailsOutput struct {
 type CreateAllowedEmailInput struct {
 	Body struct {
 		Email string `json:"email" format:"email" maxLength:"255"`
-		Note  string `json:"note" maxLength:"255"`
+		Note  string `json:"note,omitempty" maxLength:"255" required:"false" doc:"why this address is allowed"`
 	}
 }
 

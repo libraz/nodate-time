@@ -44,8 +44,11 @@ type GetCalendarOutput struct {
 
 type CreateCalendarInput struct {
 	Body struct {
-		Name  string `json:"name" minLength:"1" maxLength:"200"`
-		Color string `json:"color" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$"`
+		Name string `json:"name" minLength:"1" maxLength:"200"`
+		// Omitted means "pick the default colour" -- the handler already does
+		// that, and the pattern below rejects the empty string, so requiring
+		// the field would make that fallback unreachable.
+		Color string `json:"color,omitempty" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
 	}
 }
 type CreateCalendarOutput struct {
