@@ -5,13 +5,13 @@ import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
-import { eventTimesForSave } from '@/lib/event-times';
+import { eventTimesForSave, shiftStartKeepingDuration } from '@/lib/event-times';
 import {
   canDeleteComment,
   canEdit,
   canEditComment,
   canEditEvent,
-  roleForCalendar,
+  roleOnCalendar,
   showAsLabelKey,
   visibilityLabelKey,
 } from '@/lib/permissions';
@@ -837,6 +837,7 @@ export function EventModal() {
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
+  const fetchMembers = useCalendarStore((s) => s.fetchMembers);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const visibleRange = useCalendarStore((s) => s.visibleRange);
   const me = useAuthStore((s) => s.user);
@@ -951,19 +952,25 @@ export function EventModal() {
   // and for an existing event so does whose layer it sits on: a shared
   // calendar is not a licence to rewrite everyone else's plans.
   const formCalendarId = form.calendarId || (editingEvent?.calendarId ?? '');
-  const myRole = roleForCalendar(membersMap[formCalendarId], me?.email);
+  const myRole = roleOnCalendar(calendars, formCalendarId);
   const editable = editingEvent ? canEditEvent(editingEvent, myRole, me?.id) : canEdit(myRole);
 
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
-    () =>
-      calendars.filter(
-        (c) =>
-          activeCalendarIds.includes(c.id) && canEdit(roleForCalendar(membersMap[c.id], me?.email)),
-      ),
-    [calendars, activeCalendarIds, membersMap, me?.email],
+    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canEdit(c.role)),
+    [calendars, activeCalendarIds],
   );
   const defaultCalendarId = postableCalendars[0]?.id ?? calendars[0]?.id ?? '';
+
+  // The participant picker names the people on the calendar being edited, so
+  // that one list is fetched when the modal opens rather than every
+  // calendar's at startup. Switching the calendar in the picker fetches the
+  // new one; a list already held is not asked for again.
+  useEffect(() => {
+    if (!showEventModal || !formCalendarId) return;
+    if (membersMap[formCalendarId]) return;
+    fetchMembers(formCalendarId);
+  }, [showEventModal, formCalendarId, membersMap, fetchMembers]);
 
   // Answering an invitation is the invitee's own to give and is not editing,
   // so the control appears for a participant of a saved event regardless of
@@ -1341,25 +1348,18 @@ export function EventModal() {
         <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           <DateTimeField
             label={t('event.start')}
-            dateValue={DateTime.fromISO(form.startAt)}
+            dateValue={DateTime.fromISO(form.startAt, { zone: timezone })}
             timeValue={form.startAt.split('T')[1]?.slice(0, 5) ?? '09:00'}
             showTime={!form.allDay}
             onDateChange={(date) => {
-              const time = form.startAt.split('T')[1] ?? '09:00';
-              const newStart = `${date.toFormat('yyyy-MM-dd')}T${time}`;
               setForm((f) => {
-                const oldStartDt = DateTime.fromISO(f.startAt);
-                const oldEndDt = DateTime.fromISO(f.endAt);
-                const newStartDt = DateTime.fromISO(newStart);
-                // Preserve the original duration between start and end
-                const durationMs = oldEndDt.diff(oldStartDt).milliseconds;
-                const newEndDt = newStartDt.plus({ milliseconds: Math.max(durationMs, 0) });
-                const newEnd = newEndDt.toFormat("yyyy-MM-dd'T'HH:mm");
+                const moved = shiftStartKeepingDuration(f, date, timezone);
+                const newStartDt = DateTime.fromISO(moved.startAt, { zone: timezone });
                 const recurrenceRule =
                   f.recurrencePreset !== 'custom' && f.recurrenceRule
                     ? presetToRule(f.recurrencePreset, newStartDt)
                     : f.recurrenceRule;
-                return { ...f, startAt: newStart, endAt: newEnd, recurrenceRule };
+                return { ...f, startAt: moved.startAt, endAt: moved.endAt, recurrenceRule };
               });
             }}
             onTimeChange={(time) => {
@@ -1367,8 +1367,8 @@ export function EventModal() {
               setForm((f) => {
                 const newStart = `${datePart}T${time}`;
                 // If end is now before start on same day, push end forward by 1 hour
-                const startDt = DateTime.fromISO(newStart);
-                const endDt = DateTime.fromISO(f.endAt);
+                const startDt = DateTime.fromISO(newStart, { zone: timezone });
+                const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
                 if (endDt <= startDt) {
                   const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
                   return { ...f, startAt: newStart, endAt: newEnd };
@@ -1379,7 +1379,7 @@ export function EventModal() {
           />
           <DateTimeField
             label={t('event.end')}
-            dateValue={DateTime.fromISO(form.endAt)}
+            dateValue={DateTime.fromISO(form.endAt, { zone: timezone })}
             timeValue={form.endAt.split('T')[1]?.slice(0, 5) ?? '10:00'}
             showTime={!form.allDay}
             onDateChange={(date) => {
@@ -1387,8 +1387,8 @@ export function EventModal() {
               setForm((f) => {
                 const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
                 // If end is before start, clamp to start date
-                const startDt = DateTime.fromISO(f.startAt);
-                const endDt = DateTime.fromISO(newEnd);
+                const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
+                const endDt = DateTime.fromISO(newEnd, { zone: timezone });
                 if (endDt < startDt) {
                   const startTime = f.startAt.split('T')[1] ?? '09:00';
                   return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
@@ -1401,13 +1401,13 @@ export function EventModal() {
               setForm((f) => {
                 const newEnd = `${datePart}T${time}`;
                 // If end is before start, don't allow it — keep old value
-                const startDt = DateTime.fromISO(f.startAt);
-                const endDt = DateTime.fromISO(newEnd);
+                const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
+                const endDt = DateTime.fromISO(newEnd, { zone: timezone });
                 if (endDt <= startDt) return f;
                 return { ...f, endAt: newEnd };
               });
             }}
-            minDate={DateTime.fromISO(form.startAt)}
+            minDate={DateTime.fromISO(form.startAt, { zone: timezone })}
           />
 
           <div className="my-1 border-t border-[var(--color-border)] opacity-50" />

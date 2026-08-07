@@ -14,10 +14,11 @@ import {
   getWeekdayLabel,
   isToday,
   jsDayOfWeek,
+  nowInZone,
 } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
-import { canEditEvent, roleForCalendar } from '@/lib/permissions';
+import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -48,10 +49,10 @@ type ScrollItem =
   | { kind: 'header'; key: string; month: DateTime }
   | { kind: 'week'; key: string; weekStart: DateTime };
 
-function buildItems(anchor: DateTime): { items: ScrollItem[]; todayKey: string } {
+function buildItems(anchor: DateTime, zone: string): { items: ScrollItem[]; todayKey: string } {
   const rangeStart = anchor.startOf('month').minus({ months: RANGE_MONTHS });
   const rangeEnd = anchor.startOf('month').plus({ months: RANGE_MONTHS }).endOf('month');
-  const today = DateTime.now().startOf('day');
+  const today = nowInZone(zone).startOf('day');
 
   const items: ScrollItem[] = [];
   const seen = new Set<string>();
@@ -180,7 +181,7 @@ function WeekRow({
   return (
     <div className="relative grid grid-cols-7" data-week={weekStart.toFormat('yyyy-MM-dd')}>
       {week.map((dt, dIdx) => {
-        const today = isToday(dt);
+        const today = isToday(dt, zone);
         const dow = jsDayOfWeek(dt);
         const isoDate = dt.toFormat('yyyy-MM-dd');
         const holiday = getHoliday(holidaysCountry, isoDate);
@@ -379,7 +380,7 @@ export function MonthScroll() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
+  const calendars = useCalendarStore((s) => s.calendars);
   const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
@@ -392,7 +393,7 @@ export function MonthScroll() {
   );
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
-  const [anchorMonth, setAnchorMonth] = useState(DateTime.now().startOf('month'));
+  const [anchorMonth, setAnchorMonth] = useState(() => nowInZone(timezone).startOf('month'));
   useHolidayLoader(holidaysCountry, [
     anchorMonth.year - 2,
     anchorMonth.year - 1,
@@ -405,7 +406,10 @@ export function MonthScroll() {
   /** Window for treating a second tap on the same day as a double-tap (ms). */
   const DOUBLE_TAP_MS = 260;
 
-  const { items, todayKey } = useMemo(() => buildItems(anchorMonth), [anchorMonth]);
+  const { items, todayKey } = useMemo(
+    () => buildItems(anchorMonth, timezone),
+    [anchorMonth, timezone],
+  );
 
   const visibleEvents = useMemo(
     () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
@@ -442,9 +446,8 @@ export function MonthScroll() {
   );
 
   const canMove = useCallback(
-    (evt: CalendarEvent) =>
-      canEditEvent(evt, roleForCalendar(membersMap[evt.calendarId], me?.email), me?.id),
-    [membersMap, me],
+    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
+    [calendars, me],
   );
 
   // Multi-day bars live in an overlay outside the day cells, so the topmost
@@ -538,9 +541,9 @@ export function MonthScroll() {
     (smooth: boolean) => {
       if (scrollToWeek(todayKey, smooth)) return;
       pendingScrollRef.current = { today: true, smooth };
-      setAnchorMonth(DateTime.now().startOf('month'));
+      setAnchorMonth(nowInZone(timezone).startOf('month'));
     },
-    [scrollToWeek, todayKey],
+    [scrollToWeek, todayKey, timezone],
   );
 
   const extendRange = useCallback((direction: -1 | 1) => {

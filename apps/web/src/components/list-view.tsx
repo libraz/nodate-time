@@ -2,7 +2,7 @@ import { DateTime } from 'luxon';
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
-import { fromISOInZone } from '@/lib/date-utils';
+import { fromISOInZone, isToday } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -35,8 +35,8 @@ export function ListView() {
         </div>
       )}
       {grouped.map(([dateStr, evts]) => {
-        const dt = DateTime.fromISO(dateStr);
-        const today = dt.hasSame(DateTime.now(), 'day');
+        const dt = DateTime.fromISO(dateStr, { zone: timezone });
+        const today = isToday(dt, timezone);
         const weekday = dt.weekday % 7;
         const holiday = holidaysCountry ? getHoliday(holidaysCountry, dateStr) : null;
         const isHoliday = !!holiday;

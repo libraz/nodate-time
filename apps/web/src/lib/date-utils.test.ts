@@ -1,5 +1,5 @@
-import { DateTime } from 'luxon';
-import { describe, expect, it } from 'vitest';
+import { DateTime, Settings } from 'luxon';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchWindow,
   formatDateKey,
@@ -11,7 +11,9 @@ import {
   getWeekdayLabel,
   gridRange,
   isSameDay,
+  isToday,
   jsDayOfWeek,
+  nowInZone,
 } from './date-utils';
 
 describe('getMonthDays', () => {
@@ -62,6 +64,61 @@ describe('formatTime', () => {
   it('formats an ISO timestamp as HH:mm', () => {
     expect(formatTime('2026-04-20T09:05:00')).toBe('09:05');
     expect(formatTime('2026-04-20T18:30:00')).toBe('18:30');
+  });
+
+  it('reads the timestamp in the given zone', () => {
+    expect(formatTime('2026-04-20T09:05:00+09:00', 'UTC')).toBe('00:05');
+  });
+});
+
+// The machine is on UTC and the account is set to Tokyo, at an instant where
+// the two disagree about the date: 16:00 UTC on the 10th is already 01:00 on
+// the 11th in Tokyo. Reading the clock locally puts the today marker on the
+// 10th, a day the account has already finished.
+describe('isToday', () => {
+  const originalZone = Settings.defaultZone;
+
+  beforeEach(() => {
+    Settings.defaultZone = 'UTC';
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T16:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Settings.defaultZone = originalZone;
+  });
+
+  it('marks the day the configured zone is on, not the machine', () => {
+    const tokyo = (dayOfMonth: number) =>
+      DateTime.fromObject({ year: 2026, month: 3, day: dayOfMonth }, { zone: 'Asia/Tokyo' });
+    expect(isToday(tokyo(11), 'Asia/Tokyo')).toBe(true);
+    expect(isToday(tokyo(10), 'Asia/Tokyo')).toBe(false);
+  });
+
+  it('falls back to the machine zone when no zone is configured', () => {
+    expect(isToday(DateTime.local(2026, 3, 10))).toBe(true);
+    expect(isToday(DateTime.local(2026, 3, 11))).toBe(false);
+  });
+});
+
+describe('nowInZone', () => {
+  const originalZone = Settings.defaultZone;
+
+  beforeEach(() => {
+    Settings.defaultZone = 'UTC';
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T16:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Settings.defaultZone = originalZone;
+  });
+
+  it('reads the current instant on the configured zone’s calendar', () => {
+    expect(nowInZone('Asia/Tokyo').toISODate()).toBe('2026-03-11');
+    expect(nowInZone('').toISODate()).toBe('2026-03-10');
   });
 });
 

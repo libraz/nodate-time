@@ -13,6 +13,41 @@ export interface EventTimes {
   endAt: string;
 }
 
+/** The wall-clock shape the editor's date and time fields hold. */
+const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm";
+
+/**
+ * Moves an event's start onto `newStartDate`, keeping the time of day and the
+ * span to the end.
+ *
+ * The span is a calendar length, not a number of milliseconds. A zone that
+ * gains or loses an hour between the two ends makes those two quantities
+ * disagree, so re-applying an absolute offset moves an end the user never
+ * touched: an event running to 10:00 comes back reading 09:00 or 11:00 purely
+ * because its start was dragged past a transition.
+ */
+export function shiftStartKeepingDuration(
+  form: EventTimeForm,
+  newStartDate: DateTime,
+  zone: string,
+): EventTimes {
+  const time = form.startAt.split('T')[1] ?? '00:00';
+  const newStart = DateTime.fromISO(`${newStartDate.toFormat('yyyy-MM-dd')}T${time}`, { zone });
+  const oldStart = DateTime.fromISO(form.startAt, { zone });
+  const oldEnd = DateTime.fromISO(form.endAt, { zone });
+  // Measured on a fixed-offset clock so the transition between the old start
+  // and the old end is not charged to the event, then re-applied as calendar
+  // units so the new position's own transitions are.
+  const span = oldEnd
+    .setZone('UTC', { keepLocalTime: true })
+    .diff(oldStart.setZone('UTC', { keepLocalTime: true }), ['days', 'hours', 'minutes']);
+  const newEnd = span.toMillis() > 0 ? newStart.plus(span) : newStart;
+  return {
+    startAt: newStart.toFormat(WALL_CLOCK),
+    endAt: newEnd.toFormat(WALL_CLOCK),
+  };
+}
+
 /**
  * Turns what the editor holds into the instants the API stores.
  *

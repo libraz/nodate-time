@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { eventOccupiesDay } from '@/lib/week-layout';
-import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -16,13 +15,10 @@ export function DayDetail() {
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
-  const me = useAuthStore((s) => s.user);
+  const calendars = useCalendarStore((s) => s.calendars);
 
   // Allow adding when the user can edit at least one active calendar.
-  const canAdd = activeCalendarIds.some((id) =>
-    canEdit(roleForCalendar(membersMap[id], me?.email)),
-  );
+  const canAdd = activeCalendarIds.some((id) => canEdit(roleOnCalendar(calendars, id)));
 
   const timezone = useUiStore((s) => s.timezone);
   const dayEvents = useMemo(

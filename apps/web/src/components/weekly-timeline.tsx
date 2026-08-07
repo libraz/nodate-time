@@ -15,7 +15,7 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
-import { canEditEvent, roleForCalendar } from '@/lib/permissions';
+import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { layoutTimedEventsForDay, resizedEndForDaySegment } from '@/lib/timed-layout';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -36,7 +36,7 @@ export function WeeklyTimeline() {
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
+  const calendars = useCalendarStore((s) => s.calendars);
   const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,9 +60,8 @@ export function WeeklyTimeline() {
   const dragGeom = useRef<{ width: number; height: number }>({ width: 160, height: 40 });
 
   const canMove = useCallback(
-    (evt: CalendarEvent) =>
-      canEditEvent(evt, roleForCalendar(membersMap[evt.calendarId], me?.email), me?.id),
-    [membersMap, me],
+    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
+    [calendars, me],
   );
 
   // Weekly drag changes both the day (column under cursor) and the time (cursor Y,
@@ -223,7 +222,7 @@ export function WeeklyTimeline() {
         {/* Time gutter spacer */}
         <div className="w-14 shrink-0" />
         {days.map((day) => {
-          const today = isToday(day);
+          const today = isToday(day, timezone);
           const dow = jsDayOfWeek(day);
           return (
             <div key={day.toISO()} className="flex flex-1 flex-col items-center py-2.5">
@@ -307,7 +306,7 @@ export function WeeklyTimeline() {
             const key = day.toFormat('yyyy-MM-dd');
             const dayLayouts = timedLayouts.get(key) ?? [];
             const dayStartMs = day.startOf('day').toMillis();
-            const today = isToday(day);
+            const today = isToday(day, timezone);
 
             return (
               <div
