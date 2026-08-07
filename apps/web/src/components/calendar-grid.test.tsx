@@ -149,6 +149,42 @@ describe('CalendarGrid overflow indicator', () => {
   });
 });
 
+// The desktop grid only ever renders above the one breakpoint this app has, so
+// a `max-sm:` class here is a mobile rule nothing can apply -- and the two
+// month surfaces drifting apart is exactly how they got written.
+describe('CalendarGrid responsive rules', () => {
+  it('carries no styles for a width it never renders at', async () => {
+    await renderGrid();
+
+    const styled = [...document.querySelectorAll<HTMLElement>('[class]')].filter((el) =>
+      el.className.includes('max-sm:'),
+    );
+    expect(styled.map((el) => el.className)).toEqual([]);
+  });
+});
+
+// Chips are stacked inside the day cell while multi-day bars are drawn in an
+// overlay above it, and they only line up while both are measured from the same
+// track pitch.
+describe('CalendarGrid track metrics', () => {
+  it('gives the bars the pitch the chip slots use', async () => {
+    calendarState.events = [
+      spanEvent('b0', 'Bar zero', '2026-08-02', '2026-08-06'),
+      spanEvent('b1', 'Bar one', '2026-08-03', '2026-08-07'),
+      event('chip', 8),
+    ];
+    await renderGrid();
+
+    const top0 = Number.parseFloat(screen.getByTitle('Bar zero').style.top);
+    const top1 = Number.parseFloat(screen.getByTitle('Bar one').style.top);
+    const chip = screen.getByRole('button', { name: /Event chip/ });
+    const slotPitch =
+      Number.parseFloat(chip.style.height) + Number.parseFloat(chip.style.marginBottom);
+
+    expect(top1 - top0).toBe(slotPitch);
+  });
+});
+
 // Tracks are held for a bar's whole span, so a bar can end up on a high track
 // because of crowding on days it shares with nothing else. Those quiet days
 // must still account for it.

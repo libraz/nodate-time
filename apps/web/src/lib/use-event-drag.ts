@@ -60,6 +60,8 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
   const [drag, setDrag] = useState<DragState | null>(null);
   const pending = useRef<Pending | null>(null);
   const suppressClick = useRef(false);
+  const frame = useRef(0);
+  const queued = useRef<DragState | null>(null);
 
   const endPending = useCallback(() => {
     const s = pending.current;
@@ -67,6 +69,27 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
     s.ctrl.abort();
     if (s.timer) clearTimeout(s.timer);
     pending.current = null;
+  }, []);
+
+  const cancelFrame = useCallback(() => {
+    if (frame.current) cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    queued.current = null;
+  }, []);
+
+  // A pointer reports far more often than the screen repaints, and the whole
+  // month re-renders behind this state. Keep the latest sample and publish it
+  // once per frame so the ghost still tracks the pointer without redrawing
+  // every week for samples nobody sees.
+  const publishDrag = useCallback((state: DragState) => {
+    queued.current = state;
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      const next = queued.current;
+      queued.current = null;
+      if (next) setDrag(next);
+    });
   }, []);
 
   const handleMove = useCallback(
@@ -84,7 +107,7 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
           return;
         }
       }
-      setDrag({
+      publishDrag({
         event: s.event,
         x: e.clientX,
         y: e.clientY,
@@ -92,13 +115,15 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
         originKey: s.originKey,
       });
     },
-    [resolveKey, threshold, endPending],
+    [resolveKey, threshold, endPending, publishDrag],
   );
 
   const handleUp = useCallback(
     (e: globalThis.PointerEvent) => {
       const s = pending.current;
       endPending();
+      // A frame still in flight would put the ghost back after the drop.
+      cancelFrame();
       setDrag(null);
       if (s?.active) {
         suppressClick.current = true;
@@ -110,7 +135,7 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
         onDrop(s.event, e.clientX, e.clientY, { originKey: s.originKey, meta: s.meta });
       }
     },
-    [onDrop, endPending],
+    [onDrop, endPending, cancelFrame],
   );
 
   // Blocks page scrolling once a touch drag is active.
@@ -166,7 +191,13 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
     return false;
   }, []);
 
-  useEffect(() => () => endPending(), [endPending]);
+  useEffect(
+    () => () => {
+      endPending();
+      cancelFrame();
+    },
+    [endPending, cancelFrame],
+  );
 
   return { drag, start, consumeClick };
 }

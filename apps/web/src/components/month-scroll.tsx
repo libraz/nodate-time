@@ -8,29 +8,14 @@ import {
   useRef,
   useState,
 } from 'react';
-import {
-  formatMonthYear,
-  fromISOInZone,
-  getWeekdayLabel,
-  isToday,
-  jsDayOfWeek,
-  nowInZone,
-} from '@/lib/date-utils';
+import { type DragLanding, MonthWeekRow } from '@/components/month-week-row';
+import { formatMonthYear, fromISOInZone, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
-import { getHoliday } from '@/lib/holidays';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
-import { useHolidayLoader } from '@/lib/use-holidays';
+import { useHolidayRevision } from '@/lib/use-holiday-revision';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import {
-  eventEndDay,
-  eventStartDay,
-  isMultiDay,
-  layoutDayCell,
-  layoutWeek,
-  MAX_VISIBLE_TRACKS,
-  type PositionedEvent,
-} from '@/lib/week-layout';
+import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -41,14 +26,11 @@ const RANGE_MONTHS = 18;
 const RANGE_SHIFT_MONTHS = 12;
 const EDGE_EXTEND_PX = 700;
 
-/** Fixed vertical metrics (px) that keep single-day chips aligned with multi-day bars. */
-const DATE_ROW_H = 24;
-const SLOT_H = 15;
 const MONTH_HEADER_H = 28;
 
 type ScrollItem =
   | { kind: 'header'; key: string; month: DateTime }
-  | { kind: 'week'; key: string; weekStart: DateTime };
+  | { kind: 'week'; key: string; dayKey: string; weekStart: DateTime };
 
 function buildItems(anchor: DateTime, zone: string): { items: ScrollItem[]; todayKey: string } {
   const rangeStart = anchor.startOf('month').minus({ months: RANGE_MONTHS });
@@ -78,281 +60,16 @@ function buildItems(anchor: DateTime, zone: string): { items: ScrollItem[]; toda
         }
       }
     }
-    const weekKey = `w-${ws.toFormat('yyyy-MM-dd')}`;
+    const dayKey = ws.toFormat('yyyy-MM-dd');
+    const weekKey = `w-${dayKey}`;
     if (today >= ws && today < ws.plus({ days: 7 })) {
       todayKey = weekKey;
     }
-    items.push({ kind: 'week', key: weekKey, weekStart: ws });
+    items.push({ kind: 'week', key: weekKey, dayKey, weekStart: ws });
     ws = ws.plus({ weeks: 1 });
   }
 
   return { items, todayKey };
-}
-
-/** Landing range of the event currently being dragged. */
-interface DragLanding {
-  event: CalendarEvent;
-  start: DateTime;
-  end: DateTime;
-}
-
-interface WeekRowProps {
-  weekStart: DateTime;
-  events: CalendarEvent[];
-  zone: string;
-  holidaysCountry: string | null;
-  selectedDate: DateTime;
-  onDayClick: (date: DateTime) => void;
-  onEventClick: (eventId: string) => void;
-  onEventPointerDown: (evt: CalendarEvent, e: ReactPointerEvent) => void;
-  canMoveEvent: (evt: CalendarEvent) => boolean;
-  dragLanding: DragLanding | null;
-}
-
-function WeekRow({
-  weekStart,
-  events,
-  zone,
-  holidaysCountry,
-  selectedDate,
-  onDayClick,
-  onEventClick,
-  onEventPointerDown,
-  canMoveEvent,
-  dragLanding,
-}: WeekRowProps) {
-  const week = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => weekStart.plus({ days: i })),
-    [weekStart],
-  );
-
-  const positioned = useMemo(() => layoutWeek(weekStart, events, zone), [weekStart, events, zone]);
-
-  // Single-day events grouped by yyyy-MM-dd within this week.
-  const singleDayMap = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    for (const evt of events) {
-      if (isMultiDay(evt, zone)) continue;
-      const startDt = eventStartDay(evt, zone);
-      const inWeek = week.find((d) => d.hasSame(startDt, 'day'));
-      if (!inWeek) continue;
-      const key = inWeek.toFormat('yyyy-MM-dd');
-      const arr = map.get(key) ?? [];
-      arr.push(evt);
-      map.set(key, arr);
-    }
-    return map;
-  }, [events, week, zone]);
-
-  const cells = useMemo(
-    () =>
-      week.map((dt) =>
-        layoutDayCell(
-          jsDayOfWeek(dt),
-          positioned,
-          singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? [],
-        ),
-      ),
-    [week, positioned, singleDayMap],
-  );
-
-  const getDateColor = (dow: number, isHoliday: boolean): string => {
-    if (isHoliday || dow === 0) return 'var(--color-sunday)';
-    if (dow === 6) return 'var(--color-saturday)';
-    return 'var(--color-text-primary)';
-  };
-
-  const bodyHeight = MAX_VISIBLE_TRACKS * SLOT_H;
-
-  // Segment of the drag ghost that falls inside this week (grid-aligned, spans
-  // the event's real length and wraps across weeks).
-  const previewSeg = useMemo(() => {
-    if (!dragLanding) return null;
-    const weekEnd = weekStart.plus({ days: 6 });
-    if (dragLanding.end < weekStart || dragLanding.start > weekEnd) return null;
-    const segStart = dragLanding.start < weekStart ? weekStart : dragLanding.start;
-    const segEnd = dragLanding.end > weekEnd ? weekEnd : dragLanding.end;
-    return {
-      startCol: jsDayOfWeek(segStart),
-      span: Math.round(segEnd.diff(segStart, 'days').days) + 1,
-    };
-  }, [dragLanding, weekStart]);
-
-  return (
-    <div className="relative grid grid-cols-7" data-week={weekStart.toFormat('yyyy-MM-dd')}>
-      {week.map((dt, dIdx) => {
-        const today = isToday(dt, zone);
-        const dow = jsDayOfWeek(dt);
-        const isoDate = dt.toFormat('yyyy-MM-dd');
-        const holiday = getHoliday(holidaysCountry, isoDate);
-        const { reserved = [], singleSlots = [], overflow = 0 } = cells[dIdx] ?? {};
-        const isSelected = dt.hasSame(selectedDate, 'day');
-
-        return (
-          <div
-            key={isoDate}
-            data-day={isoDate}
-            className={`group relative flex flex-col items-start overflow-hidden border-b border-r border-[var(--color-separator)] px-1 pt-1 pb-1 ${
-              isSelected ? 'day-selected' : ''
-            }`}
-          >
-            {/* Background target: tap opens the day detail, double-tap starts a
-                new event on this day. */}
-            <button
-              type="button"
-              onClick={() => onDayClick(dt)}
-              className="absolute inset-0 z-0 touch-manipulation transition-colors active:bg-[var(--color-active)]"
-              aria-label={`${isoDate}${holiday ? ` (${holiday.name})` : ''}`}
-            />
-
-            {/* Content passes pointer events through to the day button, except event chips. */}
-            <div className="pointer-events-none relative z-10 flex w-full flex-col">
-              <div className="flex w-full items-center pl-0.5" style={{ height: DATE_ROW_H }}>
-                {today ? (
-                  <span className="today-badge flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-body font-medium tabular-nums text-white">
-                    {dt.day}
-                  </span>
-                ) : (
-                  <span
-                    className="flex h-6 w-6 items-center justify-center text-body font-medium tabular-nums"
-                    style={{ color: getDateColor(dow, !!holiday) }}
-                  >
-                    {dt.day}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex w-full flex-col" style={{ height: bodyHeight }}>
-                {(['t0', 't1', 't2'] as const).map((slotKey, slot) => {
-                  if (reserved.includes(slot)) {
-                    return <div key={`${isoDate}-spacer-${slotKey}`} style={{ height: SLOT_H }} />;
-                  }
-                  const filler = singleSlots.find((s) => s.track === slot);
-                  if (filler) {
-                    const evt = filler.evt;
-                    const start = fromISOInZone(evt.startAt, zone);
-                    return (
-                      <button
-                        key={evt.id}
-                        type="button"
-                        onPointerDown={(e) => onEventPointerDown(evt, e)}
-                        onClick={() => onEventClick(evt.id)}
-                        className={`pointer-events-auto mx-0.5 flex items-center gap-1 rounded-[4px] px-1 text-left text-micro font-semibold tabular-nums ${
-                          canMoveEvent(evt) ? 'active:cursor-grabbing' : ''
-                        }`}
-                        style={{
-                          height: SLOT_H,
-                          backgroundColor: `${evt.color}1f`,
-                          color: evt.color,
-                          opacity: dragLanding?.event.id === evt.id ? 0.4 : undefined,
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          className="h-1 w-1 shrink-0 rounded-full"
-                          style={{ backgroundColor: evt.color }}
-                        />
-                        <span className="truncate">
-                          {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
-                          {evt.title}
-                        </span>
-                      </button>
-                    );
-                  }
-                  return <div key={`${isoDate}-empty-${slotKey}`} style={{ height: SLOT_H }} />;
-                })}
-                {overflow > 0 && (
-                  <span className="text-center text-micro font-medium text-[var(--color-accent)]">
-                    +{overflow}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Multi-day bar overlay */}
-      <div
-        className="pointer-events-none absolute inset-x-0 grid grid-cols-7 px-0.5"
-        style={{ top: DATE_ROW_H }}
-      >
-        {positioned.map((p: PositionedEvent) => {
-          if (p.track >= MAX_VISIBLE_TRACKS) return null;
-          const left = `calc(${(p.startCol * 100) / 7}% + 2px)`;
-          const width = `calc(${(p.span * 100) / 7}% - 4px)`;
-          const top = `${p.track * SLOT_H}px`;
-          const start = fromISOInZone(p.event.startAt, zone);
-          const radius =
-            p.continuesLeft && p.continuesRight
-              ? '0'
-              : p.continuesLeft
-                ? '0 5px 5px 0'
-                : p.continuesRight
-                  ? '5px 0 0 5px'
-                  : '5px';
-          return (
-            <button
-              key={`${p.event.id}-${p.startCol}`}
-              type="button"
-              onPointerDown={(e) => onEventPointerDown(p.event, e)}
-              onClick={() => onEventClick(p.event.id)}
-              className={`event-bar pointer-events-auto absolute flex items-center gap-1 truncate px-2 text-micro font-semibold tabular-nums text-white ${
-                canMoveEvent(p.event) ? 'active:cursor-grabbing' : ''
-              }`}
-              style={{
-                left,
-                width,
-                top,
-                height: SLOT_H,
-                lineHeight: `${SLOT_H}px`,
-                backgroundColor: p.event.color,
-                borderRadius: radius,
-                opacity: dragLanding?.event.id === p.event.id ? 0.4 : undefined,
-              }}
-              title={p.event.title}
-            >
-              {p.continuesLeft && (
-                <span aria-hidden className="opacity-80">
-                  ‹
-                </span>
-              )}
-              <span className="truncate">
-                {!p.event.allDay && !p.continuesLeft && (
-                  <span className="mr-1 opacity-90">{start.toFormat('H:mm')}</span>
-                )}
-                {p.event.title}
-              </span>
-              {p.continuesRight && (
-                <span aria-hidden className="ml-auto opacity-80">
-                  ›
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
-      {previewSeg && dragLanding && (
-        <div
-          className="pointer-events-none absolute z-20 flex items-center truncate px-2 text-micro font-semibold text-white shadow-lg"
-          style={{
-            top: DATE_ROW_H,
-            left: `calc(${(previewSeg.startCol * 100) / 7}% + 2px)`,
-            width: `calc(${(previewSeg.span * 100) / 7}% - 4px)`,
-            height: SLOT_H,
-            lineHeight: `${SLOT_H}px`,
-            backgroundColor: dragLanding.event.color,
-            borderRadius: '5px',
-            opacity: 0.85,
-          }}
-        >
-          {dragLanding.event.title}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function MonthScroll() {
@@ -381,7 +98,7 @@ export function MonthScroll() {
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
   const [anchorMonth, setAnchorMonth] = useState(() => nowInZone(timezone).startOf('month'));
-  useHolidayLoader(holidaysCountry, [
+  const holidayRevision = useHolidayRevision(holidaysCountry, [
     anchorMonth.year - 2,
     anchorMonth.year - 1,
     anchorMonth.year,
@@ -401,6 +118,13 @@ export function MonthScroll() {
   const visibleEvents = useMemo(
     () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
     [events, activeCalendarIds],
+  );
+
+  // Three years of weeks stay mounted, so a row that filtered the whole event
+  // list on every render would do that work a few hundred times per frame.
+  const buckets = useMemo(
+    () => bucketEventsByWeek(visibleEvents, timezone),
+    [visibleEvents, timezone],
   );
 
   // Single tap opens the day detail; a quick second tap on the same day starts a
@@ -485,13 +209,27 @@ export function MonthScroll() {
     return { event: drag.event, start, end };
   }, [drag, timezone]);
 
-  // Centralize the drag-suppressed click so WeekRow stays presentational.
+  // Only the rows the ghost crosses need it; every other row keeps the same
+  // (null) prop and stays out of the re-render a pointer sample causes.
+  const landingWeeks = useMemo(
+    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end) : null),
+    [dragLanding],
+  );
+
+  // Centralize the drag-suppressed click so the week row stays presentational.
   const handleEventClick = useCallback(
     (eventId: string) => {
       if (consumeClick()) return;
       openEventModal(eventId);
     },
     [consumeClick, openEventModal],
+  );
+
+  const handleEventPointerDown = useCallback(
+    (evt: CalendarEvent, e: ReactPointerEvent) => {
+      if (canMove(evt)) startDrag(evt, e);
+    },
+    [canMove, startDrag],
   );
 
   const scrollToWeek = useCallback((weekKey: string, smooth: boolean) => {
@@ -640,20 +378,21 @@ export function MonthScroll() {
               {formatMonthYear(item.month, locale)}
             </div>
           ) : (
-            <WeekRow
+            <MonthWeekRow
               key={item.key}
               weekStart={item.weekStart}
-              events={visibleEvents}
+              events={buckets.get(item.dayKey) ?? NO_EVENTS}
               zone={timezone}
               holidaysCountry={holidaysCountry}
+              holidayRevision={holidayRevision}
               selectedDate={selectedDate}
+              density="compact"
+              draggingEventId={drag?.event.id ?? null}
+              dragLanding={landingWeeks?.has(item.dayKey) ? dragLanding : null}
               onDayClick={handleDayClick}
               onEventClick={handleEventClick}
-              onEventPointerDown={(evt, e) => {
-                if (canMove(evt)) startDrag(evt, e);
-              }}
+              onEventPointerDown={handleEventPointerDown}
               canMoveEvent={canMove}
-              dragLanding={dragLanding}
             />
           ),
         )}

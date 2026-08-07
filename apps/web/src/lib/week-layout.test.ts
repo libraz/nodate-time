@@ -2,12 +2,15 @@ import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
 import {
+  bucketEventsByWeek,
   eventOccupiesDay,
   eventStartDay,
   isMultiDay,
   layoutDayCell,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
+  weekKey,
+  weekKeysInRange,
 } from './week-layout';
 
 const ZONE = 'Asia/Tokyo';
@@ -229,6 +232,76 @@ describe('layoutWeek', () => {
     });
     const result = layoutWeek(weekStart, [...shorts, long], ZONE);
     expect(result.find((p) => p.event.id === 'long')?.track).toBe(0);
+  });
+});
+
+describe('bucketEventsByWeek', () => {
+  const sunday = '2026-04-19';
+  const nextSunday = '2026-04-26';
+
+  it('files an event under the week it starts in', () => {
+    const evt = makeEvent({
+      id: 'mon',
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+    });
+    const buckets = bucketEventsByWeek([evt], ZONE);
+    expect(buckets.get(sunday)?.map((e) => e.id)).toEqual(['mon']);
+    expect(buckets.has(nextSunday)).toBe(false);
+  });
+
+  // A bar is drawn again in every row it crosses, so every one of those rows
+  // has to be handed the event.
+  it('files a multi-day event under every week it crosses', () => {
+    const evt = makeEvent({
+      id: 'trip',
+      startAt: '2026-04-22T00:00:00+09:00',
+      endAt: '2026-04-28T00:00:00+09:00',
+    });
+    const buckets = bucketEventsByWeek([evt], ZONE);
+    expect([...buckets.keys()].sort()).toEqual([sunday, nextSunday]);
+  });
+
+  it('leaves a week with nothing in it out of the buckets', () => {
+    const evt = makeEvent({
+      startAt: '2026-04-20T10:00:00+09:00',
+      endAt: '2026-04-20T11:00:00+09:00',
+    });
+    expect(bucketEventsByWeek([evt], ZONE).get('2026-05-03')).toBeUndefined();
+  });
+
+  it('reads an event in the grid zone, not its own', () => {
+    // 09:00 Monday in Tokyo is 20:00 the Sunday before in New York, which is
+    // the week before as well.
+    const evt = makeEvent({
+      id: 'meeting',
+      timezone: 'Asia/Tokyo',
+      startAt: '2026-04-20T09:00:00+09:00',
+      endAt: '2026-04-20T10:00:00+09:00',
+    });
+    expect([...bucketEventsByWeek([evt], 'America/New_York').keys()]).toEqual(['2026-04-19']);
+  });
+
+  it('keys buckets the way weekKey does', () => {
+    const evt = makeEvent({
+      startAt: '2026-04-22T10:00:00+09:00',
+      endAt: '2026-04-22T11:00:00+09:00',
+    });
+    const day = DateTime.fromISO('2026-04-22T00:00:00', { zone: ZONE });
+    expect(bucketEventsByWeek([evt], ZONE).has(weekKey(day))).toBe(true);
+  });
+});
+
+describe('weekKeysInRange', () => {
+  it('covers the weeks a landing range crosses and no others', () => {
+    const start = DateTime.fromISO('2026-04-22T00:00:00', { zone: ZONE }); // Wednesday
+    const end = start.plus({ days: 5 }); // the following Monday
+    expect([...weekKeysInRange(start, end)].sort()).toEqual(['2026-04-19', '2026-04-26']);
+  });
+
+  it('covers one week when the range stays inside it', () => {
+    const start = DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE });
+    expect([...weekKeysInRange(start, start.plus({ days: 2 }))]).toEqual(['2026-04-19']);
   });
 });
 
