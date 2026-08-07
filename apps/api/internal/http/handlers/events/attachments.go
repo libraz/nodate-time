@@ -74,8 +74,14 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, toAPIError(err)
 		}
 
-		if in.Body.ByteSize > maxAttachmentSize || in.Body.ByteSize < 0 {
+		if in.Body.ByteSize > maxAttachmentSize {
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
+		}
+		// A size the upload URL cannot be signed for is refused here rather
+		// than passed on: the signature is what bounds the upload, so a URL
+		// issued without one accepts an object of any size.
+		if in.Body.ByteSize < 1 {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
 		digest, ok := parseSHA256(in.Body.SHA256)

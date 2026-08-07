@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import { resizeImageForAlbum } from '@/lib/image-resize';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
-import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -33,8 +32,6 @@ export function AlbumPanel() {
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
-  const me = useAuthStore((s) => s.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
   const [nextCursor, setNextCursor] = useState('');
@@ -45,9 +42,19 @@ export function AlbumPanel() {
   const [lightbox, setLightbox] = useState<AlbumPhoto | null>(null);
   const [captionDraft, setCaptionDraft] = useState('');
   const [savingCaption, setSavingCaption] = useState(false);
+  // The cursors of the pages currently on screen, in order. An image URL is
+  // signed for a limited time, and thumbnails load as they are scrolled to, so
+  // one can expire while the panel is still open; re-listing these same pages
+  // is what replaces the dead URLs without throwing away what was paged in.
+  const loadedCursorsRef = useRef<string[]>([]);
+  // Photos already retried once. A URL that expired comes back working; an
+  // object that is genuinely missing does not, and without this the second
+  // failure would ask for another listing, forever.
+  const retriedRef = useRef<Set<string>>(new Set());
+  const refreshingRef = useRef(false);
 
   const activeCalendarId = activeCalendarIds[0] ?? calendars[0]?.id ?? '';
-  const myRole = roleForCalendar(membersMap[activeCalendarId], me?.email);
+  const myRole = roleOnCalendar(calendars, activeCalendarId);
   const editable = canEdit(myRole);
 
   const reload = useCallback(async () => {
@@ -62,6 +69,8 @@ export function AlbumPanel() {
       const data = await api.get<AlbumListResponse>(`/calendars/${activeCalendarId}/albums`);
       setPhotos(data.items ?? []);
       setNextCursor(data.nextCursor ?? '');
+      loadedCursorsRef.current = [''];
+      retriedRef.current.clear();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -79,12 +88,50 @@ export function AlbumPanel() {
       );
       setPhotos((cur) => [...cur, ...(data.items ?? [])]);
       setNextCursor(data.nextCursor ?? '');
+      loadedCursorsRef.current = [...loadedCursorsRef.current, nextCursor];
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setLoadingMore(false);
     }
   }, [activeCalendarId, nextCursor, loadingMore]);
+
+  /**
+   * Re-lists every page on screen so each photo gets a freshly signed URL.
+   * Runs on the first image that fails to load, which is how an expired
+   * signature shows up: the browser reports a broken image, not an error the
+   * fetch layer ever sees.
+   */
+  const refreshImageUrls = useCallback(async () => {
+    if (!activeCalendarId || refreshingRef.current) return;
+    refreshingRef.current = true;
+    try {
+      const refreshed: AlbumPhoto[] = [];
+      for (const cursor of loadedCursorsRef.current) {
+        const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+        const data = await api.get<AlbumListResponse>(
+          `/calendars/${activeCalendarId}/albums${query}`,
+        );
+        refreshed.push(...(data.items ?? []));
+      }
+      setPhotos(refreshed);
+      setLightbox((cur) => (cur ? (refreshed.find((p) => p.id === cur.id) ?? cur) : cur));
+    } catch {
+      // Leave what is on screen alone: a failed refresh is no reason to empty
+      // an album the reader is looking at.
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, [activeCalendarId]);
+
+  const handleImageError = useCallback(
+    (photoId: string) => {
+      if (retriedRef.current.has(photoId)) return;
+      retriedRef.current.add(photoId);
+      refreshImageUrls();
+    },
+    [refreshImageUrls],
+  );
 
   useEffect(() => {
     if (rightPanel === 'album') {
@@ -258,6 +305,7 @@ export function AlbumPanel() {
                       src={p.imageUrl}
                       alt={p.caption}
                       loading="lazy"
+                      onError={() => handleImageError(p.id)}
                       className="h-full w-full object-cover"
                     />
                   </button>
@@ -290,6 +338,7 @@ export function AlbumPanel() {
             <img
               src={lightbox.imageUrl}
               alt={lightbox.caption}
+              onError={() => handleImageError(lightbox.id)}
               className="max-h-[72vh] max-w-[90vw] rounded-lg object-contain"
             />
             <div className="absolute right-2 top-2 flex gap-2">

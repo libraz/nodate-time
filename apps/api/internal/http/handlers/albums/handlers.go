@@ -31,8 +31,17 @@ var allowedAlbumImageTypes = map[string]bool{
 }
 
 const (
-	maxPhotoSize    = 20 * 1024 * 1024
-	uploadTTL       = 15 * time.Minute
+	maxPhotoSize = 20 * 1024 * 1024
+	uploadTTL    = 15 * time.Minute
+	// imageTTL covers the URLs embedded in a listing, which the browser only
+	// fetches as thumbnails scroll into view. A page of them is signed in one
+	// response but consumed over however long the reader keeps the album open,
+	// so a short life here shows up as images that break partway down the
+	// grid. An hour outlasts a browsing session; the client re-lists when one
+	// does expire.
+	imageTTL = time.Hour
+	// downloadTTL covers the single URL handed back from an explicit download,
+	// which is followed immediately and never revisited.
 	downloadTTL     = 5 * time.Minute
 	defaultPageSize = 30
 	maxPageSize     = 100
@@ -168,7 +177,7 @@ func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUpl
 	resp := AlbumUploader{ID: pubIDToHex(u.PublicID), Name: u.DisplayName}
 	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
 		if obj, oerr := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32)); oerr == nil {
-			if url, perr := deps.Storage.PresignGet(ctx, obj.StorageKey, downloadTTL); perr == nil {
+			if url, perr := deps.Storage.PresignGet(ctx, obj.StorageKey, imageTTL); perr == nil {
 				resp.AvatarURL = url
 				return resp
 			}
@@ -267,13 +276,13 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		key := p.uploaderAvatarURL.String
 		if cached, ok := avatarURLs[key]; ok {
 			resp.UploadedBy.AvatarURL = cached
-		} else if url, err := deps.Storage.PresignGet(ctx, key, downloadTTL); err == nil {
+		} else if url, err := deps.Storage.PresignGet(ctx, key, imageTTL); err == nil {
 			avatarURLs[key] = url
 			resp.UploadedBy.AvatarURL = url
 		}
 	}
 	if deps.Storage != nil {
-		if url, err := deps.Storage.PresignGet(ctx, p.storageKey, downloadTTL); err == nil {
+		if url, err := deps.Storage.PresignGet(ctx, p.storageKey, imageTTL); err == nil {
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.id, "error", err)
@@ -303,7 +312,7 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 		resp.Height = &h
 	}
 	if deps.Storage != nil {
-		if url, err := deps.Storage.PresignGet(ctx, p.StorageKey, downloadTTL); err == nil {
+		if url, err := deps.Storage.PresignGet(ctx, p.StorageKey, imageTTL); err == nil {
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.ID, "error", err)

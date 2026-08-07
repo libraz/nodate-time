@@ -80,6 +80,10 @@ var (
 	// replacing. An update carries the whole event, so applying it anyway
 	// would silently undo whatever the other writer just saved.
 	EventStale = &Spec{Status: 409, Code: "EVENT.STALE", Message: "This event changed since you opened it"}
+	// EventNotificationOffsetInvalid rejects a reminder offset outside the set
+	// the clients can display, rather than storing one the event modal would
+	// read back as no reminder at all.
+	EventNotificationOffsetInvalid = &Spec{Status: 400, Code: "EVENT.NOTIFICATION_OFFSET_INVALID", Message: "Notification offset must be 0, 5, 10, 15, 30, 60, 120, 1440, or 2880 minutes"}
 )
 
 // --- Comment errors ---
