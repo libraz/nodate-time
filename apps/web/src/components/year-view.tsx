@@ -17,7 +17,9 @@ export function YearView() {
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   // Each month card fills whole weeks, so January shows the tail of the year
-  // before and December the head of the next one.
+  // before and December the head of the next one. The cards are drawn here
+  // rather than by a memoised child, so re-rendering on the load is enough and
+  // the revision itself has no reader.
   useHolidayLoader(holidaysCountry, [
     currentMonth.year - 1,
     currentMonth.year,

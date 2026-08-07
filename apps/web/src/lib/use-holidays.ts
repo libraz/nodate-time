@@ -2,7 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import type { HolidayCountry } from '@/lib/holidays';
 import { fallbackHolidayCountries, loadHolidayCountries, preloadHolidays } from '@/lib/holidays';
 
-/** Triggers a re-render once the optional holiday-data chunk is ready. */
+/**
+ * Loads the optional holiday-data chunk for `years`, and returns a number that
+ * changes once it has arrived.
+ *
+ * `getHoliday` reads a module cache, so a subtree that draws holidays has no
+ * prop or state of its own that would report the load. Re-rendering the caller
+ * is enough for a view that draws its own days, and those callers ignore the
+ * return; one whose rows are memoised has to pass this revision down, or it
+ * keeps drawing the month it first rendered, with no holidays on it.
+ */
 export function useHolidayLoader(country: string | null, years: number[]): void {
   const yearKey = useMemo(() => [...new Set(years)].sort((a, b) => a - b).join(','), [years]);
   const [, setRevision] = useState(0);
@@ -11,12 +20,14 @@ export function useHolidayLoader(country: string | null, years: number[]): void 
     let cancelled = false;
     const requestedYears = yearKey === '' ? [] : yearKey.split(',').map(Number);
     preloadHolidays(country, requestedYears).then(() => {
-      if (!cancelled) setRevision((revision) => revision + 1);
+      if (!cancelled) setRevision((current) => current + 1);
     });
     return () => {
       cancelled = true;
     };
   }, [country, yearKey]);
+
+  return revision;
 }
 
 /** The countries a holiday picker can offer, seeded so it is never empty. */
