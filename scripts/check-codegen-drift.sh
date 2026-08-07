@@ -16,6 +16,12 @@
 # directory and the result is compared against what is committed. A failure
 # therefore tells you to run the generator; it does not half-run it for you.
 #
+# A second gap runs the other way: a query is written, generated, and then
+# nothing ever calls it. The endpoint it was written for is missing, and
+# because the generated method compiles on its own nothing says so. The
+# last section of this script lists those, with an allow-list for the ones
+# whose absent caller is the current answer.
+#
 # Usage:
 #   bash scripts/check-codegen-drift.sh            # check everything
 #   bash scripts/check-codegen-drift.sh --staged   # skip when no input is staged
@@ -222,3 +228,161 @@ then
 fi
 
 echo "generated data layer matches the schema and queries"
+
+# ── every generated query has a caller ──
+
+# The largest category of defect in this codebase has been the wiring gap:
+# a query written and generated for an endpoint that was never finished.
+# The generated method compiles whether or not anything calls it, so the
+# gap survives review, the build, and the tests, and surfaces only when
+# somebody uses the feature and finds nothing there.
+#
+# A call from a test counts. A query exercised only by a test is wired to
+# something, and treating it as dead would push the next reader to delete
+# a tested query rather than to finish the endpoint.
+unused_status=0
+python3 - "$ROOT_DIR" <<PY || unused_status=$?
+import os, re, sys
+
+root = sys.argv[1]
+outs = """$outs""".split()
+
+GENERATED_NAMES = {"models.go", "db.go", "querier.go", "copyfrom.go", "batch.go"}
+
+# Methods nothing calls, and why that is the current answer rather than an
+# oversight. Two kinds of entry live here, and the wording says which:
+# a query deliberately left uncalled, and a query whose caller has not
+# been written yet. The second kind records outstanding work — it leaves
+# this list when the endpoint is wired, not when the list gets long.
+ALLOWED = {
+    # Emitted by sqlc onto Queries in db.go; not a query. The transaction
+    # helper builds its Queries with generated.New(tx), so nothing reaches
+    # for it.
+    "WithTx",
+
+    # Superseded by CountCalendarOwnersForUpdate. The last-owner guard has
+    # to hold its count across the role change or two concurrent
+    # demotions both pass, so the locking variant is the only one a
+    # caller should want.
+    "CountCalendarOwners",
+    # Locking variants of reads whose callers do not yet take the lock:
+    # the membership write reads through GetCalendarMember and the
+    # password change through GetLocalIdentityByUser. Wiring is
+    # outstanding, and deleting these would remove the fix rather than
+    # the problem.
+    "GetCalendarMemberForUpdate",
+    "GetLocalIdentityByUserForUpdate",
+
+    # No caller yet. Expired verification rows accumulate: the cleanup
+    # sweeps cover password resets, signin states, sessions and storage,
+    # and this table was left out of the loop.
+    "DeleteExpiredEmailVerifications",
+
+    # No endpoint yet. Instance admin can be granted from the createuser
+    # command, but nothing in the API lists the grants or takes one back,
+    # which leaves an admin removable only by hand in SQL.
+    "ListInstanceAdmins",
+    "RevokeInstanceAdmin",
+    # No account screen yet. Listing a user's linked identities and
+    # disabling one are the read and write halves of a connected-accounts
+    # page that has not been built.
+    "ListIdentitiesForUser",
+    "DisableIdentity",
+
+    # Superseded by RevokeInviteByPublicIDAndCalendar, which the delete
+    # endpoint calls. Revoking by internal id alone carries no calendar
+    # scope, so the authorization would have to be repeated outside the
+    # query — the thing the resolve helpers exist to prevent.
+    "RevokeInvite",
+
+    # The admin OAuth screen reads one provider at a time through
+    # GetOAuthProviderConfig, and writes the enabled flag through
+    # UpsertOAuthProviderConfig. Both of these are the shapes that screen
+    # would use if it listed providers or toggled one on its own.
+    "ListOAuthProviderConfigs",
+    "SetOAuthProviderEnabled",
+
+    # This deployment is single-tenant: the workspace is resolved once at
+    # startup by slug, and every handler carries the id it got. Reading a
+    # workspace by id, or checking workspace membership, are the shapes a
+    # multi-tenant writer on this schema needs; neither has a question to
+    # answer here.
+    "GetWorkspaceByID",
+    "GetWorkspaceMember",
+
+    # The tail side of the append-only log, which another process on this
+    # database reads. This application is the writer; the query is here
+    # because the log is a shared channel, not because a handler wants it.
+    "ListEventsSince",
+}
+
+
+def is_generated_name(name):
+    return name.endswith(".sql.go") or name in GENERATED_NAMES
+
+
+generated_files = []
+caller_files = []
+generated_dirs = tuple(os.path.join(root, rel) for rel in outs)
+
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", "vendor"}]
+    for name in sorted(filenames):
+        if not name.endswith(".go"):
+            continue
+        full = os.path.join(dirpath, name)
+        if dirpath.startswith(generated_dirs) and is_generated_name(name):
+            generated_files.append(full)
+        else:
+            caller_files.append(full)
+
+if not generated_files:
+    print("no generated Go files found under the sqlc output directories", file=sys.stderr)
+    sys.exit(2)
+
+methods = set()
+for path in generated_files:
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            match = re.match(r"func \(q \*Queries\) ([A-Z]\w*)\(", line)
+            if match:
+                methods.add(match.group(1))
+
+sources = "\n".join(open(path, encoding="utf-8").read() for path in caller_files)
+called = {name for name in methods if re.search(r"\.\s*" + name + r"\(", sources)}
+uncalled = methods - called
+
+unlisted = sorted(uncalled - ALLOWED)
+# An allow-listed method that acquired a caller has to leave the list, or
+# the reasons above stop describing the code and the next reader has no
+# way to tell which of them still hold.
+stale = sorted(ALLOWED & called)
+
+if unlisted or stale:
+    if unlisted:
+        print("Generated queries that nothing calls:")
+        print("")
+        for name in unlisted:
+            print(f"  {name}")
+        print("")
+        print("Each one is a query with no endpoint behind it. Wire it up, or")
+        print("add it to ALLOWED in this script with the reason it stays.")
+    if stale:
+        if unlisted:
+            print("")
+        print("Allow-listed as uncalled, but now called:")
+        print("")
+        for name in stale:
+            print(f"  {name}")
+        print("")
+        print("Remove these from ALLOWED so the remaining reasons stay true.")
+    sys.exit(1)
+
+print(f"every generated query has a caller ({len(called)} called, {len(uncalled)} allow-listed)")
+PY
+
+# 1 for an unused query, 2 for a check that could not run at all: the two
+# mean different things to a caller and the wrapper must not flatten them.
+if [[ $unused_status -ne 0 ]]; then
+  exit "$unused_status"
+fi
