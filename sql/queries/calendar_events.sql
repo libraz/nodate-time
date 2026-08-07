@@ -57,6 +57,15 @@ SELECT * FROM calendar_events
 WHERE recurrence_parent_id = ? AND enabled = TRUE
 ORDER BY recurrence_original_start;
 
+-- ListRecurrenceOverridesByParents reads the changed occurrences of several
+-- series at once. A listing expands every series in the window, and asking
+-- per series made the number of round trips a function of how many recurring
+-- events the calendar holds -- which is exactly the number that grows.
+-- name: ListRecurrenceOverridesByParents :many
+SELECT * FROM calendar_events
+WHERE recurrence_parent_id IN (sqlc.slice('parent_ids')) AND enabled = TRUE
+ORDER BY recurrence_parent_id, recurrence_original_start;
+
 -- name: GetRecurrenceOverride :one
 SELECT * FROM calendar_events
 WHERE recurrence_parent_id = ? AND recurrence_original_start = ? AND enabled = TRUE;

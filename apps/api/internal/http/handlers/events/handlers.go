@@ -339,6 +339,60 @@ func matchesETag(ifMatch string, e generated.CalendarEvent) bool {
 	return false
 }
 
+// attendeeSet is every event's participants in a listing, read together.
+type attendeeSet map[uint32]struct {
+	ids       []string
+	attendees []AttendeeResponse
+}
+
+// loadAttendees reads the participants of a whole listing in one query.
+//
+// Asking per event made rendering a month cost one round trip per event on
+// it, and a month view fetches every calendar in parallel, so the count
+// multiplied by however many calendars the person had.
+func loadAttendees(ctx context.Context, deps Deps, eventIDs []uint32) (attendeeSet, error) {
+	set := attendeeSet{}
+	if len(eventIDs) == 0 {
+		return set, nil
+	}
+	keys := make([]sql.NullInt32, 0, len(eventIDs))
+	for _, id := range eventIDs {
+		keys = append(keys, sql.NullInt32{Int32: int32(id), Valid: true})
+	}
+	rows, err := deps.Queries.ListEventAttendeesByEvents(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		if !p.EventID.Valid {
+			continue
+		}
+		key := uint32(p.EventID.Int32)
+		entry := set[key]
+		id := pubIDToHex(p.UserPublicID)
+		entry.ids = append(entry.ids, id)
+		entry.attendees = append(entry.attendees, AttendeeResponse{
+			UserID:  id,
+			Rsvp:    string(p.Rsvp),
+			CanEdit: p.CanEdit,
+		})
+		set[key] = entry
+	}
+	return set, nil
+}
+
+// apply fills a response from the batch, which reports an empty list for an
+// event with no participants -- a distinction the batch can make because the
+// query it came from covered every event asked about.
+func (s attendeeSet) apply(resp *EventResponse, eventID uint32) {
+	entry, ok := s[eventID]
+	if !ok || len(entry.ids) == 0 {
+		resp.Participants, resp.Attendees = []string{}, []AttendeeResponse{}
+		return
+	}
+	resp.Participants, resp.Attendees = entry.ids, entry.attendees
+}
+
 // setAttendees fills both attendee-derived fields of a response from one read.
 func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID uint32) error {
 	participants, attendees, err := eventAttendees(ctx, deps, eventID)
@@ -736,18 +790,6 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		userCache := map[uint32]userBrief{}
-		colorCache := map[uint32]string{}
-		var results []EventResponse
-		for _, e := range rows {
-			ev := mapEvent(e, cal.PublicID)
-			if err := setAttendees(ctx, deps, &ev, e.ID); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			decorate(ctx, deps, &ev, e, cal.ID, userCache, colorCache)
-			results = append(results, ev)
-		}
-
 		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
 			RangeEnd:   sql.NullTime{Time: endTime, Valid: true},
@@ -757,17 +799,47 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		// Everything the listing needs beyond the two range queries is read
+		// here, once. Doing it per event made a month view cost a round trip
+		// per event on it, times however many calendars are shown at once.
+		seriesIDs := make([]uint32, 0, len(recurringRows))
+		for _, e := range recurringRows {
+			seriesIDs = append(seriesIDs, e.ID)
+		}
+		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+
+		attendeeIDs := make([]uint32, 0, len(rows)+len(seriesIDs))
+		for _, e := range rows {
+			attendeeIDs = append(attendeeIDs, e.ID)
+		}
+		attendeeIDs = append(attendeeIDs, seriesIDs...)
+		for _, children := range overrides {
+			for _, child := range children {
+				attendeeIDs = append(attendeeIDs, child.ID)
+			}
+		}
+		attendees, err := loadAttendees(ctx, deps, attendeeIDs)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		userCache := map[uint32]userBrief{}
+		colorCache := map[uint32]string{}
+		var results []EventResponse
+		for _, e := range rows {
+			ev := mapEvent(e, cal.PublicID)
+			attendees.apply(&ev, e.ID)
+			decorate(ctx, deps, &ev, e, cal.ID, userCache, colorCache)
+			results = append(results, ev)
+		}
+
 		truncated := false
 		for _, e := range recurringRows {
 			if len(results) >= daterange.MaxInstances {
 				truncated = true
 				break
 			}
-			masterParticipants, masterAttendees, err := eventAttendees(ctx, deps, e.ID)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, e, startTime, endTime) {
+			for _, expanded := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
 				// The window bounds one series; the number of series does not
 				// bound itself, and every one of them expands per occurrence.
 				if len(results) >= daterange.MaxInstances {
@@ -776,16 +848,13 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				}
 				if expanded.IsOverride {
 					inst := mapOverrideInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
-					if err := setAttendees(ctx, deps, &inst, expanded.Event.ID); err != nil {
-						return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-					}
+					attendees.apply(&inst, expanded.Event.ID)
 					decorate(ctx, deps, &inst, expanded.Event, cal.ID, userCache, colorCache)
 					results = append(results, inst)
 					continue
 				}
 				inst := mapRecurringInstance(e, cal.PublicID, expanded.Occurrence)
-				inst.Participants = masterParticipants
-				inst.Attendees = masterAttendees
+				attendees.apply(&inst, e.ID)
 				decorate(ctx, deps, &inst, e, cal.ID, userCache, colorCache)
 				results = append(results, inst)
 			}
@@ -1548,7 +1617,10 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 			return nil, toAPIError(err)
 		}
 
-		rows, err := deps.Queries.ListEventComments(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
+		rows, err := deps.Queries.ListEventComments(ctx, generated.ListEventCommentsParams{
+			WorkspaceID: deps.WorkspaceID,
+			EventID:     sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

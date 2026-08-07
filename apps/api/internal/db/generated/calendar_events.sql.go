@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 )
 
 const createCalendarEvent = `-- name: CreateCalendarEvent :execresult
@@ -430,6 +431,85 @@ ORDER BY recurrence_original_start
 
 func (q *Queries) ListRecurrenceOverridesByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]CalendarEvent, error) {
 	rows, err := q.db.QueryContext(ctx, listRecurrenceOverridesByParent, recurrenceParentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CalendarEvent
+	for rows.Next() {
+		var i CalendarEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.CalendarID,
+			&i.Kind,
+			&i.Visibility,
+			&i.ShowAs,
+			&i.Flexibility,
+			&i.Title,
+			&i.AllDay,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Timezone,
+			&i.Location,
+			&i.Memo,
+			&i.URL,
+			&i.OwnerUserID,
+			&i.CreatedByUserID,
+			&i.BlockLabel,
+			&i.RecurrenceRule,
+			&i.RecurrenceEnd,
+			&i.RecurrenceExceptions,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.NotificationOffset,
+			&i.NotifiedAt,
+			&i.TaskID,
+			&i.TaskRole,
+			&i.TaskRoleKey,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Flags,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecurrenceOverridesByParents = `-- name: ListRecurrenceOverridesByParents :many
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+WHERE recurrence_parent_id IN (/*SLICE:parent_ids*/?) AND enabled = TRUE
+ORDER BY recurrence_parent_id, recurrence_original_start
+`
+
+// ListRecurrenceOverridesByParents reads the changed occurrences of several
+// series at once. A listing expands every series in the window, and asking
+// per series made the number of round trips a function of how many recurring
+// events the calendar holds -- which is exactly the number that grows.
+func (q *Queries) ListRecurrenceOverridesByParents(ctx context.Context, parentIds []sql.NullInt32) ([]CalendarEvent, error) {
+	query := listRecurrenceOverridesByParents
+	var queryParams []interface{}
+	if len(parentIds) > 0 {
+		for _, v := range parentIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:parent_ids*/?", strings.Repeat(",?", len(parentIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:parent_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
