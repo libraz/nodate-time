@@ -796,25 +796,32 @@ func TestICalImportAccountsForEveryEventInALargeHostileFile(t *testing.T) {
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
-func TestICalImportProbe3(t *testing.T) {
+// Each event is its own transaction, so one the store refuses has to leave
+// nothing at all: no row, and no entry in the log either. A refusal that
+// still wrote its log entry would put a creation in the activity feed for an
+// event that does not exist, which nobody could then open or delete.
+//
+// The events either side of it are already committed. That is the per-event
+// contract working as intended, and the response counts all three.
+func TestICalImportLeavesNoTraceOfAnEventItRefused(t *testing.T) {
 	bootstrap(t)
-	tt := helpers.NewTenant(t, testServerURL)
+	t.Parallel()
 
-	// Q3: is an event the store refuses rolled back cleanly, and does it leave
-	// a log entry behind?
-	calURL := hostileCalendar(t, tt, "Probe3 rollback")
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "Refused mid-file")
+
 	ics := wrap(
-		vevent("UID:p1@example.com", "SUMMARY:First", "DTSTART:20260601T100000Z", "DTEND:20260601T110000Z") +
+		vevent("UID:p1@example.com", "SUMMARY:First",
+			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z") +
 			vevent("UID:p2@example.com", "SUMMARY:"+strings.Repeat("A", 200000),
 				"DTSTART:20260601T120000Z", "DTEND:20260601T130000Z") +
-			vevent("UID:p3@example.com", "SUMMARY:Third", "DTSTART:20260601T140000Z", "DTEND:20260601T150000Z"))
-	res := importOK(t, calURL, tt.AccessToken, ics)
-	t.Logf("PROBE3 mixed-file result: %+v", res)
+			vevent("UID:p3@example.com", "SUMMARY:Third",
+				"DTSTART:20260601T140000Z", "DTEND:20260601T150000Z"))
+	require.Equal(t, importResult{Imported: 2, Failed: 1}, importOK(t, calURL, tt.AccessToken, ics))
+
 	listed := listHostile(t, calURL, tt.AccessToken)
-	t.Logf("PROBE3 rows on calendar: %d", len(listed))
-	for _, e := range listed {
-		t.Logf("PROBE3   %s", e.Title)
-	}
+	require.Len(t, listed, 2)
+
 	var feed struct {
 		Items []struct {
 			Action  string `json:"action"`
@@ -822,46 +829,231 @@ func TestICalImportProbe3(t *testing.T) {
 		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=50", tt.AccessToken, nil, &feed)
-	t.Logf("PROBE3 activity entries: %d", len(feed.Items))
+	created := 0
 	for _, i := range feed.Items {
-		t.Logf("PROBE3   %s %q", i.Action, cut(i.Summary, 40))
+		if i.Action == "calendar.event.created" {
+			created++
+		}
 	}
+	require.Equal(t, 2, created,
+		"the refused event must not appear in the feed as something that happened")
 
-	// A Windows zone name, which is what Outlook writes.
-	calURL2 := hostileCalendar(t, tt, "Probe3 windows zone")
-	ics2 := wrap(vevent("UID:w@example.com", "SUMMARY:Outlook",
+	deleteEverything(t, calURL, tt.AccessToken, listed)
+}
+
+// A zone name the server cannot resolve is read as UTC, and the file's wall
+// clock is stored as though it had been written in UTC all along.
+//
+// This is wrong, and it is not a corner case: the name below is what Outlook
+// writes. A calendar exported from it and imported here lands every event nine
+// hours from where its author put it, and the response says it imported
+// cleanly -- there is no counter for "I did not understand this zone". Only
+// the times are wrong, which is the kind of wrong nobody checks for.
+func TestICalImportReadsAWindowsZoneNameAsUTC(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "Windows zone")
+
+	ics := wrap(vevent("UID:w@example.com", "SUMMARY:Outlook",
 		"DTSTART;TZID=Tokyo Standard Time:20260601T100000",
 		"DTEND;TZID=Tokyo Standard Time:20260601T110000"))
-	t.Logf("PROBE3 windows zone result: %+v", importOK(t, calURL2, tt.AccessToken, ics2))
-	for _, e := range listHostile(t, calURL2, tt.AccessToken) {
-		t.Logf("PROBE3   start=%s title=%s", e.StartAt, e.Title)
-	}
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
 
-	// ORGANIZER and ATTENDEE.
-	calURL3 := hostileCalendar(t, tt, "Probe3 attendees")
-	ics3 := wrap(vevent("UID:at@example.com", "SUMMARY:Meeting",
+	listed := listHostile(t, calURL, tt.AccessToken)
+	require.Len(t, listed, 1)
+	require.Equal(t, "2026-06-01T10:00:00Z", listed[0].StartAt,
+		"10:00 in Tokyo is 01:00Z; this lands at 10:00Z, nine hours out")
+	deleteEverything(t, calURL, tt.AccessToken, listed)
+}
+
+// Who an event is for is dropped on the way in, and nothing says so.
+//
+// The half that is right: a file cannot name the owner. Whoever ran the
+// import owns what it created, so an attacker cannot file events onto another
+// member's layer by writing an ORGANIZER line.
+//
+// The half that is wrong: every ATTENDEE goes the same way, silently. A
+// meeting imported from another calendar arrives with nobody invited to it,
+// counted as a clean import, and the only way to find out is to open the event
+// and notice who is missing.
+func TestICalImportDropsOrganizerAndAttendees(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "Attendees")
+
+	ics := wrap(vevent("UID:at@example.com", "SUMMARY:Meeting",
 		"ORGANIZER;CN=Someone Else:mailto:boss@example.com",
 		"ATTENDEE;CN=A:mailto:a@example.com",
 		"ATTENDEE;CN=B:mailto:b@example.com",
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	t.Logf("PROBE3 attendee result: %+v", importOK(t, calURL3, tt.AccessToken, ics3))
-	l3 := listHostile(t, calURL3, tt.AccessToken)
-	if len(l3) == 1 {
-		var evt struct {
-			Participants []string `json:"participants"`
-			OwnerID      string   `json:"ownerId"`
-			CreatedBy    string   `json:"createdBy"`
-			Attendees    []any    `json:"attendees"`
-		}
-		helpers.DoJSON(t, http.MethodGet, calURL3+"/events/"+l3[0].ID, tt.AccessToken, nil, &evt)
-		t.Logf("PROBE3 participants=%v attendees=%d owner==importer:%v",
-			evt.Participants, len(evt.Attendees), evt.OwnerID == tt.UserID)
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics),
+		"nothing counts the people the file named and the import did not keep")
+
+	listed := listHostile(t, calURL, tt.AccessToken)
+	require.Len(t, listed, 1)
+
+	var evt struct {
+		Participants []string `json:"participants"`
+		Attendees    []any    `json:"attendees"`
+		OwnerID      string   `json:"ownerId"`
+		CreatedBy    string   `json:"createdBy"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
+	require.Empty(t, evt.Participants)
+	require.Empty(t, evt.Attendees)
+	require.Equal(t, tt.UserID, evt.OwnerID,
+		"the file must not be able to say whose layer its events sit on")
+	require.Equal(t, tt.UserID, evt.CreatedBy)
+
+	deleteEverything(t, calURL, tt.AccessToken, listed)
+}
+
+// Importing is not idempotent and nothing warns that it is not. The same file
+// twice is two copies of every event, both reported as clean imports, and the
+// UID that could have matched them is stored nowhere.
+//
+// Uploading the same file again is what a person does when they are not sure
+// the first attempt worked.
+func TestICalImportingTheSameFileTwiceDuplicatesIt(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "Twice")
+
+	file := wrap(oneGoodEvent())
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, file))
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, file),
+		"the second import cannot tell it has seen this event before")
+
+	listed := listHostile(t, calURL, tt.AccessToken)
+	require.Len(t, listed, 2, "the same file twice leaves two copies of every event")
+	deleteEverything(t, calURL, tt.AccessToken, listed)
+}
+
+// importedAlarmOffset imports one event carrying a single VALARM and returns
+// the reminder it ended up with, or nil for none.
+func importedAlarmOffset(t *testing.T, calURL, token, trigger string) *int {
+	t.Helper()
+	ics := wrap(vevent("UID:al@example.com", "SUMMARY:Alarmed",
+		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
+		"BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Ring",
+		"TRIGGER:"+trigger, "END:VALARM"))
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, token, ics))
+
+	listed := listHostile(t, calURL, token)
+	require.Len(t, listed, 1)
+	var evt struct {
+		NotificationOffset *int `json:"notificationOffset"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, token, nil, &evt)
+	return evt.NotificationOffset
+}
+
+// A reminder this product cannot show is left off rather than snapped to a
+// neighbouring value, and a trigger that names an instant, fires after the
+// start, or does not parse leaves the event with none. The event itself still
+// imports: an alarm is not a reason to lose what it was attached to.
+func TestICalImportKeepsOnlyAlarmsItCanShow(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+
+	fifteen := 15
+	cases := []struct {
+		name    string
+		trigger string
+		want    *int
+	}{
+		{"a supported offset", "-PT15M", &fifteen},
+		{"an offset the picker cannot show", "-PT7M", nil},
+		{"more minutes than an int can hold", "-PT99999999999999999999M", nil},
+		{"a four-hundred-digit duration", "-P" + strings.Repeat("9", 400) + "D", nil},
+		{"weeks combined with days, which the grammar forbids", "-P1W2D", nil},
+		{"a fractional hour", "-PT0.5H", nil},
+		{"units with no numbers", "PTMMM", nil},
+		{"an empty trigger", "", nil},
+		{"a trigger after the start", "PT15M", nil},
+		{"an absolute trigger", "20260601T090000Z", nil},
 	}
 
-	// The same file twice.
-	calURL4 := hostileCalendar(t, tt, "Probe3 twice")
-	same := wrap(oneGoodEvent())
-	t.Logf("PROBE3 first import: %+v", importOK(t, calURL4, tt.AccessToken, same))
-	t.Logf("PROBE3 second import: %+v", importOK(t, calURL4, tt.AccessToken, same))
-	t.Logf("PROBE3 rows after importing the same file twice: %d", len(listHostile(t, calURL4, tt.AccessToken)))
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Alarm "+c.name)
+			require.Equal(t, c.want, importedAlarmOffset(t, calURL, tt.AccessToken, c.trigger))
+			deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
+		})
+	}
+}
+
+// Two malformed triggers produce a reminder anyway.
+//
+// This is wrong on the parser's own stated terms -- it says a reminder that
+// fires at the wrong time is worse than one the import did not take. A bare
+// "P" names no duration at all and becomes a reminder at the moment the event
+// starts; a value repeating a unit is not a duration the grammar allows, and
+// its parts are added together instead of being refused.
+//
+// Neither is dangerous. Both mean an alarm nobody asked for will go off, from
+// a file that said something else.
+func TestICalImportInventsAReminderFromAMalformedTrigger(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+
+	zero, five := 0, 5
+	cases := []struct {
+		name    string
+		trigger string
+		want    *int
+	}{
+		{"a duration with no units at all", "P", &zero},
+		// The repeats are added together, and the sum is kept whenever it
+		// happens to land on a value the picker can show -- five ones here.
+		{"a duration repeating a unit", "-PT1M1M1M1M1M", &five},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Invented "+c.name)
+			require.Equal(t, c.want, importedAlarmOffset(t, calURL, tt.AccessToken, c.trigger),
+				"a trigger that does not parse should leave no reminder")
+			deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
+		})
+	}
+}
+
+// A VALARM carries property names the event uses. Read flat, its DESCRIPTION
+// would land on the event as the note saying what the event is about --
+// replacing whatever the file said. An alarm that is never closed keeps the
+// parser inside it to the end of the event, which is the case where a flat
+// read would show.
+func TestICalImportDoesNotLetAnUnclosedAlarmOverwriteTheEvent(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := hostileCalendar(t, tt, "Unclosed alarm")
+
+	ics := wrap("BEGIN:VEVENT\r\nUID:un@example.com\r\nSUMMARY:Unclosed alarm\r\n" +
+		"DESCRIPTION:What the event is about\r\n" +
+		"DTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\n" +
+		"BEGIN:VALARM\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Ring the bell\r\nEND:VEVENT\r\n")
+	require.Equal(t, importResult{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+
+	listed := listHostile(t, calURL, tt.AccessToken)
+	require.Len(t, listed, 1)
+	var evt struct {
+		Memo string `json:"memo"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
+	require.Equal(t, "What the event is about", evt.Memo,
+		"the alarm's own description must not become the event's note")
+	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
