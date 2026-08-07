@@ -2,14 +2,13 @@ import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
-import { api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
 export interface HistoryActor {
   id: string;
   name: string;
-  icon: string;
   avatarUrl?: string;
 }
 
@@ -36,10 +35,12 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
   const locale = useUiStore((s) => s.locale);
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setError('');
     const path =
       kind === 'event'
         ? `/calendars/${calendarId}/events/${entityId}/history`
@@ -49,8 +50,12 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
         const data = await api.get<HistoryItem[]>(path);
         // The API returns newest-first; reverse for the oldest-to-newest timeline.
         if (!cancelled) setItems([...data].reverse());
-      } catch {
-        if (!cancelled) setItems([]);
+      } catch (e) {
+        // A request that failed says nothing about whether anything happened
+        // to this event. Falling through to the empty state would answer
+        // "nobody has touched it" to a question that was never asked, which
+        // is the reading a person checking who changed their event would take.
+        if (!cancelled) setError(errorMessage(e));
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -66,6 +71,10 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
         {t('history.loading')}
       </p>
     );
+  }
+
+  if (error) {
+    return <p className="py-2 text-center text-body text-[var(--color-danger)]">{error}</p>;
   }
 
   if (items.length === 0) {
