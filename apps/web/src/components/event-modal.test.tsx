@@ -36,6 +36,15 @@ vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
+// Only the relative-time formatter is stood in for; the rest of the module is
+// what the modal actually calls for its weekday labels.
+const relativeTime = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/date-utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/date-utils')>()),
+  formatRelativeTime: relativeTime,
+}));
+
 const event: CalendarEvent = {
   id: 'ev-1',
   calendarId: 'cal-1',
@@ -63,7 +72,7 @@ const event: CalendarEvent = {
 };
 
 const uiState = {
-  locale: 'ja' as const,
+  locale: 'ja' as 'ja' | 'en',
   timezone: 'Asia/Tokyo',
   showEventModal: true,
   editingEventId: 'ev-1' as string | null,
@@ -138,6 +147,9 @@ function titleField(): HTMLElement {
 beforeEach(() => {
   uiState.showEventModal = true;
   uiState.editingEventId = 'ev-1';
+  uiState.locale = 'ja';
+  calendarState.events = [event];
+  relativeTime.mockReturnValue('a while ago');
   mockApi.get.mockResolvedValue([]);
   mockApi.getWithRevision.mockResolvedValue({ data: event, revision: 'rev-1' });
   mockApi.post.mockResolvedValue(undefined);
@@ -245,10 +257,136 @@ describe('EventModal body', () => {
     expect(screen.queryByText(avatar)).toBeNull();
   });
 
+  // The modal carried its own copy of the relative-time formatter, so the same
+  // timestamp could read one way in a comment and another in the history beside
+  // it, and a fix to one of them would reach only half the screen.
+  it('times a comment with the shared formatter, not a copy of its own', async () => {
+    mockApi.get.mockImplementation((path: string) =>
+      path.endsWith('/activities')
+        ? Promise.resolve({
+            items: [
+              {
+                id: 'c1',
+                body: 'first thing',
+                userName: 'Someone',
+                userPublicId: 'u2',
+                createdAt: '2026-04-20T10:00:00Z',
+              },
+            ],
+          })
+        : Promise.resolve([]),
+    );
+
+    render(<EventModal />);
+    await screen.findByText('first thing');
+
+    expect(relativeTime).toHaveBeenCalledWith('2026-04-20T10:00:00Z', 'ja');
+    expect(screen.getAllByText('a while ago')).toHaveLength(1);
+  });
+
   it('focuses the title field on open', async () => {
     render(<EventModal />);
 
     await waitFor(() => expect(document.activeElement).toBe(titleField()));
+  });
+});
+
+// The custom-repeat editor named its weekdays from a Japanese table, so an
+// English account picked its repeat days off buttons labelled 日 to 土.
+describe('EventModal custom recurrence weekdays', () => {
+  /** An interval of 2 is no preset, which is what opens the custom editor. */
+  function openWith(rule: CalendarEvent['recurrenceRule']) {
+    calendarState.events = [{ ...event, recurrenceRule: rule }];
+  }
+
+  const weekly = { freq: 'weekly', interval: 2, byDay: ['MO', 'WE'] } as const;
+  const monthlyNth = { freq: 'monthly', interval: 2, bySetPos: 3, byDay: ['TU'] } as const;
+
+  it('labels the day toggles in the reader’s language', async () => {
+    openWith(weekly);
+    uiState.locale = 'en';
+
+    render(<EventModal />);
+    await screen.findByPlaceholderText('event.titlePlaceholder');
+
+    for (const day of ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) {
+      expect(screen.getByText(day)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('日')).toBeNull();
+  });
+
+  it('names the nth-weekday choice in the reader’s language', async () => {
+    openWith(monthlyNth);
+    uiState.locale = 'en';
+
+    render(<EventModal />);
+    await screen.findByPlaceholderText('event.titlePlaceholder');
+
+    expect(screen.getByText('Tuesday')).toBeInTheDocument();
+    expect(screen.queryByText('火')).toBeNull();
+  });
+
+  it('keeps the single-character labels a Japanese account reads', async () => {
+    openWith(weekly);
+
+    render(<EventModal />);
+    await screen.findByPlaceholderText('event.titlePlaceholder');
+
+    for (const day of ['日', '月', '火', '水', '木', '金', '土']) {
+      expect(screen.getByText(day)).toBeInTheDocument();
+    }
+  });
+});
+
+// A dialog inside a dialog. The chooser's buttons sit outside the modal's
+// container, so with only the modal's trap running they were unreachable by
+// keyboard and Tab left the page entirely.
+describe('EventModal scope chooser', () => {
+  async function openChooser() {
+    // The trap only considers painted elements, and jsdom paints nothing.
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    calendarState.events = [{ ...event, isRecurrence: true }];
+    render(<EventModal />);
+    await screen.findByPlaceholderText('event.titlePlaceholder');
+    fireEvent.click(screen.getByText('common.save'));
+    return screen.findByRole('dialog', { name: 'event.scopeEditTitle' });
+  }
+
+  it('takes the keyboard when it opens', async () => {
+    const chooser = await openChooser();
+
+    await waitFor(() => expect(chooser.contains(document.activeElement)).toBe(true));
+  });
+
+  it('keeps Tab inside the question it is asking', async () => {
+    const chooser = await openChooser();
+
+    const choices = Array.from(chooser.querySelectorAll<HTMLElement>('button'));
+    const first = choices[0];
+    const last = choices[choices.length - 1];
+    expect(first).toBeDefined();
+    expect(last).toBeDefined();
+    if (!first || !last) return;
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  // Escape belongs to the innermost surface: it answers the chooser, and the
+  // editor underneath stays open with the edit still in it.
+  it('is what Escape closes, leaving the editor open', async () => {
+    const chooser = await openChooser();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(chooser).not.toBeInTheDocument());
+    expect(screen.getByPlaceholderText('event.titlePlaceholder')).toBeInTheDocument();
+    expect(uiState.closeEventModal).not.toHaveBeenCalled();
   });
 });
 

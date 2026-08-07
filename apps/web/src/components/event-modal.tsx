@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
-import { type TranslationKey, useT } from '@/i18n';
+import { type Locale, type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
+import { formatRelativeTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { eventTimesForSave, shiftStartKeepingDuration } from '@/lib/event-times';
 import {
   canDeleteComment,
@@ -50,25 +51,8 @@ export function eventCommentText(comment: EventComment): string {
   return comment.body;
 }
 
-// Format a relative time string according to locale
-function formatRelativeTime(iso: string, locale: 'ja' | 'en'): string {
-  const dt = DateTime.fromISO(iso);
-  const diff = DateTime.now().diff(dt, ['days', 'hours', 'minutes']);
-  if (locale === 'en') {
-    if (diff.days >= 1) return `${Math.floor(diff.days)}d ago`;
-    if (diff.hours >= 1) return `${Math.floor(diff.hours)}h ago`;
-    if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}m ago`;
-    return 'just now';
-  }
-  if (diff.days >= 1) return `${Math.floor(diff.days)}\u65E5\u524D`;
-  if (diff.hours >= 1) return `${Math.floor(diff.hours)}\u6642\u9593\u524D`;
-  if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}\u5206\u524D`;
-  return '\u305F\u3063\u305F\u4ECA';
-}
-
 const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
-const WEEKDAY_LABELS_JA = ['\u65E5', '\u6708', '\u706B', '\u6C34', '\u6728', '\u91D1', '\u571F'];
-const WEEKDAY_LABELS_EN = [
+const WEEKDAY_NAMES_EN = [
   'Sunday',
   'Monday',
   'Tuesday',
@@ -78,9 +62,14 @@ const WEEKDAY_LABELS_EN = [
   'Saturday',
 ];
 
-function getWeekdayLabel(dt: DateTime, locale: 'ja' | 'en'): string {
-  const idx = dt.weekday % 7; // Luxon: 1=Mon..7=Sun, %7 gives 0=Sun
-  return locale === 'ja' ? (WEEKDAY_LABELS_JA[idx] ?? '') : (WEEKDAY_LABELS_EN[idx] ?? '');
+/**
+ * The weekday as a recurrence sentence names it ("every Tuesday", "the 3rd
+ * Tuesday"). English spells the day out where the calendar's own headings
+ * abbreviate it; every other locale reads the same as those headings, so it
+ * takes the shared label rather than a table of its own.
+ */
+function weekdayName(dayIndex: number, locale: Locale): string {
+  return locale === 'en' ? (WEEKDAY_NAMES_EN[dayIndex] ?? '') : getWeekdayLabel(dayIndex, locale);
 }
 
 function getNthWeekday(dt: DateTime): number {
@@ -164,11 +153,11 @@ function recurrenceLabel(
   rule: RecurrenceRule | null,
   dt: DateTime,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
-  locale: 'ja' | 'en',
+  locale: Locale,
 ): string {
   if (!rule) return t('event.recurrenceNone');
   const preset = ruleToPreset(rule, dt);
-  const dayLabel = getWeekdayLabel(dt, locale);
+  const dayLabel = weekdayName(jsDayOfWeek(dt), locale);
   switch (preset) {
     case 'daily':
       return t('event.recurrenceDaily');
@@ -1284,9 +1273,9 @@ export function EventModal() {
     [editingEvent, isRecurringInstance, deleteEvent, requestClose, saving, editable, t],
   );
 
-  // Escape belongs to the innermost surface that is open. The pickers portal
-  // their dropdowns out of this subtree and close themselves on Escape, so the
-  // modal stands down while one is up; the scope chooser is answered first too.
+  // The innermost open surface owns the keyboard. The pickers portal their
+  // dropdowns out of this subtree and close themselves on Escape, so the modal
+  // stands down while one is up; the scope chooser is answered first too.
   const dismiss = () => {
     if (document.querySelector('.dropdown-panel')) return;
     if (scopePrompt) {
@@ -1296,6 +1285,13 @@ export function EventModal() {
     requestClose();
   };
   const panelRef = useModalA11y<HTMLDivElement>(showEventModal, dismiss, titleRef);
+  const scopeRef = useModalA11y<HTMLDivElement>(scopePrompt !== null, () => setScopePrompt(null));
+  // The chooser is a dialog over a dialog, so it carries its own trap: without
+  // one its buttons sit outside the modal's container and Tab walks straight
+  // out of the page rather than around the question being asked. The two traps
+  // do not fight — each only intercepts Tab at the edge of its own container,
+  // and the containers are disjoint — and the outer one keeps the scroll lock
+  // and the return-focus target for the whole time the chooser is up.
 
   if (!showEventModal && !closing) return null;
 
@@ -1525,7 +1521,7 @@ export function EventModal() {
               value={form.recurrencePreset}
               options={(() => {
                 const startDt = DateTime.fromISO(form.startAt);
-                const dayLabel = getWeekdayLabel(startDt, locale);
+                const dayLabel = weekdayName(jsDayOfWeek(startDt), locale);
                 const nth = getNthWeekday(startDt);
                 return [
                   { value: 'none', label: t('event.recurrenceNone') },
@@ -1660,7 +1656,7 @@ export function EventModal() {
                             color: selected ? '#fff' : 'var(--color-text-secondary)',
                           }}
                         >
-                          {WEEKDAY_LABELS_JA[idx]}
+                          {getWeekdayLabel(idx, locale)}
                         </button>
                       );
                     })}
@@ -1731,7 +1727,7 @@ export function EventModal() {
                         value={form.recurrenceRule.byDay?.[0] ?? 'SU'}
                         options={WEEKDAY_CODES.map((code, idx) => ({
                           value: code,
-                          label: WEEKDAY_LABELS_JA[idx] ?? code,
+                          label: weekdayName(idx, locale) || code,
                         }))}
                         onChange={(day) =>
                           setForm((f) => ({
@@ -2356,6 +2352,12 @@ export function EventModal() {
           />
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none">
             <div
+              ref={scopeRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={
+                scopePrompt === 'delete' ? t('event.scopeDeleteTitle') : t('event.scopeEditTitle')
+              }
               className="glass-surface-heavy pointer-events-auto flex w-full max-w-[360px] flex-col gap-3 p-6 ring-1 ring-[var(--color-border)]"
               style={{ borderRadius: 'var(--radius-lg)' }}
             >
