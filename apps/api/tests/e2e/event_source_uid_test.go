@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -31,22 +30,30 @@ type sourceUIDFixture struct {
 	calendarB   uint32
 }
 
+// newSourceUIDFixture uses the package-wide server rather than starting one.
+// Standing up a server per test also ensures the shared workspace row, and
+// several of these running at once deadlock each other on that upsert -- a
+// failure in the setup that says nothing about the key under test.
 func newSourceUIDFixture(t *testing.T) sourceUIDFixture {
 	t.Helper()
-	srv := helpers.NewTestServer(t, testDB)
-	tenant := helpers.NewTenant(t, srv.BaseURL)
+	tenant := helpers.NewTenant(t, testServerURL)
 
 	var second struct {
 		ID string `json:"id"`
 	}
-	helpers.DoJSON(t, http.MethodPost, srv.BaseURL+"/calendars", tenant.AccessToken,
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars", tenant.AccessToken,
 		map[string]any{"name": "Second", "color": "#2ECC87"}, &second)
 	require.NotEmpty(t, second.ID)
 
+	calendarA := internalIDByPublicID(t, "calendars", tenant.CalendarID)
+	var workspaceID uint32
+	require.NoError(t, testDB.QueryRow(
+		`SELECT workspace_id FROM calendars WHERE id = ?`, calendarA).Scan(&workspaceID))
+
 	return sourceUIDFixture{
-		workspaceID: helpers.TestWorkspace(generated.New(testDB)).ID,
+		workspaceID: workspaceID,
 		userID:      internalIDByPublicID(t, "users", tenant.UserID),
-		calendarA:   internalIDByPublicID(t, "calendars", tenant.CalendarID),
+		calendarA:   calendarA,
 		calendarB:   internalIDByPublicID(t, "calendars", second.ID),
 	}
 }
