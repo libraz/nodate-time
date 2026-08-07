@@ -520,7 +520,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => openEventModal()}
-            className="flex h-9 items-center gap-1.5 px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
+            className="flex h-9 items-center justify-center px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
             style={{
               borderRadius: 'var(--radius-sm)',
               background: 'var(--color-accent)',
@@ -541,7 +541,6 @@ export function CalendarHeader() {
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            <span className="hidden lg:inline">{t('event.createEvent')}</span>
           </button>
 
           <div className="relative" ref={desktopProfileMenuRef}>

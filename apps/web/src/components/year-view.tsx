@@ -60,7 +60,9 @@ export function YearView() {
           {t('calendar.year')}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:gap-4">
+      {/* Two columns on a phone, three from the one breakpoint up: twelve
+          months then fall into four rows of a quarter each. */}
+      <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4">
         {months.map((m) => {
           const days = getMonthDays(currentMonth.year, m, timezone);
           const monthLabel = DateTime.local(currentMonth.year, m + 1, 1).toFormat(

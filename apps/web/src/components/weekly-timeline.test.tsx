@@ -124,3 +124,43 @@ describe('WeeklyTimeline across a daylight-saving transition', () => {
     expect(start.toFormat('yyyy-MM-dd HH:mm')).toBe(`${DAY} 05:00`);
   });
 });
+
+// A resize registers three window listeners and drops them on pointerup. Switch
+// view mid-drag and that pointerup arrives at a component that is gone, so the
+// listeners — and the event they close over — stayed on window for the life of
+// the page.
+describe('WeeklyTimeline resize listeners', () => {
+  function resizeHandle(): HTMLElement {
+    const handle = document.querySelector<HTMLElement>('.cursor-ns-resize');
+    if (!handle) throw new Error('no resize handle');
+    return handle;
+  }
+
+  it('ends a resize the pointer never finished when it unmounts', () => {
+    const addListener = vi.spyOn(window, 'addEventListener');
+    const { unmount } = render(<WeeklyTimeline />);
+
+    fireEvent.pointerDown(resizeHandle(), { clientY: 240 });
+
+    const signals = addListener.mock.calls
+      .filter(([type]) => type === 'pointermove' || type === 'pointerup')
+      .map(([, , options]) => (options as AddEventListenerOptions | undefined)?.signal);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((s) => s?.aborted === false)).toBe(true);
+
+    unmount();
+
+    expect(signals.every((s) => s?.aborted === true)).toBe(true);
+  });
+
+  it('leaves a resize that ended on its own alone', () => {
+    render(<WeeklyTimeline />);
+
+    fireEvent.pointerDown(resizeHandle(), { clientY: 240 });
+    fireEvent.pointerMove(window, { clientY: 300 });
+    fireEvent.pointerUp(window, { clientY: 300 });
+
+    // The gesture committed, so the event was asked to change.
+    expect(calendarState.updateEvent).toHaveBeenCalled();
+  });
+});
