@@ -25,9 +25,25 @@ type ResetDeps struct {
 	WebURL  string
 }
 
+// The budget every automated mail answers to. The per-client half stops an
+// attacker from spending the owner's allowance for their own mailbox; the
+// per-mailbox half is what bounds the flood at all, since the number of
+// clients asking is the attacker's to choose and each of them would otherwise
+// buy another three.
 const (
-	passwordResetEmailLimit  = 3
-	passwordResetEmailWindow = time.Hour
+	passwordResetEmailLimit   = 3
+	passwordResetMailboxLimit = 6
+	passwordResetEmailWindow  = time.Hour
+)
+
+// mailPurpose keeps budgets that must not spend one another apart. A password
+// reset is asked for anonymously and a confirmation link by the account
+// itself; counted together, either one silences the other.
+type mailPurpose string
+
+const (
+	mailPurposeReset  mailPurpose = "reset"
+	mailPurposeVerify mailPurpose = "verify"
 )
 
 type resetEmailBucket struct {
@@ -40,16 +56,28 @@ var resetEmailLimiter = struct {
 	buckets map[string]*resetEmailBucket
 }{buckets: map[string]*resetEmailBucket{}}
 
-// allowPasswordResetEmail scopes the send budget to (email, IP) rather than
-// email alone: an attacker hammering one IP against a victim's address can no
-// longer silently exhaust the victim's own quota for that mailbox.
-func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
+// allowEmailSend takes one unit from the (address, client) budget and one from
+// the address's own total, both scoped to a single purpose. A request the
+// per-client half turns away costs the address nothing, so an attacker who has
+// exhausted their own bucket has not eaten into what the owner can ask for.
+func allowEmailSend(purpose mailPurpose, email, clientIP string, now time.Time) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return false
 	}
-	key := email + "|" + clientIP
+	mailbox := string(purpose) + "|" + email
+	if !takeEmailBudget(mailbox+"|"+clientIP, passwordResetEmailLimit, now) {
+		return false
+	}
+	return takeEmailBudget(mailbox, passwordResetMailboxLimit, now)
+}
 
+// allowPasswordResetEmail is the reset half of that budget.
+func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
+	return allowEmailSend(mailPurposeReset, email, clientIP, now)
+}
+
+func takeEmailBudget(key string, limit int, now time.Time) bool {
 	resetEmailLimiter.Lock()
 	defer resetEmailLimiter.Unlock()
 
@@ -66,7 +94,7 @@ func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
 		}
 	}
 	b.count++
-	return b.count <= passwordResetEmailLimit
+	return b.count <= limit
 }
 
 func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInput) (*RequestResetOutput, error) {
