@@ -123,10 +123,8 @@ var errRefreshReplayed = errors.New("refresh token already spent")
 //
 // A token that matches nothing may still be one this session already spent.
 // That is the shape a leaked refresh token takes: the copy is used and then
-// the original, or the other way round. It cannot be told apart from a
-// client retrying an exchange whose reply it never received, and both mean
-// the token is in more hands than one place can account for, so the session
-// is closed rather than continued.
+// the original, or the other way round. See closeReplayedSession for what
+// separates that from the same client simply asking twice.
 func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credentials, uint32, error) {
 	spent := hashRefreshToken(refreshToken)
 	next, err := newRefreshToken()
@@ -169,12 +167,17 @@ func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credent
 
 // closeReplayedSession decides what a refresh token that opened no session
 // was. If it is the one a live session last traded in, it is being presented
-// a second time: that session is revoked, which stops the access tokens
-// naming it at their next request and makes the refresh token issued in its
-// place worthless too.
+// a second time, and outside the grace window that session is revoked --
+// which stops the access tokens naming it at their next request and makes
+// the refresh token issued in its place worthless too.
 //
-// The refusal handed back is the same either way. Telling the sender that
-// their replay was recognised only informs whoever is holding a token they
+// Only the immediately-previous token is remembered, so a replay of anything
+// older reads as an unknown value. Two rotations are enough to forget a leak,
+// which is the price of one column; catching the general case would mean
+// keeping every hash a session ever had and sweeping them.
+//
+// The refusal handed back is the same in every branch. Telling the sender
+// which one they landed in only informs whoever is holding a token they
 // should not have.
 func closeReplayedSession(ctx context.Context, deps Deps, spent string) error {
 	session, err := deps.Queries.GetSessionByPrevRefreshHash(ctx,
@@ -184,8 +187,22 @@ func closeReplayedSession(ctx context.Context, deps Deps, spent string) error {
 		// session ever issued.
 		return err
 	}
-	if err := deps.Queries.RevokeSession(ctx, session.ID); err != nil {
+
+	// The grace window lives in the query: see RevokeReplayedSession for why
+	// one clock has to decide it. No rows means the exchange was seconds ago,
+	// which reads as one client asking twice.
+	res, err := deps.Queries.RevokeReplayedSession(ctx, session.ID)
+	if err != nil {
 		return err
+	}
+	revoked, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if revoked == 0 {
+		slog.InfoContext(ctx, "refresh token presented twice in quick succession",
+			"sessionID", session.ID, "userID", session.UserID)
+		return errRefreshReplayed
 	}
 	slog.WarnContext(ctx, "refresh token replayed, session revoked",
 		"sessionID", session.ID, "userID", session.UserID)
