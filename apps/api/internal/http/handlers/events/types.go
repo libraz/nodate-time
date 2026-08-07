@@ -310,7 +310,10 @@ type PresignUploadInput struct {
 	Body       struct {
 		Filename    string `json:"filename" minLength:"1" maxLength:"500"`
 		ContentType string `json:"contentType,omitempty" maxLength:"255" required:"false"`
-		ByteSize    int64  `json:"byteSize"`
+		// ByteSize is bound into the upload URL's signature, so it is also the
+		// size limit of the upload itself. A declared zero cannot be bound and
+		// would leave the URL accepting a body of any size.
+		ByteSize int64 `json:"byteSize" minimum:"1" doc:"size of the file in bytes; the upload is signed for exactly this length"`
 		// SHA256 is the hex digest of the bytes about to be uploaded. The
 		// blob is content-addressed, so the same file attached twice is
 		// stored once; the digest is also what the storage key is built

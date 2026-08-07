@@ -479,6 +479,29 @@ func validateTimezone(tz string) *apierrors.Spec {
 	return nil
 }
 
+// supportedNotificationOffsets is the set of reminder offsets, in minutes
+// before the start, that a stored event may carry. Anything else is a value no
+// client can show or edit: the pickers offer exactly these, and an iCalendar
+// import drops an alarm that does not land on one.
+var supportedNotificationOffsets = map[int]bool{
+	0: true, 5: true, 10: true, 15: true, 30: true,
+	60: true, 120: true, 1440: true, 2880: true,
+}
+
+// validateNotificationOffset rejects a reminder the product has no way to
+// represent. Checking it here rather than only in the picker is what keeps a
+// direct API caller from storing an offset that the event modal then silently
+// reads back as "no reminder". Returns nil when no reminder is set.
+func validateNotificationOffset(offset *int) *apierrors.Spec {
+	if offset == nil {
+		return nil
+	}
+	if !supportedNotificationOffsets[*offset] {
+		return apierrors.EventNotificationOffsetInvalid
+	}
+	return nil
+}
+
 func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
 	if ruleData == nil || string(*ruleData) == "null" {
 		return nil, sql.NullTime{}
@@ -957,6 +980,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
+		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
@@ -1086,6 +1112,9 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
+		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
 

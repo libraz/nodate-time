@@ -52,23 +52,20 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 // rejected — this is what keeps a byteSize the caller validated against its
 // own limit (e.g. 100MB attachments) from being a value trusted only at
 // Confirm time, when a much larger object could already have been written.
-// byteSize <= 0 skips the length binding (a caller that has no size to
-// declare yet); contentType == "" likewise skips the type binding.
+//
+// A byteSize that is not positive is refused rather than signed without the
+// length binding: an unbound URL accepts a body of any size, so a caller that
+// let a zero through would be handing out an unlimited write to the bucket.
+// contentType == "" skips the type binding.
 func (c *Client) PresignPut(ctx context.Context, key string, contentType string, byteSize int64, expires time.Duration) (string, error) {
+	if byteSize <= 0 {
+		return "", fmt.Errorf("presign put %s: byte size must be positive, got %d", key, byteSize)
+	}
 	headers := http.Header{}
 	if contentType != "" {
 		headers.Set("Content-Type", contentType)
 	}
-	if byteSize > 0 {
-		headers.Set("Content-Length", strconv.FormatInt(byteSize, 10))
-	}
-	if len(headers) == 0 {
-		u, err := c.mc.PresignedPutObject(ctx, c.bucket, key, expires)
-		if err != nil {
-			return "", err
-		}
-		return u.String(), nil
-	}
+	headers.Set("Content-Length", strconv.FormatInt(byteSize, 10))
 	u, err := c.mc.PresignHeader(ctx, http.MethodPut, c.bucket, key, expires, url.Values{}, headers)
 	if err != nil {
 		return "", err
