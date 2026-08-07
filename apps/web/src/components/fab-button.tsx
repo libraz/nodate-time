@@ -1,9 +1,19 @@
 import { useT } from '@/i18n';
 import { useUiStore } from '@/stores/ui-store';
 
+/**
+ * The phone's create-event button.
+ *
+ * It only stands for something on the calendar tab: on memo, search and
+ * settings there is nothing on screen a new event would be added to, and the
+ * memo tab has an add button of its own that this one sits on top of.
+ */
 export function FabButton() {
   const t = useT();
   const openEventModal = useUiStore((s) => s.openEventModal);
+  const mobileTab = useUiStore((s) => s.mobileTab);
+
+  if (mobileTab !== 'calendar') return null;
 
   return (
     <button

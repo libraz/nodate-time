@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -54,6 +55,11 @@ export function WeeklyTimeline() {
     endMin: number;
   } | null>(null);
   const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; dayStart: DateTime } | null>(null);
+  // A resize in progress holds three window listeners, and the pointerup that
+  // ends them never arrives if the view is switched away mid-drag. Keeping the
+  // controller lets unmount end the gesture the pointer never did.
+  const resizeAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => resizeAbort.current?.abort(), []);
   // A resize ends with a pointerup inside the block, which the browser turns into
   // a click on the parent button. Suppress that click so it doesn't open the modal.
   const suppressClick = useRef(false);
@@ -106,6 +112,7 @@ export function WeeklyTimeline() {
       resizeRef.current = { evt, colTop, dayStart };
 
       const ctrl = new AbortController();
+      resizeAbort.current = ctrl;
       let moved = false;
       const computeEnd = (clientY: number) => {
         const end = resizedEndForDaySegment({
