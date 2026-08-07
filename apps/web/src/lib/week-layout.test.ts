@@ -5,6 +5,7 @@ import {
   eventOccupiesDay,
   eventStartDay,
   isMultiDay,
+  layoutDayCell,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
 } from './week-layout';
@@ -212,5 +213,115 @@ describe('layoutWeek', () => {
 
   it('exposes a sensible visible-track limit', () => {
     expect(MAX_VISIBLE_TRACKS).toBeGreaterThan(0);
+  });
+
+  it('gives the longest bar the lowest track when several start together', () => {
+    // Three short bars listed before the long one: on plain first-fit the long
+    // bar lands last, on a track no cell draws, and vanishes for the whole week.
+    const shorts = ['s1', 's2', 's3'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-23T00:00:00+09:00' }),
+    );
+    const long = makeEvent({
+      id: 'long',
+      title: 'Long trip',
+      startAt: '2026-04-19T00:00:00+09:00',
+      endAt: '2026-04-26T00:00:00+09:00',
+    });
+    const result = layoutWeek(weekStart, [...shorts, long], ZONE);
+    expect(result.find((p) => p.event.id === 'long')?.track).toBe(0);
+  });
+});
+
+describe('layoutDayCell', () => {
+  const weekStart = DateTime.fromISO('2026-04-19T00:00:00', { zone: ZONE }); // Sunday
+
+  // Three short bars crowd Sunday through Wednesday; a week-long bar runs
+  // underneath them. By Friday the short ones have ended and the long one is
+  // the only event left on the day.
+  const shortBars = ['s1', 's2', 's3'].map((id) =>
+    makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-23T00:00:00+09:00' }),
+  );
+  const longBar = makeEvent({
+    id: 'long',
+    title: 'Long trip',
+    startAt: '2026-04-19T00:00:00+09:00',
+    endAt: '2026-04-26T00:00:00+09:00',
+  });
+
+  it('draws the long bar on a day whose crowd has ended', () => {
+    const positioned = layoutWeek(weekStart, [...shortBars, longBar], ZONE);
+    const friday = layoutDayCell(5, positioned, []);
+
+    const drawn = positioned.filter(
+      (p) => friday.reserved.includes(p.track) && p.track < MAX_VISIBLE_TRACKS,
+    );
+    expect(drawn.map((p) => p.event.id)).toContain('long');
+    expect(friday.overflow).toBe(0);
+  });
+
+  it('counts the crowded days that lose a bar', () => {
+    const positioned = layoutWeek(weekStart, [...shortBars, longBar], ZONE);
+    // Four bars overlap on Sunday and only three tracks are drawn.
+    expect(layoutDayCell(0, positioned, []).overflow).toBe(1);
+  });
+
+  it('reports a bar the cell cannot draw as overflow rather than nothing', () => {
+    // Three bars run Sunday to Thursday and a fourth starts on that Thursday, so
+    // it can only take the fourth track -- but it alone occupies Friday.
+    const crowd = ['a', 'b', 'c'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-24T00:00:00+09:00' }),
+    );
+    const late = makeEvent({
+      id: 'late',
+      startAt: '2026-04-23T00:00:00+09:00',
+      endAt: '2026-04-26T00:00:00+09:00',
+    });
+    const positioned = layoutWeek(weekStart, [...crowd, late], ZONE);
+    expect(positioned.find((p) => p.event.id === 'late')?.track).toBe(MAX_VISIBLE_TRACKS);
+
+    const friday = layoutDayCell(5, positioned, []);
+    expect(friday.reserved).toEqual([MAX_VISIBLE_TRACKS]);
+    expect(friday.overflow).toBe(1);
+  });
+
+  it('never reports a negative overflow', () => {
+    const positioned = layoutWeek(
+      weekStart,
+      [
+        ...['a', 'b', 'c', 'd'].map((id) =>
+          makeEvent({
+            id,
+            startAt: '2026-04-19T00:00:00+09:00',
+            endAt: '2026-04-24T00:00:00+09:00',
+          }),
+        ),
+        makeEvent({
+          id: 'late',
+          startAt: '2026-04-23T00:00:00+09:00',
+          endAt: '2026-04-26T00:00:00+09:00',
+        }),
+      ],
+      ZONE,
+    );
+    for (let col = 0; col < 7; col++) {
+      expect(layoutDayCell(col, positioned, []).overflow).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('fills the tracks the bars leave free with single-day chips', () => {
+    const bar = makeEvent({
+      id: 'bar',
+      startAt: '2026-04-19T00:00:00+09:00',
+      endAt: '2026-04-26T00:00:00+09:00',
+    });
+    const positioned = layoutWeek(weekStart, [bar], ZONE);
+    const singles = ['x', 'y', 'z'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-24T10:00:00+09:00', endAt: '2026-04-24T11:00:00+09:00' }),
+    );
+    const friday = layoutDayCell(5, positioned, singles);
+
+    // The bar holds track 0, so the chips start at track 1 and the third is cut.
+    expect(friday.singleSlots.map((s) => s.track)).toEqual([1, 2]);
+    expect(friday.overflow).toBe(1);
   });
 });

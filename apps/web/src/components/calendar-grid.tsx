@@ -19,6 +19,7 @@ import {
   eventEndDay,
   eventStartDay,
   isMultiDay,
+  layoutDayCell,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
 } from '@/lib/week-layout';
@@ -211,16 +212,13 @@ export function CalendarGrid() {
             singleDayMap.set(key, arr);
           }
 
-          const reservedTracksByDay = week.map((dt) => {
-            const col = jsDayOfWeek(dt);
-            const reserved: number[] = [];
-            for (const p of positioned) {
-              if (col >= p.startCol && col < p.startCol + p.span) {
-                reserved.push(p.track);
-              }
-            }
-            return reserved;
-          });
+          const cells = week.map((dt) =>
+            layoutDayCell(
+              jsDayOfWeek(dt),
+              positioned,
+              singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? [],
+            ),
+          );
 
           // Segment of the drag ghost that falls inside this week (the ghost
           // is grid-aligned and spans the event's real length, wrapping weeks).
@@ -251,21 +249,7 @@ export function CalendarGrid() {
                 const dow = jsDayOfWeek(dt);
                 const isoDate = dt.toFormat('yyyy-MM-dd');
                 const holiday = getHoliday(holidaysCountry, isoDate);
-                const reserved = reservedTracksByDay[dIdx] ?? [];
-                const dayKey = dt.toFormat('yyyy-MM-dd');
-                const singles = singleDayMap.get(dayKey) ?? [];
-                const usedTracks = new Set(reserved);
-                const singleSlots: { track: number; evt: CalendarEvent }[] = [];
-                let nextTrack = 0;
-                for (const evt of singles) {
-                  while (usedTracks.has(nextTrack)) nextTrack++;
-                  singleSlots.push({ track: nextTrack, evt });
-                  usedTracks.add(nextTrack);
-                  nextTrack++;
-                  if (singleSlots.length >= MAX_VISIBLE_TRACKS + 5) break;
-                }
-                const totalEventsHere = reserved.length + singles.length;
-                const overflow = totalEventsHere - MAX_VISIBLE_TRACKS;
+                const { reserved = [], singleSlots = [], overflow = 0 } = cells[dIdx] ?? {};
                 const isSelected = dt.hasSame(selectedDate, 'day');
 
                 return (
