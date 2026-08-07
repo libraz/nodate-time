@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { create } from 'zustand';
 import type { Locale } from '@/i18n';
+import { detectHolidayCountry } from '@/lib/holidays';
 import type { AccountPreferences } from '@/lib/preferences';
 import { detectTimezone } from '@/lib/preferences';
 import { loadJson, saveJson } from '@/lib/storage';
@@ -93,7 +94,7 @@ export const useUiStore = create<UiState>((set) => ({
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
   locale: loadJson<Locale>('locale', 'ja'),
   timezone: loadJson<string>('timezone', detectTimezone()),
-  holidaysCountry: loadJson<string | null>('holidaysCountry', 'JP'),
+  holidaysCountry: loadJson<string | null>('holidaysCountry', detectHolidayCountry()),
 
   setCalendarView: (view) => set({ calendarView: view }),
   setSelectedDate: (date) => set({ selectedDate: date }),

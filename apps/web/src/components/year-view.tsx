@@ -16,7 +16,13 @@ export function YearView() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
-  useHolidayLoader(holidaysCountry, [currentMonth.year]);
+  // Each month card fills whole weeks, so January shows the tail of the year
+  // before and December the head of the next one.
+  useHolidayLoader(holidaysCountry, [
+    currentMonth.year - 1,
+    currentMonth.year,
+    currentMonth.year + 1,
+  ]);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
 

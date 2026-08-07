@@ -57,6 +57,40 @@ describe('CustomSelect', () => {
     expect(dropdowns).toHaveLength(0);
   });
 
+  it('narrows a long list by label or by code', async () => {
+    const user = userEvent.setup();
+    const countries = [
+      { value: 'DE', label: 'Germany' },
+      { value: 'JP', label: 'Japan' },
+      { value: 'US', label: 'United States' },
+    ];
+    render(<CustomSelect value="JP" options={countries} onChange={() => {}} searchable />);
+
+    await user.click(screen.getByText('Japan'));
+    const filter = screen.getByRole('textbox', { name: 'Search' });
+
+    await user.type(filter, 'germ');
+    expect(screen.getByText('Germany')).toBeInTheDocument();
+    expect(screen.queryByText('United States')).toBeNull();
+
+    await user.clear(filter);
+    await user.type(filter, 'us');
+    expect(screen.getByText('United States')).toBeInTheDocument();
+    expect(screen.queryByText('Germany')).toBeNull();
+
+    await user.clear(filter);
+    await user.type(filter, 'zz');
+    expect(screen.getByText('No matches')).toBeInTheDocument();
+  });
+
+  it('leaves an ordinary select without a filter box', async () => {
+    const user = userEvent.setup();
+    render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+
+    await user.click(screen.getByText('Alpha'));
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
   it('shows checkmark on selected option', async () => {
     const user = userEvent.setup();
     render(<CustomSelect value="b" options={options} onChange={() => {}} />);
