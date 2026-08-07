@@ -17,8 +17,8 @@ INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
   title, all_day, start_at, end_at, timezone, location, memo, url,
   owner_user_id, created_by_user_id, block_label, notification_offset,
-  recurrence_rule, recurrence_end
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  recurrence_rule, recurrence_end, source_uid
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateCalendarEventParams struct {
@@ -43,8 +43,13 @@ type CreateCalendarEventParams struct {
 	NotificationOffset sql.NullInt32             `json:"notificationOffset"`
 	RecurrenceRule     *json.RawMessage          `json:"recurrenceRule"`
 	RecurrenceEnd      sql.NullTime              `json:"recurrenceEnd"`
+	SourceUid          sql.NullString            `json:"sourceUid"`
 }
 
+// source_uid is what the importing file called the event, and is NULL for an
+// event created here. It is the only column on this insert that does not come
+// from the caller's own intent, which is why it sits at the end rather than
+// among the event's own fields.
 func (q *Queries) CreateCalendarEvent(ctx context.Context, arg CreateCalendarEventParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createCalendarEvent,
 		arg.PublicID,
@@ -68,6 +73,7 @@ func (q *Queries) CreateCalendarEvent(ctx context.Context, arg CreateCalendarEve
 		arg.NotificationOffset,
 		arg.RecurrenceRule,
 		arg.RecurrenceEnd,
+		arg.SourceUid,
 	)
 }
 
@@ -107,8 +113,72 @@ func (q *Queries) ExtendRecurrenceEnd(ctx context.Context, arg ExtendRecurrenceE
 	return err
 }
 
+const findCalendarEventBySourceUID = `-- name: FindCalendarEventBySourceUID :one
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
+WHERE calendar_id = ? AND source_uid = ? AND enabled = TRUE
+`
+
+type FindCalendarEventBySourceUIDParams struct {
+	CalendarID uint32         `json:"calendarId"`
+	SourceUid  sql.NullString `json:"sourceUid"`
+}
+
+// FindCalendarEventBySourceUID answers whether this calendar already holds the
+// event a file is offering, so a second import of the same file can leave it
+// alone instead of writing a second copy of everything in it.
+//
+// Scoped to enabled rows to match uniq_calendar_events_source_uid, which is
+// itself scoped to live rows through source_uid_key. An event deleted here is
+// meant to be importable again, so a soft-deleted row must not answer this
+// question -- reading it would make the deletion permanent in a way the user
+// never asked for and cannot undo from the app.
+func (q *Queries) FindCalendarEventBySourceUID(ctx context.Context, arg FindCalendarEventBySourceUIDParams) (CalendarEvent, error) {
+	row := q.db.QueryRowContext(ctx, findCalendarEventBySourceUID, arg.CalendarID, arg.SourceUid)
+	var i CalendarEvent
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.Kind,
+		&i.Visibility,
+		&i.ShowAs,
+		&i.Flexibility,
+		&i.Title,
+		&i.AllDay,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Location,
+		&i.Memo,
+		&i.OwnerUserID,
+		&i.CreatedByUserID,
+		&i.BlockLabel,
+		&i.RecurrenceRule,
+		&i.RecurrenceEnd,
+		&i.RecurrenceExceptions,
+		&i.RecurrenceParentID,
+		&i.RecurrenceOriginalStart,
+		&i.NotificationOffset,
+		&i.NotifiedAt,
+		&i.TaskID,
+		&i.TaskRole,
+		&i.TaskRoleKey,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Flags,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SourceUid,
+		&i.SourceUidKey,
+		&i.URL,
+	)
+	return i, err
+}
+
 const getCalendarEventByID = `-- name: GetCalendarEventByID :one
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events WHERE id = ? AND enabled = TRUE
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events WHERE id = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetCalendarEventByID(ctx context.Context, id uint32) (CalendarEvent, error) {
@@ -130,7 +200,6 @@ func (q *Queries) GetCalendarEventByID(ctx context.Context, id uint32) (Calendar
 		&i.Timezone,
 		&i.Location,
 		&i.Memo,
-		&i.URL,
 		&i.OwnerUserID,
 		&i.CreatedByUserID,
 		&i.BlockLabel,
@@ -150,13 +219,16 @@ func (q *Queries) GetCalendarEventByID(ctx context.Context, id uint32) (Calendar
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.SourceUid,
+		&i.SourceUidKey,
+		&i.URL,
 	)
 	return i, err
 }
 
 const getCalendarEventByPublicID = `-- name: GetCalendarEventByPublicID :one
 
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
 `
 
@@ -194,7 +266,6 @@ func (q *Queries) GetCalendarEventByPublicID(ctx context.Context, arg GetCalenda
 		&i.Timezone,
 		&i.Location,
 		&i.Memo,
-		&i.URL,
 		&i.OwnerUserID,
 		&i.CreatedByUserID,
 		&i.BlockLabel,
@@ -214,12 +285,15 @@ func (q *Queries) GetCalendarEventByPublicID(ctx context.Context, arg GetCalenda
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.SourceUid,
+		&i.SourceUidKey,
+		&i.URL,
 	)
 	return i, err
 }
 
 const getRecurrenceOverride = `-- name: GetRecurrenceOverride :one
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE recurrence_parent_id = ? AND recurrence_original_start = ? AND enabled = TRUE
 `
 
@@ -247,7 +321,6 @@ func (q *Queries) GetRecurrenceOverride(ctx context.Context, arg GetRecurrenceOv
 		&i.Timezone,
 		&i.Location,
 		&i.Memo,
-		&i.URL,
 		&i.OwnerUserID,
 		&i.CreatedByUserID,
 		&i.BlockLabel,
@@ -267,12 +340,15 @@ func (q *Queries) GetRecurrenceOverride(ctx context.Context, arg GetRecurrenceOv
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.SourceUid,
+		&i.SourceUidKey,
+		&i.URL,
 	)
 	return i, err
 }
 
 const listCalendarEventsByCalendarAndRange = `-- name: ListCalendarEventsByCalendarAndRange :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE calendar_id = ?
   AND enabled = TRUE
   AND recurrence_rule IS NULL
@@ -313,7 +389,6 @@ func (q *Queries) ListCalendarEventsByCalendarAndRange(ctx context.Context, arg 
 			&i.Timezone,
 			&i.Location,
 			&i.Memo,
-			&i.URL,
 			&i.OwnerUserID,
 			&i.CreatedByUserID,
 			&i.BlockLabel,
@@ -333,6 +408,9 @@ func (q *Queries) ListCalendarEventsByCalendarAndRange(ctx context.Context, arg 
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.URL,
 		); err != nil {
 			return nil, err
 		}
@@ -348,7 +426,7 @@ func (q *Queries) ListCalendarEventsByCalendarAndRange(ctx context.Context, arg 
 }
 
 const listCalendarEventsForExport = `-- name: ListCalendarEventsForExport :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE calendar_id = ?
   AND enabled = TRUE
   AND recurrence_parent_id IS NULL
@@ -389,7 +467,6 @@ func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID ui
 			&i.Timezone,
 			&i.Location,
 			&i.Memo,
-			&i.URL,
 			&i.OwnerUserID,
 			&i.CreatedByUserID,
 			&i.BlockLabel,
@@ -409,6 +486,9 @@ func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID ui
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.URL,
 		); err != nil {
 			return nil, err
 		}
@@ -424,7 +504,7 @@ func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID ui
 }
 
 const listRecurrenceOverridesByParent = `-- name: ListRecurrenceOverridesByParent :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE recurrence_parent_id = ? AND enabled = TRUE
 ORDER BY recurrence_original_start
 `
@@ -454,7 +534,6 @@ func (q *Queries) ListRecurrenceOverridesByParent(ctx context.Context, recurrenc
 			&i.Timezone,
 			&i.Location,
 			&i.Memo,
-			&i.URL,
 			&i.OwnerUserID,
 			&i.CreatedByUserID,
 			&i.BlockLabel,
@@ -474,6 +553,9 @@ func (q *Queries) ListRecurrenceOverridesByParent(ctx context.Context, recurrenc
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.URL,
 		); err != nil {
 			return nil, err
 		}
@@ -489,7 +571,7 @@ func (q *Queries) ListRecurrenceOverridesByParent(ctx context.Context, recurrenc
 }
 
 const listRecurrenceOverridesByParents = `-- name: ListRecurrenceOverridesByParents :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE recurrence_parent_id IN (/*SLICE:parent_ids*/?) AND enabled = TRUE
 ORDER BY recurrence_parent_id, recurrence_original_start
 `
@@ -533,7 +615,6 @@ func (q *Queries) ListRecurrenceOverridesByParents(ctx context.Context, parentId
 			&i.Timezone,
 			&i.Location,
 			&i.Memo,
-			&i.URL,
 			&i.OwnerUserID,
 			&i.CreatedByUserID,
 			&i.BlockLabel,
@@ -553,6 +634,9 @@ func (q *Queries) ListRecurrenceOverridesByParents(ctx context.Context, parentId
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.URL,
 		); err != nil {
 			return nil, err
 		}
@@ -568,7 +652,7 @@ func (q *Queries) ListRecurrenceOverridesByParents(ctx context.Context, parentId
 }
 
 const listRecurringCalendarEventsByCalendarAndRange = `-- name: ListRecurringCalendarEventsByCalendarAndRange :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, notified_at, task_id, task_role, task_role_key, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE calendar_id = ?
   AND enabled = TRUE
   AND recurrence_rule IS NOT NULL
@@ -609,7 +693,6 @@ func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Cont
 			&i.Timezone,
 			&i.Location,
 			&i.Memo,
-			&i.URL,
 			&i.OwnerUserID,
 			&i.CreatedByUserID,
 			&i.BlockLabel,
@@ -629,6 +712,9 @@ func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Cont
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.URL,
 		); err != nil {
 			return nil, err
 		}
