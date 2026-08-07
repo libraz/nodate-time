@@ -444,9 +444,22 @@ func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*Pub
 		out.Body.CalendarID = pubIDToHex(row.CalendarPublicID)
 		out.Body.Name = row.CalendarName
 		out.Body.Color = row.CalendarColor
-		out.Body.Joinable = !row.IsPublic
+		out.Body.Spent = inviteSpent(row.MaxUses, row.UseCount)
+		out.Body.Joinable = !row.IsPublic && !out.Body.Spent
 		return out, nil
 	}
+}
+
+// inviteSpent reports whether a link has been followed as many times as it was
+// meant to be. The page that opens a link is served before anyone is asked to
+// sign in, so this is the only place the difference can be shown: without it
+// the visitor is offered a join that the accept endpoint then refuses, and
+// nothing on the way there said the link was finished.
+func inviteSpent(maxUses sql.NullInt32, useCount uint32) bool {
+	if !maxUses.Valid {
+		return false
+	}
+	return int64(useCount) >= int64(maxUses.Int32)
 }
 
 // publicEventFields decides what a link holder may see of an event. A

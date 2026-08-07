@@ -71,8 +71,13 @@ type PublicCalendarOutput struct {
 		Name       string `json:"name"`
 		Color      string `json:"color"`
 		// Joinable is false for public, read-only embed links; the frontend hides
-		// the join action so such links cannot grant membership.
+		// the join action so such links cannot grant membership. It is also
+		// false once a join link has been used up.
 		Joinable bool `json:"joinable"`
+		// Spent distinguishes the two reasons a link cannot be joined, so the
+		// page can say the link is finished rather than silently drop the
+		// button and leave the visitor looking for it.
+		Spent bool `json:"spent"`
 	}
 }
 
