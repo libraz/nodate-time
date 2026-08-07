@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/libraz/nodate-time/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/nodate-time/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
 ![Bun](https://img.shields.io/badge/Bun-1.3-000000?logo=bun&logoColor=white)
@@ -25,7 +25,7 @@
 
 ## 主な機能
 
-- **カレンダー共有** — メンバーごとのロール（owner / editor / viewer）、招待リンク発行、公開共有トークン、外部埋め込み（embed）ビュー
+- **カレンダー共有** — メンバーごとのロール（owner / manager / editor / viewer）、招待リンク発行、公開共有トークン、外部埋め込み（embed）ビュー
 - **予定（イベント）** — 終日・時間指定、繰り返し（RRULE）と例外日編集、ドラッグでの移動・リサイズ、参加者・チェックリスト・添付ファイル・コメント
 - **メモ** — カレンダー単位のメモ
 - **アルバム** — カレンダーごとの写真アルバム（イベントへの紐付け可）
@@ -39,7 +39,7 @@
 
 | 領域 | 採用技術 |
 | --- | --- |
-| API | Go 1.25 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
+| API | Go 1.26 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
 | DB | MySQL 8.4（Docker Compose） |
 | オブジェクトストレージ | S3 互換（ローカルは MinIO） |
 | Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
@@ -77,7 +77,7 @@ compose.yml            MySQL + MinIO のローカルスタック
 ### 必要なもの
 
 - [Bun](https://bun.sh)
-- Go 1.25+
+- Go 1.26+
 - Docker（MySQL / MinIO 用）
 - [sqlc](https://sqlc.dev)（コード生成する場合）
 
