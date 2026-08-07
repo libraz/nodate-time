@@ -62,7 +62,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSe
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE public_id = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
@@ -94,12 +94,48 @@ func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session,
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.PrevRefreshHash,
+		&i.RotatedAt,
+	)
+	return i, err
+}
+
+const getSessionByPrevRefreshHash = `-- name: GetSessionByPrevRefreshHash :one
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+WHERE prev_refresh_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+`
+
+// GetSessionByPrevRefreshHash finds the session a spent refresh token used to
+// belong to. Matching here is the only evidence that a token which opens no
+// session was ever real, which is what separates a replay from a guess.
+func (q *Queries) GetSessionByPrevRefreshHash(ctx context.Context, prevRefreshHash sql.NullString) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByPrevRefreshHash, prevRefreshHash)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.UserID,
+		&i.RefreshHash,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.PrevRefreshHash,
+		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE refresh_hash = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
@@ -124,12 +160,14 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash strin
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.PrevRefreshHash,
+		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC
 `
@@ -158,6 +196,8 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, userID uint32) ([]Ses
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.PrevRefreshHash,
+			&i.RotatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -210,19 +250,35 @@ func (q *Queries) RevokeSessionByPublicID(ctx context.Context, arg RevokeSession
 	return q.db.ExecContext(ctx, revokeSessionByPublicID, arg.PublicID, arg.UserID)
 }
 
-const rotateSession = `-- name: RotateSession :exec
+const rotateSessionByHash = `-- name: RotateSessionByHash :execresult
 UPDATE sessions
-SET refresh_hash = ?, expires_at = ?, last_used_at = NOW(3)
-WHERE id = ?
+SET prev_refresh_hash = refresh_hash,
+    refresh_hash = ?,
+    expires_at = ?,
+    rotated_at = NOW(3),
+    last_used_at = NOW(3)
+WHERE refresh_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+  AND expires_at > NOW(3)
 `
 
-type RotateSessionParams struct {
-	RefreshHash string    `json:"refreshHash"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-	ID          uint32    `json:"id"`
+type RotateSessionByHashParams struct {
+	RefreshHash   string    `json:"refreshHash"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+	RefreshHash_2 string    `json:"refreshHash2"`
 }
 
-func (q *Queries) RotateSession(ctx context.Context, arg RotateSessionParams) error {
-	_, err := q.db.ExecContext(ctx, rotateSession, arg.RefreshHash, arg.ExpiresAt, arg.ID)
-	return err
+// RotateSessionByHash exchanges one refresh token for the next in a single
+// statement, so two requests arriving with the same token cannot both come
+// away with credentials: whichever reaches the row first replaces the hash
+// they matched on, and the other matches nothing. Reading the row and then
+// updating it would let both through, and the loser's tokens would stop
+// working with no record of why.
+//
+// The assignments are order-dependent: MySQL evaluates SET left to right, so
+// prev_refresh_hash takes the old value only because it is assigned before
+// refresh_hash is overwritten.
+func (q *Queries) RotateSessionByHash(ctx context.Context, arg RotateSessionByHashParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, rotateSessionByHash, arg.RefreshHash, arg.ExpiresAt, arg.RefreshHash_2)
 }

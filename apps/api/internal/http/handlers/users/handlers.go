@@ -288,12 +288,14 @@ func recordFailedAttempt(ctx context.Context, deps Deps, identity generated.Iden
 }
 
 // Refresh trades a refresh token for a new pair. The old one stops working,
-// so a token that leaked cannot be used alongside the real client's.
+// so a token that leaked cannot be used alongside the real client's -- and
+// presenting the spent one ends the session, since only one of the two
+// holders can be the person the session belongs to.
 func Refresh(deps Deps) func(context.Context, *RefreshInput) (*RefreshOutput, error) {
 	return func(ctx context.Context, in *RefreshInput) (*RefreshOutput, error) {
 		creds, userID, err := rotateSession(ctx, deps, in.Body.RefreshToken)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errRefreshReplayed) {
 				return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)

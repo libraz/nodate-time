@@ -26,10 +26,36 @@ WHERE refresh_hash = ?
   AND enabled = TRUE
   AND expires_at > NOW(3);
 
--- name: RotateSession :exec
+-- RotateSessionByHash exchanges one refresh token for the next in a single
+-- statement, so two requests arriving with the same token cannot both come
+-- away with credentials: whichever reaches the row first replaces the hash
+-- they matched on, and the other matches nothing. Reading the row and then
+-- updating it would let both through, and the loser's tokens would stop
+-- working with no record of why.
+--
+-- The assignments are order-dependent: MySQL evaluates SET left to right, so
+-- prev_refresh_hash takes the old value only because it is assigned before
+-- refresh_hash is overwritten.
+-- name: RotateSessionByHash :execresult
 UPDATE sessions
-SET refresh_hash = ?, expires_at = ?, last_used_at = NOW(3)
-WHERE id = ?;
+SET prev_refresh_hash = refresh_hash,
+    refresh_hash = ?,
+    expires_at = ?,
+    rotated_at = NOW(3),
+    last_used_at = NOW(3)
+WHERE refresh_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+  AND expires_at > NOW(3);
+
+-- GetSessionByPrevRefreshHash finds the session a spent refresh token used to
+-- belong to. Matching here is the only evidence that a token which opens no
+-- session was ever real, which is what separates a replay from a guess.
+-- name: GetSessionByPrevRefreshHash :one
+SELECT * FROM sessions
+WHERE prev_refresh_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE;
 
 -- name: RevokeSession :exec
 UPDATE sessions SET revoked_at = NOW(3) WHERE id = ?;
