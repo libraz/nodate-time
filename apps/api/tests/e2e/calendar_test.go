@@ -67,6 +67,103 @@ func TestCalendarLifecycle(t *testing.T) {
 	require.Len(t, cals3, 1)
 }
 
+// calendarBody is the shape every calendar response is read through here: the
+// caller's own standing on the calendar travels with it, so a client never has
+// to work out its own role from the member list -- which meant recognising the
+// signed-in account by its address.
+type calendarBody struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	MemberColor  string `json:"memberColor"`
+	PublicShared bool   `json:"publicShared"`
+}
+
+func TestCalendarListReportsTheCallersOwnRole(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	viewer := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "viewer"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", viewer.AccessToken, nil, nil)
+
+	// The same calendar, listed by two people, reports two different roles.
+	var ownerList []calendarBody
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", owner.AccessToken, nil, &ownerList)
+	require.Len(t, ownerList, 1)
+	require.Equal(t, owner.CalendarID, ownerList[0].ID)
+	require.Equal(t, "owner", ownerList[0].Role)
+	require.Equal(t, owner.CalendarColor, ownerList[0].MemberColor)
+
+	var viewerList []calendarBody
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", viewer.AccessToken, nil, &viewerList)
+	shared, ok := findCalendar(viewerList, owner.CalendarID)
+	require.True(t, ok, "the invited calendar must appear in the viewer's list")
+	require.Equal(t, "viewer", shared.Role)
+	// Their own calendar is still theirs to run: one membership says nothing
+	// about the next.
+	own, ok := findCalendar(viewerList, viewer.CalendarID)
+	require.True(t, ok)
+	require.Equal(t, "owner", own.Role)
+
+	// Fetching the calendar on its own answers the same question.
+	var single calendarBody
+	helpers.DoJSON(t, http.MethodGet, calURL, viewer.AccessToken, nil, &single)
+	require.Equal(t, "viewer", single.Role)
+
+	// So does creating one: the creator owns what they just made.
+	var created calendarBody
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars", viewer.AccessToken,
+		map[string]any{"name": "新規", "color": "#B38BDC"}, &created)
+	require.Equal(t, "owner", created.Role)
+	require.Equal(t, "#B38BDC", created.MemberColor)
+}
+
+func TestRenamingAPubliclySharedCalendarKeepsItShared(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var publicInvite struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
+		map[string]any{"role": "viewer", "isPublic": true}, &publicInvite)
+	require.NotEmpty(t, publicInvite.Token)
+
+	var before calendarBody
+	helpers.DoJSON(t, http.MethodGet, calURL, tt.AccessToken, nil, &before)
+	require.True(t, before.PublicShared)
+
+	// A rename says nothing about who the calendar is shared with, so the
+	// response must not report it as no longer shared.
+	var renamed calendarBody
+	helpers.DoJSON(t, http.MethodPut, calURL, tt.AccessToken,
+		map[string]any{"name": "改名後"}, &renamed)
+	require.Equal(t, "改名後", renamed.Name)
+	require.True(t, renamed.PublicShared, "renaming must not take the calendar off the internet")
+	require.Equal(t, "owner", renamed.Role)
+}
+
+// findCalendar picks a calendar out of a listing by its public id.
+func findCalendar(list []calendarBody, id string) (calendarBody, bool) {
+	for _, c := range list {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return calendarBody{}, false
+}
+
 func TestCalendarMembers(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()

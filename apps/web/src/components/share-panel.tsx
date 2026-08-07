@@ -7,12 +7,10 @@ import {
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
   type Role,
-  roleForCalendar,
   roleLabelKey,
 } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import {
@@ -35,18 +33,11 @@ export function SharePanel() {
   );
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
-  const me = useAuthStore((s) => s.user);
 
   // Inviting requires admin; only offer calendars the user administers and is viewing.
   const adminCalendars = useMemo(
-    () =>
-      calendars.filter(
-        (c) =>
-          activeCalendarIds.includes(c.id) &&
-          canManage(roleForCalendar(membersMap[c.id], me?.email)),
-      ),
-    [calendars, activeCalendarIds, membersMap, me?.email],
+    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canManage(c.role)),
+    [calendars, activeCalendarIds],
   );
 
   const [targetId, setTargetId] = useState('');

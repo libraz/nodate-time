@@ -22,10 +22,12 @@ export function MembersPanel() {
   const calendarId = activeCalendarIds[0] ?? calendars[0]?.id ?? '';
   const calendar = calendars.find((c) => c.id === calendarId);
   const members = (calendarId && membersMap[calendarId]) || [];
-  const myMembership = members.find((m) => m.email === me?.email);
-  const canManageMembers = canManage(myMembership?.role);
-  const amOwner = canOwn(myMembership?.role);
-  const roleOptions = assignableRoles(myMembership?.role);
+  // The calendar carries the caller's own role, so what the panel may offer
+  // does not wait on the member list it is about to render.
+  const myRole = calendar?.role;
+  const canManageMembers = canManage(myRole);
+  const amOwner = canOwn(myRole);
+  const roleOptions = assignableRoles(myRole);
   const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   useEffect(() => {
@@ -133,7 +135,7 @@ export function MembersPanel() {
           ) : (
             <ul className="divide-y divide-[var(--color-separator)]">
               {members.map((m) => {
-                const isMe = m.email === me?.email;
+                const isMe = m.id === me?.id;
                 const lastOwner = m.role === 'owner' && ownerCount <= 1;
                 // Touching an owner is the owner's own business, so a manager
                 // sees the row but not the controls.

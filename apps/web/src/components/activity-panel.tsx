@@ -4,9 +4,7 @@ import { type TranslationKey, useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
-import { roleForCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
-import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -54,18 +52,13 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
   const locale = useUiStore((s) => s.locale);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
-  const me = useAuthStore((s) => s.user);
 
-  // Only calendars the user is a member of and is currently viewing.
+  // Only calendars the user is currently viewing. The list the server returns
+  // is already scoped to the ones they are a member of, so being in it is the
+  // membership -- there is nothing further to check.
   const memberCalendars = useMemo(
-    () =>
-      calendars.filter(
-        (c) =>
-          activeCalendarIds.includes(c.id) &&
-          roleForCalendar(membersMap[c.id], me?.email) !== undefined,
-      ),
-    [calendars, activeCalendarIds, membersMap, me?.email],
+    () => calendars.filter((c) => activeCalendarIds.includes(c.id)),
+    [calendars, activeCalendarIds],
   );
 
   const [targetId, setTargetId] = useState('');

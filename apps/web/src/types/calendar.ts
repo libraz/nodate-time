@@ -6,6 +6,12 @@ export interface Calendar {
   createdAt: string;
   /** True when an active public (read-only embed) link exposes this calendar externally. */
   publicShared: boolean;
+  /** The signed-in user's own role on this calendar, as the server resolved
+   *  it to answer the request. */
+  role: string;
+  /** The colour the signed-in user's own layer is drawn in here. Carried by
+   *  the membership rather than by the calendar. */
+  memberColor: string;
 }
 
 export interface Member {

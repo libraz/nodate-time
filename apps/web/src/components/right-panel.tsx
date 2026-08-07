@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { MemoDialog } from '@/components/memo-dialog';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
-import { canEdit, roleForCalendar } from '@/lib/permissions';
+import { canEdit } from '@/lib/permissions';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
@@ -141,19 +141,13 @@ export function MemoSection() {
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
-  const me = useAuthStore((s) => s.user);
   const [targetId, setTargetId] = useState('');
   const [dialog, setDialog] = useState<MemoDialogState>(null);
 
   // Calendars the user can post a memo to: active in the sidebar and editable.
   const postableCalendars = useMemo(
-    () =>
-      calendars.filter(
-        (c) =>
-          activeCalendarIds.includes(c.id) && canEdit(roleForCalendar(membersMap[c.id], me?.email)),
-      ),
-    [calendars, activeCalendarIds, membersMap, me?.email],
+    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canEdit(c.role)),
+    [calendars, activeCalendarIds],
   );
 
   // Fall back to the first postable calendar when the chosen target is gone.
@@ -234,7 +228,7 @@ export function MemoSection() {
         ) : (
           visibleMemos.map((memo) => {
             const memoCal = calendarById.get(memo.calendarId);
-            const memoEditable = canEdit(roleForCalendar(membersMap[memo.calendarId], me?.email));
+            const memoEditable = canEdit(memoCal?.role);
             const rowContent = (
               <>
                 <button

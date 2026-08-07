@@ -59,14 +59,28 @@ func nullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }
 
-func mapCalendar(c generated.Calendar) CalendarResponse {
+// mapCalendar renders a calendar together with the requesting user's own
+// standing on it. The role and the member colour come from the membership
+// that was resolved to reach the calendar in the first place, so every
+// response carries the answer the client would otherwise have to reconstruct.
+func mapCalendar(c generated.Calendar, role generated.CalendarMembersRole, memberColor string) CalendarResponse {
 	return CalendarResponse{
-		ID:        pubIDToHex(c.PublicID),
-		Name:      c.Name,
-		Color:     c.Color,
-		CoverURL:  nullStringValue(c.CoverURL),
-		CreatedAt: c.CreatedAt,
+		ID:          pubIDToHex(c.PublicID),
+		Name:        c.Name,
+		Color:       c.Color,
+		CoverURL:    nullStringValue(c.CoverURL),
+		CreatedAt:   c.CreatedAt,
+		Role:        string(role),
+		MemberColor: memberColor,
 	}
+}
+
+// publicShared reports whether the calendar currently exposes an active
+// public link. A response that leaves it out reads as "not shared", so every
+// calendar body answers the question rather than defaulting it.
+func publicShared(ctx context.Context, deps Deps, calendarID uint32) bool {
+	cnt, err := deps.Queries.CountActivePublicInvites(ctx, calendarID)
+	return err == nil && cnt > 0
 }
 
 // resolveCalendar converts public UUID to internal calendar row + verifies membership.
@@ -79,8 +93,11 @@ func resolveCalendar(ctx context.Context, deps Deps, calendarPubID string, userI
 // resolving for read and then checking the role separately -- two steps that
 // could drift apart, which is exactly how an authorization check goes
 // missing.
-func resolveCalendarManage(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, error) {
-	return calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
+//
+// It returns the caller's membership alongside the calendar, so a handler
+// that reports the caller's own role back does not have to look it up again.
+func resolveCalendarManage(ctx context.Context, deps Deps, calendarPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
+	return calresolve.ManageMember(ctx, deps.Queries, deps.WorkspaceID, calendarPubID, userID)
 }
 
 // resolveCalendarOwn resolves the calendar and admits only its owner, for the
@@ -122,15 +139,16 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 
 		out := &ListCalendarsOutput{Body: make([]CalendarResponse, 0, len(rows))}
 		for _, c := range rows {
-			resp := CalendarResponse{
-				ID:        pubIDToHex(c.PublicID),
-				Name:      c.Name,
-				Color:     c.Color,
-				CoverURL:  nullStringValue(c.CoverURL),
-				CreatedAt: c.CreatedAt,
-			}
-			resp.PublicShared = publicSet[c.ID]
-			out.Body = append(out.Body, resp)
+			out.Body = append(out.Body, CalendarResponse{
+				ID:           pubIDToHex(c.PublicID),
+				Name:         c.Name,
+				Color:        c.Color,
+				CoverURL:     nullStringValue(c.CoverURL),
+				CreatedAt:    c.CreatedAt,
+				PublicShared: publicSet[c.ID],
+				Role:         string(c.MemberRole),
+				MemberColor:  c.MemberColor,
+			})
 		}
 		return out, nil
 	}
@@ -139,14 +157,12 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalendarOutput, error) {
 	return func(ctx context.Context, in *GetCalendarInput) (*GetCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, member, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		resp := mapCalendar(cal)
-		if cnt, err := deps.Queries.CountActivePublicInvites(ctx, cal.ID); err == nil {
-			resp.PublicShared = cnt > 0
-		}
+		resp := mapCalendar(cal, member.Role, member.MemberColor)
+		resp.PublicShared = publicShared(ctx, deps, cal.ID)
 		return &GetCalendarOutput{Body: resp}, nil
 	}
 }
@@ -220,14 +236,19 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		return &CreateCalendarOutput{Body: mapCalendar(created)}, nil
+		// The creator owns the calendar, in the colour it was just created
+		// with. Nothing has had the chance to share it yet, so publicShared
+		// is false by construction rather than by omission.
+		return &CreateCalendarOutput{
+			Body: mapCalendar(created, generated.CalendarMembersRoleOwner, color),
+		}, nil
 	}
 }
 
 func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 	return func(ctx context.Context, in *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		cal, member, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -275,7 +296,13 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		return &UpdateCalendarOutput{Body: mapCalendar(updated)}, nil
+		// A rename says nothing about who the calendar is shared with, so the
+		// share state is read rather than left at its zero value: a client
+		// that merges this response over the one it holds would otherwise take
+		// the omission for a calendar that had stopped being shared.
+		resp := mapCalendar(updated, member.Role, member.MemberColor)
+		resp.PublicShared = publicShared(ctx, deps, cal.ID)
+		return &UpdateCalendarOutput{Body: resp}, nil
 	}
 }
 

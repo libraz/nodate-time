@@ -86,14 +86,23 @@ func Write(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID 
 // Manage admits manager and owner, who may change membership and calendar
 // settings rather than just its contents.
 func Manage(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
+	cal, _, err := ManageMember(ctx, q, workspaceID, calendarPublicID, userID)
+	return cal, err
+}
+
+// ManageMember is Manage, handing back the caller's membership as well, for
+// handlers that report the caller's own standing on the calendar in their
+// response. The check stays here rather than at the call site so asking for
+// the role does not cost the caller the gate that comes with it.
+func ManageMember(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	cal, member, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
 	if err != nil {
-		return generated.Calendar{}, err
+		return generated.Calendar{}, generated.CalendarMember{}, err
 	}
 	if !CanManage(member.Role) {
-		return generated.Calendar{}, apierrors.CalendarRoleRequired
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarRoleRequired
 	}
-	return cal, nil
+	return cal, member, nil
 }
 
 // Own admits only the owner. Managing a calendar and owning it are not the

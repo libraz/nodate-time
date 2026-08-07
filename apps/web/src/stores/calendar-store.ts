@@ -54,9 +54,9 @@ interface CalendarState {
    */
   loadError: string | null;
   /**
-   * Calendars whose member list failed to load, by id. Their entries in
-   * `membersMap` are absent, so every permission check on them answers "no";
-   * this is what says that answer is a missing reply rather than a role.
+   * Calendars whose member list failed to load, by id. The list is what names
+   * the people an event can be assigned to, so its absence is reported rather
+   * than shown as a calendar nobody is on.
    */
   memberErrors: Record<string, string>;
 
@@ -183,16 +183,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ calendars: cals, activeCalendarIds: ids });
       saveJson('activeCalendarIds', ids);
 
-      // fetchMembers records its own failures rather than rejecting: a
-      // calendar whose members did not arrive is reported once, by the banner
-      // that offers to fetch them again, instead of by a toast per calendar
-      // that scrolls away and leaves nothing to act on.
-      await Promise.all(cals.map((c) => get().fetchMembers(c.id)));
-      if (
-        requestGeneration !== calendarRequestGeneration ||
-        currentAccountGeneration !== accountGeneration
-      )
-        return;
+      // Member lists are not fetched here. They are only needed where members
+      // are shown -- the member panel and the participant picker -- and each
+      // of those asks for the one calendar it is showing. Loading all of them
+      // at startup cost one request per calendar for an answer that arrived
+      // with the list itself.
       const first = cals[0];
       if (first && get().labels.length === 0) {
         try {

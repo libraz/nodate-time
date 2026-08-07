@@ -11,6 +11,15 @@ type CalendarResponse struct {
 	// PublicShared is true when an active public (read-only embed) link exists,
 	// so the UI can flag the calendar as externally exposed.
 	PublicShared bool `json:"publicShared"`
+	// Role is the requesting user's own role on this calendar. It is what
+	// decides which actions the client may offer, and it is reported here
+	// because the calendar is never reached without resolving it -- a client
+	// that had to work it out from the member list would be re-deriving an
+	// answer the server already has.
+	Role string `json:"role" enum:"owner,manager,editor,viewer"`
+	// MemberColor is the colour the requesting user's own layer is drawn in on
+	// this calendar. It belongs to the membership, not to the calendar.
+	MemberColor string `json:"memberColor"`
 }
 
 type MemberResponse struct {
