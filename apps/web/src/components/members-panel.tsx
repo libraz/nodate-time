@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Avatar } from '@/components/avatar';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
@@ -148,13 +149,7 @@ export function MembersPanel() {
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     {canManageMembers || isMe ? (
                       <label className="relative shrink-0" aria-label={t('members.color')}>
-                        <span
-                          aria-hidden
-                          className="flex h-9 w-9 items-center justify-center rounded-full text-default font-bold text-white"
-                          style={{ backgroundColor: m.color }}
-                        >
-                          {m.name.slice(0, 1)}
-                        </span>
+                        <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
                         <input
                           type="color"
                           value={m.color}
@@ -164,13 +159,7 @@ export function MembersPanel() {
                         />
                       </label>
                     ) : (
-                      <span
-                        aria-hidden
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
-                        style={{ backgroundColor: m.color }}
-                      >
-                        {m.name.slice(0, 1)}
-                      </span>
+                      <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">

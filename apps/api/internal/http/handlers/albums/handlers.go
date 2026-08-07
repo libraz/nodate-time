@@ -15,6 +15,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -60,13 +61,6 @@ func toAPIError(err error) error {
 		return apierrors.ToHuma(spec)
 	}
 	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
-func nullStringValue(n sql.NullString) string {
-	if !n.Valid {
-		return ""
-	}
-	return n.String
 }
 
 func pubIDToHex(b []byte) string {
@@ -174,54 +168,50 @@ func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUpl
 	if err != nil {
 		return AlbumUploader{ID: ""}
 	}
-	resp := AlbumUploader{ID: pubIDToHex(u.PublicID), Name: u.DisplayName}
-	if deps.Storage != nil && u.AvatarStorageObjectID.Valid {
-		if obj, oerr := deps.Queries.GetStorageObjectByID(ctx, uint32(u.AvatarStorageObjectID.Int32)); oerr == nil {
-			if url, perr := deps.Storage.PresignGet(ctx, obj.StorageKey, imageTTL); perr == nil {
-				resp.AvatarURL = url
-				return resp
-			}
-		}
+	return AlbumUploader{
+		ID:        pubIDToHex(u.PublicID),
+		Name:      u.DisplayName,
+		AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u),
 	}
-	resp.AvatarURL = nullStringValue(u.AvatarURL)
-	return resp
 }
 
 type albumPhotoListRow struct {
-	id                uint32
-	publicID          []byte
-	caption           string
-	contentType       string
-	byteSize          uint64
-	width             sql.NullInt32
-	height            sql.NullInt32
-	storageKey        string
-	takenAt           time.Time
-	createdAt         time.Time
-	uploaderPublicID  []byte
-	uploaderName      string
-	uploaderAvatarURL sql.NullString
-	eventPublicID     sql.NullString
+	id                       uint32
+	publicID                 []byte
+	caption                  string
+	contentType              string
+	byteSize                 uint64
+	width                    sql.NullInt32
+	height                   sql.NullInt32
+	storageKey               string
+	takenAt                  time.Time
+	createdAt                time.Time
+	uploaderPublicID         []byte
+	uploaderName             string
+	uploaderAvatarURL        sql.NullString
+	uploaderAvatarStorageKey sql.NullString
+	eventPublicID            sql.NullString
 }
 
 func firstPagePhotoRows(rows []generated.ListAlbumPhotosFirstPageRow) []albumPhotoListRow {
 	out := make([]albumPhotoListRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, albumPhotoListRow{
-			id:                r.ID,
-			publicID:          r.PublicID,
-			caption:           r.Caption,
-			contentType:       r.ContentType,
-			byteSize:          r.ByteSize,
-			width:             r.Width,
-			height:            r.Height,
-			storageKey:        r.StorageKey,
-			takenAt:           r.TakenAt,
-			createdAt:         r.CreatedAt,
-			uploaderPublicID:  r.UploaderPublicID,
-			uploaderName:      r.UploaderDisplayName,
-			uploaderAvatarURL: r.UploaderAvatarURL,
-			eventPublicID:     r.EventPublicID,
+			id:                       r.ID,
+			publicID:                 r.PublicID,
+			caption:                  r.Caption,
+			contentType:              r.ContentType,
+			byteSize:                 r.ByteSize,
+			width:                    r.Width,
+			height:                   r.Height,
+			storageKey:               r.StorageKey,
+			takenAt:                  r.TakenAt,
+			createdAt:                r.CreatedAt,
+			uploaderPublicID:         r.UploaderPublicID,
+			uploaderName:             r.UploaderDisplayName,
+			uploaderAvatarURL:        r.UploaderAvatarURL,
+			uploaderAvatarStorageKey: r.UploaderAvatarStorageKey,
+			eventPublicID:            r.EventPublicID,
 		})
 	}
 	return out
@@ -231,26 +221,27 @@ func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoLi
 	out := make([]albumPhotoListRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, albumPhotoListRow{
-			id:                r.ID,
-			publicID:          r.PublicID,
-			caption:           r.Caption,
-			contentType:       r.ContentType,
-			byteSize:          r.ByteSize,
-			width:             r.Width,
-			height:            r.Height,
-			storageKey:        r.StorageKey,
-			takenAt:           r.TakenAt,
-			createdAt:         r.CreatedAt,
-			uploaderPublicID:  r.UploaderPublicID,
-			uploaderName:      r.UploaderDisplayName,
-			uploaderAvatarURL: r.UploaderAvatarURL,
-			eventPublicID:     r.EventPublicID,
+			id:                       r.ID,
+			publicID:                 r.PublicID,
+			caption:                  r.Caption,
+			contentType:              r.ContentType,
+			byteSize:                 r.ByteSize,
+			width:                    r.Width,
+			height:                   r.Height,
+			storageKey:               r.StorageKey,
+			takenAt:                  r.TakenAt,
+			createdAt:                r.CreatedAt,
+			uploaderPublicID:         r.UploaderPublicID,
+			uploaderName:             r.UploaderDisplayName,
+			uploaderAvatarURL:        r.UploaderAvatarURL,
+			uploaderAvatarStorageKey: r.UploaderAvatarStorageKey,
+			eventPublicID:            r.EventPublicID,
 		})
 	}
 	return out
 }
 
-func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albumPhotoListRow, avatarURLs map[string]string) AlbumPhotoResponse {
+func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albumPhotoListRow, av *avatars.Resolver) AlbumPhotoResponse {
 	resp := AlbumPhotoResponse{
 		ID:          pubIDToHex(p.publicID),
 		CalendarID:  pubIDToHex(cal.PublicID),
@@ -259,7 +250,11 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		ByteSize:    int64(p.byteSize),
 		TakenAt:     p.takenAt,
 		CreatedAt:   p.createdAt,
-		UploadedBy:  AlbumUploader{ID: pubIDToHex(p.uploaderPublicID), Name: p.uploaderName},
+		UploadedBy: AlbumUploader{
+			ID:        pubIDToHex(p.uploaderPublicID),
+			Name:      p.uploaderName,
+			AvatarURL: av.FromKey(ctx, p.uploaderAvatarStorageKey, p.uploaderAvatarURL),
+		},
 	}
 	if p.eventPublicID.Valid {
 		resp.EventID = pubIDToHex([]byte(p.eventPublicID.String))
@@ -271,15 +266,6 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 	if p.height.Valid {
 		h := int(p.height.Int32)
 		resp.Height = &h
-	}
-	if deps.Storage != nil && p.uploaderAvatarURL.Valid && p.uploaderAvatarURL.String != "" {
-		key := p.uploaderAvatarURL.String
-		if cached, ok := avatarURLs[key]; ok {
-			resp.UploadedBy.AvatarURL = cached
-		} else if url, err := deps.Storage.PresignGet(ctx, key, imageTTL); err == nil {
-			avatarURLs[key] = url
-			resp.UploadedBy.AvatarURL = url
-		}
 	}
 	if deps.Storage != nil {
 		if url, err := deps.Storage.PresignGet(ctx, p.storageKey, imageTTL); err == nil {
@@ -393,9 +379,9 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		if hasMore {
 			photos = photos[:limit]
 		}
-		avatarURLs := make(map[string]string)
+		av := avatars.New(deps.Queries, deps.Storage)
 		for _, p := range photos {
-			out.Body.Items = append(out.Body.Items, mapListPhoto(ctx, deps, cal, p, avatarURLs))
+			out.Body.Items = append(out.Body.Items, mapListPhoto(ctx, deps, cal, p, av))
 		}
 		if hasMore && len(photos) > 0 {
 			last := photos[len(photos)-1]

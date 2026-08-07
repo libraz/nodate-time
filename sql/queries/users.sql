@@ -24,8 +24,12 @@ VALUES (?, ?, ?, ?, ?, ?);
 -- name: UpdateUser :exec
 UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ? WHERE id = ?;
 
+-- SetUserAvatarObject points the user at a picture they uploaded. The external
+-- URL is deliberately left where it is: the object is preferred while it
+-- exists, and the foreign key clears this column if the blob is ever swept, so
+-- the provider's picture is what the account falls back to rather than nothing.
 -- name: SetUserAvatarObject :exec
-UPDATE users SET avatar_storage_object_id = ?, avatar_url = NULL WHERE id = ?;
+UPDATE users SET avatar_storage_object_id = ? WHERE id = ?;
 
 -- name: ClearUserAvatar :exec
 UPDATE users SET avatar_storage_object_id = NULL, avatar_url = NULL WHERE id = ?;

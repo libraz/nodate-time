@@ -12,6 +12,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -385,6 +386,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 		}
 
 		out := &ListMembersOutput{Body: make([]MemberResponse, 0, len(rows))}
+		av := avatars.New(deps.Queries, deps.Storage)
 		for _, m := range rows {
 			// An address is shown to whoever administers the calendar and to
 			// its owner; to everyone else a member is a name and a colour.
@@ -396,7 +398,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 				ID:     pubIDToHex(m.UserPublicID),
 				Name:   m.UserDisplayName,
 				Email:  email,
-				Avatar: nullStringValue(m.UserAvatarURL),
+				Avatar: av.FromKey(ctx, m.UserAvatarStorageKey, m.UserAvatarURL),
 				Role:   string(m.Role),
 				Color:  m.MemberColor,
 			})
@@ -482,7 +484,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			ID:     pubIDToHex(target.PublicID),
 			Name:   target.DisplayName,
 			Email:  target.Email,
-			Avatar: nullStringValue(target.AvatarURL),
+			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:   in.Body.Role,
 			Color:  current.MemberColor,
 		}}, nil
@@ -538,7 +540,7 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 			ID:     pubIDToHex(target.PublicID),
 			Name:   target.DisplayName,
 			Email:  email,
-			Avatar: nullStringValue(target.AvatarURL),
+			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:   string(current.Role),
 			Color:  in.Body.Color,
 		}}, nil

@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Avatar } from '@/components/avatar';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
@@ -362,12 +363,7 @@ function CommentsSection({
           )}
           {comments.map((c) => (
             <div key={c.id} className="group flex gap-2">
-              <span
-                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-surface-inset)] text-default"
-                style={{ borderRadius: 'var(--radius-sm)' }}
-              >
-                {c.userAvatar || '\uD83D\uDC64'}
-              </span>
+              <Avatar src={c.userAvatar} name={c.userName} className="mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
                   <span className="text-body font-medium text-[var(--color-text-primary)]">
@@ -1416,25 +1412,16 @@ export function EventModal() {
             (m) => m.id === editingEvent.createdBy,
           );
           const name = editingEvent.creatorName || member?.name;
-          const avatarUrl = editingEvent.creatorAvatarUrl;
-          // There is no per-member emoji any more: a member is a name, a
-          // colour and possibly an uploaded picture. The initial stands in
-          // when there is no picture.
-          const icon = name?.slice(0, 1);
           if (!name) return null;
           return (
             <div className="flex items-center gap-2 px-6 pb-3 text-caption text-[var(--color-text-secondary)]">
               <span>{t('event.createdBy')}</span>
-              <span
-                className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden bg-[var(--color-surface-inset)] text-caption"
-                style={{ borderRadius: 'var(--radius-sm)' }}
-              >
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  (icon ?? name.slice(0, 1))
-                )}
-              </span>
+              <Avatar
+                src={editingEvent.creatorAvatarUrl}
+                name={name}
+                size="h-5 w-5"
+                className="text-caption"
+              />
               <span className="font-medium text-[var(--color-text-primary)]">{name}</span>
             </div>
           );

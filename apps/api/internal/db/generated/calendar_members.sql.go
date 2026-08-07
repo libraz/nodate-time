@@ -137,9 +137,11 @@ func (q *Queries) GetCalendarMemberForUpdate(ctx context.Context, arg GetCalenda
 
 const listCalendarMembers = `-- name: ListCalendarMembers :many
 SELECT cm.id, cm.public_id, cm.workspace_id, cm.calendar_id, cm.user_id, cm.role, cm.member_color, cm.invited_by_user_id, cm.sort_weight, cm.notes, cm.enabled, cm.updated_at, cm.created_at, u.public_id AS user_public_id, u.display_name AS user_display_name,
-       u.email AS user_email, u.avatar_url AS user_avatar_url
+       u.email AS user_email, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.created_at
 LIMIT ?
@@ -151,23 +153,24 @@ type ListCalendarMembersParams struct {
 }
 
 type ListCalendarMembersRow struct {
-	ID              uint32              `json:"id"`
-	PublicID        []byte              `json:"publicId"`
-	WorkspaceID     uint32              `json:"workspaceId"`
-	CalendarID      uint32              `json:"calendarId"`
-	UserID          uint32              `json:"userId"`
-	Role            CalendarMembersRole `json:"role"`
-	MemberColor     string              `json:"memberColor"`
-	InvitedByUserID sql.NullInt32       `json:"invitedByUserId"`
-	SortWeight      int32               `json:"sortWeight"`
-	Notes           sql.NullString      `json:"notes"`
-	Enabled         bool                `json:"enabled"`
-	UpdatedAt       sql.NullTime        `json:"updatedAt"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	UserPublicID    []byte              `json:"userPublicId"`
-	UserDisplayName string              `json:"userDisplayName"`
-	UserEmail       string              `json:"userEmail"`
-	UserAvatarURL   sql.NullString      `json:"userAvatarUrl"`
+	ID                   uint32              `json:"id"`
+	PublicID             []byte              `json:"publicId"`
+	WorkspaceID          uint32              `json:"workspaceId"`
+	CalendarID           uint32              `json:"calendarId"`
+	UserID               uint32              `json:"userId"`
+	Role                 CalendarMembersRole `json:"role"`
+	MemberColor          string              `json:"memberColor"`
+	InvitedByUserID      sql.NullInt32       `json:"invitedByUserId"`
+	SortWeight           int32               `json:"sortWeight"`
+	Notes                sql.NullString      `json:"notes"`
+	Enabled              bool                `json:"enabled"`
+	UpdatedAt            sql.NullTime        `json:"updatedAt"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	UserPublicID         []byte              `json:"userPublicId"`
+	UserDisplayName      string              `json:"userDisplayName"`
+	UserEmail            string              `json:"userEmail"`
+	UserAvatarURL        sql.NullString      `json:"userAvatarUrl"`
+	UserAvatarStorageKey sql.NullString      `json:"userAvatarStorageKey"`
 }
 
 // The LIMIT is a cap rather than a page. Membership is a list of people, and
@@ -175,6 +178,10 @@ type ListCalendarMembersRow struct {
 // colour legend -- wants all of them at once; paging it would mean a picker
 // that cannot offer somebody who is in the calendar. The cap is a ceiling on
 // what one response can cost, not a page size.
+//
+// The avatar object is joined in rather than looked up per member: a picture
+// is a URL only once it is signed, and asking for the key one member at a time
+// makes the sheet cost a query per person.
 func (q *Queries) ListCalendarMembers(ctx context.Context, arg ListCalendarMembersParams) ([]ListCalendarMembersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listCalendarMembers, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -202,6 +209,7 @@ func (q *Queries) ListCalendarMembers(ctx context.Context, arg ListCalendarMembe
 			&i.UserDisplayName,
 			&i.UserEmail,
 			&i.UserAvatarURL,
+			&i.UserAvatarStorageKey,
 		); err != nil {
 			return nil, err
 		}

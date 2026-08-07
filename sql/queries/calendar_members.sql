@@ -11,11 +11,17 @@ WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE FOR UPDATE;
 -- colour legend -- wants all of them at once; paging it would mean a picker
 -- that cannot offer somebody who is in the calendar. The cap is a ceiling on
 -- what one response can cost, not a page size.
+--
+-- The avatar object is joined in rather than looked up per member: a picture
+-- is a URL only once it is signed, and asking for the key one member at a time
+-- makes the sheet cost a query per person.
 -- name: ListCalendarMembers :many
 SELECT cm.*, u.public_id AS user_public_id, u.display_name AS user_display_name,
-       u.email AS user_email, u.avatar_url AS user_avatar_url
+       u.email AS user_email, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key
 FROM calendar_members cm
 INNER JOIN users u ON u.id = cm.user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.created_at
 LIMIT ?;

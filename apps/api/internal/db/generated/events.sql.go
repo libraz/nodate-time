@@ -76,9 +76,11 @@ func (q *Queries) GetEventIDByPublicID(ctx context.Context, arg GetEventIDByPubl
 const listEventsByCalendar = `-- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
-       u.avatar_url AS actor_avatar_url
+       u.avatar_url AS actor_avatar_url,
+       so.storage_key AS actor_avatar_storage_key
 FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
   AND (? = 0 OR e.id < ?)
@@ -94,14 +96,15 @@ type ListEventsByCalendarParams struct {
 }
 
 type ListEventsByCalendarRow struct {
-	ID               uint64          `json:"id"`
-	PublicID         []byte          `json:"publicId"`
-	Type             string          `json:"type"`
-	PayloadJSON      json.RawMessage `json:"payloadJson"`
-	OccurredAt       time.Time       `json:"occurredAt"`
-	ActorPublicID    sql.NullString  `json:"actorPublicId"`
-	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
-	ActorAvatarURL   sql.NullString  `json:"actorAvatarUrl"`
+	ID                    uint64          `json:"id"`
+	PublicID              []byte          `json:"publicId"`
+	Type                  string          `json:"type"`
+	PayloadJSON           json.RawMessage `json:"payloadJson"`
+	OccurredAt            time.Time       `json:"occurredAt"`
+	ActorPublicID         sql.NullString  `json:"actorPublicId"`
+	ActorDisplayName      sql.NullString  `json:"actorDisplayName"`
+	ActorAvatarURL        sql.NullString  `json:"actorAvatarUrl"`
+	ActorAvatarStorageKey sql.NullString  `json:"actorAvatarStorageKey"`
 }
 
 // ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
@@ -113,6 +116,10 @@ type ListEventsByCalendarRow struct {
 // GetEventIDByPublicID. The internal id is a single deployment-wide sequence,
 // so handing it out tells anyone holding two cursors how much the whole
 // instance wrote in between.
+//
+// The actor's avatar object is joined in with the row. A feed page is up to
+// two hundred entries and looking the key up per entry would be two hundred
+// reads for a handful of distinct people.
 func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCalendarParams) ([]ListEventsByCalendarRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventsByCalendar,
 		arg.WorkspaceID,
@@ -137,6 +144,7 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
 			&i.ActorAvatarURL,
+			&i.ActorAvatarStorageKey,
 		); err != nil {
 			return nil, err
 		}
@@ -154,9 +162,11 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 const listEventsBySubject = `-- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
-       u.avatar_url AS actor_avatar_url
+       u.avatar_url AS actor_avatar_url,
+       so.storage_key AS actor_avatar_storage_key
 FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
   AND e.subject_public_id = ?
@@ -172,14 +182,15 @@ type ListEventsBySubjectParams struct {
 }
 
 type ListEventsBySubjectRow struct {
-	ID               uint64          `json:"id"`
-	PublicID         []byte          `json:"publicId"`
-	Type             string          `json:"type"`
-	PayloadJSON      json.RawMessage `json:"payloadJson"`
-	OccurredAt       time.Time       `json:"occurredAt"`
-	ActorPublicID    sql.NullString  `json:"actorPublicId"`
-	ActorDisplayName sql.NullString  `json:"actorDisplayName"`
-	ActorAvatarURL   sql.NullString  `json:"actorAvatarUrl"`
+	ID                    uint64          `json:"id"`
+	PublicID              []byte          `json:"publicId"`
+	Type                  string          `json:"type"`
+	PayloadJSON           json.RawMessage `json:"payloadJson"`
+	OccurredAt            time.Time       `json:"occurredAt"`
+	ActorPublicID         sql.NullString  `json:"actorPublicId"`
+	ActorDisplayName      sql.NullString  `json:"actorDisplayName"`
+	ActorAvatarURL        sql.NullString  `json:"actorAvatarUrl"`
+	ActorAvatarStorageKey sql.NullString  `json:"actorAvatarStorageKey"`
 }
 
 // ListEventsBySubject is one entity's history: every log row whose payload
@@ -214,6 +225,7 @@ func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubje
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
 			&i.ActorAvatarURL,
+			&i.ActorAvatarStorageKey,
 		); err != nil {
 			return nil, err
 		}

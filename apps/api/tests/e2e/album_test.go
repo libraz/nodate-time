@@ -23,8 +23,9 @@ type albumPhotoResp struct {
 	ByteSize    int64  `json:"byteSize"`
 	ImageURL    string `json:"imageUrl"`
 	UploadedBy  struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatarUrl"`
 	} `json:"uploadedBy"`
 }
 

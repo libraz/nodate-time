@@ -20,12 +20,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 -- GetEventIDByPublicID. The internal id is a single deployment-wide sequence,
 -- so handing it out tells anyone holding two cursors how much the whole
 -- instance wrote in between.
+--
+-- The actor's avatar object is joined in with the row. A feed page is up to
+-- two hundred entries and looking the key up per entry would be two hundred
+-- reads for a handful of distinct people.
 -- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
-       u.avatar_url AS actor_avatar_url
+       u.avatar_url AS actor_avatar_url,
+       so.storage_key AS actor_avatar_storage_key
 FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
   AND (sqlc.arg(after_id) = 0 OR e.id < sqlc.arg(after_id))
@@ -55,9 +61,11 @@ WHERE workspace_id = ? AND calendar_id = ? AND public_id = ?;
 -- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
-       u.avatar_url AS actor_avatar_url
+       u.avatar_url AS actor_avatar_url,
+       so.storage_key AS actor_avatar_storage_key
 FROM events e
 LEFT JOIN users u ON u.id = e.actor_user_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE e.workspace_id = ?
   AND e.calendar_id = ?
   AND e.subject_public_id = sqlc.arg(subject_id)

@@ -10,21 +10,28 @@
 -- the history.
 --
 -- id closes the order, since two comments can land in the same millisecond.
+--
+-- Every one of these joins the author's avatar object, so a thread carries the
+-- key its pictures are signed from instead of costing a lookup per comment.
 
 -- name: ListEventCommentsLatest :many
 SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
 ORDER BY ec.created_at DESC, ec.id DESC
 LIMIT ?;
 
 -- name: ListEventCommentsBefore :many
 SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.workspace_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
   AND (
     ec.created_at < sqlc.arg(before_created_at)
@@ -39,16 +46,20 @@ VALUES (?, ?, ?, ?, ?);
 
 -- name: GetEventCommentByPublicID :one
 SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.public_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL;
 
 -- name: GetEventCommentByPublicIDAndEvent :one
 SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key,
        u.public_id AS user_public_id
 FROM calendar_event_comments ec
 INNER JOIN users u ON u.id = ec.author_id
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.public_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL;
 
 -- name: UpdateEventComment :exec

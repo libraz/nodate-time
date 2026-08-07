@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api } from '@/lib/api';
@@ -83,16 +84,7 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
             className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: activityColor(item.action) }}
           />
-          <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-[var(--color-surface-inset)] text-default"
-            style={{ borderRadius: 'var(--radius-sm)' }}
-          >
-            {item.actor?.avatarUrl ? (
-              <img src={item.actor.avatarUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              (item.actor?.icon ?? '👤')
-            )}
-          </span>
+          <Avatar src={item.actor?.avatarUrl} name={item.actor?.name ?? t('history.deletedUser')} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2">
               <span className="text-body font-medium text-[var(--color-text-primary)]">
