@@ -12,9 +12,9 @@ import { fallbackHolidayCountries, loadHolidayCountries, preloadHolidays } from 
  * return; one whose rows are memoised has to pass this revision down, or it
  * keeps drawing the month it first rendered, with no holidays on it.
  */
-export function useHolidayLoader(country: string | null, years: number[]): void {
+export function useHolidayLoader(country: string | null, years: number[]): number {
   const yearKey = useMemo(() => [...new Set(years)].sort((a, b) => a - b).join(','), [years]);
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
