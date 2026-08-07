@@ -1011,8 +1011,6 @@ type CalendarEvent struct {
 	Location sql.NullString `json:"location"`
 	// Free-form notes (markdown)
 	Memo sql.NullString `json:"memo"`
-	// Meeting link or related URL
-	URL sql.NullString `json:"url"`
 	// Event owner (whose color/layer). Only owner, managers, or can_edit attendees may edit
 	OwnerUserID uint32 `json:"ownerUserId"`
 	// Actual creator (may differ from owner for manager delegation)
@@ -1049,6 +1047,12 @@ type CalendarEvent struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+	// UID of the VEVENT this event was imported from, as the file gave it. NULL when the event was created here, when it is a recurrence override, or when the file UID exceeded the column.
+	SourceUid sql.NullString `json:"sourceUid"`
+	// source_uid while the row is live, NULL once it is soft-deleted. Exists solely to scope uniq_calendar_events_source_uid to rows the calendar still shows. Generated: never written directly.
+	SourceUidKey sql.NullString `json:"sourceUidKey"`
+	// Meeting link or related URL. utf8mb4 rather than latin1: an internationalised address (RFC 3987) carries non-ASCII directly.
+	URL sql.NullString `json:"url"`
 }
 
 // Calendar event file attachments

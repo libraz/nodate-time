@@ -139,13 +139,30 @@ UPDATE calendar_events
 SET updated_at = NOW(3)
 WHERE id = ?;
 
+-- source_uid is what the importing file called the event, and is NULL for an
+-- event created here. It is the only column on this insert that does not come
+-- from the caller's own intent, which is why it sits at the end rather than
+-- among the event's own fields.
 -- name: CreateCalendarEvent :execresult
 INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
   title, all_day, start_at, end_at, timezone, location, memo, url,
   owner_user_id, created_by_user_id, block_label, notification_offset,
-  recurrence_rule, recurrence_end
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  recurrence_rule, recurrence_end, source_uid
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- FindCalendarEventBySourceUID answers whether this calendar already holds the
+-- event a file is offering, so a second import of the same file can leave it
+-- alone instead of writing a second copy of everything in it.
+--
+-- Scoped to enabled rows to match uniq_calendar_events_source_uid, which is
+-- itself scoped to live rows through source_uid_key. An event deleted here is
+-- meant to be importable again, so a soft-deleted row must not answer this
+-- question -- reading it would make the deletion permanent in a way the user
+-- never asked for and cannot undo from the app.
+-- name: FindCalendarEventBySourceUID :one
+SELECT * FROM calendar_events
+WHERE calendar_id = ? AND source_uid = ? AND enabled = TRUE;
 
 -- name: UpdateCalendarEvent :exec
 UPDATE calendar_events

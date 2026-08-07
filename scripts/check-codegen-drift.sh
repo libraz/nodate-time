@@ -314,6 +314,13 @@ ALLOWED = {
     # database reads. This application is the writer; the query is here
     # because the log is a shared channel, not because a handler wants it.
     "ListEventsSince",
+
+    # Caller outstanding. The column and its uniqueness landed with the
+    # schema so the import could stop duplicating a re-uploaded file; the
+    # import itself has still to ask the question. Until it does, the
+    # constraint prevents a second copy but nothing reports the first one
+    # as already present.
+    "FindCalendarEventBySourceUID",
 }
 
 
