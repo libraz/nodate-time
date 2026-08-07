@@ -1,5 +1,6 @@
 import type { DateTime } from 'luxon';
 import { fromISOInZone } from '@/lib/date-utils';
+import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
 import type { CalendarEvent } from '@/types/calendar';
 
 export interface TimedLayout {
@@ -89,8 +90,11 @@ export function resizedEndForDaySegment(params: {
   const rawMin = ((params.clientY - params.colTop) / params.hourHeight) * 60;
   const snapped = Math.round(rawMin / params.snapMinutes) * params.snapMinutes;
   const eventStart = fromISOInZone(params.eventStartISO, params.zone);
-  const startOffset = eventStart.diff(params.dayStart, 'minutes').minutes;
+  // Wall-clock minutes, matching the rules the cursor is being dragged to. The
+  // elapsed-time form lands an hour away on a day that gains or loses one, and
+  // this is a write path: the wrong end time is what gets stored.
+  const startOffset = minutesIntoDay(eventStart, params.dayStart);
   const minEnd = Math.max(startOffset + params.minDurationMinutes, params.minDurationMinutes);
   const endMin = Math.min(Math.max(snapped, minEnd), 24 * 60);
-  return params.dayStart.plus({ minutes: endMin });
+  return atMinutesIntoDay(params.dayStart, endMin);
 }

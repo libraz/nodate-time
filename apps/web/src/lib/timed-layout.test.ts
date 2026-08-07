@@ -96,4 +96,41 @@ describe('resizedEndForDaySegment', () => {
 
     expect(end.toISO()).toContain('2026-04-20T22:30:00.000+09:00');
   });
+
+  // Dragging the bottom edge is a write path: the time this returns is the one
+  // that gets stored. On a day that loses an hour the elapsed-time form lands
+  // an hour early, so the event is saved ending somewhere the cursor never was.
+  it('ends where the cursor is on a day that springs forward', () => {
+    const zone = 'America/New_York';
+    const end = resizedEndForDaySegment({
+      eventStartISO: '2026-03-08T01:00:00-05:00',
+      dayStart: DateTime.fromISO('2026-03-08T00:00:00', { zone }),
+      // The 05:00 rule: the grid draws it five wall-clock hours down, because
+      // that is where its own label sits.
+      clientY: 5 * 48,
+      colTop: 0,
+      hourHeight: 48,
+      snapMinutes: 30,
+      minDurationMinutes: 30,
+      zone,
+    });
+
+    expect(end.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-03-08 05:00');
+  });
+
+  it('ends where the cursor is on a day that falls back', () => {
+    const zone = 'Europe/Berlin';
+    const end = resizedEndForDaySegment({
+      eventStartISO: '2026-10-25T01:00:00+02:00',
+      dayStart: DateTime.fromISO('2026-10-25T00:00:00', { zone }),
+      clientY: 5 * 48,
+      colTop: 0,
+      hourHeight: 48,
+      snapMinutes: 30,
+      minDurationMinutes: 30,
+      zone,
+    });
+
+    expect(end.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-10-25 05:00');
+  });
 });
