@@ -17,6 +17,7 @@ export function SearchPanel() {
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
+  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,7 +38,10 @@ export function SearchPanel() {
     return () => document.removeEventListener('keydown', handler);
   }, [showSearch, toggleSearch]);
 
-  const filtered = useMemo(() => filterEventsForSearch(events, searchQuery), [searchQuery, events]);
+  const filtered = useMemo(
+    () => filterEventsForSearch(events, activeCalendarIds, searchQuery),
+    [searchQuery, events, activeCalendarIds],
+  );
 
   const handleSelect = (eventId: string, startAt: string) => {
     const dt = fromISOInZone(startAt, timezone);

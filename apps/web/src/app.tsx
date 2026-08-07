@@ -10,6 +10,7 @@ import { RightSidebar } from '@/components/right-sidebar';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { fetchWindow, fromISOInZone } from '@/lib/date-utils';
+import { filterEventsForSearch } from '@/lib/search';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
@@ -58,6 +59,7 @@ function MobileSearchView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const events = useCalendarStore((s) => s.events);
+  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
@@ -70,15 +72,10 @@ function MobileSearchView() {
   }, []);
 
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!q) return [];
-    return events.filter(
-      (evt) =>
-        evt.title.toLowerCase().includes(q) ||
-        evt.location.toLowerCase().includes(q) ||
-        evt.memo.toLowerCase().includes(q),
-    );
-  }, [q, events]);
+  const filtered = useMemo(
+    () => filterEventsForSearch(events, activeCalendarIds, query),
+    [query, events, activeCalendarIds],
+  );
 
   const timezone = useUiStore((s) => s.timezone);
   const handleSelect = (eventId: string, startAt: string) => {
@@ -305,6 +302,17 @@ function MemoPanel() {
   );
 }
 
+/**
+ * How long the shown month has to hold still before its events are fetched.
+ *
+ * The mobile month view scrolls continuously, so a single flick walks through
+ * a dozen months the reader never stopped on -- each of which used to be a
+ * request the server ran to completion. Long enough to swallow a flick's
+ * worth of those, short enough that landing on a month fills it in without a
+ * wait anyone would notice as one.
+ */
+const MONTH_FETCH_DEBOUNCE_MS = 250;
+
 const TAB_ICONS: Record<MobileTab, React.ReactNode> = {
   calendar: (
     <svg
@@ -394,6 +402,7 @@ export function App() {
   const memberErrors = useCalendarStore((s) => s.memberErrors);
   const retryFailedLoads = useCalendarStore((s) => s.retryFailedLoads);
   const initDone = useRef(false);
+  const rangeLoaded = useRef(false);
   const eventModalLoaded = useRef(false);
   if (showEventModal) eventModalLoaded.current = true;
 
@@ -414,8 +423,26 @@ export function App() {
     // of density dots, and three months of events leaves nine of them blank
     // in a way that reads as a year with nothing planned.
     const { start, end } = fetchWindow(calendarView, currentMonth);
-    fetchEvents(start, end).catch(() => {});
-    fetchMemos().catch(() => {});
+    const controller = new AbortController();
+    const load = () => {
+      rangeLoaded.current = true;
+      fetchEvents(start, end, controller.signal).catch(() => {});
+      fetchMemos().catch(() => {});
+    };
+    // The first load has an empty grid behind it, so it goes now. Only the
+    // changes after it are worth waiting out.
+    if (!rangeLoaded.current) {
+      load();
+      return () => controller.abort();
+    }
+    const timer = setTimeout(load, MONTH_FETCH_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      // The scheduled request is cancelled by the timer; one already in
+      // flight is cancelled here, so a flick that begins mid-load does not
+      // leave the server finishing a month nobody is looking at.
+      controller.abort();
+    };
   }, [calendars, currentMonth, calendarView, fetchEvents, fetchMemos]);
 
   const membersFailed = Object.keys(memberErrors).length > 0;

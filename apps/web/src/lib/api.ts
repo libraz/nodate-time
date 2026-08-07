@@ -265,34 +265,54 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+/**
+ * Reports whether a rejection is a caller's own cancellation rather than a
+ * failure. A superseded request rejects like any other, and a caller that
+ * cannot tell the two apart shows the user an error for something the user
+ * did not do.
+ */
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError';
+}
+
 export const api = {
-  get: <T>(path: string, skipAuthRedirect = false) => request<T>(path, {}, skipAuthRedirect),
+  get: <T>(path: string, skipAuthRedirect = false, signal?: AbortSignal) =>
+    request<T>(path, { ...(signal ? { signal } : {}) }, skipAuthRedirect),
   /**
    * A GET that also reports the entity tag the server sent. An endpoint whose
    * updates are full replacements needs the caller to be able to say which
    * copy it is replacing, and that identity lives in the header rather than
    * in the body.
    */
-  getWithRevision: async <T>(path: string): Promise<{ data: T; revision: string | null }> => {
-    const res = await requestRaw(path, {});
+  getWithRevision: async <T>(
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ data: T; revision: string | null }> => {
+    const res = await requestRaw(path, { ...(signal ? { signal } : {}) });
     const revision = res.headers.get('ETag');
     return { data: (await res.json()) as T, revision };
   },
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', ...(body != null ? { body: JSON.stringify(body) } : {}) }),
-  put: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+  post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    request<T>(path, {
+      method: 'POST',
+      ...(body != null ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
+    }),
+  put: <T>(path: string, body?: unknown, headers?: Record<string, string>, signal?: AbortSignal) =>
     request<T>(path, {
       method: 'PUT',
       ...(headers ? { headers } : {}),
       ...(body != null ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
     }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  delete: <T>(path: string, signal?: AbortSignal) =>
+    request<T>(path, { method: 'DELETE', ...(signal ? { signal } : {}) }),
   /** Fetches a binary response through the central client (auth + 401 handling). */
-  getBlob: async (path: string): Promise<Blob> => {
+  getBlob: async (path: string, signal?: AbortSignal): Promise<Blob> => {
     const token = getToken();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}${path}`, { headers });
+    const res = await fetch(`${API_BASE}${path}`, { headers, ...(signal ? { signal } : {}) });
     if (!res.ok) {
       if (res.status === 401) {
         expireSession();

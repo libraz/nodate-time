@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, isAbortError } from '@/lib/api';
 import { fetchWindow } from '@/lib/date-utils';
 import { loadJson, saveJson } from '@/lib/storage';
 import { toast } from '@/lib/toast';
@@ -61,7 +61,12 @@ interface CalendarState {
   memberErrors: Record<string, string>;
 
   fetchCalendars: () => Promise<void>;
-  fetchEvents: (start: string, end: string) => Promise<void>;
+  /**
+   * Loads the events for a date range. A caller that can supersede its own
+   * request -- the month view, whose month changes as it scrolls -- passes a
+   * signal so the requests it has already moved past stop costing anything.
+   */
+  fetchEvents: (start: string, end: string, signal?: AbortSignal) => Promise<void>;
   fetchMemos: () => Promise<void>;
   fetchMembers: (calendarId: string) => Promise<void>;
   fetchLabels: (calendarId: string) => Promise<void>;
@@ -236,7 +241,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }
   },
 
-  async fetchEvents(start, end) {
+  async fetchEvents(start, end, signal) {
     const requestGeneration = ++eventRequestGeneration;
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
@@ -255,6 +260,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         const tz = encodeURIComponent(useUiStore.getState().timezone);
         const evts = await api.get<CalendarEvent[]>(
           `/calendars/${cal.id}/events?start=${start}&end=${end}&tz=${tz}`,
+          false,
+          signal,
         );
         answered.add(cal.id);
         for (const evt of evts) {
@@ -268,7 +275,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     )
       return;
     for (const result of results) {
-      if (result.status === 'rejected') toast.error(errorMessage(result.reason));
+      // A request the caller superseded is not a failure anyone should be
+      // told about. It stays out of `answered` either way, so the calendar
+      // keeps showing what it had rather than being blanked.
+      if (result.status === 'rejected' && !isAbortError(result.reason)) {
+        toast.error(errorMessage(result.reason));
+      }
     }
     const known = new Set(calendars.map((c) => c.id));
     set((s) => ({

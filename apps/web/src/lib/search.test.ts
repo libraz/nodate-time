@@ -29,6 +29,8 @@ function event(id: string, overrides: Partial<CalendarEvent> = {}): CalendarEven
   };
 }
 
+const shown = ['cal-1'];
+
 describe('filterEventsForSearch', () => {
   it('matches title, location, and memo case-insensitively', () => {
     const events = [
@@ -38,15 +40,27 @@ describe('filterEventsForSearch', () => {
       event('miss', { title: 'Lunch' }),
     ];
 
-    expect(filterEventsForSearch(events, 'rehearsal').map((e) => e.id)).toEqual(['title']);
-    expect(filterEventsForSearch(events, 'STUDIO').map((e) => e.id)).toEqual(['location']);
-    expect(filterEventsForSearch(events, 'script').map((e) => e.id)).toEqual(['memo']);
+    expect(filterEventsForSearch(events, shown, 'rehearsal').map((e) => e.id)).toEqual(['title']);
+    expect(filterEventsForSearch(events, shown, 'STUDIO').map((e) => e.id)).toEqual(['location']);
+    expect(filterEventsForSearch(events, shown, 'script').map((e) => e.id)).toEqual(['memo']);
   });
 
   it('trims queries and returns no results for blank input', () => {
     const events = [event('one', { title: 'Meeting' })];
 
-    expect(filterEventsForSearch(events, '  meet  ').map((e) => e.id)).toEqual(['one']);
-    expect(filterEventsForSearch(events, '   ')).toEqual([]);
+    expect(filterEventsForSearch(events, shown, '  meet  ').map((e) => e.id)).toEqual(['one']);
+    expect(filterEventsForSearch(events, shown, '   ')).toEqual([]);
+  });
+
+  it('leaves out calendars the reader has switched off', () => {
+    // Following a result from a hidden calendar lands on a day that does not
+    // draw it, so offering it at all is a dead end.
+    const events = [
+      event('shown', { calendarId: 'cal-1', title: 'Rehearsal' }),
+      event('hidden', { calendarId: 'cal-2', title: 'Rehearsal' }),
+    ];
+
+    expect(filterEventsForSearch(events, shown, 'rehearsal').map((e) => e.id)).toEqual(['shown']);
+    expect(filterEventsForSearch(events, [], 'rehearsal')).toEqual([]);
   });
 });
