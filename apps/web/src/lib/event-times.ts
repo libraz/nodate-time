@@ -16,6 +16,47 @@ export interface EventTimes {
 /** The wall-clock shape the editor's date and time fields hold. */
 const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm";
 
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * Where `dt` sits inside the day `dayStart` belongs to, as minutes on the wall
+ * clock, clamped to that day.
+ *
+ * A timeline draws 24 equal hours and labels them with wall-clock hours, so a
+ * position inside it is a wall-clock quantity. Elapsed time is a different
+ * measure: the day a zone springs forward is 23 hours long, so counting from
+ * midnight in elapsed milliseconds draws everything after the transition an
+ * hour above the hour line it is labelled with.
+ */
+export function minutesIntoDay(dt: DateTime, dayStart: DateTime): number {
+  const start = dayStart.startOf('day');
+  if (dt <= start) return 0;
+  if (dt >= start.plus({ days: 1 })) return MINUTES_PER_DAY;
+  // Read in the day's own zone: the hour is what the position is made of.
+  const local = dt.setZone(start.zone);
+  return local.hour * 60 + local.minute;
+}
+
+/**
+ * The instant `minutes` wall-clock minutes into the day `dayStart` belongs to.
+ *
+ * The inverse of {@link minutesIntoDay}, and what a click at a position on the
+ * timeline means. Adding the minutes to midnight as elapsed time instead lands
+ * an hour away from the slot that was clicked on a transition day, and that is
+ * the time the event is stored with.
+ */
+export function atMinutesIntoDay(dayStart: DateTime, minutes: number): DateTime {
+  const start = dayStart.startOf('day');
+  const clamped = Math.min(Math.max(minutes, 0), MINUTES_PER_DAY);
+  if (clamped === MINUTES_PER_DAY) return start.plus({ days: 1 });
+  return start.set({
+    hour: Math.floor(clamped / 60),
+    minute: clamped % 60,
+    second: 0,
+    millisecond: 0,
+  });
+}
+
 /**
  * Moves an event's start onto `newStartDate`, keeping the time of day and the
  * span to the end.

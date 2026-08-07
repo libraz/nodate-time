@@ -15,6 +15,7 @@ import {
   jsDayOfWeek,
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
+import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { layoutTimedEventsForDay, resizedEndForDaySegment } from '@/lib/timed-layout';
 import { useEventDrag } from '@/lib/use-event-drag';
@@ -78,9 +79,10 @@ export function WeeklyTimeline() {
       const rawMinutes = (offsetY / HOUR_HEIGHT) * 60;
       const snapped = Math.round(rawMinutes / SNAP_MINUTES) * SNAP_MINUTES;
       const clamped = Math.min(Math.max(snapped, 0), 23 * 60 + 30);
-      const newStart = DateTime.fromFormat(dayStr, 'yyyy-MM-dd', { zone: timezone })
-        .startOf('day')
-        .plus({ minutes: clamped });
+      const newStart = atMinutesIntoDay(
+        DateTime.fromFormat(dayStr, 'yyyy-MM-dd', { zone: timezone }),
+        clamped,
+      );
       requestUpdate(evt, buildMovedEvent(evt, newStart));
     },
     [timezone, requestUpdate],
@@ -118,7 +120,8 @@ export function WeeklyTimeline() {
         });
         return {
           end,
-          endMin: end.diff(dayStart, 'minutes').minutes,
+          // Where the preview is drawn, so on the same clock as the grid.
+          endMin: minutesIntoDay(end, dayStart),
         };
       };
       const onMove = (ev: globalThis.PointerEvent) => {
@@ -153,7 +156,7 @@ export function WeeklyTimeline() {
     const rawMinutes = (y / HOUR_HEIGHT) * 60;
     const snapped = Math.round(rawMinutes / SNAP_MINUTES) * SNAP_MINUTES;
     const clamped = Math.min(Math.max(snapped, 0), 23 * 60 + 30);
-    const start = day.startOf('day').plus({ minutes: clamped });
+    const start = atMinutesIntoDay(day, clamped);
     setSelectedDate(start);
     openEventModal(undefined, start);
   };
@@ -204,12 +207,8 @@ export function WeeklyTimeline() {
     return layouts;
   }, [days, timedEvents, timezone]);
 
-  /** Convert ISO string to pixel offset within the day column. */
-  const timeToY = (iso: string, dayStartMs: number): number => {
-    const ms = fromISOInZone(iso, timezone).toMillis() - dayStartMs;
-    const hours = ms / 3600000;
-    return Math.max(0, hours * HOUR_HEIGHT);
-  };
+  /** Pixel offset within the day column of a wall-clock minute of the day. */
+  const minutesToY = (minutes: number): number => (minutes / 60) * HOUR_HEIGHT;
 
   const now = DateTime.now().setZone(timezone);
   const nowMinutes = now.hour * 60 + now.minute;
@@ -305,7 +304,7 @@ export function WeeklyTimeline() {
           {days.map((day) => {
             const key = day.toFormat('yyyy-MM-dd');
             const dayLayouts = timedLayouts.get(key) ?? [];
-            const dayStartMs = day.startOf('day').toMillis();
+            const dayStart = day.startOf('day');
             const today = isToday(day, timezone);
 
             return (
@@ -347,25 +346,21 @@ export function WeeklyTimeline() {
 
                 {/* Timed event blocks */}
                 {dayLayouts.map(({ event: evt, leftPct, widthPct }) => {
-                  const evtStartMs = fromISOInZone(evt.startAt, timezone).toMillis();
-                  const evtEndMs = fromISOInZone(evt.endAt, timezone).toMillis();
-                  const clampedStart =
-                    DateTime.fromMillis(Math.max(evtStartMs, dayStartMs)).toISO() ?? evt.startAt;
-                  const clampedEnd =
-                    DateTime.fromMillis(Math.min(evtEndMs, dayStartMs + 86400000)).toISO() ??
-                    evt.endAt;
-                  const top = timeToY(clampedStart, dayStartMs);
-                  const baseHeight = Math.max(timeToY(clampedEnd, dayStartMs) - top, 20);
                   const startDt = fromISOInZone(evt.startAt, timezone);
                   const endDt = fromISOInZone(evt.endAt, timezone);
+                  // Clamped to this day, so a block that spans midnight fills
+                  // the column rather than running off it.
+                  const top = minutesToY(minutesIntoDay(startDt, dayStart));
+                  const baseHeight = Math.max(
+                    minutesToY(minutesIntoDay(endDt, dayStart)) - top,
+                    20,
+                  );
                   const resizing = resizePreview?.id === evt.id && resizePreview.dayKey === key;
                   const height = resizing
-                    ? Math.max((resizePreview.endMin * HOUR_HEIGHT) / 60 - top, 20)
+                    ? Math.max(minutesToY(resizePreview.endMin) - top, 20)
                     : baseHeight;
                   const endLabel = resizing
-                    ? DateTime.fromMillis(dayStartMs, { zone: timezone })
-                        .plus({ minutes: resizePreview.endMin })
-                        .toFormat('H:mm')
+                    ? atMinutesIntoDay(dayStart, resizePreview.endMin).toFormat('H:mm')
                     : endDt.toFormat('H:mm');
                   const movable = canMove(evt);
 
