@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
 import { ApiError, api, errorMessage } from '@/lib/api';
-import { HOLIDAY_COUNTRIES } from '@/lib/holidays';
+import { detectHolidayCountry } from '@/lib/holidays';
 import {
   assignableRoles,
   canManage as canManageRole,
@@ -16,6 +16,7 @@ import {
 import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useHolidayCountries } from '@/lib/use-holidays';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -650,7 +651,7 @@ function SegmentedControl<V extends string>({
   );
 }
 
-function AppearanceSection() {
+export function AppearanceSection() {
   const t = useT();
   const theme = useUiStore((s) => s.theme);
   const colorMode = useUiStore((s) => s.colorMode);
@@ -663,6 +664,9 @@ function AppearanceSection() {
   const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
 
   const detectedTz = useMemo(detectTimezone, []);
+  // Every country the bundled holiday data covers, named for the language in
+  // use. The list is long enough that the picker filters rather than scrolls.
+  const holidayCountries = useHolidayCountries(locale);
 
   // Language and timezone belong to the account: they decide what every date
   // on screen says, and a person reading the same calendar on a phone and a
@@ -736,7 +740,7 @@ function AppearanceSection() {
             <input
               type="checkbox"
               checked={holidaysCountry !== null}
-              onChange={(e) => setHolidaysCountry(e.target.checked ? 'JP' : null)}
+              onChange={(e) => setHolidaysCountry(e.target.checked ? detectHolidayCountry() : null)}
               className="peer sr-only"
             />
             <span
@@ -756,10 +760,8 @@ function AppearanceSection() {
               onChange={(v) => setHolidaysCountry(v)}
               className="w-full max-w-[420px]"
               triggerClassName="input-modern"
-              options={HOLIDAY_COUNTRIES.map((c) => ({
-                value: c.code,
-                label: locale === 'ja' ? c.nameJa : c.nameEn,
-              }))}
+              searchable
+              options={holidayCountries.map((c) => ({ value: c.code, label: c.name }))}
             />
           </FieldRow>
         )}

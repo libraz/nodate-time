@@ -69,14 +69,24 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-const uiState = { locale: 'ja', theme: 'light', weekStart: 0, timezone: 'Asia/Tokyo' };
+const uiState = {
+  locale: 'ja',
+  theme: 'light',
+  colorMode: 'light',
+  weekStart: 0,
+  timezone: 'Asia/Tokyo',
+  holidaysCountry: 'JP' as string | null,
+  setTheme: vi.fn(),
+  setColorMode: vi.fn(),
+  setHolidaysCountry: vi.fn(),
+};
 
 vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
 import { api } from '@/lib/api';
-import { AllowedEmailsSection, CalendarsSection } from './settings';
+import { AllowedEmailsSection, AppearanceSection, CalendarsSection } from './settings';
 
 const apiGet = vi.mocked(api.get);
 const apiPost = vi.mocked(api.post);
@@ -227,5 +237,46 @@ describe('AllowedEmailsSection', () => {
         reason: 'contractor until March',
       }),
     );
+  });
+});
+
+/**
+ * The holiday country picker offered ten of the two hundred-odd countries the
+ * bundled data covers, and switching holidays on gave everyone Japan.
+ */
+describe('AppearanceSection holidays', () => {
+  /**
+   * The picker offered ten of the countries the bundled data covers, and
+   * switching holidays on gave everyone Japan.
+   *
+   * The dropdown renders through a portal, so it is queried from the document
+   * rather than from the render container.
+   */
+  it('offers the countries the data covers, not the ten it used to', async () => {
+    uiState.holidaysCountry = 'JP';
+    render(<AppearanceSection />);
+
+    const field = screen.getByText('settings.holidaysCountry').closest('div')
+      ?.parentElement as HTMLElement;
+    fireEvent.click(within(field).getByRole('button'));
+
+    // The search box is the picker saying the list is long enough to need one.
+    expect(await screen.findByLabelText('common.search')).toBeTruthy();
+    // The full list arrives with a dynamically imported chunk.
+    await waitFor(() => expect(screen.getAllByRole('button').length).toBeGreaterThan(100), {
+      timeout: 5000,
+    });
+  });
+
+  it('turns holidays on for the country the browser implies', () => {
+    uiState.holidaysCountry = null;
+    const { container } = render(<AppearanceSection />);
+
+    const toggle = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(toggle);
+
+    // jsdom reports en-US, so anything but the old hardcoded 'JP' is the point.
+    expect(uiState.setHolidaysCountry).toHaveBeenCalledWith('US');
+    uiState.holidaysCountry = 'JP';
   });
 });
