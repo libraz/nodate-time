@@ -1,8 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
-import { DateTime } from 'luxon';
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
-import { formatMonthYear } from '@/lib/date-utils';
+import { formatMonthYear, nowInZone } from '@/lib/date-utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -18,6 +17,7 @@ export function CalendarHeader() {
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setShowMobileMenu = useUiStore((s) => s.setShowMobileMenu);
   const triggerScrollToToday = useUiStore((s) => s.triggerScrollToToday);
+  const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const navigate = useNavigate();
@@ -76,7 +76,7 @@ export function CalendarHeader() {
   }, [showViewMenu]);
 
   const handleGoToToday = () => {
-    const today = DateTime.now();
+    const today = nowInZone(timezone);
     setCurrentMonth(today.startOf('month'));
     setSelectedDate(today);
     // Mobile month view is an infinite scroll; signal it to scroll back to today.

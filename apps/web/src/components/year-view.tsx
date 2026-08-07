@@ -60,7 +60,7 @@ export function YearView() {
           const monthLabel = DateTime.local(currentMonth.year, m + 1, 1).toFormat(
             locale === 'ja' ? 'M月' : 'MMM',
           );
-          const monthHasToday = days.some((d) => d.month === m + 1 && isToday(d));
+          const monthHasToday = days.some((d) => d.month === m + 1 && isToday(d, timezone));
           return (
             <button
               type="button"
@@ -108,7 +108,7 @@ export function YearView() {
                   const isoDate = dt.toFormat('yyyy-MM-dd');
                   const count = eventCount.get(isoDate) ?? 0;
                   const holiday = getHoliday(holidaysCountry, isoDate);
-                  const today = isToday(dt);
+                  const today = isToday(dt, timezone);
                   const color =
                     holiday || dow === 0
                       ? 'var(--color-sunday)'

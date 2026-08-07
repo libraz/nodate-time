@@ -1,6 +1,7 @@
-import { DateTime } from 'luxon';
+import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isToday } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
 /* ============================================
@@ -195,7 +196,9 @@ function DatePickerDropdown({
         {emptySlots > 0 && <div style={{ gridColumn: `span ${emptySlots}` }} />}
         {calendarDays.map((day) => {
           const isSelected = day.hasSame(value, 'day');
-          const isToday = day.hasSame(DateTime.now(), 'day');
+          // The grid is built from `value`, so "today" has to be read in the
+          // same zone that value carries rather than the browser's.
+          const today = isToday(day, value.zoneName ?? undefined);
           const isDisabled = minDate ? day < minDate.startOf('day') : false;
           const dayOfWeek = day.weekday % 7;
           return (
@@ -217,9 +220,9 @@ function DatePickerDropdown({
                       : dayOfWeek === 6
                         ? 'var(--color-saturday)'
                         : 'var(--color-text-primary)',
-                fontWeight: isToday ? 700 : isSelected ? 600 : 400,
+                fontWeight: today ? 700 : isSelected ? 600 : 400,
                 opacity: isDisabled ? 0.3 : 1,
-                outline: isToday && !isSelected ? '2px solid var(--color-accent)' : 'none',
+                outline: today && !isSelected ? '2px solid var(--color-accent)' : 'none',
                 outlineOffset: '-2px',
               }}
             >

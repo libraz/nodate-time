@@ -11,7 +11,7 @@ import {
 } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { getHoliday } from '@/lib/holidays';
-import { canEditEvent, roleForCalendar } from '@/lib/permissions';
+import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -46,16 +46,15 @@ export function CalendarGrid() {
   const navigateMonth = useUiStore((s) => s.navigateMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const membersMap = useCalendarStore((s) => s.membersMap);
+  const calendars = useCalendarStore((s) => s.calendars);
   const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const touchStartRef = useRef({ x: 0, y: 0 });
 
   const canMove = useCallback(
-    (evt: CalendarEvent) =>
-      canEditEvent(evt, roleForCalendar(membersMap[evt.calendarId], me?.email), me?.id),
-    [membersMap, me],
+    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
+    [calendars, me],
   );
 
   // Multi-day bars live in an overlay outside the day cells, so the topmost
@@ -248,7 +247,7 @@ export function CalendarGrid() {
           return (
             <div key={weekKey} className="relative grid grid-cols-7">
               {week.map((dt, dIdx) => {
-                const today = isToday(dt);
+                const today = isToday(dt, timezone);
                 const inMonth = calendarView === 'week' || isCurrentMonth(dt);
                 const dow = jsDayOfWeek(dt);
                 const isoDate = dt.toFormat('yyyy-MM-dd');

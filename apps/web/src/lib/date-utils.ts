@@ -92,12 +92,28 @@ export function isSameDay(a: DateTime, b: DateTime): boolean {
   return a.hasSame(b, 'day');
 }
 
-export function isToday(date: DateTime): boolean {
-  return date.hasSame(DateTime.now(), 'day');
+/**
+ * True when `date` falls on today's date in `zone` (the local zone when `zone`
+ * is empty).
+ *
+ * Which day is "today" belongs to a zone, not to the machine: between midnight
+ * and 09:00 in Tokyo a browser running on UTC is still on the previous date, so
+ * reading the clock locally puts the today marker one cell off and sends the
+ * Today button to the neighbouring week.
+ */
+export function isToday(date: DateTime, zone?: string): boolean {
+  return date.hasSame(nowInZone(zone), 'day');
 }
 
-export function formatTime(iso: string): string {
-  return DateTime.fromISO(iso).toFormat('HH:mm');
+/** The current instant read in `zone` (the local zone when `zone` is empty). */
+export function nowInZone(zone?: string): DateTime {
+  const now = DateTime.now();
+  return zone && zone.length > 0 ? now.setZone(zone) : now;
+}
+
+/** Formats an ISO timestamp as `HH:mm` in `zone` (local when `zone` is empty). */
+export function formatTime(iso: string, zone?: string): string {
+  return fromISOInZone(iso, zone).toFormat('HH:mm');
 }
 
 /** Formats an ISO timestamp as a short relative time string (e.g. "5m ago" / "5分前"). */

@@ -118,8 +118,10 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			user.DisplayName, resetURL,
 		)
 		// The response is always {ok:true} regardless of delivery so the
-		// endpoint cannot be used to probe which emails exist. A delivery
-		// failure is logged (without the token) so operators can still notice.
+		// endpoint cannot be used to probe which emails exist. Delivery can
+		// finish after this handler returns, so an error here means the
+		// message was never accepted; either way it is logged (without the
+		// token) so operators can still notice.
 		if err := deps.Mailer.Send(ctx, mailer.Message{
 			To:      user.Email,
 			Subject: "Reset your Nodate Time password",
