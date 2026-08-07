@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
@@ -292,11 +295,43 @@ func sanitizeFilename(s string) string {
 	return r.Replace(s)
 }
 
+// forbiddenControl reports whether r is a character RFC 5545 does not allow
+// inside a value: every C0 control but HTAB, and DEL.
+//
+// A line break is left out of the set because a value may legally contain one
+// -- it is written as an escape rather than as a raw byte, and the escaping is
+// what keeps it inside the value. The rest are not text at all: a terminal
+// executes an escape sequence rather than showing it, so a title carrying one
+// runs a command in the shell of whoever reads the file.
+func forbiddenControl(r rune) bool {
+	return r == 0x7f || (r < 0x20 && r != '\t' && r != '\n')
+}
+
+// dropForbiddenControl removes those characters.
+//
+// They are dropped rather than costing the value or the event they arrived on:
+// nothing in a calendar means anything by them, and the same rule has to hold
+// on the way out, where the row is already stored and refusing it is not on
+// offer. One rule in both directions is also what keeps an import and the
+// export after it agreeing on what the event says.
+func dropForbiddenControl(s string) string {
+	if !strings.ContainsFunc(s, forbiddenControl) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if forbiddenControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func icsEscape(s string) string {
 	// Normalize all newline variants to a single \n before escaping so bare CR
 	// and CRLF do not leak raw control characters into the output.
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
+	s = dropForbiddenControl(s)
 	r := strings.NewReplacer(
 		"\\", `\\`,
 		";", `\;`,
@@ -313,7 +348,7 @@ func icsURI(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "")
 	s = strings.ReplaceAll(s, "\r", "")
 	s = strings.ReplaceAll(s, "\n", "")
-	return s
+	return dropForbiddenControl(s)
 }
 
 func icsTime(t time.Time) string {
@@ -572,9 +607,29 @@ func parseTriggerMinutes(value string, params []string) (int32, bool) {
 	return int32(d / time.Minute), true
 }
 
-// parseICSDuration parses the unsigned part of an RFC 5545 duration. Weeks are
-// accepted but cannot be combined with other units, which is what the grammar
-// says.
+// The units a duration may name, in the order the grammar puts them. Weeks
+// stand alone; the rest run from days down to seconds, each at most once.
+const (
+	durNoUnit = iota
+	durWeek
+	durDay
+	durHour
+	durMinute
+	durSecond
+)
+
+// maxICSDuration is the longest span a Duration can hold, which is what bounds
+// the arithmetic below.
+const maxICSDuration = time.Duration(1<<63 - 1)
+
+// parseICSDuration parses the unsigned part of an RFC 5545 duration.
+//
+// The grammar is followed rather than approximated: each unit appears at most
+// once, in order, weeks combine with nothing, and a value naming no unit at
+// all is not a duration. Adding up whatever units a malformed value happens to
+// carry would answer a file that asked for no reminder with one -- and a
+// reminder at the wrong time is worse than one the import says it did not
+// take.
 func parseICSDuration(s string) (time.Duration, bool) {
 	if !strings.HasPrefix(s, "P") {
 		return 0, false
@@ -583,13 +638,14 @@ func parseICSDuration(s string) (time.Duration, bool) {
 	var total time.Duration
 	inTime := false
 	num := ""
+	last := durNoUnit
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
 			num += string(r)
 			continue
 		}
 		if r == 'T' {
-			if num != "" {
+			if num != "" || inTime {
 				return 0, false
 			}
 			inTime = true
@@ -600,22 +656,39 @@ func parseICSDuration(s string) (time.Duration, bool) {
 			return 0, false
 		}
 		num = ""
+		var unit int
+		var size time.Duration
 		switch {
 		case r == 'W' && !inTime:
-			total += time.Duration(n) * 7 * 24 * time.Hour
+			unit, size = durWeek, 7*24*time.Hour
 		case r == 'D' && !inTime:
-			total += time.Duration(n) * 24 * time.Hour
+			unit, size = durDay, 24*time.Hour
 		case r == 'H' && inTime:
-			total += time.Duration(n) * time.Hour
+			unit, size = durHour, time.Hour
 		case r == 'M' && inTime:
-			total += time.Duration(n) * time.Minute
+			unit, size = durMinute, time.Minute
 		case r == 'S' && inTime:
-			total += time.Duration(n) * time.Second
+			unit, size = durSecond, time.Second
 		default:
 			return 0, false
 		}
+		if unit <= last || last == durWeek {
+			return 0, false
+		}
+		last = unit
+		// More than a duration can hold is refused rather than allowed to wrap
+		// round, which would land on some unrelated offset and read as an
+		// interval someone chose.
+		if time.Duration(n) > maxICSDuration/size {
+			return 0, false
+		}
+		part := time.Duration(n) * size
+		if total > maxICSDuration-part {
+			return 0, false
+		}
+		total += part
 	}
-	if num != "" {
+	if num != "" || last == durNoUnit {
 		return 0, false
 	}
 	return total, true
@@ -741,10 +814,34 @@ type ImportOutput struct {
 		Imported int `json:"imported"`
 		Skipped  int `json:"skipped"`
 		Failed   int `json:"failed"`
+		// Rejected is the part of Failed the file itself caused: a value the
+		// calendar cannot hold, however many times it is uploaded. It is
+		// counted inside Failed rather than beside it so the four outcomes
+		// still account for every event exactly once, and it exists because
+		// "failed" on its own invites a retry that can only fail again.
+		Rejected int `json:"rejected"`
+		// Duplicates is how many events the calendar already held, recognised
+		// by what the file called them. They are counted apart from Skipped,
+		// which means the parser could not use the event: a clean re-upload
+		// reporting "skipped: 40" reads as a failure to whoever just uploaded
+		// it, and "already here: 40" is the same fact the other way up.
+		Duplicates int `json:"duplicates"`
 		// Truncated is how many events past the per-file limit were never
 		// looked at. It is reported separately from Skipped because it is the
 		// one outcome the file itself cannot explain.
 		Truncated int `json:"truncated"`
+		// UnknownTimezones is how many imported events named a zone nothing
+		// here could resolve. Their wall clocks were read as UTC, which is the
+		// wrong instant for every zone that is not UTC. The events are on the
+		// calendar and only their times are wrong, which nobody checks -- so a
+		// fallback that says nothing is the defect, and one that reports
+		// itself is something its reader can go and look at.
+		UnknownTimezones int `json:"unknownTimezones"`
+		// Unreadable says the body held nothing this parser recognised as
+		// iCalendar. Without it, a file whose shape cannot be read answers
+		// exactly like a calendar that genuinely had no events in it: every
+		// counter zero, and no way to tell which happened.
+		Unreadable bool `json:"unreadable"`
 	}
 }
 
@@ -764,7 +861,13 @@ type rawEvent struct {
 	end    time.Time
 	allDay bool
 	tzid   string
-	rrule  string
+	// tzUnknown records that a dated property named a zone nothing here could
+	// resolve, so its wall clock was read as UTC. The event still imports --
+	// there is nothing better to do with it -- but the import says how many it
+	// placed that way, because the times are the only thing wrong and nobody
+	// checks those.
+	tzUnknown bool
+	rrule     string
 	// exdates are the occurrences the series cancels.
 	exdates []time.Time
 	// recurrenceID names the occurrence this entry replaces; when set the
@@ -777,12 +880,52 @@ type rawEvent struct {
 	alarmMinutes *int32
 }
 
+// noteUnknownZone records a TZID this server could not resolve. A property
+// with no TZID at all is a floating time rather than a zone that failed, so
+// there is nothing to report about it.
+func (e *rawEvent) noteUnknownZone(tzid string) {
+	if tzid == "" {
+		return
+	}
+	if _, ok := resolveTZID(tzid); !ok {
+		e.tzUnknown = true
+	}
+}
+
+// resolveTZID maps a TZID from a file onto an IANA zone name, which is the
+// only kind this server can look up. A Windows name -- what Outlook and
+// everything speaking to Exchange write -- is mapped onto its IANA equivalent
+// rather than being read as UTC.
+//
+// ok is false when the name means nothing here. The caller then reads the
+// value as UTC, which is the only fallback available and the wrong instant for
+// every zone that is not UTC, so the import counts how often it had to.
+func resolveTZID(tzid string) (string, bool) {
+	name := strings.Trim(strings.TrimSpace(tzid), `"`)
+	if name == "" {
+		return "", false
+	}
+	// "Local" resolves against whichever machine is running the server, which
+	// has nothing to do with the calendar the file came from.
+	if strings.EqualFold(name, "Local") {
+		return "", false
+	}
+	if _, err := time.LoadLocation(name); err == nil {
+		return name, true
+	}
+	if iana, ok := windowsZones[name]; ok {
+		return iana, true
+	}
+	return "", false
+}
+
 // parseICSTime parses a DTSTART/DTEND value. Wall-clock values carrying a TZID
 // are anchored in that zone; UTC values end in Z; floating values (no TZID, no
-// Z) are treated as UTC. An unknown TZID falls back to UTC.
+// Z) are treated as UTC. A TZID nothing can resolve falls back to UTC.
 func parseICSTime(value, tzid string, allDay bool) (time.Time, error) {
 	value = strings.TrimSpace(value)
-	loc := loadLocationOrUTC(tzid)
+	name, _ := resolveTZID(tzid)
+	loc := loadLocationOrUTC(name)
 	if allDay {
 		return time.ParseInLocation("20060102", value, loc)
 	}
@@ -794,9 +937,20 @@ func parseICSTime(value, tzid string, allDay bool) (time.Time, error) {
 
 func unfoldICS(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
+	// A file separated by bare CR is one long line otherwise, so no component
+	// in it is ever seen and the whole thing imports as nothing at all.
+	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.ReplaceAll(text, "\n ", "")
 	text = strings.ReplaceAll(text, "\n\t", "")
 	return text
+}
+
+// containsICSComponent reports whether the body holds a line this parser would
+// recognise as opening a component. A body with none imported nothing because
+// there was nothing in it to read, which is worth saying: every counter
+// reading zero is also what a calendar containing no events answers with.
+func containsICSComponent(text string) bool {
+	return strings.Contains(text, "BEGIN:VCALENDAR") || strings.Contains(text, "BEGIN:VEVENT")
 }
 
 func parseICS(text string) []rawEvent {
@@ -809,7 +963,10 @@ func parseICS(text string) []rawEvent {
 	// event as its memo, replacing whatever the file said the event was about.
 	inAlarm := false
 	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
+		// A byte order mark belongs at the head of the file, but some exporters
+		// write one against a component's first line, where it carries no text
+		// and keeps the line from matching anything.
+		line = strings.TrimPrefix(line, "\ufeff")
 		switch {
 		case line == "BEGIN:VEVENT":
 			cur = &rawEvent{}
@@ -844,7 +1001,11 @@ func parseICS(text string) []rawEvent {
 				continue
 			}
 			rawKey := line[:colon]
-			val := line[colon+1:]
+			// Whatever the file put in the value, what leaves this parser is
+			// text. A control character is not: it survives storage and the
+			// export writes it back out, handing the next reader a file whose
+			// title runs a command in their terminal.
+			val := dropForbiddenControl(line[colon+1:])
 			parts := strings.Split(rawKey, ";")
 			key := strings.ToUpper(parts[0])
 			isDate := false
@@ -879,6 +1040,7 @@ func parseICS(text string) []rawEvent {
 				if tzid != "" {
 					cur.tzid = tzid
 				}
+				cur.noteUnknownZone(tzid)
 				if t, err := parseICSTime(val, tzid, isDate); err == nil {
 					cur.start = t
 				}
@@ -886,6 +1048,7 @@ func parseICS(text string) []rawEvent {
 				if cur.tzid == "" && tzid != "" {
 					cur.tzid = tzid
 				}
+				cur.noteUnknownZone(tzid)
 				if t, err := parseICSTime(val, tzid, isDate); err == nil {
 					cur.end = t
 				}
@@ -1055,7 +1218,26 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 			events = events[:importMaxEvents]
 		}
 
-		var imported, skipped, failed int
+		var imported, skipped, failed, rejected, duplicates, unknownZones int
+		// count records one event's outcome. A rejection is a failure as well:
+		// the event did not land either way, and the second counter only says
+		// whose fault that was.
+		count := func(outcome importOutcome) {
+			switch outcome {
+			case importSkipped:
+				skipped++
+			case importRejected:
+				failed++
+				rejected++
+			case importFailed:
+				failed++
+			case importDuplicate:
+				duplicates++
+			default:
+				imported++
+			}
+		}
+
 		// Series heads are written first: a changed occurrence names the one
 		// it belongs to by UID, and the file may put it either side of it.
 		seriesByUID := map[string]importedSeries{}
@@ -1066,17 +1248,19 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 				changed = append(changed, e)
 				continue
 			}
-			series, outcome := importSeriesHead(ctx, deps, cal, userID, e)
-			switch outcome {
-			case importSkipped:
-				skipped++
-			case importFailed:
-				failed++
-			default:
-				imported++
-				if e.uid != "" {
-					seriesByUID[e.uid] = series
-				}
+			series, outcome := importSeriesHead(ctx, deps, cal, userID, e,
+				importIdentity(e.uid, seriesByUID))
+			count(outcome)
+			if outcome != importCreated && outcome != importDuplicate {
+				continue
+			}
+			if outcome == importCreated && e.tzUnknown {
+				unknownZones++
+			}
+			// A recognised series is registered like a written one: its changed
+			// occurrences have to find it, and find out that it was left alone.
+			if e.uid != "" {
+				seriesByUID[e.uid] = series
 			}
 		}
 
@@ -1089,18 +1273,31 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 				skipped++
 				continue
 			}
-			if err := importChangedOccurrence(ctx, deps, cal, userID, e, parent); err != nil {
-				failed++
+			if parent.recognised {
+				// The series is already on the calendar, so its departures from
+				// it are already here too. Writing this one anyway would apply
+				// it over the occurrence the earlier import left, which is half
+				// the file landing -- worse than taking all of it or none.
+				duplicates++
 				continue
 			}
-			imported++
+			outcome := importChangedOccurrence(ctx, deps, cal, userID, e, parent)
+			count(outcome)
+			if outcome == importCreated && e.tzUnknown {
+				unknownZones++
+			}
 		}
 
 		out := &ImportOutput{}
 		out.Body.Imported = imported
 		out.Body.Skipped = skipped
 		out.Body.Failed = failed
+		out.Body.Rejected = rejected
+		out.Body.Duplicates = duplicates
 		out.Body.Truncated = truncated
+		out.Body.UnknownTimezones = unknownZones
+		out.Body.Unreadable = imported+skipped+failed+duplicates+truncated == 0 &&
+			!containsICSComponent(in.Body.ICS)
 		return out, nil
 	}
 }
@@ -1111,6 +1308,26 @@ type importedSeries struct {
 	id       uint32
 	timezone string
 	rule     *json.RawMessage
+	// recognised marks a series the calendar already held, which this import
+	// left alone. Its changed occurrences have to be left alone with it: the
+	// override write applies itself in place, so taking those while the series
+	// keeps the values it already had would land half the file.
+	recognised bool
+}
+
+// importIdentity decides what an event will be known by on this calendar.
+//
+// A UID answers for one event per import, whether that event was written or
+// recognised. A file is free to repeat a UID however badly, and the second
+// event under it is a second event: matching it against the same row would
+// leave one of them off the calendar, and once the other is deleted no
+// re-upload could put it back. Written without an identity it simply imports
+// again next time -- the half of the choice that can be undone.
+func importIdentity(uid string, seen map[string]importedSeries) sql.NullString {
+	if _, taken := seen[uid]; taken {
+		return sql.NullString{}
+	}
+	return sourceUID(uid)
 }
 
 type importOutcome int
@@ -1119,16 +1336,90 @@ const (
 	importCreated importOutcome = iota
 	importSkipped
 	importFailed
+	// importRejected is a failure the file caused: a value the calendar cannot
+	// hold, whatever the caller does with it. It is told apart from a plain
+	// failure because "failed" invites a retry, and a retry of these can only
+	// end the same way.
+	importRejected
+	// importDuplicate is an event this calendar already holds under the name
+	// the file gave it. Nothing was written and nothing was wrong.
+	importDuplicate
 )
 
+// mysqlDataErrors are the codes MySQL answers with when the value is what it
+// objects to: too long for its column, outside what the type can name, or
+// against a constraint the table declares.
+var mysqlDataErrors = map[uint16]bool{
+	1264: true, // out of range value
+	1265: true, // data truncated for column
+	1292: true, // incorrect value for a date or time column
+	1366: true, // incorrect string value for the column's character set
+	1406: true, // data too long for column
+	3819: true, // check constraint violated
+}
+
+// storableInstant reports whether an instant is one the store can hold. The
+// columns are DATETIMEs, which name the years 1 through 9999, and the driver
+// refuses anything outside that before it ever reaches MySQL -- so the check
+// belongs here, where the event can be counted as one the file put outside the
+// calendar rather than as a failure with nothing to say about it.
+func storableInstant(t time.Time) bool {
+	return t.Year() >= 1 && t.Year() <= 9999
+}
+
+// isDataRejection reports whether the store refused a row over the data in it
+// rather than over something that went wrong on this side.
+func isDataRejection(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlDataErrors[mysqlErr.Number]
+	}
+	return false
+}
+
+// storeOutcome names what happened to one event the store would not take.
+//
+// A duplicate key on the source UID is the calendar saying it already holds
+// this event: the lookup before the insert answers that question for anything
+// already committed, and this covers the two it cannot see -- a file naming
+// the same event twice, and a second import running alongside this one.
+func storeOutcome(err error) importOutcome {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == mysqlDuplicateKey {
+		return importDuplicate
+	}
+	if isDataRejection(err) {
+		return importRejected
+	}
+	return importFailed
+}
+
+// mysqlDuplicateKey is the code for a write refused by a unique constraint.
+const mysqlDuplicateKey = 1062
+
+// sourceUID is the identity an imported event keeps, so a second upload of the
+// same file can recognise it rather than writing another copy.
+//
+// A UID longer than the column is left off instead of cut down: two different
+// UIDs sharing a prefix would merge two unrelated events, and an event that
+// merely imports twice can be deleted while one that was never written cannot
+// be got back.
+func sourceUID(uid string) sql.NullString {
+	if uid == "" || utf8.RuneCountInString(uid) > sourceUIDMaxRunes {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: uid, Valid: true}
+}
+
+// sourceUIDMaxRunes is what calendar_events.source_uid holds.
+const sourceUIDMaxRunes = 255
+
 // importZone keeps the source zone so wall-clock semantics (recurrence,
-// all-day rendering) survive the import. Unknown TZIDs fall back to UTC to
-// match how the times were parsed.
+// all-day rendering) survive the import. A name nothing can resolve falls back
+// to UTC to match how the times were parsed.
 func importZone(tzid string) string {
-	if tzid != "" {
-		if _, err := time.LoadLocation(tzid); err == nil {
-			return tzid
-		}
+	if name, ok := resolveTZID(tzid); ok {
+		return name
 	}
 	return "UTC"
 }
@@ -1153,8 +1444,14 @@ func importEndAt(e rawEvent) time.Time {
 // The importing user is recorded as the owner. A .ics file has no notion of
 // one, and filing the events under whoever ran the import is the honest
 // answer -- they are who put them there.
+//
+// identity is what the event will be known by, and an event this calendar
+// already holds under it is left exactly as it is. An import that overwrote
+// what it recognised would undo whatever was changed here since, which is not
+// what uploading the same file again asks for.
 func importSeriesHead(
 	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32, e rawEvent,
+	identity sql.NullString,
 ) (importedSeries, importOutcome) {
 	if e.summary == "" || e.start.IsZero() {
 		return importedSeries{}, importSkipped
@@ -1189,6 +1486,29 @@ func importSeriesHead(
 		}
 		exceptions = column
 	}
+	if !storableInstant(e.start) || !storableInstant(endAt) ||
+		(recEnd.Valid && !storableInstant(recEnd.Time)) {
+		return importedSeries{}, importRejected
+	}
+
+	// Asked after the event is known to be one this import would write, so an
+	// event it was going to skip is reported as skipped rather than as one the
+	// calendar already has.
+	if identity.Valid {
+		existing, err := deps.Queries.FindCalendarEventBySourceUID(ctx,
+			generated.FindCalendarEventBySourceUIDParams{CalendarID: cal.ID, SourceUid: identity})
+		switch {
+		case err == nil:
+			return importedSeries{
+				id:         existing.ID,
+				timezone:   existing.Timezone,
+				rule:       existing.RecurrenceRule,
+				recognised: true,
+			}, importDuplicate
+		case !errors.Is(err, sql.ErrNoRows):
+			return importedSeries{}, importFailed
+		}
+	}
 
 	pubID, err := uuid.NewV7()
 	if err != nil {
@@ -1218,6 +1538,7 @@ func importSeriesHead(
 			NotificationOffset: importAlarm(e.alarmMinutes),
 			RecurrenceRule:     ruleData,
 			RecurrenceEnd:      recEnd,
+			SourceUid:          identity,
 		})
 		if err != nil {
 			return err
@@ -1246,7 +1567,7 @@ func importSeriesHead(
 		})
 	})
 	if err != nil {
-		return importedSeries{}, importFailed
+		return importedSeries{}, storeOutcome(err)
 	}
 	return importedSeries{id: newID, timezone: tz, rule: ruleData}, importCreated
 }
@@ -1258,13 +1579,19 @@ func importSeriesHead(
 func importChangedOccurrence(
 	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32,
 	e rawEvent, parent importedSeries,
-) error {
+) importOutcome {
 	if e.start.IsZero() {
-		return fmt.Errorf("changed occurrence has no start")
+		// The file named an occurrence to replace and then did not date the
+		// replacement, which no retry of the same bytes fixes.
+		return importRejected
+	}
+	if !storableInstant(e.start) || !storableInstant(importEndAt(e)) ||
+		!storableInstant(e.recurrenceID) {
+		return importRejected
 	}
 	overridePubID, err := uuid.NewV7()
 	if err != nil {
-		return err
+		return importFailed
 	}
 	tz := parent.timezone
 	if e.tzid != "" {
@@ -1273,7 +1600,7 @@ func importChangedOccurrence(
 	parentRef := sql.NullInt32{Int32: int32(parent.id), Valid: true}
 	originalRef := sql.NullTime{Time: e.recurrenceID, Valid: true}
 
-	return dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 		_, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
 			PublicID:                overridePubID[:],
 			WorkspaceID:             deps.WorkspaceID,
@@ -1298,4 +1625,8 @@ func importChangedOccurrence(
 		})
 		return err
 	})
+	if err != nil {
+		return storeOutcome(err)
+	}
+	return importCreated
 }
