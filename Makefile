@@ -31,11 +31,17 @@ db-seed: db-apply db-seed-users
 	docker run --rm -i --network host mysql:8.4 \
 		mysql --default-character-set=utf8mb4 -u root -prootpw -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/seed.sql
 
+# A user has no colour of its own: the colour that identifies someone on a
+# calendar is per-membership, so the seed sets it in calendar_members.
+#
+# createuser loads the same configuration as the server, which refuses the
+# default signing secret outside development — so seeding needs the dev
+# environment the API is started with.
 db-seed-users:
-	cd apps/api && go run ./cmd/createuser -skip-existing \
-		-email demo@example.com -password password123 -name "Demo User" -icon 😊 -color "#2ECC87"
-	cd apps/api && go run ./cmd/createuser -skip-existing -admin \
-		-email admin@example.com -password password123 -name "Admin User" -icon 🛠️ -color "#E73B3B"
+	cd apps/api && $(DEV_API_ENV) go run ./cmd/createuser -skip-existing \
+		-email demo@example.com -password password123 -name "Demo User"
+	cd apps/api && $(DEV_API_ENV) go run ./cmd/createuser -skip-existing -admin \
+		-email admin@example.com -password password123 -name "Admin User"
 
 # Code generation
 sqlc:
