@@ -5,6 +5,7 @@ import { errorMessage } from '@/lib/api';
 import { canEdit } from '@/lib/permissions';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -14,6 +15,7 @@ export function SettingsModal() {
   const t = useT();
   const showSettings = useUiStore((s) => s.showSettings);
   const toggleSettings = useUiStore((s) => s.toggleSettings);
+  const panelRef = useModalA11y<HTMLDivElement>(showSettings, toggleSettings);
   const theme = useUiStore((s) => s.theme);
   const colorMode = useUiStore((s) => s.colorMode);
   const locale = useUiStore((s) => s.locale);
@@ -33,7 +35,13 @@ export function SettingsModal() {
       />
 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('tabs.settings')}
+          className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]"
+        >
           <div className="flex items-center justify-between px-6 py-4">
             <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
               {t('tabs.settings')}

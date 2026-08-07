@@ -5,6 +5,7 @@ import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import { assignableRoles, canManage, canOwn, roleLabelKey } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -14,6 +15,9 @@ export function MembersPanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'members', () =>
+    toggleRightPanel('members'),
+  );
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const membersMap = useCalendarStore((s) => s.membersMap);
@@ -87,7 +91,13 @@ export function MembersPanel() {
         className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('members')}
       />
-      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.members')}
+        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <div className="min-w-0">
             <h2 className="truncate text-subhead font-semibold">{t('panel.members')}</h2>
