@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { detectHolidayCountry } from '@/lib/holidays';
 import { useUiStore } from './ui-store';
 
 beforeEach(() => {
@@ -103,5 +104,12 @@ describe('persisted preferences', () => {
     useUiStore.getState().setHolidaysCountry('US');
     expect(useUiStore.getState().holidaysCountry).toBe('US');
     expect(localStorage.getItem('tt_holidaysCountry')).toBe('"US"');
+  });
+
+  it('starts from the country the browser implies, not a fixed one', () => {
+    // jsdom reports en-US, so anything but US here means the default was
+    // picked for one country's users rather than derived.
+    expect(useUiStore.getInitialState().holidaysCountry).toBe(detectHolidayCountry());
+    expect(useUiStore.getInitialState().holidaysCountry).toBe('US');
   });
 });

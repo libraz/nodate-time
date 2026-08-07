@@ -1,6 +1,7 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '@/i18n';
 import { isToday } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -332,6 +333,13 @@ interface CustomSelectProps {
   className?: string;
   /** Overrides the default filled trigger look (e.g. "input-modern" or a pill). */
   triggerClassName?: string;
+  /**
+   * Adds a filter box to the dropdown.
+   *
+   * A list long enough that scrolling it is a chore — the two hundred
+   * countries holiday data covers — is only usable if it can be narrowed.
+   */
+  searchable?: boolean;
 }
 
 export function CustomSelect({
@@ -340,10 +348,14 @@ export function CustomSelect({
   onChange,
   className,
   triggerClassName,
+  searchable,
 }: CustomSelectProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const { anchorRef, floatingRef, pos } = useFloating(open, 160);
   const selectedRef = useRef<HTMLButtonElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
   const handleClose = useCallback(() => setOpen(false), []);
 
   useOutsideClose([floatingRef, anchorRef], handleClose, open);
@@ -351,10 +363,23 @@ export function CustomSelect({
   useEffect(() => {
     if (open) {
       setTimeout(() => selectedRef.current?.scrollIntoView({ block: 'center' }), 0);
+      // Typing is the point of a filtered list; opening it should be enough.
+      filterRef.current?.focus();
+    } else {
+      setQuery('');
     }
   }, [open]);
 
   const selected = options.find((o) => o.value === value);
+  const needle = query.trim().toLowerCase();
+  // The code is matched as well as the label: someone who knows "DE" should
+  // not have to guess how the list spells Germany.
+  const visible =
+    searchable && needle
+      ? options.filter(
+          (o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle),
+        )
+      : options;
 
   return (
     <div className={`relative ${className ?? ''}`}>
@@ -390,7 +415,9 @@ export function CustomSelect({
         createPortal(
           <div
             ref={floatingRef}
-            className="dropdown-panel fixed z-[9999] max-h-[240px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
+            className={`dropdown-panel fixed z-[9999] bg-[var(--color-surface-elevated)] ring-1 ring-[var(--color-border)] ${
+              searchable ? 'flex max-h-[280px] flex-col' : 'max-h-[240px] overflow-y-auto py-1'
+            }`}
             style={{
               top: pos.top,
               left: pos.left,
@@ -400,40 +427,60 @@ export function CustomSelect({
               backdropFilter: 'blur(20px)',
             }}
           >
-            {options.map((opt) => {
-              const isSelected = opt.value === value;
-              return (
-                <button
-                  key={opt.value}
-                  ref={isSelected ? selectedRef : undefined}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2.5 text-left text-default transition-colors"
-                  style={{
-                    backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
-                    color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
-                    fontWeight: isSelected ? 600 : 400,
-                  }}
-                >
-                  {isSelected && (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="var(--color-accent)"
-                      strokeWidth="2.5"
-                    >
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                  )}
-                  <span className={isSelected ? '' : 'pl-[22px]'}>{opt.label}</span>
-                </button>
-              );
-            })}
+            {searchable && (
+              <div className="border-b border-[var(--color-separator)] p-2">
+                <input
+                  ref={filterRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label={t('common.search')}
+                  placeholder={t('common.search')}
+                  className="input-modern w-full text-default"
+                />
+              </div>
+            )}
+            <div className={searchable ? 'flex-1 overflow-y-auto py-1' : 'contents'}>
+              {searchable && visible.length === 0 && (
+                <p className="px-3 py-3 text-default text-[var(--color-text-tertiary)]">
+                  {t('common.noMatches')}
+                </p>
+              )}
+              {visible.map((opt) => {
+                const isSelected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value}
+                    ref={isSelected ? selectedRef : undefined}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-2.5 text-left text-default transition-colors"
+                    style={{
+                      backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
+                      color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                      fontWeight: isSelected ? 600 : 400,
+                    }}
+                  >
+                    {isSelected && (
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="var(--color-accent)"
+                        strokeWidth="2.5"
+                      >
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    )}
+                    <span className={isSelected ? '' : 'pl-[22px]'}>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>,
           document.body,
         )}
