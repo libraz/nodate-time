@@ -5,10 +5,13 @@ export interface ResizedImage {
   height: number;
 }
 
+/** The encodings canvas can be asked for without losing the image entirely. */
+type EncodableType = 'image/jpeg' | 'image/png' | 'image/webp';
+
 interface ResizeOptions {
   maxDimension: number;
   quality?: number;
-  preferredType?: 'image/jpeg' | 'image/webp';
+  preferredType?: EncodableType;
 }
 
 async function readAsImage(file: File): Promise<HTMLImageElement> {
@@ -66,6 +69,73 @@ export function resizeImageForAvatar(file: File): Promise<ResizedImage> {
   return resize(file, { maxDimension: 512, quality: 0.92, preferredType: 'image/jpeg' });
 }
 
-export function resizeImageForAlbum(file: File): Promise<ResizedImage> {
-  return resize(file, { maxDimension: 2048, quality: 0.88, preferredType: 'image/jpeg' });
+/** The longest edge an album photo is stored at. */
+export const albumMaxDimension = 2048;
+
+/** The types the album accepts, matching the server's own allow-list. */
+const albumTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+/**
+ * What should be uploaded for a picked file: either its own bytes, or a
+ * re-encoding in a named format.
+ */
+export type EncodingPlan = { passthrough: true } | { passthrough: false; type: EncodableType };
+
+/**
+ * Decides how a picked photo should be sent.
+ *
+ * Re-encoding everything to JPEG -- which is what this used to do
+ * unconditionally -- costs three things that cannot be recovered afterwards: a
+ * PNG's transparency becomes black, an animated GIF becomes its first frame,
+ * and the EXIF block goes altogether, taking the capture time the album orders
+ * by with it. None of that is visible at upload time; it is discovered later,
+ * by whoever opens the photo.
+ *
+ * So the file is left alone unless resizing it actually buys something, and
+ * when it does have to be re-encoded it keeps its own format.
+ */
+export function planAlbumEncoding(
+  sourceType: string,
+  longestEdge: number,
+  maxDimension = albumMaxDimension,
+): EncodingPlan {
+  const type = sourceType.toLowerCase();
+
+  // A GIF is never re-encoded. Canvas draws one frame, so re-encoding an
+  // animated GIF silently discards every other frame -- and whether a GIF is
+  // animated cannot be told without decoding it, so the safe reading is that
+  // it might be.
+  if (type === 'image/gif') return { passthrough: true };
+
+  // Already small enough and in a format the album stores: the original bytes
+  // are strictly better than anything a re-encode would produce.
+  if (albumTypes.has(type) && longestEdge <= maxDimension) return { passthrough: true };
+
+  if (type === 'image/png') return { passthrough: false, type: 'image/png' };
+  if (type === 'image/webp') return { passthrough: false, type: 'image/webp' };
+  return { passthrough: false, type: 'image/jpeg' };
+}
+
+/**
+ * Prepares a picked photo for upload, resizing only when that is what the file
+ * needs. See planAlbumEncoding for why the format is preserved.
+ */
+export async function prepareImageForAlbum(file: File): Promise<ResizedImage> {
+  const img = await readAsImage(file);
+  const longest = Math.max(img.naturalWidth, img.naturalHeight);
+  const plan = planAlbumEncoding(file.type, longest);
+
+  if (plan.passthrough) {
+    return {
+      bytes: await file.arrayBuffer(),
+      contentType: file.type,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+    };
+  }
+  return resize(file, {
+    maxDimension: albumMaxDimension,
+    quality: 0.88,
+    preferredType: plan.type,
+  });
 }

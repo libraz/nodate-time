@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { resizeImageForAlbum } from '@/lib/image-resize';
+import { readCaptureTime } from '@/lib/exif';
+import { prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -145,7 +146,10 @@ export function AlbumPanel() {
       setUploading(true);
       setError(null);
       try {
-        const resized = await resizeImageForAlbum(file);
+        // Read the capture time before preparing the file: re-encoding drops
+        // the EXIF block, and this is the value the album orders by.
+        const takenAt = await readCaptureTime(file);
+        const resized = await prepareImageForAlbum(file);
         const presign = await uploadViaPresign<PresignResponse>({
           kind: 'album',
           presignPath: `/calendars/${activeCalendarId}/albums/presign`,
@@ -154,6 +158,10 @@ export function AlbumPanel() {
             byteSize: resized.bytes.byteLength,
             width: resized.width,
             height: resized.height,
+            // Omitted rather than sent as now: the server treats an absent
+            // capture time as the upload time, and saying "taken now" for a
+            // photo with no metadata would be a claim rather than a default.
+            ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
           },
           contentType: resized.contentType,
           body: resized.bytes,
