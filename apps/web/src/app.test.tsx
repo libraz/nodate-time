@@ -17,6 +17,21 @@ vi.mock('@/lib/api', () => ({
   errorMessage: (e: unknown) => String(e),
 }));
 
+// The month views stand in for themselves here. Nothing in this file asserts
+// anything about a day cell, and jsdom applies no CSS, so both layouts mount
+// at once: the real pair puts twelve thousand nodes -- MonthScroll alone keeps
+// 37 months of them -- in front of every accessible-name query, which is what
+// made a two-click test take seconds.
+vi.mock('@/components/calendar-grid', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  CalendarGrid: () => <div data-testid="calendar-grid" />,
+}));
+
+vi.mock('@/components/month-scroll', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  MonthScroll: () => <div data-testid="month-scroll" />,
+}));
+
 const calendarState = {
   calendars: [
     { id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner', publicShared: false },
@@ -89,8 +104,7 @@ function event(id: string, calendarId: string, title: string): CalendarEvent {
   };
 }
 
-// Both layouts mount here regardless of width, and the mobile month scroll
-// positions itself on mount; jsdom has no scrollTo.
+// jsdom has no scrollTo, and the panels position themselves on open.
 Element.prototype.scrollTo = () => {};
 
 afterEach(() => {

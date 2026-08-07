@@ -423,6 +423,12 @@ export function App() {
     // of density dots, and three months of events leaves nine of them blank
     // in a way that reads as a year with nothing planned.
     const { start, end } = fetchWindow(calendarView, currentMonth);
+    // In development this effect runs twice: StrictMode mounts, cleans up and
+    // mounts again, so the immediate first fetch is aborted by that synthetic
+    // cleanup and re-issued through the debounce a quarter second later. Two
+    // event requests on a dev reload, one of them cancelled, are expected --
+    // production mounts once, and either way the store ignores the answer to a
+    // request a newer one has replaced.
     const controller = new AbortController();
     const load = () => {
       rangeLoaded.current = true;
