@@ -437,6 +437,8 @@ export const en: Record<TranslationKey, string> = {
   'album.captionPlaceholder': 'Add a caption...',
   'album.saveCaption': 'Save',
   'album.download': 'Download',
+  'album.event': 'Event',
+  'album.noEvent': 'Not linked',
   'album.loadMore': 'Load more',
 
   // Calendar settings (name / color / cover)

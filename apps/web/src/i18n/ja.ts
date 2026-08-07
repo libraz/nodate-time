@@ -456,6 +456,8 @@ export const ja = {
   'album.captionPlaceholder': 'キャプションを追加...',
   'album.saveCaption': '保存',
   'album.download': 'ダウンロード',
+  'album.event': '予定',
+  'album.noEvent': '紐付けなし',
   'album.loadMore': 'さらに読み込む',
 
   // Calendar settings (name / color / cover)
