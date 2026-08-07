@@ -88,10 +88,15 @@ func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificatio
 			return out, nil
 		}
 
+		// The confirmation has a budget of its own: asking for password resets
+		// must not silence the button the account offers for its own address.
+		// And since the caller is signed in and asking about that address,
+		// there is nobody to keep the answer uniform for -- being told it
+		// worked when nothing was sent leaves them pressing it again.
 		clientIP, _ := middleware.ClientIPFromContext(ctx)
-		if !allowPasswordResetEmail(user.Email, clientIP, time.Now()) {
+		if !allowEmailSend(mailPurposeVerify, user.Email, clientIP, time.Now()) {
 			slog.WarnContext(ctx, "email verification resend suppressed by rate limiter", "userID", user.ID)
-			return out, nil
+			return nil, apierrors.ToHuma(apierrors.RateLimited)
 		}
 		if err := deps.Queries.InvalidateUserEmailVerifications(ctx, user.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
