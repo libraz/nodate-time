@@ -26,6 +26,7 @@ import {
   eventEndDay,
   eventStartDay,
   isMultiDay,
+  layoutDayCell,
   layoutWeek,
   MAX_VISIBLE_TRACKS,
   type PositionedEvent,
@@ -143,17 +144,16 @@ function WeekRow({
     return map;
   }, [events, week, zone]);
 
-  const reservedTracksByDay = useMemo(
+  const cells = useMemo(
     () =>
-      week.map((dt) => {
-        const col = jsDayOfWeek(dt);
-        const reserved: number[] = [];
-        for (const p of positioned) {
-          if (col >= p.startCol && col < p.startCol + p.span) reserved.push(p.track);
-        }
-        return reserved;
-      }),
-    [week, positioned],
+      week.map((dt) =>
+        layoutDayCell(
+          jsDayOfWeek(dt),
+          positioned,
+          singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? [],
+        ),
+      ),
+    [week, positioned, singleDayMap],
   );
 
   const getDateColor = (dow: number, isHoliday: boolean): string => {
@@ -185,20 +185,7 @@ function WeekRow({
         const dow = jsDayOfWeek(dt);
         const isoDate = dt.toFormat('yyyy-MM-dd');
         const holiday = getHoliday(holidaysCountry, isoDate);
-        const reserved = reservedTracksByDay[dIdx] ?? [];
-        const singles = singleDayMap.get(isoDate) ?? [];
-        const usedTracks = new Set(reserved);
-        const singleSlots: { track: number; evt: CalendarEvent }[] = [];
-        let nextTrack = 0;
-        for (const evt of singles) {
-          while (usedTracks.has(nextTrack)) nextTrack++;
-          singleSlots.push({ track: nextTrack, evt });
-          usedTracks.add(nextTrack);
-          nextTrack++;
-          if (singleSlots.length >= MAX_VISIBLE_TRACKS + 5) break;
-        }
-        const totalEventsHere = reserved.length + singles.length;
-        const overflow = totalEventsHere - MAX_VISIBLE_TRACKS;
+        const { reserved = [], singleSlots = [], overflow = 0 } = cells[dIdx] ?? {};
         const isSelected = dt.hasSame(selectedDate, 'day');
 
         return (

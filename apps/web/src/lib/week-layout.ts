@@ -68,9 +68,16 @@ export function layoutWeek(
   const tracks: { end: number }[] = [];
   const positioned: PositionedEvent[] = [];
 
+  // Earliest start first, and on a tie the longest bar first: only the last few
+  // tracks of a crowded week are hidden, and the event that loses its track
+  // should be the one that goes missing from the fewest cells.
   const multiDay = events
     .filter((evt) => isMultiDay(evt, zone))
-    .sort((a, b) => +eventStartDay(a, zone) - +eventStartDay(b, zone));
+    .sort(
+      (a, b) =>
+        +eventStartDay(a, zone) - +eventStartDay(b, zone) ||
+        +eventEndDay(b, zone) - +eventEndDay(a, zone),
+    );
 
   for (const evt of multiDay) {
     const startDay = eventStartDay(evt, zone);
@@ -106,4 +113,48 @@ export function layoutWeek(
   }
 
   return positioned;
+}
+
+/** What a single day cell renders, once its multi-day bars have claimed their tracks. */
+export interface DayCellLayout {
+  /** Tracks held by bars crossing this day, including tracks past the visible limit. */
+  reserved: number[];
+  /** Single-day chips placed in the visible tracks the bars left free. */
+  singleSlots: { track: number; evt: CalendarEvent }[];
+  /** How many of the day's events the cell cannot show. Never negative. */
+  overflow: number;
+}
+
+/**
+ * Places one day cell's events into the tracks it renders.
+ *
+ * Tracks are assigned across the whole week so that a bar keeps one row for
+ * every day it spans, which means a bar can sit past the visible limit because
+ * of congestion on days other than this one. The overflow count is therefore
+ * taken from what this cell actually hides, not from the track index — on a day
+ * whose crowd has already ended, that bar may be the only thing the cell holds.
+ */
+export function layoutDayCell(
+  col: number,
+  positioned: PositionedEvent[],
+  singles: CalendarEvent[],
+): DayCellLayout {
+  const reserved: number[] = [];
+  for (const p of positioned) {
+    if (col >= p.startCol && col < p.startCol + p.span) reserved.push(p.track);
+  }
+
+  const used = new Set(reserved);
+  const singleSlots: { track: number; evt: CalendarEvent }[] = [];
+  let nextTrack = 0;
+  for (const evt of singles) {
+    while (used.has(nextTrack)) nextTrack++;
+    if (nextTrack >= MAX_VISIBLE_TRACKS) break;
+    singleSlots.push({ track: nextTrack, evt });
+    used.add(nextTrack);
+    nextTrack++;
+  }
+
+  const hiddenBars = reserved.filter((track) => track >= MAX_VISIBLE_TRACKS).length;
+  return { reserved, singleSlots, overflow: hiddenBars + singles.length - singleSlots.length };
 }
