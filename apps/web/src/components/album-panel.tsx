@@ -7,6 +7,7 @@ import { readCaptureTime } from '@/lib/exif';
 import { prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -64,6 +65,25 @@ export function AlbumPanel() {
   const activeCalendarId = activeCalendarIds[0] ?? calendars[0]?.id ?? '';
   const myRole = roleOnCalendar(calendars, activeCalendarId);
   const editable = canEdit(myRole);
+
+  // The innermost open surface owns the keyboard. The lightbox answers first
+  // while it is up, and the event picker portals its list out of the lightbox
+  // and closes itself on Escape, so the lightbox stands down while one is open.
+  const dismissLightbox = () => {
+    if (document.querySelector('.dropdown-panel')) return;
+    setLightbox(null);
+  };
+  const dismissPanel = () => {
+    if (lightbox) return;
+    toggleRightPanel('album');
+  };
+  const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'album', dismissPanel);
+  const lightboxRef = useModalA11y<HTMLDivElement>(lightbox !== null, dismissLightbox);
+  // The lightbox carries its own trap because its controls sit outside the
+  // panel's container, and without one Tab walks straight out of the page. The
+  // two traps do not fight -- each only intercepts Tab at the edge of its own
+  // container, and the containers are disjoint -- and a picker's portalled list
+  // is deliberately outside both, so opening one hands it the keyboard.
 
   const reload = useCallback(async () => {
     if (!activeCalendarId) {
@@ -289,7 +309,13 @@ export function AlbumPanel() {
         className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('album')}
       />
-      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.album')}
+        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <h2 className="text-subhead font-semibold">{t('panel.album')}</h2>
           <div className="flex items-center gap-2">
@@ -391,7 +417,13 @@ export function AlbumPanel() {
             className="absolute inset-0 cursor-default"
             onClick={() => setLightbox(null)}
           />
-          <div className="relative flex max-h-full max-w-full flex-col gap-3">
+          <div
+            ref={lightboxRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('album.photo')}
+            className="relative flex max-h-full max-w-full flex-col gap-3"
+          >
             <img
               src={lightbox.imageUrl}
               alt={lightbox.caption}

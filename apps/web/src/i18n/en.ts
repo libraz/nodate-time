@@ -433,6 +433,7 @@ export const en: Record<TranslationKey, string> = {
   'event.moreOptions': 'More options',
 
   // Album
+  'album.photo': 'Photo',
   'album.caption': 'Caption',
   'album.captionPlaceholder': 'Add a caption...',
   'album.saveCaption': 'Save',

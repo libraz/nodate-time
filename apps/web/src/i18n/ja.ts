@@ -452,6 +452,7 @@ export const ja = {
   'event.moreOptions': '詳細オプション',
 
   // Album
+  'album.photo': '写真',
   'album.caption': 'キャプション',
   'album.captionPlaceholder': 'キャプションを追加...',
   'album.saveCaption': '保存',

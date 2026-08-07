@@ -10,14 +10,14 @@ vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
 }));
 
+const uiState = {
+  rightPanel: 'album' as string | null,
+  toggleRightPanel: vi.fn(),
+  timezone: 'Asia/Tokyo',
+};
+
 vi.mock('@/stores/ui-store', () => ({
-  useUiStore: (
-    selector: (s: {
-      rightPanel: string;
-      toggleRightPanel: () => void;
-      timezone: string;
-    }) => unknown,
-  ) => selector({ rightPanel: 'album', toggleRightPanel: () => {}, timezone: 'Asia/Tokyo' }),
+  useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
 /**
@@ -63,7 +63,17 @@ function photo(imageUrl: string, id = 'photo-1') {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  uiState.rightPanel = 'album';
+  document.body.style.overflow = '';
 });
+
+/** jsdom reports no layout, so focusable elements have to look painted. */
+function rectList(): DOMRectList {
+  const rects = [new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList;
+  rects.item = (index: number) => rects[index] ?? null;
+  return rects;
+}
 
 describe('AlbumPanel', () => {
   // An image URL is signed for a limited time and thumbnails load as they are
@@ -265,5 +275,194 @@ describe('AlbumPanel event link', () => {
         eventId: '',
       }),
     );
+  });
+});
+
+// The panel covers the page but had none of what that owes the keyboard: Tab
+// walked into the calendar behind it and Escape did nothing.
+describe('AlbumPanel keyboard', () => {
+  it('announces itself as a modal dialog', async () => {
+    mockApi.get.mockResolvedValue({ items: [] });
+
+    render(<AlbumPanel />);
+
+    const panel = await screen.findByRole('dialog', { name: 'panel.album' });
+    expect(panel).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('locks the page behind it and closes on Escape', async () => {
+    mockApi.get.mockResolvedValue({ items: [] });
+
+    render(<AlbumPanel />);
+
+    expect(document.body.style.overflow).toBe('hidden');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(uiState.toggleRightPanel).toHaveBeenCalledWith('album');
+  });
+
+  it('keeps Tab inside the panel', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({
+      items: [photo('https://storage/one')],
+      nextCursor: 'c1',
+    });
+
+    render(<AlbumPanel />);
+
+    const panel = await screen.findByRole('dialog', { name: 'panel.album' });
+    await screen.findByText('album.loadMore');
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button,input'));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    expect(focusable.length).toBeGreaterThan(1);
+    if (!first || !last) return;
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('returns focus to whatever opened it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({ items: [] });
+    uiState.rightPanel = null;
+
+    function Harness() {
+      return (
+        <>
+          <button type="button" data-testid="trigger">
+            open
+          </button>
+          <AlbumPanel />
+        </>
+      );
+    }
+    const { rerender } = render(<Harness />);
+    const trigger = screen.getByTestId('trigger');
+    trigger.focus();
+
+    uiState.rightPanel = 'album';
+    rerender(<Harness />);
+    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
+
+    uiState.rightPanel = null;
+    rerender(<Harness />);
+
+    expect(document.activeElement).toBe(trigger);
+  });
+});
+
+/**
+ * The lightbox is a dialog over the panel, so it carries its own trap: the
+ * question it puts on screen is the one the keyboard should be answering.
+ *
+ * Its event picker portals its dropdown to the body, which puts the open list
+ * outside the lightbox's own subtree on purpose. The trap only intercepts Tab
+ * at the edges of its container, so a portalled list keeps the keyboard; and
+ * Escape is answered by the innermost open surface, which is the list.
+ */
+describe('AlbumPanel lightbox keyboard', () => {
+  beforeEach(() => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner' }];
+  });
+
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+  });
+
+  it('announces itself as a modal dialog of its own', async () => {
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+
+    const lightbox = await screen.findByRole('dialog', { name: 'album.photo' });
+    expect(lightbox).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('closes on Escape and leaves the panel behind it open', async () => {
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+    await screen.findByRole('dialog', { name: 'album.photo' });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'album.photo' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('dialog', { name: 'panel.album' })).toBeInTheDocument();
+    expect(uiState.toggleRightPanel).not.toHaveBeenCalled();
+  });
+
+  it('keeps Tab inside the lightbox', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+
+    const lightbox = await screen.findByRole('dialog', { name: 'album.photo' });
+    const focusable = Array.from(lightbox.querySelectorAll<HTMLElement>('button,input'));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    expect(focusable.length).toBeGreaterThan(1);
+    if (!first || !last) return;
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('returns focus to the thumbnail that opened it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    const thumbnail = (await screen.findByAltText('a photo')).closest('button');
+    expect(thumbnail).not.toBeNull();
+    if (!thumbnail) return;
+    thumbnail.focus();
+    fireEvent.click(thumbnail);
+
+    await screen.findByRole('dialog', { name: 'album.photo' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(document.activeElement).toBe(thumbnail));
+  });
+
+  it('hands Escape and the keyboard to an open event picker, not to itself', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('a photo'));
+    fireEvent.click(await screen.findByText('album.noEvent'));
+
+    const option = await screen.findByText('Sports day');
+    // The list is portalled to the body, so it sits outside the lightbox's own
+    // subtree. Tab there must be left alone rather than pulled back inside.
+    const optionButton = option.closest('button');
+    expect(optionButton).not.toBeNull();
+    if (!optionButton) return;
+    optionButton.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(optionButton);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByText('Sports day')).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'album.photo' })).toBeInTheDocument();
   });
 });

@@ -112,7 +112,17 @@ beforeEach(() => {
   calendarState.activeCalendarIds = ['cal-1'];
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  document.body.style.overflow = '';
+});
+
+/** jsdom reports no layout, so focusable elements have to look painted. */
+function rectList(): DOMRectList {
+  const rects = [new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList;
+  rects.item = (index: number) => rects[index] ?? null;
+  return rects;
+}
 
 describe('ActivityPanel', () => {
   it('says it is loading until the first page arrives', () => {
@@ -281,5 +291,87 @@ describe('ActivityPanel', () => {
     expect(closers).toHaveLength(2);
     for (const closer of closers) fireEvent.click(closer);
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+// The feed covers the page but had none of what that owes the keyboard: Tab
+// walked into the calendar behind it and Escape did nothing.
+describe('ActivityPanel keyboard', () => {
+  it('announces itself as a modal dialog', async () => {
+    mockApi.get.mockResolvedValue({ items: [] });
+
+    render(<ActivityPanel onClose={() => {}} />);
+
+    const panel = await screen.findByRole('dialog');
+    expect(panel).toHaveAttribute('aria-modal', 'true');
+    expect(panel).toHaveAccessibleName('activity.title');
+  });
+
+  it('locks the page behind it and closes on Escape', () => {
+    mockApi.get.mockResolvedValue({ items: [] });
+    const onClose = vi.fn();
+
+    render(<ActivityPanel onClose={onClose} />);
+
+    expect(document.body.style.overflow).toBe('hidden');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Tab inside the panel', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({
+      items: [feedItem()],
+      nextCursor: '00000000-0000-7000-8000-0000000000c1',
+    });
+
+    render(<ActivityPanel onClose={() => {}} />);
+
+    const panel = await screen.findByRole('dialog');
+    await screen.findByText('activity.loadMore');
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button,input,select'));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    expect(focusable.length).toBeGreaterThan(1);
+    if (!first || !last) return;
+
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    vi.restoreAllMocks();
+  });
+
+  it('returns focus to whatever opened it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    mockApi.get.mockResolvedValue({ items: [] });
+
+    function Harness({ open }: { open: boolean }) {
+      return (
+        <>
+          <button type="button" data-testid="trigger">
+            open
+          </button>
+          {open && <ActivityPanel onClose={() => {}} />}
+        </>
+      );
+    }
+    const { rerender } = render(<Harness open={false} />);
+    const trigger = screen.getByTestId('trigger');
+    trigger.focus();
+
+    rerender(<Harness open={true} />);
+    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
+
+    rerender(<Harness open={false} />);
+
+    expect(document.activeElement).toBe(trigger);
+    vi.restoreAllMocks();
   });
 });
