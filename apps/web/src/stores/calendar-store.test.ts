@@ -9,6 +9,7 @@ vi.mock('@/lib/api', () => ({
     delete: vi.fn(),
   },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+  isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
 }));
 
 vi.mock('@/lib/toast', () => ({
@@ -191,6 +192,45 @@ describe('fetchEvents', () => {
     await older;
 
     expect(useCalendarStore.getState().events.map((event) => event.id)).toEqual(['latest']);
+  });
+
+  it('says nothing and keeps the grid when the caller cancels', async () => {
+    // The month view cancels the request it has scrolled past. Reporting that
+    // as a failure would put an error in front of the user for something they
+    // did not do, and blanking the cancelled calendars would empty the month
+    // mid-flick.
+    useCalendarStore.setState({
+      calendars: [cal('cal-1'), cal('cal-2')],
+      events: [evt('e1', 'cal-1'), evt('e2', 'cal-2')],
+    });
+    mockApi.get.mockImplementation(
+      (_url: string, _skipAuthRedirect?: boolean, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        }) as never,
+    );
+    const controller = new AbortController();
+
+    const pending = useCalendarStore
+      .getState()
+      .fetchEvents('2026-04-01', '2026-04-30', controller.signal);
+    controller.abort();
+    await pending;
+
+    expect(mockApi.get).toHaveBeenCalledWith(
+      expect.stringContaining('/calendars/cal-1/events'),
+      false,
+      controller.signal,
+    );
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(
+      useCalendarStore
+        .getState()
+        .events.map((e) => e.id)
+        .sort(),
+    ).toEqual(['e1', 'e2']);
   });
 
   it('does not repopulate events after session data is reset', async () => {

@@ -7,6 +7,7 @@ import {
   decodeJwtExp,
   errorMessage,
   hasToken,
+  isAbortError,
   isTokenExpired,
   setToken,
 } from './api';
@@ -192,7 +193,7 @@ describe('request', () => {
   it('omits the body when none is provided', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}));
 
-    await api.post('/calendars/1/leave');
+    await api.post('/calendars/1/albums/2/confirm');
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.body).toBeUndefined();
@@ -219,6 +220,60 @@ describe('request', () => {
     fetchMock.mockResolvedValue(new Response('boom', { status: 500, statusText: 'Server Error' }));
 
     await expect(api.get('/calendars')).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('request cancellation', () => {
+  it('hands the caller its signal on every verb', async () => {
+    // A fresh response per call: a body can only be read once.
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })));
+    const controller = new AbortController();
+
+    await api.get('/calendars', false, controller.signal);
+    await api.getWithRevision('/calendars/1', controller.signal);
+    await api.post('/calendars', { name: 'Team' }, controller.signal);
+    await api.put('/calendars/1', { name: 'Team' }, undefined, controller.signal);
+    await api.delete('/calendars/1', controller.signal);
+    await api.getBlob('/calendars/1/albums/2', controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      expect(init.signal).toBe(controller.signal);
+    }
+  });
+
+  it('leaves the signal unset for callers that pass none', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await api.get('/calendars');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBeUndefined();
+  });
+
+  it('reports an aborted request as a cancellation, not a failure', async () => {
+    // A superseded request rejects like any other. A caller that cannot tell
+    // the two apart shows an error for something the user did not do.
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        }),
+    );
+    const controller = new AbortController();
+    const pending = api.get('/calendars', false, controller.signal);
+    controller.abort();
+
+    const err = await pending.catch((e: unknown) => e);
+    expect(isAbortError(err)).toBe(true);
+    expect(err).not.toBeInstanceOf(ApiError);
+  });
+
+  it('does not mistake a server failure for a cancellation', () => {
+    expect(isAbortError(new ApiError(500, 'boom'))).toBe(false);
+    expect(isAbortError(new Error('network down'))).toBe(false);
   });
 });
 

@@ -1,7 +1,8 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -21,7 +22,7 @@ const calendarState = {
     { id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner', publicShared: false },
   ],
   activeCalendarIds: ['cal-1'],
-  events: [],
+  events: [] as CalendarEvent[],
   memos: [],
   membersMap: {},
   memberErrors: {},
@@ -59,7 +60,34 @@ vi.mock('@/stores/auth-store', () => ({
 }));
 
 import { App } from './app';
+import { fetchWindow } from './lib/date-utils';
 import { useUiStore } from './stores/ui-store';
+
+function event(id: string, calendarId: string, title: string): CalendarEvent {
+  return {
+    id,
+    calendarId,
+    title,
+    allDay: false,
+    startAt: '2026-08-05T10:00:00+09:00',
+    endAt: '2026-08-05T11:00:00+09:00',
+    color: '#47B2F7',
+    ownerId: 'u1',
+    showAs: 'busy',
+    flexibility: 'fixed',
+    visibility: 'default',
+    location: '',
+    memo: '',
+    url: '',
+    notificationOffset: null,
+    participants: [],
+    recurrenceRule: null,
+    isRecurrence: false,
+    recurrenceDate: null,
+    createdAt: '2026-08-01T00:00:00+09:00',
+    updatedAt: '2026-08-01T00:00:00+09:00',
+  };
+}
 
 // Both layouts mount here regardless of width, and the mobile month scroll
 // positions itself on mount; jsdom has no scrollTo.
@@ -97,5 +125,85 @@ describe('App right sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'panel.memo' }));
     expect(screen.queryByRole('heading', { name: 'panel.memo' })).toBeNull();
+  });
+});
+
+describe('App mobile search', () => {
+  afterEach(() => {
+    useUiStore.setState({ mobileTab: 'calendar' });
+    calendarState.calendars = calendarState.calendars.slice(0, 1);
+    calendarState.activeCalendarIds = ['cal-1'];
+    calendarState.events = [];
+  });
+
+  it('leaves out events from a calendar the reader has switched off', async () => {
+    // The store keeps every calendar's events. Offering one from a hidden
+    // calendar leads to a day that does not draw it.
+    calendarState.calendars = [
+      ...calendarState.calendars,
+      { id: 'cal-2', name: 'Work', color: '#F76B47', role: 'owner', publicShared: false },
+    ];
+    calendarState.activeCalendarIds = ['cal-1'];
+    calendarState.events = [
+      event('e-shown', 'cal-1', 'Rehearsal at home'),
+      event('e-hidden', 'cal-2', 'Rehearsal at work'),
+    ];
+    useUiStore.setState({ mobileTab: 'search' });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(screen.getByPlaceholderText('search.placeholder'), 'rehearsal');
+
+    expect(screen.getByText('Rehearsal at home')).toBeInTheDocument();
+    expect(screen.queryByText('Rehearsal at work')).toBeNull();
+  });
+});
+
+describe('App month fetching', () => {
+  const month = (iso: string) => DateTime.fromISO(iso, { zone: 'Asia/Tokyo' });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    useUiStore.setState({ currentMonth: month('2026-08-01') });
+  });
+
+  it('fetches once for a burst of month changes, for the month it settles on', () => {
+    vi.useFakeTimers();
+    render(<App />);
+    expect(calendarState.fetchEvents).toHaveBeenCalledTimes(1);
+
+    // A flick through the mobile month scroll: every month it passes through
+    // arrives as its own change.
+    for (const iso of ['2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01']) {
+      act(() => {
+        useUiStore.setState({ currentMonth: month(iso) });
+      });
+    }
+
+    expect(calendarState.fetchEvents).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(calendarState.fetchEvents).toHaveBeenCalledTimes(2);
+    const settled = fetchWindow('month', month('2026-12-01'));
+    const [start, end] = calendarState.fetchEvents.mock.lastCall as [string, string, AbortSignal];
+    expect([start, end]).toEqual([settled.start, settled.end]);
+  });
+
+  it('cancels a request the month has already moved past', () => {
+    vi.useFakeTimers();
+    render(<App />);
+
+    const [, , inFlight] = calendarState.fetchEvents.mock.calls[0] as [string, string, AbortSignal];
+    expect(inFlight.aborted).toBe(false);
+
+    act(() => {
+      useUiStore.setState({ currentMonth: month('2026-09-01') });
+    });
+
+    // Nothing waits for the response to a month nobody is on any more.
+    expect(inFlight.aborted).toBe(true);
   });
 });
