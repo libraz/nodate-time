@@ -10,6 +10,8 @@ export const en: Record<TranslationKey, string> = {
   'common.loading': 'Loading...',
   'common.copy': 'Copy',
   'common.copied': 'Copied',
+  'common.search': 'Search',
+  'common.noMatches': 'No matches',
 
   'calendar.today': 'Today',
   'calendar.monthly': 'Monthly',
@@ -24,6 +26,9 @@ export const en: Record<TranslationKey, string> = {
   'calendar.selectAll': 'Select all',
   'calendar.newCalendar': 'New calendar',
   'calendar.calendarName': 'Calendar name',
+  'calendar.deleteCalendar': 'Delete calendar',
+  'calendar.deleteWarning': 'The events, memos and album in "{name}" go with it, for everyone.',
+  'calendar.moreEvents': '{count} more events',
 
   'weekday.sun': 'Sun',
   'weekday.mon': 'Mon',
@@ -52,6 +57,7 @@ export const en: Record<TranslationKey, string> = {
   'event.createEvent': 'Create event',
   'event.comments': 'Comments',
   'event.noComments': 'No comments yet',
+  'event.loadEarlierComments': 'Show earlier comments',
   'event.commentPlaceholder': 'Write a comment...',
   'event.send': 'Send',
   'event.addEvent': 'Add event',

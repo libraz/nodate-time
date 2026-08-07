@@ -9,6 +9,8 @@ export const ja = {
   'common.loading': '読み込み中...',
   'common.copy': 'コピー',
   'common.copied': 'コピーしました',
+  'common.search': '検索',
+  'common.noMatches': '該当なし',
 
   // Calendar
   'calendar.today': '今日',
@@ -24,6 +26,9 @@ export const ja = {
   'calendar.selectAll': 'すべて選択',
   'calendar.newCalendar': '新しいカレンダーを作る',
   'calendar.calendarName': 'カレンダー名',
+  'calendar.deleteCalendar': 'カレンダーを削除',
+  'calendar.deleteWarning': '「{name}」の予定・メモ・アルバムがメンバー全員から消えます。',
+  'calendar.moreEvents': 'ほか{count}件の予定',
 
   // Weekday labels
   'weekday.sun': '日',
@@ -55,6 +60,7 @@ export const ja = {
   'event.createEvent': '予定を作成',
   'event.comments': 'コメント',
   'event.noComments': 'コメントはまだありません',
+  'event.loadEarlierComments': '以前のコメントを表示',
   'event.commentPlaceholder': 'コメントを入力...',
   'event.send': '送信',
   'event.addEvent': '予定を追加',
