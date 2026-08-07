@@ -232,9 +232,13 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		// A locked identity is refused before the password is even checked,
-		// so brute-forcing cannot proceed by simply continuing to guess.
-		if identity.LockedUntilAt.Valid && identity.LockedUntilAt.Time.After(time.Now()) {
+		// A locked identity is refused whatever the password is, so
+		// brute-forcing cannot proceed by simply continuing to guess. The hash
+		// is still run: returning without it made the locked path answer in a
+		// fraction of the time every other path takes, and that gap says both
+		// that the address has an account and that it is currently locked.
+		if lockStands(identity, time.Now()) {
+			auth.CheckPassword(in.Body.Password, dummyPasswordHash)
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
@@ -274,14 +278,23 @@ const (
 	lockoutWindow    = 15 * time.Minute
 )
 
+// lockStands reports whether a recorded lock has yet to run out.
+func lockStands(identity generated.Identity, now time.Time) bool {
+	return identity.LockedUntilAt.Valid && identity.LockedUntilAt.Time.After(now)
+}
+
+// recordFailedAttempt hands the threshold and the window to the statement that
+// counts the failure: whether the previous window has run out and whether this
+// failure reaches the threshold are the same question asked of one row, and
+// answering half of it here would put a second clock on it.
 func recordFailedAttempt(ctx context.Context, deps Deps, identity generated.Identity) {
-	lockedUntil := sql.NullTime{}
-	if identity.FailedAttempts+1 >= lockoutThreshold {
-		lockedUntil = sql.NullTime{Time: time.Now().Add(lockoutWindow), Valid: true}
-	}
 	if err := deps.Queries.RecordFailedLogin(ctx, generated.RecordFailedLoginParams{
-		LockedUntilAt: lockedUntil,
-		ID:            identity.ID,
+		LockoutThreshold: lockoutThreshold,
+		// Untyped in the generated parameters: sqlc infers nothing for the
+		// operand of an INTERVAL, so the window goes over as a plain count of
+		// minutes.
+		LockoutWindowMinutes: int32(lockoutWindow / time.Minute),
+		ID:                   identity.ID,
 	}); err != nil {
 		slog.WarnContext(ctx, "failed to record login attempt", "identityID", identity.ID, "error", err)
 	}
