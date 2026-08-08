@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
@@ -175,8 +176,25 @@ func idTokenEmail(idToken string) string {
 	return claims.Email
 }
 
+// redirectMaxRunes is what signin_states.redirect_to holds: VARCHAR(512) on a
+// utf8mb4 table, so 512 characters rather than 512 bytes.
+const redirectMaxRunes = 512
+
 // safeRedirect returns a path safe to redirect the user to after OAuth.
 // Only same-origin paths starting with "/" (and not "//") are accepted to avoid open redirect.
+//
+// Everything unusable becomes "/" rather than an error, and the length limit
+// joins that list rather than refusing the request. The return path is a
+// convenience -- signing in is what the caller came to do -- and this runs on
+// an endpoint the browser reaches by following a redirect, so answering with
+// an error body would render JSON in the address bar the user is watching.
+//
+// Length is the only one of these checks that is not about safety. The
+// dangerous shapes are handled above it: an absolute or protocol-relative URL
+// would be an open redirect, and CR/LF or a backslash would be header
+// injection or a path a browser normalises back off-origin. A long path is
+// merely one the column cannot store, which the insert used to discover on the
+// caller's behalf by failing.
 func safeRedirect(raw string) string {
 	if raw == "" {
 		return "/"
@@ -187,7 +205,30 @@ func safeRedirect(raw string) string {
 	if strings.ContainsAny(raw, "\r\n\\") {
 		return "/"
 	}
+	if utf8.RuneCountInString(raw) > redirectMaxRunes {
+		return "/"
+	}
 	return raw
+}
+
+// storableEmail reports whether an address fits the columns that hold it.
+//
+// users.email and oauth_allowed_emails.email are latin1 and documented as
+// ASCII only, so an address outside ASCII cannot be stored, cannot be
+// allow-listed, and cannot be matched against either. Passing one to the
+// database produces a charset error the caller reads as a server fault.
+//
+// The check is ASCII rather than latin1-encodable on purpose. latin1 could
+// hold some of these, but the collation folds accented letters onto their
+// plain forms, so two addresses that differ would compare equal -- and which
+// two accounts collide is an authentication question, not a storage one.
+func storableEmail(email string) bool {
+	for i := 0; i < len(email); i++ {
+		if email[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // ListEnabledProviders reports which OAuth providers are usable (have a client
@@ -448,6 +489,13 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			if u.Email == "" || !u.EmailVerified {
 				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
+			// Answered before the allow-list, because looking the address up is
+			// itself what the column cannot do. Reported as its own reason: an
+			// administrator cannot fix this by allow-listing the address, since
+			// that column has the same charset.
+			if !storableEmail(u.Email) {
+				return oauthRedirect(deps, "oauth_email_unsupported"), nil
+			}
 			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -466,6 +514,11 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			// the id_token issued alongside the access token.
 			if u.Email == "" {
 				u.Email = idTokenEmail(idToken)
+			}
+			// An empty address is left to the allow-list below, which is what
+			// decides whether a LINE account with no email may sign in at all.
+			if u.Email != "" && !storableEmail(u.Email) {
+				return oauthRedirect(deps, "oauth_email_unsupported"), nil
 			}
 			// The allow-list applies to every provider. LINE does not return a
 			// verified-email proof, so when a domain/email restriction is active
