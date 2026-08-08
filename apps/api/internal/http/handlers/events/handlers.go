@@ -1212,6 +1212,47 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 
 			var child generated.CalendarEvent
 			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+				// If this transaction writes the parent series row at all, the
+				// first such write has to come before the override is inserted.
+				//
+				// Inserting the override takes a shared lock on the parent to
+				// check its foreign key. A write to the parent afterwards has
+				// to raise that to an exclusive lock, and two people editing
+				// different occurrences of one series then hold a shared lock
+				// each while both wait for the other to let go -- a deadlock,
+				// reaching whoever dragged an occurrence as a 500. Writing the
+				// parent first means they queue instead.
+				//
+				// What matters is only that ordering. Skipping these when they
+				// have nothing to do is safe, because a write that does not
+				// happen takes no lock to upgrade; so is writing the parent
+				// again lower down, because the exclusive lock is already held
+				// by then. Moving the first parent write below the insert is
+				// what brings the deadlock back, and
+				// TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock is what
+				// notices.
+				//
+				// Neither statement depends on the override existing, so the
+				// order is free to be the safe one.
+
+				// An occurrence dragged past the end of its own series has to
+				// carry that end with it, or the master stops being selected
+				// for the window it now falls in and the occurrence vanishes
+				// from every view without being deleted.
+				if err := q.ExtendRecurrenceEnd(ctx, generated.ExtendRecurrenceEndParams{
+					RecurrenceEnd: sql.NullTime{Time: endAt, Valid: true},
+					ID:            evt.ID,
+					Boundary:      sql.NullTime{Time: endAt, Valid: true},
+				}); err != nil {
+					return err
+				}
+				// The occurrence lives in its own row, so without this the
+				// series would report the same revision as before the edit and
+				// a second writer holding the older copy would be let through.
+				if err := q.TouchCalendarEvent(ctx, evt.ID); err != nil {
+					return err
+				}
+
 				if _, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
 					PublicID:                overridePubID[:],
 					WorkspaceID:             deps.WorkspaceID,
@@ -1234,23 +1275,6 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 					RecurrenceParentID:      parentRef,
 					RecurrenceOriginalStart: originalRef,
 				}); err != nil {
-					return err
-				}
-				// An occurrence dragged past the end of its own series has to
-				// carry that end with it, or the master stops being selected
-				// for the window it now falls in and the occurrence vanishes
-				// from every view without being deleted.
-				if err := q.ExtendRecurrenceEnd(ctx, generated.ExtendRecurrenceEndParams{
-					RecurrenceEnd: sql.NullTime{Time: endAt, Valid: true},
-					ID:            evt.ID,
-					Boundary:      sql.NullTime{Time: endAt, Valid: true},
-				}); err != nil {
-					return err
-				}
-				// The occurrence lives in its own row, so without this the
-				// series would report the same revision as before the edit and
-				// a second writer holding the older copy would be let through.
-				if err := q.TouchCalendarEvent(ctx, evt.ID); err != nil {
 					return err
 				}
 				var err error
