@@ -637,11 +637,9 @@ func TestNewFieldsInListEvents(t *testing.T) {
 	assert.Equal(t, 60, *evts[0].NotificationOffset)
 }
 
-func TestAttachmentWithoutStorage(t *testing.T) {
+func TestStorageAbsentAttachmentPresign(t *testing.T) {
 	bootstrap(t)
-	if helpers.StorageEnabled() {
-		t.Skip("only meaningful when storage is disabled")
-	}
+	requireStorageAbsent(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)

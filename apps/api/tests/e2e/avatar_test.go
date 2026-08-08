@@ -312,11 +312,9 @@ func TestAvatarUnauthorized(t *testing.T) {
 	assert.Equal(t, 401, status)
 }
 
-func TestAvatarWithoutStorageAvailable(t *testing.T) {
+func TestStorageAbsentAvatarPresign(t *testing.T) {
 	bootstrap(t)
-	if helpers.StorageEnabled() {
-		t.Skip("only meaningful when storage is disabled")
-	}
+	requireStorageAbsent(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)

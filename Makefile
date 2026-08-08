@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-conformance check-core minio-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance check-core minio-up format lint
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -99,6 +99,15 @@ test-e2e:
 
 test-e2e-storage:
 	cd apps/api && TC_TEST_INTEGRATION=1 TC_TEST_MINIO=1 go test ./tests/e2e/ -v -count=1
+
+# The 503 for absent object storage is the one answer the storage run cannot
+# observe: the test server is built once per process, so a run with MinIO has
+# storage for every test in it and the tests about its absence skip. This is
+# the run where they execute. They are selected by name, and the package's
+# storage_absent_test.go asserts that the name, the opt-out and this selector
+# never drift apart.
+test-e2e-storage-absent:
+	cd apps/api && TC_TEST_INTEGRATION=1 go test ./tests/e2e/ -v -count=1 -run '^TestStorageAbsent'
 
 # Check this application's schema against the shared contract it claims to
 # implement. Runs on a scratch database so it never touches dev data.
