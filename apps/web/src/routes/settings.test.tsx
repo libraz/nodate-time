@@ -30,6 +30,7 @@ vi.mock('@/lib/api', () => {
     ApiError,
     api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getBlob: vi.fn() },
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+    isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
   };
 });
 
@@ -100,6 +101,7 @@ import {
 
 const apiGet = vi.mocked(api.get);
 const apiPost = vi.mocked(api.post);
+const apiGetBlob = vi.mocked(api.getBlob);
 const toastError = vi.mocked(toast.error);
 
 function member(role: string, email = 'me@example.com', id = 'm1', name = 'Me'): Member {
@@ -382,6 +384,72 @@ describe('ExportSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.importPasted' }));
 
     await waitFor(() => expect(calendarState.fetchEvents).toHaveBeenCalledWith(start, end));
+  });
+
+  /**
+   * The server names the export after the calendar it came from. Naming it on
+   * the client gave every calendar the same file, so exporting a second one
+   * saved over the first with no sign that it had.
+   */
+  it('saves the export under the name the server gave it', async () => {
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this.download);
+    });
+    const createObjectUrl = vi.fn(() => 'blob:export');
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: vi.fn(),
+    });
+    apiGetBlob.mockResolvedValue({
+      blob: new Blob(['BEGIN:VCALENDAR']),
+      filename: 'Family.ics',
+    });
+
+    render(<ExportSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'settings.exportIcal' }));
+
+    await waitFor(() => expect(downloads).toEqual(['Family.ics']));
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});
+
+/**
+ * A screen that has gone is not owed an answer. Without a guard the reply to a
+ * request nobody is waiting for still writes state, and cancelling it reads as
+ * a failure -- an error message for having navigated away.
+ */
+describe('AllowedEmailsSection cancellation', () => {
+  it('calls the request off when the section goes', async () => {
+    let signal: AbortSignal | undefined;
+    apiGet.mockImplementation((_path, _skipRedirect, s) => {
+      signal = s;
+      return new Promise(() => {});
+    });
+
+    const { unmount } = render(<AllowedEmailsSection />);
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('says nothing to the reader about a request it called off itself', async () => {
+    apiGet.mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+
+    render(<AllowedEmailsSection />);
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    await act(async () => {});
+    expect(toastError).not.toHaveBeenCalled();
   });
 });
 

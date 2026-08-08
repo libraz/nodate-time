@@ -275,6 +275,36 @@ export function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError';
 }
 
+/**
+ * The filename a `Content-Disposition` header names, or an empty string when
+ * it names none.
+ *
+ * Both spellings are read. `filename*=UTF-8''...` is the one that survives a
+ * name with anything outside ASCII in it -- a calendar called 家族 among them
+ * -- so it wins wherever the server sent it; the quoted `filename="..."` is
+ * what is left for everyone else. Any directory part is dropped: a downloaded
+ * file is named, not placed.
+ */
+export function filenameFromDisposition(header: string | null): string {
+  if (!header) return '';
+  let name = '';
+  const extended = header.match(/filename\*=\s*(?:UTF-8|utf-8)''([^;]+)/);
+  if (extended?.[1]) {
+    try {
+      name = decodeURIComponent(extended[1].trim());
+    } catch {
+      // A percent-encoding the server got wrong is not a filename; the plain
+      // form below is still worth reading.
+    }
+  }
+  if (!name) {
+    const quoted = header.match(/filename="([^"]*)"/i);
+    name = (quoted?.[1] ?? header.match(/filename=([^;]+)/i)?.[1] ?? '').trim();
+  }
+  // A name is a name, not a path: keep only what follows the last separator.
+  return name.slice(name.search(/[^/\\]*$/));
+}
+
 export const api = {
   get: <T>(path: string, skipAuthRedirect = false, signal?: AbortSignal) =>
     request<T>(path, { ...(signal ? { signal } : {}) }, skipAuthRedirect),
@@ -307,8 +337,18 @@ export const api = {
     }),
   delete: <T>(path: string, signal?: AbortSignal) =>
     request<T>(path, { method: 'DELETE', ...(signal ? { signal } : {}) }),
-  /** Fetches a binary response through the central client (auth + 401 handling). */
-  getBlob: async (path: string, signal?: AbortSignal): Promise<Blob> => {
+  /**
+   * Fetches a binary response through the central client (auth + 401
+   * handling), with the name the server gave it.
+   *
+   * The name is part of the answer rather than decoration: an export is named
+   * after the calendar it came from, and a caller that drops it saves every
+   * calendar's export under one filename, over the last one.
+   */
+  getBlob: async (
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ blob: Blob; filename: string }> => {
     const token = getToken();
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -319,6 +359,9 @@ export const api = {
       }
       throw await buildError(res);
     }
-    return res.blob();
+    return {
+      blob: await res.blob(),
+      filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
+    };
   },
 };
