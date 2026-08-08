@@ -82,6 +82,21 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 	expiresAt := time.Now().Add(refreshTokenTTL)
 
 	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		// The user row is written before the session that points at it.
+		//
+		// Inserting the session takes a shared lock on that row to check its
+		// foreign key, and stamping the login time needs an exclusive one on
+		// the same row. One account signing in twice at once -- two devices,
+		// two tabs, a client retrying -- puts both transactions in that order,
+		// each holding a shared lock while waiting for the other to release
+		// it, and MySQL rolls one back. Whoever was signing in gets a 500 they
+		// can do nothing about.
+		//
+		// Taking the exclusive lock first makes the two sign-ins queue. The
+		// order is free: neither statement reads what the other writes.
+		if err := q.TouchUserLastLogin(ctx, userID); err != nil {
+			return err
+		}
 		_, err := q.CreateSession(ctx, generated.CreateSessionParams{
 			PublicID:    pubID[:],
 			UserID:      userID,
@@ -90,10 +105,7 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 			IpAddress:   packIP(ipAddress),
 			ExpiresAt:   expiresAt,
 		})
-		if err != nil {
-			return err
-		}
-		return q.TouchUserLastLogin(ctx, userID)
+		return err
 	})
 	if err != nil {
 		return Credentials{}, err
