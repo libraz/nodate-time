@@ -445,9 +445,33 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 	// Disable every current row first, then revive the ones still wanted.
 	// A hard delete would drop the RSVP of somebody who is being re-added in
 	// the same request, silently resetting their answer to pending.
+	//
+	// Only for an event that can already have attendees. Creation calls
+	// addEventParticipants instead, and the difference is not tidiness --
+	// see there before routing the two back through one function.
 	if err := q.RemoveAllEventAttendees(ctx, sql.NullInt32{Int32: int32(eventID), Valid: true}); err != nil {
 		return err
 	}
+	return addEventParticipants(ctx, q, workspaceID, eventID, participants)
+}
+
+// addEventParticipants adds attendees to an event that cannot already have
+// any: one created by the same transaction that is now adding them.
+//
+// The disable step in replaceEventParticipants is deliberately absent here,
+// and restoring it to make the two symmetrical would restore an intermittent
+// 500 on event creation. An empty UPDATE is not free. Attendee rows are
+// indexed on (event_id, user_id) and a brand-new event id sorts above every
+// value in that index, so the scan for rows to disable finds nothing and
+// still takes a next-key lock running to supremum. Every concurrent creation
+// lands on that same gap; gap locks are shared, so all of them get it, and
+// then each needs to insert into the gap the others hold. Two creators are
+// enough for MySQL to roll one of them back, and the caller sees a request
+// that failed for no reason it could act on.
+//
+// The inserts on their own do not collide: an insert-intention lock conflicts
+// with another transaction's gap lock, not with another insert intention.
+func addEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, participants []eventParticipant) error {
 	for _, participant := range participants {
 		pubID, err := uuid.NewV7()
 		if err != nil {
@@ -1027,7 +1051,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				return err
 			}
 			eventID := uint32(eventID64)
-			if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, eventID, participants); err != nil {
+			// Added rather than replaced: the row was inserted a statement ago
+			// and has no attendees to replace.
+			if err := addEventParticipants(ctx, q, deps.WorkspaceID, eventID, participants); err != nil {
 				return err
 			}
 			// Reload the stored row so the response reflects DB truth (normalized
