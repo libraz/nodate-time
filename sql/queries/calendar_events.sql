@@ -89,6 +89,19 @@ ORDER BY recurrence_parent_id, recurrence_original_start;
 SELECT * FROM calendar_events
 WHERE recurrence_parent_id = ? AND recurrence_original_start = ? AND enabled = TRUE;
 
+-- UpsertRecurrenceOverride writes the row that stands in for one occurrence of
+-- a series, inserting it or updating the one already standing in for that
+-- occurrence.
+--
+-- public_id is deliberately not among the columns this statement updates on
+-- conflict, so a row keeps the id it was created with. That is how a caller
+-- tells an insert from a conflict: the row it reads back carries the id that
+-- call generated only if that call inserted it. Adding public_id makes every
+-- caller look like the one that created the row, and the attendee write that
+-- decision feeds becomes an append instead of a replacement -- somebody
+-- removed from an occurrence keeps attending it, with no error raised
+-- anywhere.
+-- TestSecondEditOfAnOccurrenceReplacesItsParticipants is what notices.
 -- name: UpsertRecurrenceOverride :execresult
 INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
