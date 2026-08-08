@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -234,20 +235,25 @@ func TestPresignRefusesAThumbnailThatIsNotOne(t *testing.T) {
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
+	// The code is asserted, not just the status. All four are 400, so a status
+	// alone cannot tell whether the caller was told about the thumbnail or
+	// about the photo -- and being told about the photo's 20MB ceiling when a
+	// 1.5MB thumbnail was refused sends them to look at the wrong file.
 	cases := []struct {
 		name string
+		code string
 		body map[string]any
 	}{
-		{"active content", map[string]any{
+		{"active content", "IMAGE.INVALID_CONTENT_TYPE", map[string]any{
 			"thumbnailContentType": "image/svg+xml", "thumbnailByteSize": 128,
 		}},
-		{"a full-size picture in a thumbnail's clothing", map[string]any{
+		{"a full-size picture in a thumbnail's clothing", "ALBUM.THUMBNAIL_TOO_LARGE", map[string]any{
 			"thumbnailContentType": "image/jpeg", "thumbnailByteSize": 2 * 1024 * 1024,
 		}},
-		{"a type with no size", map[string]any{
+		{"a type with no size", "ALBUM.THUMBNAIL_INCOMPLETE", map[string]any{
 			"thumbnailContentType": "image/png",
 		}},
-		{"a size with no type", map[string]any{
+		{"a size with no type", "ALBUM.THUMBNAIL_INCOMPLETE", map[string]any{
 			"thumbnailByteSize": 4096,
 		}},
 	}
@@ -260,6 +266,11 @@ func TestPresignRefusesAThumbnailThatIsNotOne(t *testing.T) {
 			status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 				testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken, body)
 			require.Equal(t, http.StatusBadRequest, status, "body: %s", string(raw))
+			var failure struct {
+				Code string `json:"code"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &failure))
+			require.Equal(t, tc.code, failure.Code, "body: %s", string(raw))
 		})
 	}
 }

@@ -557,6 +557,8 @@ export const ja = {
   'apiError.IMAGE.INVALID_CONTENT_TYPE': 'JPEG・PNG・WebP の画像のみアップロードできます',
   'apiError.ALBUM.NOT_FOUND': 'アルバムの写真が見つかりません',
   'apiError.ALBUM.TOO_LARGE': '写真が上限の 20MB を超えています',
+  'apiError.ALBUM.THUMBNAIL_TOO_LARGE': 'サムネイルが上限の 1MB を超えています',
+  'apiError.ALBUM.THUMBNAIL_INCOMPLETE': 'サムネイルには形式とサイズの両方が必要です',
   'apiError.MEMBER.NOT_FOUND': 'メンバーが見つかりません',
   'apiError.MEMBER.ALREADY_EXISTS': 'このユーザは既にカレンダーのメンバーです',
   'apiError.MEMBER.LAST_ADMIN': '最後の管理者は外せません',

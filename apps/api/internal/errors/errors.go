@@ -130,6 +130,17 @@ var (
 var (
 	AlbumPhotoNotFound = &Spec{Status: 404, Code: "ALBUM.NOT_FOUND", Message: "Album photo not found"}
 	AlbumPhotoTooLarge = &Spec{Status: 400, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
+	// AlbumThumbnailTooLarge refuses the small rendering a photo is uploaded
+	// with, not the photo. Deliberately not ALBUM.TOO_LARGE: that one names
+	// the photo's own ceiling, so a rejected 1.5MB thumbnail would be
+	// answered with a sentence about 20MB and send the reader looking at the
+	// wrong file.
+	AlbumThumbnailTooLarge = &Spec{Status: 400, Code: "ALBUM.THUMBNAIL_TOO_LARGE", Message: "Thumbnail exceeds maximum size of 1MB"}
+	// AlbumThumbnailIncomplete answers a request that names a thumbnail's
+	// type without its size, or the reverse. Answering it as "no thumbnail"
+	// would be silent: the caller believes it is sending one, and the only
+	// symptom is a grid that keeps downloading full-size pictures.
+	AlbumThumbnailIncomplete = &Spec{Status: 400, Code: "ALBUM.THUMBNAIL_INCOMPLETE", Message: "A thumbnail needs both its content type and its size"}
 )
 
 // --- Member errors ---

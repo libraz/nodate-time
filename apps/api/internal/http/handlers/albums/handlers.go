@@ -489,13 +489,13 @@ func validateThumbnailDeclaration(b PresignPhotoBody) error {
 		return nil
 	}
 	if b.ThumbnailContentType == "" || b.ThumbnailByteSize <= 0 {
-		return apierrors.BadRequest
+		return apierrors.AlbumThumbnailIncomplete
 	}
 	if !isImageContentType(b.ThumbnailContentType) {
 		return apierrors.InvalidImageContentType
 	}
 	if b.ThumbnailByteSize > maxThumbnailSize {
-		return apierrors.BadRequest
+		return apierrors.AlbumThumbnailTooLarge
 	}
 	return nil
 }
