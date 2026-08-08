@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { en } from '@/i18n/en';
+import { ja } from '@/i18n/ja';
 import {
   INVITE_EXPIRY_HOURS,
   INVITE_MAX_USES,
@@ -110,5 +112,39 @@ describe('invite bound options', () => {
   it('offers an unbounded use count without leading with it', () => {
     expect(INVITE_MAX_USES).toContain(0);
     expect(INVITE_MAX_USES[0]).not.toBe(0);
+  });
+});
+
+/**
+ * The note above the pickers says what a link carries. It used to say every
+ * link stops once one person joins, printed directly above a control offering
+ * five people and unlimited -- text asserting a rule the thing beside it
+ * contradicts.
+ */
+describe('the note above the invite pickers', () => {
+  it('claims no use limit the picker does not impose', () => {
+    expect(INVITE_MAX_USES.some((uses) => uses !== 1)).toBe(true);
+    expect(en['share.inviteTermsNote']).not.toMatch(/single.?use|once one person/i);
+    expect(ja['share.inviteTermsNote']).not.toMatch(/1回限り|1 ?人が参加/);
+  });
+
+  it('is written in both languages', () => {
+    expect(en['share.inviteTermsNote']).toBeTruthy();
+    expect(ja['share.inviteTermsNote']).toBeTruthy();
+  });
+});
+
+/**
+ * A label with no choice behind it is a promise nothing can keep: "Never" long
+ * outlived the option that produced it, and the next reader would have found a
+ * translated string for a link the API stopped issuing.
+ */
+describe('expiry labels', () => {
+  it('declares no expiry label without a choice that reaches it', () => {
+    const reachable = new Set<string>(INVITE_EXPIRY_HOURS.map(inviteExpiryLabelKey));
+    const declared = Object.keys(ja).filter(
+      (key) => key.startsWith('invites.expiry') && key !== 'invites.expiry',
+    );
+    expect(declared.sort()).toEqual([...reachable].sort());
   });
 });

@@ -152,7 +152,7 @@ export function SharePanel() {
                   {t('share.inviteSection')}
                 </h3>
                 <p className="text-caption text-[var(--color-text-secondary)]">
-                  {t('share.inviteSingleUseNote')}
+                  {t('share.inviteTermsNote')}
                 </p>
                 <CustomSelect
                   value={inviteRole}

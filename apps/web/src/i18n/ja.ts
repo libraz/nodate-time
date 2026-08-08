@@ -170,8 +170,7 @@ export const ja = {
   'share.poweredBy': 'Powered by Nodate Time',
   'share.targetCalendar': '対象カレンダー',
   'share.inviteSection': '招待リンク',
-  'share.inviteSingleUseNote':
-    '各リンクは1人が参加すると無効になります（1回限り）。複数発行できます',
+  'share.inviteTermsNote': 'リンクごとに権限・有効期限・使える人数を選べます。複数発行できます',
   'share.createInvite': '招待リンクを作成',
   'share.createAnotherInvite': '別の招待リンクを作成',
   'share.inviteUsed': '使用済み',
@@ -413,7 +412,6 @@ export const ja = {
   'invites.expiry24h': '24 時間',
   'invites.expiry7d': '7 日間',
   'invites.expiry30d': '30 日間',
-  'invites.expiryNever': '無期限',
   'invites.uses': '使用回数',
   'invites.usesOnce': '1 人まで',
   'invites.usesFive': '5 人まで',

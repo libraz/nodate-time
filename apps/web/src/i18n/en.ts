@@ -165,8 +165,8 @@ export const en: Record<TranslationKey, string> = {
   'share.poweredBy': 'Powered by Nodate Time',
   'share.targetCalendar': 'Target calendar',
   'share.inviteSection': 'Invite link',
-  'share.inviteSingleUseNote':
-    'Each link stops working once one person joins (single-use). You can issue several',
+  'share.inviteTermsNote':
+    'Each link carries the role, expiry and number of uses you choose below. You can issue several',
   'share.createInvite': 'Create invite link',
   'share.createAnotherInvite': 'Create another invite link',
   'share.inviteUsed': 'Used',
@@ -394,7 +394,6 @@ export const en: Record<TranslationKey, string> = {
   'invites.expiry24h': 'In 24 hours',
   'invites.expiry7d': 'In 7 days',
   'invites.expiry30d': 'In 30 days',
-  'invites.expiryNever': 'Never',
   'invites.uses': 'Uses',
   'invites.usesOnce': 'One person',
   'invites.usesFive': 'Up to 5 people',
