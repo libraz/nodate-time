@@ -284,6 +284,8 @@ export const ja = {
   'auth.oauthState': 'セッションの有効期限が切れました。もう一度ログインしてください',
   'auth.oauthEmailUnverified':
     'このメールアドレスを使うアカウントがすでにありますが、確認が済んでいません。パスワードでログインしてアドレスを確認してから、もう一度お試しください',
+  'auth.oauthEmailUnsupported':
+    'このメールアドレスには、現在ご利用いただけない文字が含まれています。半角英数字のみのアドレスでお試しください',
 
   // メールアドレスの確認
   'auth.verifyEmailTitle': 'メールアドレスの確認',
@@ -518,6 +520,8 @@ export const ja = {
   'apiError.AUTH.TOKEN_INVALID':
     'サインインの有効期限が切れています。もう一度サインインしてください',
   'apiError.AUTH.EMAIL_EXISTS': 'このメールアドレスは既に登録されています',
+  'apiError.AUTH.EMAIL_UNSUPPORTED':
+    'このメールアドレスには、現在ご利用いただけない文字が含まれています。半角英数字のみのアドレスでお試しください',
   'apiError.AUTH.REGISTER_FAILED': '入力された内容では登録できません',
   'apiError.AUTH.BAD_CREDENTIALS': 'メールアドレスまたはパスワードが違います',
   'apiError.AUTH.WRONG_PASSWORD': '現在のパスワードが違います',

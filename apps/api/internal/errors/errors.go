@@ -53,9 +53,14 @@ var (
 	AuthVerificationInvalid = &Spec{Status: 400, Code: "AUTH.VERIFICATION_INVALID", Message: "Verification link is invalid or expired"}
 	AuthOAuthFailed         = &Spec{Status: 400, Code: "AUTH.OAUTH_FAILED", Message: "OAuth authentication failed"}
 	AuthSignupNotAllowed    = &Spec{Status: 403, Code: "AUTH.SIGNUP_NOT_ALLOWED", Message: "This email address is not permitted to sign up. Contact an administrator."}
-	AuthAdminRequired       = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
-	AuthSessionNotFound     = &Spec{Status: 404, Code: "AUTH.SESSION_NOT_FOUND", Message: "Session not found"}
-	SecretsUnavailable      = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
+	// AuthEmailUnsupported refuses an address the account columns cannot store.
+	// Deliberately not SIGNUP_NOT_ALLOWED: that one tells the reader to ask an
+	// administrator, and an administrator cannot help here -- the allow-list
+	// column has the same charset as the one that refused the address.
+	AuthEmailUnsupported = &Spec{Status: 400, Code: "AUTH.EMAIL_UNSUPPORTED", Message: "This email address uses characters this service cannot store"}
+	AuthAdminRequired    = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
+	AuthSessionNotFound  = &Spec{Status: 404, Code: "AUTH.SESSION_NOT_FOUND", Message: "Session not found"}
+	SecretsUnavailable   = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
 )
 
 // --- Calendar errors ---

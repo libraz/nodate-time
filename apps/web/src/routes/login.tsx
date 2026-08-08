@@ -25,6 +25,8 @@ export function oauthErrorMessageKey(code: string | undefined): TranslationKey |
       return 'auth.oauthNotAllowed';
     case 'oauth_email_unverified':
       return 'auth.oauthEmailUnverified';
+    case 'oauth_email_unsupported':
+      return 'auth.oauthEmailUnsupported';
     default:
       return 'auth.oauthFailed';
   }
