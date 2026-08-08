@@ -84,7 +84,10 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		}
 	}
 
-	cfg, err := config.Load()
+	// This command writes rows; it signs nothing, serves nothing and sends
+	// nothing. Loading the serving configuration would make it refuse to start
+	// over a signing secret, a CORS list and a mail relay it never reads.
+	cfg, err := config.LoadForTooling()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
