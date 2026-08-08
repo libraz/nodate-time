@@ -196,3 +196,51 @@ describe('SharePanel invites', () => {
     expect(toastError).toHaveBeenCalledWith('error.serverUnavailable');
   });
 });
+
+/**
+ * The link a listing cannot hand back.
+ *
+ * The server stores a hash, so only the response that created an invite ever
+ * carries a usable link. Listing them returns rows without one, and the panel
+ * re-lists every time it opens. Rendering a URL from that missing value put
+ * `/share/undefined` on screen and into the clipboard -- and into embed code
+ * pasted on other people's sites, where it outlived the session that made it.
+ *
+ * TypeScript cannot catch this: a template literal accepts `string |
+ * undefined` and prints it. Only an assertion can.
+ */
+describe('SharePanel links a listing cannot reproduce', () => {
+  /** An invite as the listing returns one: no token, because there is none. */
+  function listedWithoutToken(id: string): InviteData {
+    const { token: _token, ...rest } = invite(id, 'unused');
+    return rest;
+  }
+
+  it('shows no link for an invite whose token this session never held', async () => {
+    apiGet.mockResolvedValue([listedWithoutToken('inv-1')]);
+
+    await act(async () => {
+      render(<SharePanel />);
+    });
+
+    expect(screen.queryByDisplayValue(/\/share\//)).toBeNull();
+    expect(document.body.textContent).not.toContain('undefined');
+    // And it says why, rather than leaving a row that looks like it failed to
+    // load: the link existed, it was shown once, and it cannot be shown again.
+    expect(screen.getByText('invites.linkUnavailable')).toBeTruthy();
+  });
+
+  it('still shows the link for an invite created in this session', async () => {
+    apiPost.mockResolvedValue(invite('inv-1', 'token-1'));
+    apiGet.mockResolvedValue([listedWithoutToken('inv-1')]);
+
+    await act(async () => {
+      render(<SharePanel />);
+    });
+    // A calendar that already has a link offers to make another one.
+    fireEvent.click(await screen.findByRole('button', { name: 'share.createAnotherInvite' }));
+
+    // Re-listing after the creation must not blank the link that was just made.
+    expect(await screen.findByDisplayValue('http://localhost:3000/share/token-1')).toBeTruthy();
+  });
+});
