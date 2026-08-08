@@ -21,9 +21,24 @@ import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
 
-/** How many months of weeks to keep mounted before/after the moving anchor month. */
-const RANGE_MONTHS = 18;
-const RANGE_SHIFT_MONTHS = 12;
+/**
+ * How many months of weeks stay mounted either side of the anchor, and how far
+ * the anchor jumps when the reader reaches an edge.
+ *
+ * These two move together. The range is not what the scroll needs on screen --
+ * a phone shows about one month and a hard flick covers three -- it is how
+ * rarely the list has to be rebuilt: reaching an edge re-anchors by the shift
+ * and rebuilds every row. A wider range buys fewer rebuilds with a cost paid
+ * continuously, and the grid is what costs, not the events on it. Eighteen
+ * months held about 11,700 elements with an empty calendar and added roughly
+ * 40ms to every re-render the view took; six holds about 4,100.
+ *
+ * Lower than this trades a steady cost for an intermittent visible one: at
+ * three months a reader reaches an edge within a couple of flicks, and a
+ * rebuild is a full remount with the scroll position restored underneath it.
+ */
+const RANGE_MONTHS = 6;
+const RANGE_SHIFT_MONTHS = 6;
 const EDGE_EXTEND_PX = 700;
 
 const MONTH_HEADER_H = 28;

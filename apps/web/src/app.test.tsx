@@ -18,10 +18,10 @@ vi.mock('@/lib/api', () => ({
 }));
 
 // The month views stand in for themselves here. Nothing in this file asserts
-// anything about a day cell, and jsdom applies no CSS, so both layouts mount
-// at once: the real pair puts twelve thousand nodes -- MonthScroll alone keeps
-// 37 months of them -- in front of every accessible-name query, which is what
-// made a two-click test take seconds.
+// anything about a day cell, and jsdom applies no CSS, so both layouts mount at
+// once, putting several thousand elements in front of every accessible-name
+// query. The scroller holds far less than it used to and the real pair passes
+// these tests, but it still takes this file from under a second to nearly five.
 vi.mock('@/components/calendar-grid', () => ({
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
   CalendarGrid: () => <div data-testid="calendar-grid" />,
