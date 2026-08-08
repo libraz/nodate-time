@@ -51,12 +51,21 @@ func Ensure(ctx context.Context, q *generated.Queries, slug, name, timezone, cou
 	// EnsureWorkspace is an upsert keyed on slug, so a concurrent start
 	// cannot produce two workspaces; the generated public_id above is
 	// discarded when the row already exists.
-	if _, err := q.EnsureWorkspace(ctx, generated.EnsureWorkspaceParams{
-		PublicID: pubID[:],
-		Slug:     slug,
-		Name:     name,
-		Timezone: timezone,
-		Country:  nullString(country),
+	//
+	// Concurrent starts aim every one of those upserts at the same row, which
+	// is the shape InnoDB resolves by rolling one side back. The loser is not
+	// wrong and has nothing else to do about it -- a caller here either fails
+	// to boot or fails a test suite's setup -- so the retry belongs at this
+	// call rather than in a return the callers cannot act on.
+	if err := retryOnDeadlock(ctx, func() error {
+		_, err := q.EnsureWorkspace(ctx, generated.EnsureWorkspaceParams{
+			PublicID: pubID[:],
+			Slug:     slug,
+			Name:     name,
+			Timezone: timezone,
+			Country:  nullString(country),
+		})
+		return err
 	}); err != nil {
 		return Scope{}, fmt.Errorf("ensure workspace %q: %w", slug, err)
 	}
