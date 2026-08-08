@@ -537,6 +537,8 @@ export const en: Record<TranslationKey, string> = {
   'apiError.IMAGE.INVALID_CONTENT_TYPE': 'Only JPEG, PNG, and WebP images are accepted',
   'apiError.ALBUM.NOT_FOUND': 'Album photo not found',
   'apiError.ALBUM.TOO_LARGE': 'Photo exceeds maximum size of 20MB',
+  'apiError.ALBUM.THUMBNAIL_TOO_LARGE': 'Thumbnail exceeds maximum size of 1MB',
+  'apiError.ALBUM.THUMBNAIL_INCOMPLETE': 'A thumbnail needs both its content type and its size',
   'apiError.MEMBER.NOT_FOUND': 'Member not found',
   'apiError.MEMBER.ALREADY_EXISTS': 'User is already a member of this calendar',
   'apiError.MEMBER.LAST_ADMIN': 'Cannot remove the last admin',
