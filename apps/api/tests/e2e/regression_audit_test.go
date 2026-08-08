@@ -72,9 +72,9 @@ func TestInviteCannotGrantAdmin(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
 		map[string]any{"role": "owner"})
-	// The admin role is rejected at the schema layer (enum: member,viewer), which
-	// Huma reports as 422; a 400 from the handler is equally acceptable. Either way
-	// an invite must never be able to grant admin.
+	// The owner role is rejected at the schema layer (enum: editor,viewer),
+	// which Huma reports as 422; a 400 from the handler is equally acceptable.
+	// Either way an invite must never be able to grant ownership.
 	require.True(t, status == http.StatusBadRequest || status == http.StatusUnprocessableEntity,
 		"expected admin role to be rejected, got %d", status)
 }
@@ -105,16 +105,27 @@ func TestSingleUseInviteCannotBeReused(t *testing.T) {
 	require.True(t, secondStatus == 404 || secondStatus == 410, "expected exhausted invite to be rejected, got %d", secondStatus)
 }
 
-// TestDeleteInviteRejectsUnknownIDAndDoesNotAudit verifies that deleting a
-// non-existent (or foreign) invite id is reported as a 404 rather than a
-// silent success, and that no revoke is recorded for a delete that did not
-// happen.
+// TestDeleteInviteRejectsUnknownIDAndDoesNotAudit verifies that deleting an id
+// that names no invite is reported as a 404 rather than a silent success, and
+// that no revoke is recorded for a delete that did not happen.
+//
+// The id here is malformed rather than merely absent, which is a different
+// rejection: it never reaches the lookup. The id that is well-formed and
+// belongs to somebody else is the case below.
 func TestDeleteInviteRejectsUnknownIDAndDoesNotAudit(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	owner := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	// A real invite, so the feed below has something of this kind to record.
+	var inv struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "editor"}, &inv)
+	require.NotEmpty(t, inv.ID)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/invites/999999999", owner.AccessToken, nil)
 	require.Equal(t, http.StatusNotFound, status)
@@ -128,10 +139,64 @@ func TestDeleteInviteRejectsUnknownIDAndDoesNotAudit(t *testing.T) {
 	}
 	var feed activityPage
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity?limit=20", owner.AccessToken, nil, &feed)
+
+	seen := map[string]bool{}
 	for _, item := range feed.Items {
-		require.False(t, item.EntityType == "invite" && item.Action == "calendar.invite.revoked",
-			"a no-op delete must not be audited as a revoke")
+		seen[item.EntityType+":"+item.Action] = true
 	}
+	// Asserting the absence of a revoke over a feed that might be empty proves
+	// nothing -- an activity endpoint that returned no rows at all would read
+	// as a clean result. Finding the creation is what makes the silence about
+	// revokes mean something.
+	require.True(t, seen["invite:calendar.invite.created"],
+		"the feed must be recording invite events for its silence about revokes to count")
+	require.False(t, seen["invite:calendar.invite.revoked"],
+		"a no-op delete must not be audited as a revoke")
+}
+
+// TestDeleteInviteRejectsAnInviteFromAnotherCalendar covers the case the test
+// above names in passing and never sends: an id that is well-formed and
+// belongs to somebody else.
+//
+// The scoping is real today -- the handler resolves the calendar and revokes
+// by public id *and* calendar. What was missing is anything that would notice
+// if it stopped being. The generated data layer still carries an unscoped
+// RevokeInvite, held out of use by a comment in the drift script's allow-list
+// saying the authorization would have to be repeated outside the query. This
+// is that comment turned into something that fails.
+func TestDeleteInviteRejectsAnInviteFromAnotherCalendar(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	outsider := helpers.NewTenant(t, testServerURL)
+	joiner := helpers.NewTenant(t, testServerURL)
+
+	ownerCal := testServerURL + "/calendars/" + owner.CalendarID
+	var inv struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, ownerCal+"/invites", owner.AccessToken,
+		map[string]any{"role": "editor", "maxUses": 2}, &inv)
+	require.NotEmpty(t, inv.ID)
+	require.NotEmpty(t, inv.Token)
+
+	// The outsider manages a calendar of their own, so the request is refused
+	// on the invite belonging elsewhere rather than on their rights.
+	outsiderCal := testServerURL + "/calendars/" + outsider.CalendarID
+	status, body := helpers.DoJSONStatus(t, http.MethodDelete,
+		outsiderCal+"/invites/"+inv.ID, outsider.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status,
+		"an invite on another calendar must not be reachable: %s", string(body))
+
+	// The status on its own would pass against a handler that revoked the
+	// invite and then reported a miss, which is exactly what dropping the
+	// calendar from the query would produce. Using the link is what does not.
+	acceptStatus, acceptBody := helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/invites/"+inv.Token+"/accept", joiner.AccessToken, nil)
+	require.True(t, acceptStatus >= 200 && acceptStatus < 300,
+		"the refused delete must leave the invite usable: %s", string(acceptBody))
 }
 
 // TestSingleUseInviteConcurrentAccept verifies the invite use-count guard under
