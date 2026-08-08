@@ -11,6 +11,24 @@ import (
 	"time"
 )
 
+const attachAlbumPhotoStorageObject = `-- name: AttachAlbumPhotoStorageObject :execresult
+UPDATE album_photos SET storage_object_id = ?
+WHERE id = ? AND storage_object_id IS NULL
+`
+
+type AttachAlbumPhotoStorageObjectParams struct {
+	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
+	ID              uint32        `json:"id"`
+}
+
+// AttachAlbumPhotoStorageObject moves a photo onto the object model. The
+// IS NULL guard is what makes it idempotent: a confirm and a backfill pass
+// racing for the same row both write, but only one reports a row, and only
+// that one takes the reference.
+func (q *Queries) AttachAlbumPhotoStorageObject(ctx context.Context, arg AttachAlbumPhotoStorageObjectParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, attachAlbumPhotoStorageObject, arg.StorageObjectID, arg.ID)
+}
+
 const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
 UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
 `
@@ -92,7 +110,7 @@ func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePending
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
-SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at FROM album_photos WHERE public_id = ?
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at, storage_object_id FROM album_photos WHERE public_id = ?
 `
 
 func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) (AlbumPhoto, error) {
@@ -117,12 +135,13 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.StorageObjectID,
 	)
 	return i, err
 }
 
 const listAbandonedAlbumPhotoStorageKeys = `-- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT id, storage_key FROM album_photos
+SELECT id, storage_key, storage_object_id FROM album_photos
 WHERE enabled = FALSE AND updated_at < ? AND id > ?
 ORDER BY id
 LIMIT ?
@@ -135,8 +154,9 @@ type ListAbandonedAlbumPhotoStorageKeysParams struct {
 }
 
 type ListAbandonedAlbumPhotoStorageKeysRow struct {
-	ID         uint32 `json:"id"`
-	StorageKey string `json:"storageKey"`
+	ID              uint32        `json:"id"`
+	StorageKey      string        `json:"storageKey"`
+	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
 }
 
 // ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
@@ -147,6 +167,10 @@ type ListAbandonedAlbumPhotoStorageKeysRow struct {
 // created_at. Ageing by creation time gets it backwards: a photo kept for a
 // year is collected on the very next pass after it is deleted, while one
 // uploaded and deleted this morning sits around until it is a year old.
+//
+// storage_object_id comes along because deleting the row is what ends the
+// photo's reference to its blob: the sweep releases it there, which is the
+// one place every way of losing a photo passes through.
 func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg ListAbandonedAlbumPhotoStorageKeysParams) ([]ListAbandonedAlbumPhotoStorageKeysRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAbandonedAlbumPhotoStorageKeys, arg.UpdatedAt, arg.ID, arg.Limit)
 	if err != nil {
@@ -156,7 +180,7 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 	var items []ListAbandonedAlbumPhotoStorageKeysRow
 	for rows.Next() {
 		var i ListAbandonedAlbumPhotoStorageKeysRow
-		if err := rows.Scan(&i.ID, &i.StorageKey); err != nil {
+		if err := rows.Scan(&i.ID, &i.StorageKey, &i.StorageObjectID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -171,7 +195,8 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 }
 
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id,
+       COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -179,6 +204,7 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
@@ -217,6 +243,8 @@ type ListAlbumPhotosAfterRow struct {
 	Enabled                  bool           `json:"enabled"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
+	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ImageStorageKey          string         `json:"imageStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
@@ -258,6 +286,8 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.StorageObjectID,
+			&i.ImageStorageKey,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
@@ -278,7 +308,8 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 }
 
 const listAlbumPhotosFirstPage = `-- name: ListAlbumPhotosFirstPage :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id,
+       COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -286,6 +317,7 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
@@ -317,6 +349,8 @@ type ListAlbumPhotosFirstPageRow struct {
 	Enabled                  bool           `json:"enabled"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
+	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ImageStorageKey          string         `json:"imageStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
@@ -326,6 +360,12 @@ type ListAlbumPhotosFirstPageRow struct {
 
 // Both listings join the uploader's avatar object, so a page carries the key
 // its pictures are signed from rather than costing a lookup per photo.
+//
+// image_storage_key is where a photo's bytes are: the storage object once the
+// photo has been moved onto one, and the row's own key until then. The
+// fallback is expressed here as well as in the handler because a page holds
+// thirty photos, and resolving it per row is the lookup the avatar join above
+// exists to avoid.
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAlbumPhotosFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -354,11 +394,68 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.StorageObjectID,
+			&i.ImageStorageKey,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
 			&i.UploaderAvatarStorageKey,
 			&i.EventPublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlbumPhotosWithoutStorageObject = `-- name: ListAlbumPhotosWithoutStorageObject :many
+SELECT id, workspace_id, storage_key, content_type, byte_size FROM album_photos
+WHERE storage_object_id IS NULL AND enabled = TRUE AND storage_key <> '' AND id > ?
+ORDER BY id
+LIMIT ?
+`
+
+type ListAlbumPhotosWithoutStorageObjectParams struct {
+	ID    uint32 `json:"id"`
+	Limit int32  `json:"limit"`
+}
+
+type ListAlbumPhotosWithoutStorageObjectRow struct {
+	ID          uint32 `json:"id"`
+	WorkspaceID uint32 `json:"workspaceId"`
+	StorageKey  string `json:"storageKey"`
+	ContentType string `json:"contentType"`
+	ByteSize    uint64 `json:"byteSize"`
+}
+
+// ListAlbumPhotosWithoutStorageObject walks the photos that predate the
+// object model, oldest first by id so the cursor makes progress.
+//
+// Only live photos are backfilled. A retired one is on its way out through
+// the sweep above, and moving it onto an object first would take a reference
+// that the same sweep has to release moments later.
+func (q *Queries) ListAlbumPhotosWithoutStorageObject(ctx context.Context, arg ListAlbumPhotosWithoutStorageObjectParams) ([]ListAlbumPhotosWithoutStorageObjectRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAlbumPhotosWithoutStorageObject, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAlbumPhotosWithoutStorageObjectRow
+	for rows.Next() {
+		var i ListAlbumPhotosWithoutStorageObjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.StorageKey,
+			&i.ContentType,
+			&i.ByteSize,
 		); err != nil {
 			return nil, err
 		}

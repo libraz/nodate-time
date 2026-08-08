@@ -80,6 +80,33 @@ func (q *Queries) DeleteStorageObject(ctx context.Context, id uint32) (sql.Resul
 	return q.db.ExecContext(ctx, deleteStorageObject, id)
 }
 
+const deleteUnreferencedStorageObject = `-- name: DeleteUnreferencedStorageObject :execresult
+DELETE so FROM storage_objects so
+WHERE so.id = ?
+  AND so.ref_count = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
+  )
+`
+
+// DeleteUnreferencedStorageObject collects one named object, and only if
+// nothing holds it: the count is zero and no referring row of either kind is
+// still pointing at it. It is what lets the caller that released the last
+// reference finish the job in the same pass, rather than leaving the bytes to
+// an age-gated sweep -- that gate exists to protect a reservation which has
+// not been confirmed yet, and an object whose last referrer was just deleted
+// cannot be one.
+//
+// The two NOT EXISTS clauses are the same ones the sweep applies. Both
+// foreign keys are RESTRICT, so without them this is an error the caller has
+// to interpret rather than an answer.
+func (q *Queries) DeleteUnreferencedStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteUnreferencedStorageObject, id)
+}
+
 const getStorageObjectByID = `-- name: GetStorageObjectByID :one
 SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE id = ? AND enabled = TRUE
 `
@@ -132,6 +159,47 @@ func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) 
 	return i, err
 }
 
+const getStorageObjectByWorkspaceDigest = `-- name: GetStorageObjectByWorkspaceDigest :one
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
+WHERE workspace_id = ? AND sha256 = ? AND enabled = TRUE
+`
+
+type GetStorageObjectByWorkspaceDigestParams struct {
+	WorkspaceID sql.NullInt32 `json:"workspaceId"`
+	Sha256      []byte        `json:"sha256"`
+}
+
+// GetStorageObjectByWorkspaceDigest finds the row that content addressing
+// deduplicated onto.
+//
+// Reading it back by key only works when the key is derived from the digest,
+// which is true of attachments and avatars and not of album photos: their
+// bytes are written at a key chosen before anything knows the digest, so the
+// row already holding those bytes is keyed by whichever photo got there
+// first. (workspace_id, sha256) is the unique key the upsert collides on, so
+// it is the one that can answer for either.
+func (q *Queries) GetStorageObjectByWorkspaceDigest(ctx context.Context, arg GetStorageObjectByWorkspaceDigestParams) (StorageObject, error) {
+	row := q.db.QueryRowContext(ctx, getStorageObjectByWorkspaceDigest, arg.WorkspaceID, arg.Sha256)
+	var i StorageObject
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.OwnerUserID,
+		&i.Sha256,
+		&i.ByteSize,
+		&i.ContentType,
+		&i.StorageKey,
+		&i.RefCount,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const incrementStorageObjectRefs = `-- name: IncrementStorageObjectRefs :exec
 UPDATE storage_objects SET ref_count = ref_count + 1 WHERE id = ?
 `
@@ -148,6 +216,9 @@ WHERE so.ref_count = 0
   AND so.id > ?
   AND NOT EXISTS (
     SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
   )
 ORDER BY so.id
 LIMIT ?

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/albumblob"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -105,6 +106,30 @@ func photoStorageKey(calPubHex, photoPubHex string) string {
 	return fmt.Sprintf("albums/%s/%s", calPubHex, photoPubHex)
 }
 
+// photoObjectKey says where a photo's bytes are.
+//
+// A photo that has been moved onto the object model is read through the
+// object, because that is the row the sweep and the reference count agree
+// about -- and after deduplication it can name another photo's copy of the
+// same bytes. A photo the backfill has not reached yet is read through the key
+// it was uploaded with, which is what lets the migration stop half-way without
+// anything going dark.
+//
+// The listings resolve the same thing in SQL: a page carries thirty photos and
+// this would be thirty lookups.
+func photoObjectKey(ctx context.Context, deps Deps, p generated.AlbumPhoto) string {
+	if !p.StorageObjectID.Valid {
+		return p.StorageKey
+	}
+	object, err := deps.Queries.GetStorageObjectByID(ctx, uint32(p.StorageObjectID.Int32))
+	if err != nil {
+		slog.WarnContext(ctx, "album photo storage object is unreadable, falling back to its own key",
+			"photoID", p.ID, "storageObjectID", p.StorageObjectID.Int32, "error", err)
+		return p.StorageKey
+	}
+	return object.StorageKey
+}
+
 // photoExtensions maps the allowed album image content types to a file
 // extension for the synthesized download filename (album photos have no
 // stored original filename, unlike event attachments).
@@ -176,13 +201,15 @@ func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUpl
 }
 
 type albumPhotoListRow struct {
-	id                       uint32
-	publicID                 []byte
-	caption                  string
-	contentType              string
-	byteSize                 uint64
-	width                    sql.NullInt32
-	height                   sql.NullInt32
+	id          uint32
+	publicID    []byte
+	caption     string
+	contentType string
+	byteSize    uint64
+	width       sql.NullInt32
+	height      sql.NullInt32
+	// storageKey is the listing's resolved key: the photo's storage object
+	// when it has one, its own key until the backfill reaches it.
 	storageKey               string
 	takenAt                  time.Time
 	createdAt                time.Time
@@ -204,7 +231,7 @@ func firstPagePhotoRows(rows []generated.ListAlbumPhotosFirstPageRow) []albumPho
 			byteSize:                 r.ByteSize,
 			width:                    r.Width,
 			height:                   r.Height,
-			storageKey:               r.StorageKey,
+			storageKey:               r.ImageStorageKey,
 			takenAt:                  r.TakenAt,
 			createdAt:                r.CreatedAt,
 			uploaderPublicID:         r.UploaderPublicID,
@@ -228,7 +255,7 @@ func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoLi
 			byteSize:                 r.ByteSize,
 			width:                    r.Width,
 			height:                   r.Height,
-			storageKey:               r.StorageKey,
+			storageKey:               r.ImageStorageKey,
 			takenAt:                  r.TakenAt,
 			createdAt:                r.CreatedAt,
 			uploaderPublicID:         r.UploaderPublicID,
@@ -298,7 +325,7 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 		resp.Height = &h
 	}
 	if deps.Storage != nil {
-		if url, err := deps.Storage.PresignGet(ctx, p.StorageKey, imageTTL); err == nil {
+		if url, err := deps.Storage.PresignGet(ctx, photoObjectKey(ctx, deps, p), imageTTL); err == nil {
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.ID, "error", err)
@@ -510,6 +537,16 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
+		// The digest is read from what landed rather than declared by the
+		// client, because the album's presign happens before the bytes exist:
+		// there is no digest to name a key with, so it is computed here, once,
+		// on the upload path. It is what puts the photo on the same footing as
+		// every other blob -- one object row, one reference count, one sweep.
+		digest, err := deps.Storage.SHA256(ctx, p.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+
 		// Logged on Confirm, not on the earlier presign: a presign whose
 		// upload is abandoned never becomes a real photo, so it must not
 		// appear in the feed.
@@ -530,6 +567,16 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			if affected != 1 {
 				return apierrors.AlbumPhotoNotFound
 			}
+			if err := albumblob.Attach(ctx, q, albumblob.Photo{
+				ID:          p.ID,
+				WorkspaceID: deps.WorkspaceID,
+				StorageKey:  p.StorageKey,
+				ContentType: p.ContentType,
+				ByteSize:    p.ByteSize,
+				SHA256:      digest,
+			}); err != nil {
+				return err
+			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
@@ -542,8 +589,14 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		p.Enabled = true
-		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, p)}, nil
+		// Re-read rather than patching the copy in hand: the confirm attached a
+		// storage object, and the response presigns whatever the photo now
+		// points at.
+		confirmed, err := deps.Queries.GetAlbumPhotoByPublicID(ctx, p.PublicID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, confirmed)}, nil
 	}
 }
 
@@ -552,6 +605,11 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 // as an orphan until the 7-day abandoned-upload sweep. Best-effort: errors are
 // logged, not surfaced, since the caller is already returning the mismatch
 // error to the client.
+//
+// Deleting the bytes is still safe here, unlike on the delete path: a
+// reservation is not attached to a storage object until its digest has been
+// read, so these bytes sit at a key belonging to this photo alone and no
+// other row can be resolving to them.
 func deleteMismatchedPhoto(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
 	if err := deps.Storage.DeleteObject(ctx, p.StorageKey); err != nil {
 		slog.WarnContext(ctx, "failed to delete mismatched album photo object", "key", p.StorageKey, "error", err)
@@ -671,11 +729,16 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		if deps.Storage != nil {
-			if derr := deps.Storage.DeleteObject(ctx, photo.StorageKey); derr != nil {
-				slog.WarnContext(ctx, "failed to delete album photo object", "key", photo.StorageKey, "error", derr)
-			}
-		}
+		// The bytes are not deleted here, and that is not tidiness deferred:
+		// photos with identical content share one storage object, so the key
+		// this photo resolves to can be where another photo's picture lives.
+		// Deleting it would blank that one.
+		//
+		// The photo is gone as access the moment the row is disabled -- every
+		// path that signs a URL for one requires it to be enabled, so no new
+		// URL is issued after this returns. What waits is only the reclaiming
+		// of the bytes: the sweep releases the reference when it removes the
+		// row, and collects the object once nothing else holds it.
 		return &DeletePhotoOutput{}, nil
 	}
 }
@@ -697,7 +760,7 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
-		url, err := deps.Storage.PresignDownload(ctx, photo.StorageKey, photoDownloadFilename(photo), downloadTTL)
+		url, err := deps.Storage.PresignDownload(ctx, photoObjectKey(ctx, deps, photo), photoDownloadFilename(photo), downloadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

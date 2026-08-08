@@ -15,8 +15,15 @@ SELECT * FROM album_photos WHERE public_id = ?;
 
 -- Both listings join the uploader's avatar object, so a page carries the key
 -- its pictures are signed from rather than costing a lookup per photo.
+--
+-- image_storage_key is where a photo's bytes are: the storage object once the
+-- photo has been moved onto one, and the row's own key until then. The
+-- fallback is expressed here as well as in the handler because a page holds
+-- thirty photos, and resolving it per row is the lookup the avatar join above
+-- exists to avoid.
 -- name: ListAlbumPhotosFirstPage :many
 SELECT ap.*,
+       COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -24,6 +31,7 @@ SELECT ap.*,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
@@ -32,6 +40,7 @@ LIMIT ?;
 
 -- name: ListAlbumPhotosAfter :many
 SELECT ap.*,
+       COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -39,6 +48,7 @@ SELECT ap.*,
        e.public_id AS event_public_id
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
+LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
@@ -73,9 +83,33 @@ UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE
 -- created_at. Ageing by creation time gets it backwards: a photo kept for a
 -- year is collected on the very next pass after it is deleted, while one
 -- uploaded and deleted this morning sits around until it is a year old.
+--
+-- storage_object_id comes along because deleting the row is what ends the
+-- photo's reference to its blob: the sweep releases it there, which is the
+-- one place every way of losing a photo passes through.
 -- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT id, storage_key FROM album_photos
+SELECT id, storage_key, storage_object_id FROM album_photos
 WHERE enabled = FALSE AND updated_at < ? AND id > ?
+ORDER BY id
+LIMIT ?;
+
+-- AttachAlbumPhotoStorageObject moves a photo onto the object model. The
+-- IS NULL guard is what makes it idempotent: a confirm and a backfill pass
+-- racing for the same row both write, but only one reports a row, and only
+-- that one takes the reference.
+-- name: AttachAlbumPhotoStorageObject :execresult
+UPDATE album_photos SET storage_object_id = ?
+WHERE id = ? AND storage_object_id IS NULL;
+
+-- ListAlbumPhotosWithoutStorageObject walks the photos that predate the
+-- object model, oldest first by id so the cursor makes progress.
+--
+-- Only live photos are backfilled. A retired one is on its way out through
+-- the sweep above, and moving it onto an object first would take a reference
+-- that the same sweep has to release moments later.
+-- name: ListAlbumPhotosWithoutStorageObject :many
+SELECT id, workspace_id, storage_key, content_type, byte_size FROM album_photos
+WHERE storage_object_id IS NULL AND enabled = TRUE AND storage_key <> '' AND id > ?
 ORDER BY id
 LIMIT ?;
 
