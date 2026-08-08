@@ -1305,7 +1305,7 @@ export function ExportSection() {
         >
           {importing ? '...' : t('settings.importPasted')}
         </button>
-        <p className="mt-3 text-footnote text-muted">{t('settings.importAlwaysCreates')}</p>
+        <p className="mt-3 text-footnote text-muted">{t('settings.importSkipsDuplicates')}</p>
       </Section>
     </>
   );

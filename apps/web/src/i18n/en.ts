@@ -328,8 +328,8 @@ export const en: Record<TranslationKey, string> = {
   'settings.importEmpty': 'This file had no events in it',
   'settings.importTruncated':
     '{count} events were past the per-import limit and were not read. Split the file and try again.',
-  'settings.importAlwaysCreates':
-    'Import always adds new events. Importing the same file twice will duplicate them.',
+  'settings.importSkipsDuplicates':
+    'Re-importing a file a calendar app exported does not duplicate its events. A hand-written file whose events carry no identifier adds them again every time.',
   'settings.dangerZone': 'Danger zone',
 
   'settings.admin': 'Admin',
