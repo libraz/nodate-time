@@ -117,6 +117,75 @@ export function planAlbumEncoding(
 }
 
 /**
+ * The longest edge an album thumbnail is generated at.
+ *
+ * A grid tile is about 134px wide, and this app targets 3x screens, so a 2x
+ * thumbnail would be visibly soft on the device it is drawn for.
+ */
+export const albumThumbnailMaxDimension = 400;
+
+/**
+ * Whether a thumbnail is worth generating for a stored photo, and in what
+ * format.
+ */
+export type ThumbnailPlan = { thumbnail: false } | { thumbnail: true; type: EncodableType };
+
+/**
+ * Decides whether a photo gets a thumbnail.
+ *
+ * The format rule is planAlbumEncoding's, for the same reason: a JPEG
+ * thumbnail of a transparent PNG draws the transparency black, and the grid is
+ * where that is most visible.
+ *
+ * A GIF gets none at all. Canvas draws one frame, so its thumbnail would be a
+ * still, and the grid animates a GIF today because it shows the stored photo.
+ * Falling back to that photo keeps the animation.
+ */
+export function planAlbumThumbnail(
+  storedType: string,
+  longestEdge: number,
+  maxDimension = albumThumbnailMaxDimension,
+): ThumbnailPlan {
+  const type = storedType.toLowerCase();
+
+  if (type === 'image/gif') return { thumbnail: false };
+
+  // Already thumbnail-sized: a second copy of the same picture would cost an
+  // upload and save nothing.
+  if (longestEdge <= maxDimension) return { thumbnail: false };
+
+  if (type === 'image/png') return { thumbnail: true, type: 'image/png' };
+  if (type === 'image/webp') return { thumbnail: true, type: 'image/webp' };
+  return { thumbnail: true, type: 'image/jpeg' };
+}
+
+/**
+ * Generates the small image the album grid draws, or null when the photo
+ * should be drawn from `upload` instead.
+ *
+ * `upload` is what prepareImageForAlbum produced -- the bytes actually being
+ * stored -- because that, not the picked file, is what the grid would
+ * otherwise download, and what a thumbnail has to beat to be worth uploading.
+ */
+export async function prepareAlbumThumbnail(
+  file: File,
+  upload: ResizedImage,
+): Promise<ResizedImage | null> {
+  const plan = planAlbumThumbnail(upload.contentType, Math.max(upload.width, upload.height));
+  if (!plan.thumbnail) return null;
+
+  const thumbnail = await resize(file, {
+    maxDimension: albumThumbnailMaxDimension,
+    quality: 0.8,
+    preferredType: plan.type,
+  });
+  // A lossless format at a small size can still encode larger than the stored
+  // photo did; when it does, there is nothing to gain from sending it.
+  if (thumbnail.bytes.byteLength >= upload.bytes.byteLength) return null;
+  return thumbnail;
+}
+
+/**
  * Prepares a picked photo for upload, resizing only when that is what the file
  * needs. See planAlbumEncoding for why the format is preserved.
  */

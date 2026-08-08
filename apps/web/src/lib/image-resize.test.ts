@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { albumMaxDimension, planAlbumEncoding } from './image-resize';
+import {
+  albumMaxDimension,
+  albumThumbnailMaxDimension,
+  planAlbumEncoding,
+  planAlbumThumbnail,
+} from './image-resize';
 
 /**
  * Every album upload used to be re-encoded to JPEG regardless of what was
@@ -56,5 +61,61 @@ describe('planAlbumEncoding', () => {
       passthrough: false,
       type: 'image/png',
     });
+  });
+});
+
+/**
+ * The grid draws tiles of about 134px from the stored photo, which is up to
+ * 2048px on its longest edge -- megabytes to show a screenful of thumbnails.
+ * A second, small image is generated at upload time so the grid has something
+ * its own size to load.
+ */
+describe('planAlbumThumbnail', () => {
+  it('gives an animated GIF no thumbnail at all', () => {
+    // Canvas draws one frame, so the thumbnail would be a still where the grid
+    // animates today. Falling back to the photo keeps the animation.
+    expect(planAlbumThumbnail('image/gif', 2048)).toEqual({ thumbnail: false });
+  });
+
+  it('keeps a PNG thumbnail a PNG', () => {
+    // A JPEG thumbnail of a transparent PNG draws the transparency black, in
+    // the grid, where every photo is on screen at once.
+    expect(planAlbumThumbnail('image/png', 2048)).toEqual({
+      thumbnail: true,
+      type: 'image/png',
+    });
+  });
+
+  it('keeps a WebP thumbnail WebP', () => {
+    expect(planAlbumThumbnail('image/webp', 2048)).toEqual({
+      thumbnail: true,
+      type: 'image/webp',
+    });
+  });
+
+  it('makes a JPEG thumbnail of a JPEG', () => {
+    expect(planAlbumThumbnail('image/jpeg', 2048)).toEqual({
+      thumbnail: true,
+      type: 'image/jpeg',
+    });
+  });
+
+  it('skips a photo already no larger than a thumbnail', () => {
+    // Uploading a second copy of the same picture costs a request and saves
+    // the grid nothing.
+    expect(planAlbumThumbnail('image/jpeg', albumThumbnailMaxDimension)).toEqual({
+      thumbnail: false,
+    });
+  });
+
+  it('makes one for a photo a single pixel over', () => {
+    expect(planAlbumThumbnail('image/jpeg', albumThumbnailMaxDimension + 1)).toEqual({
+      thumbnail: true,
+      type: 'image/jpeg',
+    });
+  });
+
+  it('is not fooled by an uppercase content type', () => {
+    expect(planAlbumThumbnail('IMAGE/GIF', 2048)).toEqual({ thumbnail: false });
   });
 });
