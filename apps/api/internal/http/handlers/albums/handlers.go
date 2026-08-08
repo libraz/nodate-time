@@ -34,7 +34,20 @@ var allowedAlbumImageTypes = map[string]bool{
 
 const (
 	maxPhotoSize = 20 * 1024 * 1024
-	uploadTTL    = 15 * time.Minute
+	// maxThumbnailSize bounds the second, smaller rendering. The photo's own
+	// ceiling is the wrong number for it by three orders of magnitude, and a
+	// ceiling that admits a full-size picture admits sending the picture twice.
+	//
+	// The size is derived from what a thumbnail is: 400px on its longest edge,
+	// which is the 134px grid tile at the 3x screens this app targets. Even the
+	// worst encoding of that -- lossless PNG with an alpha channel, 400x400x4
+	// bytes before compression -- fits inside a megabyte, so this refuses a
+	// full-size photo in a thumbnail's clothing without ever refusing a real
+	// one. Refusing a real one would be the expensive mistake: the thumbnail is
+	// declared in the same request as the photo, so the picture would fail to
+	// upload over a rendering nothing needed.
+	maxThumbnailSize = 1024 * 1024
+	uploadTTL        = 15 * time.Minute
 	// imageTTL covers the URLs embedded in a listing, which the browser only
 	// fetches as thumbnails scroll into view. A page of them is signed in one
 	// response but consumed over however long the reader keeps the album open,
@@ -130,6 +143,27 @@ func photoObjectKey(ctx context.Context, deps Deps, p generated.AlbumPhoto) stri
 	return object.StorageKey
 }
 
+// thumbnailObjectKey says where a photo's grid-sized rendering is, or "" when
+// it has none.
+//
+// There is no fallback key to try, unlike the picture: a thumbnail has only
+// ever existed as an object, so a photo without one is simply drawn from the
+// picture -- larger than it needs to be, and correct.
+//
+// The listings resolve this in SQL for the reason photoObjectKey does.
+func thumbnailObjectKey(ctx context.Context, deps Deps, p generated.AlbumPhoto) string {
+	if !p.ThumbnailObjectID.Valid {
+		return ""
+	}
+	object, err := deps.Queries.GetStorageObjectByID(ctx, uint32(p.ThumbnailObjectID.Int32))
+	if err != nil {
+		slog.WarnContext(ctx, "album photo thumbnail object is unreadable, falling back to the photo",
+			"photoID", p.ID, "thumbnailObjectID", p.ThumbnailObjectID.Int32, "error", err)
+		return ""
+	}
+	return object.StorageKey
+}
+
 // photoExtensions maps the allowed album image content types to a file
 // extension for the synthesized download filename (album photos have no
 // stored original filename, unlike event attachments).
@@ -210,7 +244,10 @@ type albumPhotoListRow struct {
 	height      sql.NullInt32
 	// storageKey is the listing's resolved key: the photo's storage object
 	// when it has one, its own key until the backfill reaches it.
-	storageKey               string
+	storageKey string
+	// thumbnailStorageKey is the grid-sized rendering's key, absent when the
+	// photo has no thumbnail.
+	thumbnailStorageKey      sql.NullString
 	takenAt                  time.Time
 	createdAt                time.Time
 	uploaderPublicID         []byte
@@ -232,6 +269,7 @@ func firstPagePhotoRows(rows []generated.ListAlbumPhotosFirstPageRow) []albumPho
 			width:                    r.Width,
 			height:                   r.Height,
 			storageKey:               r.ImageStorageKey,
+			thumbnailStorageKey:      r.ThumbnailStorageKey,
 			takenAt:                  r.TakenAt,
 			createdAt:                r.CreatedAt,
 			uploaderPublicID:         r.UploaderPublicID,
@@ -256,6 +294,7 @@ func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoLi
 			width:                    r.Width,
 			height:                   r.Height,
 			storageKey:               r.ImageStorageKey,
+			thumbnailStorageKey:      r.ThumbnailStorageKey,
 			takenAt:                  r.TakenAt,
 			createdAt:                r.CreatedAt,
 			uploaderPublicID:         r.UploaderPublicID,
@@ -300,6 +339,13 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.id, "error", err)
 		}
+		if p.thumbnailStorageKey.Valid {
+			if url, err := deps.Storage.PresignGet(ctx, p.thumbnailStorageKey.String, imageTTL); err == nil {
+				resp.ThumbnailURL = url
+			} else {
+				slog.WarnContext(ctx, "failed to presign album thumbnail URL", "photoID", p.id, "error", err)
+			}
+		}
 	}
 	return resp
 }
@@ -329,6 +375,13 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.ID, "error", err)
+		}
+		if key := thumbnailObjectKey(ctx, deps, p); key != "" {
+			if url, err := deps.Storage.PresignGet(ctx, key, imageTTL); err == nil {
+				resp.ThumbnailURL = url
+			} else {
+				slog.WarnContext(ctx, "failed to presign album thumbnail URL", "photoID", p.ID, "error", err)
+			}
 		}
 	}
 	return resp
@@ -418,7 +471,37 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 	}
 }
 
-// PresignUpload issues a presigned PUT URL for adding a photo to the album.
+// declaresThumbnail reports whether the body is asking for a second upload.
+//
+// A thumbnail is declared by both of its fields or by neither. Half a
+// declaration is a client that believes it is sending one, and answering that
+// with no URL and no error leaves the mistake invisible until somebody notices
+// the grid is downloading full-size pictures.
+func declaresThumbnail(b PresignPhotoBody) bool {
+	return b.ThumbnailContentType != "" || b.ThumbnailByteSize > 0
+}
+
+// validateThumbnailDeclaration applies the photo's own rules to the smaller
+// rendering: it is an image of a type a browser renders inert, and it is
+// thumbnail-sized. Returns nil when nothing was declared, which is normal.
+func validateThumbnailDeclaration(b PresignPhotoBody) error {
+	if !declaresThumbnail(b) {
+		return nil
+	}
+	if b.ThumbnailContentType == "" || b.ThumbnailByteSize <= 0 {
+		return apierrors.BadRequest
+	}
+	if !isImageContentType(b.ThumbnailContentType) {
+		return apierrors.InvalidImageContentType
+	}
+	if b.ThumbnailByteSize > maxThumbnailSize {
+		return apierrors.BadRequest
+	}
+	return nil
+}
+
+// PresignUpload issues a presigned PUT URL for adding a photo to the album,
+// and a second one for its thumbnail when the request declares one.
 // The metadata row is created with the storage key in the same call; if the
 // client never PUTs the object, the row will simply have no underlying object
 // in MinIO and the photo will render as broken — a future janitor can clean
@@ -435,6 +518,9 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		}
 		if in.Body.ByteSize > maxPhotoSize {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
+		}
+		if err := validateThumbnailDeclaration(in.Body); err != nil {
+			return nil, toAPIError(err)
 		}
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
@@ -490,6 +576,21 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		out := &PresignPhotoOutput{}
 		out.Body.PhotoID = photoPubHex
 		out.Body.UploadURL = url
+		if declaresThumbnail(in.Body) {
+			// A thumbnail URL that cannot be signed is left out rather than
+			// failing the request. The picture's URL is already in hand, and
+			// refusing it here would mean losing a photo over a rendering
+			// nothing needs -- the same rule the confirm applies when the
+			// thumbnail does not arrive. The caller sees the field absent,
+			// which it already has to handle.
+			thumbURL, terr := deps.Storage.PresignPut(ctx, albumblob.ThumbnailKey(key),
+				in.Body.ThumbnailContentType, in.Body.ThumbnailByteSize, uploadTTL)
+			if terr != nil {
+				slog.WarnContext(ctx, "failed to presign album thumbnail upload", "key", key, "error", terr)
+			} else {
+				out.Body.ThumbnailUploadURL = thumbURL
+			}
+		}
 		return out, nil
 	}
 }
@@ -589,6 +690,12 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		if err != nil {
 			return nil, toAPIError(err)
 		}
+		// The thumbnail is attached after that commit, in a transaction of its
+		// own, and nothing it can do reaches back. A photo whose bytes arrived
+		// is never lost to a second, optional upload that did not: the picture
+		// is already confirmed by the time this runs, and every way it can fail
+		// leaves the photo exactly as it is, drawn from the picture itself.
+		attachThumbnail(ctx, deps, p)
 		// Re-read rather than patching the copy in hand: the confirm attached a
 		// storage object, and the response presigns whatever the photo now
 		// points at.
@@ -597,6 +704,59 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, confirmed)}, nil
+	}
+}
+
+// attachThumbnail moves a photo's grid-sized rendering onto the object model,
+// if one was uploaded.
+//
+// Nothing here reports a failure to the caller, and that is the point rather
+// than an oversight: the thumbnail is optional at every step. It may not be
+// there at all -- the client never declared one, or declared one and did not
+// send it -- and it may be there and refused. Each of those leaves a confirmed
+// photo with no thumbnail, which is a state every read already falls back from.
+// The alternative, failing the confirm, would answer "your picture is stored"
+// with an error and lose the photo to a rendering nothing needs.
+//
+// The content type is taken from what landed rather than from the declaration,
+// for the same reason the digest is: the presign is the only thing the client
+// said, and this is the only thing that can say what is actually there.
+func attachThumbnail(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
+	key := albumblob.ThumbnailKey(p.StorageKey)
+	info, exists, err := deps.Storage.StatObject(ctx, key)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to stat album thumbnail object", "photoID", p.ID, "key", key, "error", err)
+		return
+	}
+	if !exists {
+		return
+	}
+	if info.Size <= 0 || info.Size > maxThumbnailSize {
+		slog.WarnContext(ctx, "album thumbnail object is not thumbnail-sized, leaving the photo without one",
+			"photoID", p.ID, "size", info.Size)
+		return
+	}
+	if !isImageContentType(info.ContentType) {
+		slog.WarnContext(ctx, "album thumbnail object is not a renderable image, leaving the photo without one",
+			"photoID", p.ID, "contentType", info.ContentType)
+		return
+	}
+	digest, err := deps.Storage.SHA256(ctx, key)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to digest album thumbnail object", "photoID", p.ID, "key", key, "error", err)
+		return
+	}
+	if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		return albumblob.AttachThumbnail(ctx, q, albumblob.Photo{
+			ID:          p.ID,
+			WorkspaceID: deps.WorkspaceID,
+			StorageKey:  key,
+			ContentType: strings.ToLower(info.ContentType),
+			ByteSize:    uint64(info.Size),
+			SHA256:      digest,
+		})
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to attach album thumbnail object", "photoID", p.ID, "error", err)
 	}
 }
 

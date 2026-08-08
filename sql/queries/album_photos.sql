@@ -21,9 +21,15 @@ SELECT * FROM album_photos WHERE public_id = ?;
 -- fallback is expressed here as well as in the handler because a page holds
 -- thirty photos, and resolving it per row is the lookup the avatar join above
 -- exists to avoid.
+--
+-- thumbnail_storage_key is the grid-sized rendering, and is joined here for the
+-- same reason: it is the key the tiles are actually drawn from, so resolving it
+-- per row would put the page's whole saving back. It is NULL when the photo has
+-- no thumbnail, which is normal -- the reader falls back to the picture itself.
 -- name: ListAlbumPhotosFirstPage :many
 SELECT ap.*,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
+       tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -32,6 +38,7 @@ SELECT ap.*,
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
+LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
@@ -41,6 +48,7 @@ LIMIT ?;
 -- name: ListAlbumPhotosAfter :many
 SELECT ap.*,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
+       tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -49,6 +57,7 @@ SELECT ap.*,
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
+LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
@@ -86,9 +95,12 @@ UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE
 --
 -- storage_object_id comes along because deleting the row is what ends the
 -- photo's reference to its blob: the sweep releases it there, which is the
--- one place every way of losing a photo passes through.
+-- one place every way of losing a photo passes through. thumbnail_object_id is
+-- read for the same reason -- a photo holds up to two objects and the row going
+-- away ends both claims, so a sweep that released only the first would pin the
+-- thumbnail's bytes for good.
 -- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT id, storage_key, storage_object_id FROM album_photos
+SELECT id, storage_key, storage_object_id, thumbnail_object_id FROM album_photos
 WHERE enabled = FALSE AND updated_at < ? AND id > ?
 ORDER BY id
 LIMIT ?;
@@ -100,6 +112,14 @@ LIMIT ?;
 -- name: AttachAlbumPhotoStorageObject :execresult
 UPDATE album_photos SET storage_object_id = ?
 WHERE id = ? AND storage_object_id IS NULL;
+
+-- AttachAlbumPhotoThumbnailObject points a photo at the object holding its
+-- grid-sized rendering. The IS NULL guard is the one AttachAlbumPhotoStorageObject
+-- uses, and for the same reason: two confirms racing over one photo both write,
+-- one reports a row, and only that one takes the reference.
+-- name: AttachAlbumPhotoThumbnailObject :execresult
+UPDATE album_photos SET thumbnail_object_id = ?
+WHERE id = ? AND thumbnail_object_id IS NULL;
 
 -- ListAlbumPhotosWithoutStorageObject walks the photos that predate the
 -- object model, oldest first by id so the cursor makes progress.

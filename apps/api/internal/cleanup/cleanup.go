@@ -206,31 +206,33 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
 				continue
 			}
-			// Removing the row is what ends the photo's claim on its blob, so
-			// the reference is released here rather than where the photo went
+			// Removing the row is what ends the photo's claim on its blobs, so
+			// the references are released here rather than where the photo went
 			// out of use. Every way of losing one -- deleted by its owner,
 			// retired with its calendar, an upload that never landed -- passes
 			// through this delete, and releasing at each of them instead would
 			// be three chances to release twice or not at all.
+			//
+			// A photo holds up to two: the picture and its grid-sized
+			// rendering. Releasing only the first would leave the thumbnail's
+			// object at a count nothing will ever give back, pinning bytes no
+			// row can reach.
 			if photo.StorageObjectID.Valid {
 				releaseStorageObject(ctx, q, storageClient, uint32(photo.StorageObjectID.Int32))
 			}
-			// The photo's own key is still checked, and still only deleted
-			// when no object claims it. That covers a photo the backfill never
-			// reached, and the second copy of bytes that deduplicated onto
+			if photo.ThumbnailObjectID.Valid {
+				releaseStorageObject(ctx, q, storageClient, uint32(photo.ThumbnailObjectID.Int32))
+			}
+			// The photo's own keys are still checked, and still only deleted
+			// when no object claims them. That covers a photo the backfill never
+			// reached, a thumbnail whose upload was never confirmed onto an
+			// object, and the second copy of bytes that deduplicated onto
 			// another photo's object: the row shared, the bytes did not.
 			if photo.StorageKey == "" {
 				continue
 			}
-			if used, err := q.CountStorageObjectsByKey(ctx, photo.StorageKey); err != nil {
-				slog.Warn("cleanup: count objects for album key failed", "key", photo.StorageKey, "error", err)
-				continue
-			} else if used > 0 {
-				continue
-			}
-			if err := storageClient.DeleteObject(ctx, photo.StorageKey); err != nil {
-				slog.Warn("cleanup: delete abandoned album object failed", "key", photo.StorageKey, "error", err)
-			}
+			deleteUnclaimedAlbumKey(ctx, q, storageClient, photo.StorageKey)
+			deleteUnclaimedAlbumKey(ctx, q, storageClient, albumblob.ThumbnailKey(photo.StorageKey))
 		}
 		if len(photos) < storageSweepBatchSize {
 			break
@@ -288,6 +290,26 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 	}
 }
 
+// deleteUnclaimedAlbumKey removes bytes that no storage object names.
+//
+// The check is what separates an album key from the bytes at it: the same
+// picture uploaded twice is one object, whose key belongs to whichever photo
+// stored it first, so a photo going away can leave a key another row is still
+// resolving through. Deleting unconditionally would blank that one.
+func deleteUnclaimedAlbumKey(ctx context.Context, q *generated.Queries, storageClient *storage.Client, key string) {
+	used, err := q.CountStorageObjectsByKey(ctx, key)
+	if err != nil {
+		slog.Warn("cleanup: count objects for album key failed", "key", key, "error", err)
+		return
+	}
+	if used > 0 {
+		return
+	}
+	if err := storageClient.DeleteObject(ctx, key); err != nil {
+		slog.Warn("cleanup: delete abandoned album object failed", "key", key, "error", err)
+	}
+}
+
 // releaseStorageObject gives back one reference and, if it was the last one,
 // reclaims the object in the same pass.
 //
@@ -296,8 +318,8 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 // photo deleted today would wait out the album's own retention and then that
 // gate again. The gate is there to protect an object between being reserved
 // and being confirmed; one whose last referring row was just deleted is not
-// in that state, and DeleteUnreferencedStorageObject re-checks both referrers
-// before removing anything.
+// in that state, and DeleteUnreferencedStorageObject re-checks every column
+// that can point at an object before removing anything.
 func releaseStorageObject(ctx context.Context, q *generated.Queries, storageClient *storage.Client, objectID uint32) {
 	if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
 		slog.Warn("cleanup: release storage object reference failed", "id", objectID, "error", err)

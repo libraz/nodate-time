@@ -23,22 +23,24 @@ var uniquePhotoSuffix atomic.Int64
 var photoRunID = time.Now().UnixNano()
 
 type albumPresignResp struct {
-	PhotoID   string `json:"photoId"`
-	UploadURL string `json:"uploadUrl"`
+	PhotoID            string `json:"photoId"`
+	UploadURL          string `json:"uploadUrl"`
+	ThumbnailUploadURL string `json:"thumbnailUploadUrl"`
 	// Bytes is what the helper uploaded, so a test reading the photo back
 	// compares against what it sent rather than against a shared constant.
 	Bytes []byte `json:"-"`
 }
 
 type albumPhotoResp struct {
-	ID          string `json:"id"`
-	CalendarID  string `json:"calendarId"`
-	Caption     string `json:"caption"`
-	ContentType string `json:"contentType"`
-	EventID     string `json:"eventId"`
-	ByteSize    int64  `json:"byteSize"`
-	ImageURL    string `json:"imageUrl"`
-	UploadedBy  struct {
+	ID           string `json:"id"`
+	CalendarID   string `json:"calendarId"`
+	Caption      string `json:"caption"`
+	ContentType  string `json:"contentType"`
+	EventID      string `json:"eventId"`
+	ByteSize     int64  `json:"byteSize"`
+	ImageURL     string `json:"imageUrl"`
+	ThumbnailURL string `json:"thumbnailUrl"`
+	UploadedBy   struct {
 		ID        string `json:"id"`
 		Name      string `json:"name"`
 		AvatarURL string `json:"avatarUrl"`
