@@ -148,6 +148,7 @@ beforeEach(() => {
   uiState.showEventModal = true;
   uiState.editingEventId = 'ev-1';
   uiState.locale = 'ja';
+  uiState.timezone = 'Asia/Tokyo';
   calendarState.events = [event];
   relativeTime.mockReturnValue('a while ago');
   mockApi.get.mockResolvedValue([]);
@@ -479,5 +480,92 @@ describe('EventModal failures', () => {
     render(<EventModal />);
 
     expect(await screen.findByText('checklist offline')).toBeInTheDocument();
+  });
+});
+
+/**
+ * What the modal actually sends.
+ *
+ * The rest of this file covers what the modal draws. Nothing covered what it
+ * puts on the wire, and both of the release blockers that reached production
+ * through this component were payload bugs: a `color` key the body schema
+ * forbids, which failed every save with 422, and the viewer's timezone sent
+ * for an event that had one of its own, which moved the whole series.
+ *
+ * The API rejects unknown properties, so the field set is a contract and is
+ * asserted as one. `apps/api/tests/e2e/event_payload_test.go` states the same
+ * set on the server side, but it states it by hand -- adding a field here
+ * cannot fail it. This is the assertion that can.
+ */
+describe('EventModal save payload', () => {
+  /** Every key the events API accepts from this modal. */
+  const wireFields = [
+    'allDay',
+    'endAt',
+    'location',
+    'memo',
+    'notificationOffset',
+    'ownerId',
+    'participants',
+    'recurrenceRule',
+    'showAs',
+    'startAt',
+    'timezone',
+    'title',
+    'url',
+    'visibility',
+  ];
+
+  async function saveExisting() {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    return calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+  }
+
+  it('sends the fields the API accepts and no others', async () => {
+    const payload = await saveExisting();
+
+    expect(Object.keys(payload).sort()).toEqual(wireFields);
+  });
+
+  // The colour of an event is derived from the owner's membership; there is no
+  // input field for it. Sending one is not a value the server ignores, it is a
+  // 422 on every save, which is how create, edit, drag and resize were all
+  // broken from the shipped UI at once.
+  it('sends no colour, which the body schema has no field for', async () => {
+    const payload = await saveExisting();
+
+    expect(payload).not.toHaveProperty('color');
+  });
+
+  // An existing event keeps the zone it was created in. Its all-day dates and
+  // its recurrence grid are both measured there, so sending the viewer's zone
+  // re-anchors the series and moves every later occurrence across a DST
+  // boundary -- from a save that changed nothing.
+  it('sends an existing event back in its own timezone, not the viewer’s', async () => {
+    uiState.timezone = 'America/New_York';
+
+    const payload = await saveExisting();
+
+    expect(payload.timezone).toBe('Asia/Tokyo');
+  });
+
+  // The other half of the same rule: a new event has no zone of its own, so it
+  // takes the one its author is working in. A fix that always sent the event's
+  // zone would leave creation with nothing to send.
+  it('sends a new event in the viewer’s timezone', async () => {
+    uiState.editingEventId = null;
+    uiState.timezone = 'America/New_York';
+
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Kickoff' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    const payload = calendarState.addEvent.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(payload.timezone).toBe('America/New_York');
+    expect(Object.keys(payload).sort()).toEqual(wireFields);
   });
 });

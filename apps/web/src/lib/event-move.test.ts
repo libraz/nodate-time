@@ -92,3 +92,49 @@ describe('isRecurringEvent', () => {
     expect(isRecurringEvent(makeEvent())).toBe(false);
   });
 });
+
+/**
+ * What a drag and a resize put on the wire.
+ *
+ * These builders are the payload for every move and every resize, and the
+ * events API refuses unknown properties: one extra key fails the save with a
+ * 422 rather than being ignored. The same `color` key that broke creating and
+ * editing from the shipped UI was here too.
+ *
+ * `EventInput` already rejects an added field at compile time. This says the
+ * same thing where a test can watch it, and names the set so a field added to
+ * one builder and not the other cannot pass unnoticed.
+ */
+describe('drag and resize payloads', () => {
+  const wireFields = [
+    'allDay',
+    'endAt',
+    'flexibility',
+    'location',
+    'memo',
+    'notificationOffset',
+    'ownerId',
+    'participants',
+    'recurrenceRule',
+    'showAs',
+    'startAt',
+    'timezone',
+    'title',
+    'url',
+    'visibility',
+  ];
+
+  it('sends the fields the API accepts and no others when moved', () => {
+    const moved = buildMovedEvent(makeEvent(), DateTime.fromISO('2026-06-24T11:00:00+09:00'));
+
+    expect(Object.keys(moved).sort()).toEqual(wireFields);
+    expect(moved).not.toHaveProperty('color');
+  });
+
+  it('sends the same set when resized', () => {
+    const resized = buildResizedEvent(makeEvent(), DateTime.fromISO('2026-06-24T12:00:00+09:00'));
+
+    expect(Object.keys(resized).sort()).toEqual(wireFields);
+    expect(resized).not.toHaveProperty('color');
+  });
+});
