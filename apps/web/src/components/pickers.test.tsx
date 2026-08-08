@@ -102,6 +102,29 @@ describe('CustomSelect', () => {
     // There should be 2 instances: trigger + dropdown
     expect(betaInDropdown.length).toBeGreaterThanOrEqual(2);
   });
+
+  /**
+   * The outside-click listeners are subscribed for as long as the dropdown is
+   * open, not re-subscribed for every render it survives. The refs are handed
+   * to the hook as a fresh array each render, so naming the array in the
+   * effect's dependencies tore the document listeners down and put them back
+   * on every keystroke that reached the picker's parent.
+   */
+  it('subscribes to the document once while open, not once per render', async () => {
+    const user = userEvent.setup();
+    const subscribe = vi.spyOn(document, 'addEventListener');
+    const mousedowns = () => subscribe.mock.calls.filter(([type]) => type === 'mousedown').length;
+
+    const { rerender } = render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+    await user.click(screen.getByText('Alpha'));
+
+    const whileOpen = mousedowns();
+    // A render the dropdown lives through: same open list, different props.
+    rerender(<CustomSelect value="a" options={options} onChange={() => {}} className="w-40" />);
+
+    expect(mousedowns()).toBe(whileOpen);
+    subscribe.mockRestore();
+  });
 });
 
 describe('DateTimeField', () => {
