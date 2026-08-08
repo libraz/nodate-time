@@ -54,14 +54,24 @@ function useOutsideClose(
   onClose: () => void,
   active: boolean,
 ) {
+  // Read both through a ref, as useModalA11y does with its own onClose. Every
+  // caller builds the array inline and some pass an inline closure, so naming
+  // them here would re-run the effect on every render the dropdown survives,
+  // taking the document listeners off and putting them back each time.
+  const latest = useRef({ refs, onClose });
+  useEffect(() => {
+    latest.current = { refs, onClose };
+  });
+
   useEffect(() => {
     if (!active) return;
     const handlePointer = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node;
-      if (refs.every((r) => r.current && !r.current.contains(target))) onClose();
+      const { refs: current, onClose: close } = latest.current;
+      if (current.every((r) => r.current && !r.current.contains(target))) close();
     };
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') latest.current.onClose();
     };
     document.addEventListener('mousedown', handlePointer);
     document.addEventListener('touchstart', handlePointer);
@@ -71,7 +81,7 @@ function useOutsideClose(
       document.removeEventListener('touchstart', handlePointer);
       document.removeEventListener('keydown', handleKey);
     };
-  }, [refs, onClose, active]);
+  }, [active]);
 }
 
 /* ============================================
