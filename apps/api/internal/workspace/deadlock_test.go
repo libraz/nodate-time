@@ -79,10 +79,25 @@ func TestRetryOnDeadlockStopsWhenTheCallerHasGoneAway(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
-// deadlockingDB is a DBTX whose writes always lose the deadlock. Only
-// ExecContext is reached: Ensure gives up on the upsert before it reads the
-// row back.
+// deadlockingDB is a DBTX whose writes always lose the deadlock.
+//
+// Ensure looks before it writes, so the read comes first; this answers it from
+// a handle that cannot connect, which is the "no workspace here" side of the
+// branch as far as Ensure is concerned. It then gives up on the upsert without
+// reading the row back, which is what the exec count measures.
 type deadlockingDB struct{ execs int }
+
+// unreachable answers the look-before-write. A *sql.Row carrying an error
+// cannot be constructed from outside database/sql, so it is obtained from a
+// handle pointed at a port nothing listens on: the connection is refused
+// immediately rather than waited for.
+var unreachable = func() *sql.DB {
+	db, err := sql.Open("mysql", "nobody:nobody@tcp(127.0.0.1:1)/nowhere")
+	if err != nil {
+		panic(err)
+	}
+	return db
+}()
 
 func (d *deadlockingDB) ExecContext(context.Context, string, ...interface{}) (sql.Result, error) {
 	d.execs++
@@ -97,6 +112,9 @@ func (d *deadlockingDB) QueryContext(context.Context, string, ...interface{}) (*
 	return nil, errors.New("unused")
 }
 
-func (d *deadlockingDB) QueryRowContext(context.Context, string, ...interface{}) *sql.Row {
-	panic("Ensure must not read the row back after failing to write it")
+func (d *deadlockingDB) QueryRowContext(ctx context.Context, q string, args ...interface{}) *sql.Row {
+	if d.execs > 0 {
+		panic("Ensure must not read the row back after failing to write it")
+	}
+	return unreachable.QueryRowContext(ctx, q, args...)
 }

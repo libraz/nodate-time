@@ -44,6 +44,25 @@ func Ensure(ctx context.Context, q *generated.Queries, slug, name, timezone, cou
 		timezone = "UTC"
 	}
 
+	// Look before writing. Only the first start of a deployment creates this
+	// row; every later one, and every test server, finds it already there.
+	//
+	// The upsert below writes id = id when the row exists -- a statement that
+	// changes nothing and still takes an exclusive lock on it. Everything in
+	// this schema is scoped by workspace, so every insert anywhere takes a
+	// shared lock on that same row to check its foreign key, and a shared
+	// request that arrives after the exclusive one queues behind it. That is
+	// enough to close a cycle between two transactions that would otherwise
+	// only have shared locks between them, and the writer that loses is
+	// whichever one InnoDB picks -- never this one.
+	// A read that fails for any reason falls through rather than returning:
+	// this is a lock-avoidance step, not the authority on whether the row is
+	// there. The upsert has to work regardless, and the read after it is what
+	// reports a database that is genuinely unreachable.
+	if ws, err := q.GetWorkspaceBySlug(ctx, slug); err == nil {
+		return Scope{ID: ws.ID, PublicID: ws.PublicID, Slug: ws.Slug, Timezone: ws.Timezone}, nil
+	}
+
 	pubID, err := uuid.NewV7()
 	if err != nil {
 		return Scope{}, fmt.Errorf("generate workspace id: %w", err)
