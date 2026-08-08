@@ -18,8 +18,23 @@ interface Segment {
 }
 
 /**
+ * The least time a block is drawn across.
+ *
+ * A block has a minimum height, so anything shorter than this -- a marker at a
+ * single moment above all -- covers more of the day on screen than it holds in
+ * time. Lanes exist to stop one block being drawn over another, so they are
+ * packed by the room a block takes rather than by the time it occupies. The
+ * view derives its own height floor from this figure, so the two cannot drift.
+ */
+export const MIN_RENDERED_MINUTES = 25;
+
+/**
  * Packs same-day timed events into horizontal lanes so overlapping blocks remain
  * visible and clickable.
+ *
+ * An event whose end equals its start is a marker at a moment rather than a
+ * span, and belongs to the day it opens: it is not late enough for the day that
+ * closes on it, which is how the API attributes one too.
  */
 export function layoutTimedEventsForDay(
   events: CalendarEvent[],
@@ -28,13 +43,28 @@ export function layoutTimedEventsForDay(
 ): TimedLayout[] {
   const dayStartMs = dayStart.startOf('day').toMillis();
   const dayEndMs = dayStart.startOf('day').plus({ days: 1 }).toMillis();
+  const minExtentMs = MIN_RENDERED_MINUTES * 60_000;
   const segments = events
     .map((event) => ({
       event,
-      start: Math.max(fromISOInZone(event.startAt, zone).toMillis(), dayStartMs),
-      end: Math.min(fromISOInZone(event.endAt, zone).toMillis(), dayEndMs),
+      start: fromISOInZone(event.startAt, zone).toMillis(),
+      end: fromISOInZone(event.endAt, zone).toMillis(),
     }))
-    .filter((s) => s.end > s.start)
+    // Which events this column draws. A span has to reach into the day; a
+    // marker has only an instant to place, and the day it opens is the one.
+    .filter(({ start, end }) =>
+      end === start
+        ? start >= dayStartMs && start < dayEndMs
+        : start < dayEndMs && end > dayStartMs,
+    )
+    .map(({ event, start, end }) => {
+      const from = Math.max(start, dayStartMs);
+      return {
+        event,
+        start: from,
+        end: Math.max(Math.min(end, dayEndMs), from + minExtentMs),
+      };
+    })
     .sort((a, b) => a.start - b.start || b.end - a.end);
 
   const out: TimedLayout[] = [];

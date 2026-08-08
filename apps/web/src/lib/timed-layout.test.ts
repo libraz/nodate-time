@@ -50,6 +50,88 @@ describe('layoutTimedEventsForDay', () => {
     expect(result.map((r) => r.leftPct).sort((a, b) => a - b)).toEqual([0, 50]);
   });
 
+  /**
+   * An event whose end equals its start is a marker at a moment. The API
+   * returns one -- deliberately, and attributed to the day it opens rather
+   * than the day that closes on it -- and the layout used to drop it before
+   * anything could draw it.
+   */
+  it('lays out a marker at a moment', () => {
+    const day = DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE });
+    const result = layoutTimedEventsForDay(
+      [makeEvent('marker', '2026-04-20T09:00:00+09:00', '2026-04-20T09:00:00+09:00')],
+      day,
+      ZONE,
+    );
+
+    expect(result.map((r) => r.event.id)).toEqual(['marker']);
+    // Overlapping nothing, it is drawn the full width like any other event.
+    expect(result[0]?.laneCount).toBe(1);
+    expect(result[0]?.widthPct).toBe(100);
+  });
+
+  // The boundary case, and the one the server had to be fixed for twice: a
+  // marker at midnight is not late enough for the day that ends there and not
+  // early enough for the one that begins there unless somebody decides. It
+  // belongs to the day it opens.
+  it('puts a midnight marker on the day it opens, not the day that closes there', () => {
+    const marker = makeEvent('midnight', '2026-04-20T00:00:00+09:00', '2026-04-20T00:00:00+09:00');
+
+    const opens = layoutTimedEventsForDay(
+      [marker],
+      DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE }),
+      ZONE,
+    );
+    const closes = layoutTimedEventsForDay(
+      [marker],
+      DateTime.fromISO('2026-04-19T00:00:00', { zone: ZONE }),
+      ZONE,
+    );
+
+    expect(opens.map((r) => r.event.id)).toEqual(['midnight']);
+    expect(closes).toEqual([]);
+  });
+
+  /**
+   * The filter that dropped markers also kept out events belonging to other
+   * days: clamped to this day, one of those collapses to zero length too.
+   * Removing the filter without saying which days an event belongs to turns
+   * every event from yesterday into a marker at this midnight.
+   */
+  it('leaves an event that ended before the day out of it', () => {
+    const day = DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE });
+    const result = layoutTimedEventsForDay(
+      [makeEvent('yesterday', '2026-04-19T09:00:00+09:00', '2026-04-19T10:00:00+09:00')],
+      day,
+      ZONE,
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  /**
+   * A marker has no duration to lay out, but it is drawn with a height, and a
+   * block drawn over another is what lanes exist to prevent. It is packed by
+   * the room it takes on screen rather than by the nothing it occupies in
+   * time, so the event it is drawn across moves aside for it.
+   */
+  it('moves an event aside for a marker drawn across it', () => {
+    const day = DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE });
+    const result = layoutTimedEventsForDay(
+      [
+        // Ten minutes apart: nothing overlaps in time, and the marker's own
+        // drawn height reaches well into the event below it.
+        makeEvent('marker', '2026-04-20T09:50:00+09:00', '2026-04-20T09:50:00+09:00'),
+        makeEvent('after', '2026-04-20T10:00:00+09:00', '2026-04-20T11:00:00+09:00'),
+      ],
+      day,
+      ZONE,
+    );
+
+    expect(result.map((r) => r.laneCount)).toEqual([2, 2]);
+    expect(result.map((r) => r.widthPct)).toEqual([50, 50]);
+  });
+
   it('keeps non-overlapping events full width', () => {
     const day = DateTime.fromISO('2026-04-20T00:00:00', { zone: ZONE });
     const result = layoutTimedEventsForDay(

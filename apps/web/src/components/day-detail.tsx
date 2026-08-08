@@ -1,10 +1,23 @@
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
-import { formatTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
+
+/**
+ * The time a row states: a span reads from one time to another, and an event
+ * whose end equals its start is a moment rather than a span. Rendering it as a
+ * range gives "9:00 - 9:00", which reads as a mistake in the data.
+ */
+function eventTimeLabel(evt: { startAt: string; endAt: string }, zone: string): string {
+  const start = formatTime(evt.startAt, zone);
+  // Compared as instants: the same moment reaches here written more than one
+  // way, and a marker is a marker whichever spelling it arrives in.
+  const marker = +fromISOInZone(evt.endAt, zone) === +fromISOInZone(evt.startAt, zone);
+  return marker ? start : `${start} - ${formatTime(evt.endAt, zone)}`;
+}
 
 export function DayDetail() {
   const t = useT();
@@ -118,9 +131,7 @@ export function DayDetail() {
                         {evt.title}
                       </p>
                       <p className="mt-1 text-default text-[var(--color-text-secondary)]">
-                        {evt.allDay
-                          ? t('calendar.allDay')
-                          : `${formatTime(evt.startAt, timezone)} - ${formatTime(evt.endAt, timezone)}`}
+                        {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
                       </p>
                       {evt.location && (
                         <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">

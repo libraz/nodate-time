@@ -103,4 +103,41 @@ describe('DayDetail', () => {
 
     expect(screen.getByText('09:00 - 10:00')).toBeInTheDocument();
   });
+
+  /**
+   * An event whose end equals its start is a marker at a moment, which the API
+   * returns and this list has always been able to show. A moment has one time:
+   * printed as a range it says "09:00 - 09:00", which reads as broken data
+   * rather than as a thing with no duration.
+   */
+  it('gives a marker one time rather than a range from itself to itself', () => {
+    calendarState.events = [
+      { ...rehearsal, id: 'marker', title: 'Standup', endAt: rehearsal.startAt },
+    ];
+
+    render(<DayDetail />);
+
+    expect(screen.getByText('Standup')).toBeInTheDocument();
+    expect(screen.getByText('09:00')).toBeInTheDocument();
+    expect(screen.queryByText('09:00 - 09:00')).toBeNull();
+  });
+
+  // The marker the server had to be fixed twice for: midnight belongs to the
+  // day that opens there, and this list is one of the places it has to appear.
+  it('lists a marker sitting on the day boundary', () => {
+    calendarState.events = [
+      {
+        ...rehearsal,
+        id: 'midnight',
+        title: 'Day one',
+        startAt: '2026-08-04T15:00:00Z',
+        endAt: '2026-08-04T15:00:00Z',
+      },
+    ];
+
+    render(<DayDetail />);
+
+    expect(screen.getByText('Day one')).toBeInTheDocument();
+    expect(screen.getByText('00:00')).toBeInTheDocument();
+  });
 });
