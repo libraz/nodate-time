@@ -114,6 +114,89 @@ function px(value: string): number {
   return Number.parseFloat(value);
 }
 
+/**
+ * Reaching the edge of the mounted range re-anchors it: the anchor moves by a
+ * year, the whole list is rebuilt, and the month the reader was on has to
+ * survive that and be scrolled back to. Nothing covered this, and it is the
+ * path that decides how far the range can be shortened -- a shorter range
+ * means reaching the edge more often, which is only safe if arriving there
+ * costs the reader nothing.
+ */
+describe('MonthScroll re-anchoring at the edge of the range', () => {
+  /** The scrolling element, given the size jsdom will not give it. */
+  function scroller(scrollTop: number): HTMLElement {
+    const el = document.querySelector<HTMLElement>('.overflow-y-auto');
+    if (!el) throw new Error('no scroll container');
+    Object.defineProperty(el, 'scrollTop', { value: scrollTop, configurable: true });
+    Object.defineProperty(el, 'clientHeight', { value: 800, configurable: true });
+    Object.defineProperty(el, 'scrollHeight', { value: 100000, configurable: true });
+    return el;
+  }
+
+  function monthsShown(): string[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-month]')).map(
+      (el) => el.dataset.month ?? '',
+    );
+  }
+
+  /**
+   * Puts a month at the top of the viewport. jsdom lays nothing out, so every
+   * header reports the same position and the view would call the last one
+   * current -- an artefact that would have this assert the opposite of what a
+   * reader experiences. The headers above the chosen one sit at the top edge,
+   * the rest below the fold, which is what the view reads to decide.
+   */
+  function readerIsOn(index: number): string {
+    const headers = Array.from(document.querySelectorAll<HTMLElement>('[data-month]'));
+    headers.forEach((header, i) => {
+      Object.defineProperty(header, 'getBoundingClientRect', {
+        value: () => ({ top: i <= index ? 0 : 1000 }) as DOMRect,
+        configurable: true,
+      });
+    });
+    return headers[index]?.dataset.month ?? '';
+  }
+
+  it('grows the range backwards and keeps the reader where they were', async () => {
+    await renderScroll([]);
+    const before = monthsShown();
+    const earliest = before[0] as string;
+    const el = scroller(0);
+    const current = readerIsOn(Math.floor(before.length / 2));
+    const scrollTo = vi.fn();
+    Object.defineProperty(el, 'scrollTo', { value: scrollTo, configurable: true });
+
+    await act(async () => {
+      el.dispatchEvent(new Event('scroll'));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+
+    const after = monthsShown();
+    expect(after[0] as string).not.toBe(earliest);
+    expect((after[0] as string) < earliest).toBe(true);
+    // The month being read is still mounted, and was scrolled back to.
+    expect(after).toContain(current);
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it('grows the range forwards at the other edge', async () => {
+    await renderScroll([]);
+    const before = monthsShown();
+    const latest = before[before.length - 1] as string;
+    // Nothing left below: scrollTop within a screen of the bottom.
+    const el = scroller(99500);
+    Object.defineProperty(el, 'scrollTo', { value: vi.fn(), configurable: true });
+
+    await act(async () => {
+      el.dispatchEvent(new Event('scroll'));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+
+    const after = monthsShown();
+    expect((after[after.length - 1] as string) > latest).toBe(true);
+  });
+});
+
 // Sunday 2026-08-02 through Saturday 2026-08-08 is one row on both surfaces.
 // These are the desktop grid's own cases: the extraction is only worth having
 // while a fix made once holds on the surface it was not written for.
