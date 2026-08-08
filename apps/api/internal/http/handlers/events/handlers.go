@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1285,7 +1286,29 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				if err != nil {
 					return err
 				}
-				if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, participants); err != nil {
+				// Whether this request created the override or found one that
+				// was already there.
+				//
+				// The upsert does not rewrite public_id on conflict -- it is
+				// deliberately absent from that statement's update list -- so a
+				// row carrying the id generated for this request is one this
+				// request inserted. That row was written a statement ago and
+				// has no attendees, and asking to remove the ones it does not
+				// have is not free: it holds a gap lock to the end of the
+				// attendee index, which the participant insert behind it then
+				// has to write into. Two first edits on different series do
+				// that at the same moment and deadlock, and whoever dragged an
+				// occurrence sees a 500.
+				//
+				// Edits of one series cannot reach this: they queue on the
+				// parent row first. That is why it needs its own test, and why
+				// that test puts every series on its own calendar.
+				if bytes.Equal(child.PublicID, overridePubID[:]) {
+					err = addEventParticipants(ctx, q, deps.WorkspaceID, child.ID, participants)
+				} else {
+					err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, participants)
+				}
+				if err != nil {
 					return err
 				}
 				return eventlog.Append(ctx, q, eventlog.Entry{
