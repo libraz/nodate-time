@@ -63,12 +63,25 @@ describe('inviteCreateBody', () => {
     });
   });
 
-  // The API reads an absent field as "no limit". Sending zero would ask for a
-  // link that expires immediately, or one nobody may use.
-  it('omits a bound rather than sending zero for it', () => {
-    expect(inviteCreateBody('viewer', 0, 0)).toEqual({ role: 'viewer' });
+  /**
+   * The expiry is always stated. A request that omits it is not asking for an
+   * unlimited link: the API answers an absent expiry with a default of its own
+   * -- seven days for a join link -- so leaving the field out would quietly
+   * replace whatever the person chose.
+   */
+  it('states the expiry rather than leaving the API to supply one', () => {
     expect(inviteCreateBody('viewer', 24, 0)).toEqual({ role: 'viewer', expiresInHours: 24 });
-    expect(inviteCreateBody('viewer', 0, 1)).toEqual({ role: 'viewer', maxUses: 1 });
+    expect(inviteCreateBody('viewer', 720, 5)).toEqual({
+      role: 'viewer',
+      expiresInHours: 720,
+      maxUses: 5,
+    });
+  });
+
+  // An absent use limit does still mean unlimited, and a zero would ask for a
+  // link nobody may use.
+  it('omits a zero use limit rather than sending it', () => {
+    expect(inviteCreateBody('viewer', 24, 0)).not.toHaveProperty('maxUses');
   });
 });
 
@@ -80,11 +93,21 @@ describe('invite bound options', () => {
     expect(new Set(usesKeys).size).toBe(INVITE_MAX_USES.length);
   });
 
-  // An unbounded link is the one that cannot be taken back once forwarded, so
-  // it is available but not what the picker opens on.
-  it('offers an unbounded choice without leading with it', () => {
-    expect(INVITE_EXPIRY_HOURS).toContain(0);
-    expect(INVITE_EXPIRY_HOURS[0]).not.toBe(0);
+  /**
+   * A join link cannot be asked to live forever. The API takes an expiry of
+   * between one hour and a year, and reads its absence as its own seven-day
+   * default, so there is no value the client can send that means "never" --
+   * and an option saying otherwise produces a link that dies in a week under
+   * a label promising it never would.
+   */
+  it('offers no expiry the API cannot honour', () => {
+    expect(INVITE_EXPIRY_HOURS).not.toContain(0);
+    expect(INVITE_EXPIRY_HOURS.every((hours) => hours >= 1 && hours <= 8760)).toBe(true);
+  });
+
+  // Uses are a different bound: an absent one really is unlimited, so the
+  // choice is offered -- just not led with.
+  it('offers an unbounded use count without leading with it', () => {
     expect(INVITE_MAX_USES).toContain(0);
     expect(INVITE_MAX_USES[0]).not.toBe(0);
   });

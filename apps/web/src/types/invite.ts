@@ -46,24 +46,38 @@ export function mergeInviteTokens(listed: InviteData[], known: InviteData[]): In
 /**
  * How long a join link stays usable, and how many people it admits.
  *
- * A link with neither bound is a standing invitation: it works for whoever
- * finds it, forever, and the only remedy left is revoking it after the fact.
- * Offering both makes the narrow choice the easy one.
+ * Every choice here is one the API will honour as given. A join link cannot be
+ * asked to live forever: the API takes an expiry of an hour to a year and
+ * applies a default of its own -- a week -- to a request that states none, so
+ * there is nothing the client can send that means "never". The option that
+ * said otherwise produced a link that stopped working after seven days while
+ * its label promised it never would.
+ *
+ * A public link is a different thing and is not created from this list: it
+ * carries no expiry at all, because it grants no membership and an embedded
+ * calendar going dark every week would be the worse failure.
  */
-export const INVITE_EXPIRY_HOURS = [24, 168, 720, 0] as const;
+export const INVITE_EXPIRY_HOURS = [24, 168, 720] as const;
 export const INVITE_MAX_USES = [1, 5, 0] as const;
 
-/** i18n key for each expiry choice. 0 means no expiry. */
-export function inviteExpiryLabelKey(hours: number): TranslationKey {
+/** One of the expiry choices, in hours. */
+export type InviteExpiryHours = (typeof INVITE_EXPIRY_HOURS)[number];
+
+/**
+ * i18n key for each expiry choice.
+ *
+ * Taking the choices themselves as its argument keeps this answerable: a value
+ * with no honest label -- a zero standing for "never" among them -- cannot be
+ * added to the list without the compiler asking what it should say.
+ */
+export function inviteExpiryLabelKey(hours: InviteExpiryHours): TranslationKey {
   switch (hours) {
     case 24:
       return 'invites.expiry24h';
     case 168:
       return 'invites.expiry7d';
-    case 720:
-      return 'invites.expiry30d';
     default:
-      return 'invites.expiryNever';
+      return 'invites.expiry30d';
   }
 }
 
@@ -80,14 +94,18 @@ export function inviteUsesLabelKey(uses: number): TranslationKey {
 }
 
 /**
- * Builds the create-invite body. A zero bound is omitted rather than sent:
- * the API reads an absent field as "no limit", and sending zero would ask for
- * a link nobody can use.
+ * Builds the create-invite body.
+ *
+ * The expiry is always stated. An absent one is not a request for an unlimited
+ * link -- the API answers it with a default of its own -- so omitting the
+ * field would quietly replace the choice that was made. A zero use limit is
+ * still dropped: there an absent field really does mean unlimited, and zero
+ * would ask for a link nobody may use.
  */
 export function inviteCreateBody(role: string, expiryHours: number, maxUses: number) {
   return {
     role,
-    ...(expiryHours > 0 ? { expiresInHours: expiryHours } : {}),
+    expiresInHours: expiryHours,
     ...(maxUses > 0 ? { maxUses } : {}),
   };
 }
