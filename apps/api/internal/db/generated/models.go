@@ -883,6 +883,8 @@ type AlbumPhoto struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+	// Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.
+	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
 }
 
 // Workspace audit log

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/albumblob"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -91,6 +92,7 @@ func runOnce(ctx context.Context, q *generated.Queries, storageClient *storage.C
 		})
 	})
 	cleanupAbandonedUploads(ctx, q, storageClient, now.Add(-abandonedUploadAge))
+	backfillAlbumPhotoObjects(ctx, q, storageClient)
 	sweepUnreferencedObjects(ctx, q, storageClient, now.Add(-abandonedUploadAge))
 }
 
@@ -180,9 +182,9 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 
 	// Album photos that went out of use -- an upload that never landed, a photo
 	// the user deleted, or one that went with its calendar. The row is dropped
-	// first and the bytes only when no storage object claims that key, the same
-	// order the object sweep uses: keys are derived from content, so another
-	// live row can be pointing at the same bytes.
+	// first and the bytes only after, the same order the object sweep uses: a
+	// key can be claimed by a storage object that other photos resolve
+	// through, and taking the bytes out from under it would blank theirs.
 	var photoCursor uint32
 	for range maxBatches {
 		photos, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, generated.ListAbandonedAlbumPhotoStorageKeysParams{
@@ -204,6 +206,19 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
 				continue
 			}
+			// Removing the row is what ends the photo's claim on its blob, so
+			// the reference is released here rather than where the photo went
+			// out of use. Every way of losing one -- deleted by its owner,
+			// retired with its calendar, an upload that never landed -- passes
+			// through this delete, and releasing at each of them instead would
+			// be three chances to release twice or not at all.
+			if photo.StorageObjectID.Valid {
+				releaseStorageObject(ctx, q, storageClient, uint32(photo.StorageObjectID.Int32))
+			}
+			// The photo's own key is still checked, and still only deleted
+			// when no object claims it. That covers a photo the backfill never
+			// reached, and the second copy of bytes that deduplicated onto
+			// another photo's object: the row shared, the bytes did not.
 			if photo.StorageKey == "" {
 				continue
 			}
@@ -268,6 +283,107 @@ func cleanupAbandonedUploads(ctx context.Context, q *generated.Queries, storageC
 			}
 		}
 		if len(expiredUploads) < avatarUploadListBatchSize {
+			return
+		}
+	}
+}
+
+// releaseStorageObject gives back one reference and, if it was the last one,
+// reclaims the object in the same pass.
+//
+// Waiting for sweepUnreferencedObjects instead would put the bytes behind its
+// age gate, which is counted from when the object row was created -- so a
+// photo deleted today would wait out the album's own retention and then that
+// gate again. The gate is there to protect an object between being reserved
+// and being confirmed; one whose last referring row was just deleted is not
+// in that state, and DeleteUnreferencedStorageObject re-checks both referrers
+// before removing anything.
+func releaseStorageObject(ctx context.Context, q *generated.Queries, storageClient *storage.Client, objectID uint32) {
+	if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
+		slog.Warn("cleanup: release storage object reference failed", "id", objectID, "error", err)
+		return
+	}
+	object, err := q.GetStorageObjectByID(ctx, objectID)
+	if err != nil {
+		// Already collected, or never readable. Either way there is no key
+		// left to act on.
+		return
+	}
+	res, err := q.DeleteUnreferencedStorageObject(ctx, objectID)
+	if err != nil {
+		slog.Warn("cleanup: delete released storage object failed", "id", objectID, "error", err)
+		return
+	}
+	// Anything else still holding it -- another photo, an attachment, a
+	// reference taken since the count was read -- and the row stays, which is
+	// what keeps the blob under it.
+	if affected, err := res.RowsAffected(); err != nil || affected == 0 {
+		return
+	}
+	if err := storageClient.DeleteObject(ctx, object.StorageKey); err != nil {
+		slog.Warn("cleanup: delete released object failed", "key", object.StorageKey, "error", err)
+	}
+}
+
+// albumBackfillBatchSize and albumBackfillBatches bound one tick of the
+// backfill far tighter than the other sweeps.
+//
+// Every other sweep here touches rows; this one reads each photo's bytes to
+// digest them, so its cost per row is the size of the picture rather than the
+// size of a row. A hundred photos a tick converges on any album this product
+// realistically holds within a day, without a restart turning into hours of
+// reading.
+const (
+	albumBackfillBatchSize = 50
+	albumBackfillBatches   = 2
+)
+
+// backfillAlbumPhotoObjects moves photos that predate storage_object_id onto
+// the object model, so the album stops being the one place with a blob nothing
+// counts.
+//
+// It is a sweep rather than a one-shot command because a command's effect is
+// "somebody ran it": a deployment where nobody did looks exactly like one
+// where the migration is finished. This converges on its own and then costs
+// one empty query per tick.
+//
+// A photo whose bytes cannot be read is left alone, on its own key, where it
+// goes on being served. That is the whole point of keeping storage_key: this
+// pass failing does not take a photo off the album.
+func backfillAlbumPhotoObjects(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
+	if storageClient == nil {
+		return
+	}
+	var cursor uint32
+	for range albumBackfillBatches {
+		photos, err := q.ListAlbumPhotosWithoutStorageObject(ctx, generated.ListAlbumPhotosWithoutStorageObjectParams{
+			ID:    cursor,
+			Limit: albumBackfillBatchSize,
+		})
+		if err != nil {
+			slog.Warn("cleanup: list album photos without a storage object failed", "error", err)
+			return
+		}
+		for _, photo := range photos {
+			cursor = photo.ID
+			digest, err := storageClient.SHA256(ctx, photo.StorageKey)
+			if err != nil {
+				slog.Warn("cleanup: digest album photo for backfill failed",
+					"id", photo.ID, "key", photo.StorageKey, "error", err)
+				continue
+			}
+			if err := albumblob.Attach(ctx, q, albumblob.Photo{
+				ID:          photo.ID,
+				WorkspaceID: photo.WorkspaceID,
+				StorageKey:  photo.StorageKey,
+				ContentType: photo.ContentType,
+				ByteSize:    photo.ByteSize,
+				SHA256:      digest,
+			}); err != nil {
+				slog.Warn("cleanup: attach album photo to storage object failed", "id", photo.ID, "error", err)
+			}
+		}
+		if len(photos) < albumBackfillBatchSize {
 			return
 		}
 	}
