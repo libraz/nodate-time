@@ -128,3 +128,12 @@ jobs:
           TC_TEST_INTEGRATION: '1'
           TC_TEST_MINIO: '1'
         run: go test ./... -count=1
+
+      # The pass above has object storage for every test in it -- the test
+      # server is built once per process -- so the tests that assert what the
+      # API answers without storage skip there, and a skip is not a failure.
+      # This is the run that executes them. Invoked through make so the set it
+      # selects is defined in one place and can be reproduced locally with the
+      # same command.
+      - name: E2E tests (object storage absent)
+        run: make test-e2e-storage-absent

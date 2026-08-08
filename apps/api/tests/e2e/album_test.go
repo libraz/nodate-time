@@ -296,11 +296,9 @@ func TestAlbumDownloadURL(t *testing.T) {
 	assert.Equal(t, 403, status)
 }
 
-func TestAlbumWithoutStorage(t *testing.T) {
+func TestStorageAbsentAlbumPresign(t *testing.T) {
 	bootstrap(t)
-	if helpers.StorageEnabled() {
-		t.Skip("only meaningful when storage is disabled")
-	}
+	requireStorageAbsent(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
