@@ -343,8 +343,8 @@ export const ja = {
   'settings.importEmpty': 'このファイルにイベントはありませんでした',
   'settings.importTruncated':
     '1回に取り込める上限を超えたため、{count}件は読み込んでいません。ファイルを分けて再度お試しください',
-  'settings.importAlwaysCreates':
-    'インポートは常に新規イベントとして追加します。同じファイルを2回取り込むと重複します。',
+  'settings.importSkipsDuplicates':
+    'カレンダーアプリが書き出したファイルは、取り込み直しても重複しません。イベントに識別子のない手書きのファイルは、取り込むたびに追加されます。',
   'settings.dangerZone': '危険操作',
 
   // Admin (platform) settings
