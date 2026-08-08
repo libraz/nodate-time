@@ -1113,6 +1113,21 @@ export function CalendarsSection() {
   );
 }
 
+interface ImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  /** The part of `failed` the file caused, which a retry cannot change. */
+  rejected: number;
+  /** Events the calendar already held under the name the file gave them. */
+  duplicates: number;
+  truncated: number;
+  /** Imported events whose zone was not recognised, so read as UTC. */
+  unknownTimezones: number;
+  /** The body held nothing that could be read as a calendar. */
+  unreadable: boolean;
+}
+
 /** Exported for testing: an import refreshes the range the app is showing. */
 export function ExportSection() {
   const t = useT();
@@ -1167,24 +1182,55 @@ export function ExportSection() {
     if (!icsText.trim()) return;
     setImporting(true);
     try {
-      const res = await api.post<{
-        imported: number;
-        skipped: number;
-        failed: number;
-        truncated: number;
-      }>(`/calendars/${selectedId}/import`, { ics: icsText });
-      toast.success(t('settings.imported', { count: String(res.imported) }));
+      const res = await api.post<ImportResult>(`/calendars/${selectedId}/import`, {
+        ics: icsText,
+      });
+      if (res.unreadable) {
+        // Nothing was read, so nothing was written -- and every counter
+        // sitting at zero cannot tell that apart from a calendar that
+        // genuinely had no events in it. The pasted text is left where it is:
+        // none of it was consumed, and there is nothing to refresh.
+        toast.error(t('settings.importUnreadable'));
+        return;
+      }
       // Every event the file contained is accounted for. Reporting only the
       // successes turns a migration that lost a slice of the calendar into
       // one that reads as clean.
+      if (res.imported > 0) {
+        toast.success(t('settings.imported', { count: String(res.imported) }));
+      } else if (res.duplicates + res.skipped + res.failed + res.truncated === 0) {
+        // Readable, and it held nothing. Said only when no other outcome is
+        // there to say it: "imported 0" next to a reason is the reason twice.
+        toast.info(t('settings.importEmpty'));
+      }
+      if (res.duplicates > 0) {
+        // These events are on the calendar, put there by an earlier upload of
+        // the same file. That is the answer somebody re-uploading to check was
+        // after, so it is told as one rather than filed with the failures.
+        toast.success(t('settings.importDuplicates', { count: String(res.duplicates) }));
+      }
       if (res.skipped > 0) {
         toast.error(t('settings.importSkipped', { count: String(res.skipped) }));
       }
-      if (res.failed > 0) {
-        toast.error(t('settings.importFailed', { count: String(res.failed) }));
+      // A rejection is counted inside the failures, so reporting both numbers
+      // as given states the same events twice. They are split by what the
+      // reader can do: the remainder is worth another attempt, the rejected
+      // part never will be.
+      const retryable = res.failed - res.rejected;
+      if (retryable > 0) {
+        toast.error(t('settings.importFailed', { count: String(retryable) }));
+      }
+      if (res.rejected > 0) {
+        toast.error(t('settings.importRejected', { count: String(res.rejected) }));
       }
       if (res.truncated > 0) {
         toast.error(t('settings.importTruncated', { count: String(res.truncated) }));
+      }
+      if (res.unknownTimezones > 0) {
+        // These events landed; only their times are wrong, which is the one
+        // thing nobody goes back and checks. Told as a problem rather than as
+        // a note, because it is one -- just not one that failed.
+        toast.error(t('settings.importUnknownTimezones', { count: String(res.unknownTimezones) }));
       }
       setIcsText('');
       // The window the app is already showing, sized by the view and read in

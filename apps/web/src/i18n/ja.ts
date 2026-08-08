@@ -334,6 +334,13 @@ export const ja = {
   'settings.imported': '{count}件のイベントを取り込みました',
   'settings.importSkipped': '{count}件は取り込めませんでした（対応していない繰り返しなど）',
   'settings.importFailed': '{count}件は保存に失敗しました',
+  'settings.importRejected':
+    '{count}件はこのカレンダーで扱えない内容のため、やり直しても取り込めません',
+  'settings.importDuplicates': '{count}件はすでにこのカレンダーにあります（そのままにしました）',
+  'settings.importUnknownTimezones':
+    '{count}件はタイムゾーンを判別できず UTC として取り込みました。時刻をご確認ください',
+  'settings.importUnreadable': 'このファイルはカレンダーとして読み取れませんでした',
+  'settings.importEmpty': 'このファイルにイベントはありませんでした',
   'settings.importTruncated':
     '1回に取り込める上限を超えたため、{count}件は読み込んでいません。ファイルを分けて再度お試しください',
   'settings.importAlwaysCreates':
