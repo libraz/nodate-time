@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
-import { ApiError, api, hasToken } from '@/lib/api';
+import { api, errorMessage, hasToken } from '@/lib/api';
 import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
 import { publicEventOccursOnDay, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
 import { useUiStore } from '@/stores/ui-store';
@@ -33,7 +33,21 @@ export const Route = createFileRoute('/share/$token')({
   component: SharedCalendarView,
 });
 
-function SharedCalendarView() {
+/**
+ * Whether this link publishes the calendar, and so has events to draw.
+ *
+ * A join link is an offer of access rather than access itself: the server
+ * refuses it the events endpoint by design, and it stays an offer once it has
+ * been used up. Drawing a grid for one produces six weeks of empty cells,
+ * which reads as a calendar with nothing in it rather than as an invitation
+ * waiting to be accepted.
+ */
+function publishesEvents(cal: PublicCalendar): boolean {
+  return !cal.joinable && !cal.spent;
+}
+
+/** Exported for testing: what a link publishes decides what this page draws. */
+export function SharedCalendarView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
@@ -41,7 +55,11 @@ function SharedCalendarView() {
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   const [events, setEvents] = useState<PublicEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Whether the calendar could be read at all, kept apart from why. The words
+  // shown come from the reason below; holding a sentence here as well would
+  // put the translator in this callback, and `useT` hands back a new function
+  // on every render -- enough to make the load depend on itself.
+  const [failed, setFailed] = useState(false);
   const [failure, setFailure] = useState<ShareFailure | null>(null);
   const [currentMonth, setCurrentMonth] = useState(DateTime.now().startOf('month'));
   const [joining, setJoining] = useState(false);
@@ -58,42 +76,42 @@ function SharedCalendarView() {
       await api.post<{ calendarId: string; role: string }>(`/invites/${token}/accept`);
       navigate({ to: '/' });
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 409) {
-          setJoinError(t('share.alreadyMember'));
-        } else if (e.status === 404 || e.status === 410) {
-          setJoinError(t('share.inviteInvalid'));
-        } else {
-          setJoinError(e.detail || t('share.joinFailed'));
-        }
-      } else {
-        setJoinError(t('share.joinFailed'));
-      }
+      // Every refusal the server can give here carries a code, and the code is
+      // what has a sentence in the reader's language behind it: a link that has
+      // run out, one that never existed, and a public link that publishes a
+      // calendar without ever admitting anyone to it. Branching on the status
+      // instead left that last one showing the server's English, and answered a
+      // 409 the server does not send -- an existing member is readmitted
+      // silently rather than refused.
+      setJoinError(errorMessage(e, t('share.joinFailed')));
     } finally {
       setJoining(false);
     }
   }, [token, navigate, t]);
 
+  // Depends on the token and nothing else. Every response is a fresh object,
+  // so a load that re-created itself on each render asked again for what it
+  // had just been given, and went on asking.
   const loadCalendar = useCallback(() => {
     api
       .get<PublicCalendar>(`/share/${token}`, true)
       .then((cal) => {
         setCalendar(cal);
-        setError(null);
+        setFailed(false);
         setFailure(null);
       })
       .catch((e: unknown) => {
         setFailure(shareFailureOf(e));
-        setError(t('share.calendarNotFound'));
+        setFailed(true);
       });
-  }, [token, t]);
+  }, [token]);
 
   useEffect(() => {
     loadCalendar();
   }, [loadCalendar]);
 
   useEffect(() => {
-    if (!calendar) return;
+    if (!calendar || !publishesEvents(calendar)) return;
     // The grid draws part of the neighbouring months, and the dates are days
     // in the zone this page renders -- both have to be said, or the edge cells
     // stay empty and an event near a month boundary lands in the wrong one.
@@ -105,7 +123,7 @@ function SharedCalendarView() {
       .catch(() => setEvents([]));
   }, [token, calendar, currentMonth, timezone]);
 
-  if (error) {
+  if (failed) {
     return (
       <div className="app-bg flex min-h-screen items-center justify-center">
         <div className="glass-surface auth-card rounded-2xl px-8 py-12 text-center">
@@ -130,7 +148,7 @@ function SharedCalendarView() {
             <button
               type="button"
               onClick={() => {
-                setError(null);
+                setFailed(false);
                 setFailure(null);
                 loadCalendar();
               }}
@@ -152,6 +170,7 @@ function SharedCalendarView() {
     );
   }
 
+  const showsGrid = publishesEvents(calendar);
   const days = getMonthDays(currentMonth.year, currentMonth.month - 1, timezone);
   const weeks: DateTime[][] = [];
   for (let i = 0; i < days.length; i += 7) {
@@ -187,140 +206,147 @@ function SharedCalendarView() {
             </svg>
             <h1 className="text-subhead font-bold sm:text-title">{calendar.name}</h1>
           </div>
-          <span className="rounded-full bg-white/20 px-3 py-1 text-caption font-medium">
-            {t('share.readOnly')}
-          </span>
+          {showsGrid && (
+            <span className="rounded-full bg-white/20 px-3 py-1 text-caption font-medium">
+              {t('share.readOnly')}
+            </span>
+          )}
         </header>
 
-        {/* Month navigation */}
-        <div className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 shadow-sm sm:px-6">
-          <button
-            type="button"
-            onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <span className="text-callout font-bold tabular-nums text-[var(--color-text-primary)]">
-            {formatMonthYear(currentMonth, locale)}
-          </span>
-          <button
-            type="button"
-            onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
-        </div>
+        {showsGrid && (
+          <>
+            {/* Month navigation */}
+            <div className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 shadow-sm sm:px-6">
+              <button
+                type="button"
+                onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+              <span className="text-callout font-bold tabular-nums text-[var(--color-text-primary)]">
+                {formatMonthYear(currentMonth, locale)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
 
-        {/* Calendar grid */}
-        <div className="flex-1 bg-[var(--color-surface)]">
-          {/* Day of week header */}
-          <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
-            {Array.from({ length: 7 }, (_, i) => {
-              const label = getWeekdayLabel(i, locale);
-              return (
+            {/* Calendar grid */}
+            <div className="flex-1 bg-[var(--color-surface)]">
+              {/* Day of week header */}
+              <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
+                {Array.from({ length: 7 }, (_, i) => {
+                  const label = getWeekdayLabel(i, locale);
+                  return (
+                    <div
+                      key={label}
+                      className="py-2 text-center text-footnote font-medium"
+                      style={{
+                        color:
+                          i === 0
+                            ? 'var(--color-sunday)'
+                            : i === 6
+                              ? 'var(--color-saturday)'
+                              : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      {label}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Weeks */}
+              {weeks.map((week) => (
                 <div
-                  key={label}
-                  className="py-2 text-center text-footnote font-medium"
+                  key={week[0]?.toISO()}
+                  className="grid grid-cols-7"
                   style={{
-                    color:
-                      i === 0
-                        ? 'var(--color-sunday)'
-                        : i === 6
-                          ? 'var(--color-saturday)'
-                          : 'var(--color-text-secondary)',
+                    borderBottom:
+                      '1px solid color-mix(in srgb, var(--color-border) 50%, transparent)',
                   }}
                 >
-                  {label}
-                </div>
-              );
-            })}
-          </div>
+                  {week.map((day) => {
+                    const isCurrentMonth = day.month === currentMonth.month;
+                    const isToday = day.hasSame(today, 'day');
+                    const dayEvents = getEventsForDay(day);
 
-          {/* Weeks */}
-          {weeks.map((week) => (
-            <div
-              key={week[0]?.toISO()}
-              className="grid grid-cols-7"
-              style={{
-                borderBottom: '1px solid color-mix(in srgb, var(--color-border) 50%, transparent)',
-              }}
-            >
-              {week.map((day) => {
-                const isCurrentMonth = day.month === currentMonth.month;
-                const isToday = day.hasSame(today, 'day');
-                const dayEvents = getEventsForDay(day);
-
-                return (
-                  <div
-                    key={day.toISO()}
-                    className="min-h-[70px] p-1 last:border-r-0 sm:min-h-[90px] sm:p-2"
-                    style={{
-                      opacity: isCurrentMonth ? 1 : 0.35,
-                      borderRight:
-                        '1px solid color-mix(in srgb, var(--color-border) 30%, transparent)',
-                    }}
-                  >
-                    <div className="mb-1 flex items-center justify-center">
-                      <span
-                        className="flex h-6 w-6 items-center justify-center rounded-full text-footnote tabular-nums sm:text-body"
+                    return (
+                      <div
+                        key={day.toISO()}
+                        className="min-h-[70px] p-1 last:border-r-0 sm:min-h-[90px] sm:p-2"
                         style={{
-                          backgroundColor: isToday ? calendar.color : 'transparent',
-                          boxShadow: isToday
-                            ? `0 2px 8px color-mix(in srgb, ${calendar.color} 45%, transparent)`
-                            : undefined,
-                          color: isToday
-                            ? '#fff'
-                            : day.weekday === 7
-                              ? 'var(--color-sunday)'
-                              : day.weekday === 6
-                                ? 'var(--color-saturday)'
-                                : 'var(--color-text-primary)',
-                          fontWeight: isToday ? 700 : 400,
+                          opacity: isCurrentMonth ? 1 : 0.35,
+                          borderRight:
+                            '1px solid color-mix(in srgb, var(--color-border) 30%, transparent)',
                         }}
                       >
-                        {day.day}
-                      </span>
-                    </div>
-                    {dayEvents.slice(0, 3).map((evt) => (
-                      <div
-                        key={evt.id}
-                        className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white sm:text-caption"
-                        style={{ backgroundColor: evt.color || calendar.color }}
-                      >
-                        {evt.private ? t('event.privateBusy') : evt.title}
+                        <div className="mb-1 flex items-center justify-center">
+                          <span
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-footnote tabular-nums sm:text-body"
+                            style={{
+                              backgroundColor: isToday ? calendar.color : 'transparent',
+                              boxShadow: isToday
+                                ? `0 2px 8px color-mix(in srgb, ${calendar.color} 45%, transparent)`
+                                : undefined,
+                              color: isToday
+                                ? '#fff'
+                                : day.weekday === 7
+                                  ? 'var(--color-sunday)'
+                                  : day.weekday === 6
+                                    ? 'var(--color-saturday)'
+                                    : 'var(--color-text-primary)',
+                              fontWeight: isToday ? 700 : 400,
+                            }}
+                          >
+                            {day.day}
+                          </span>
+                        </div>
+                        {dayEvents.slice(0, 3).map((evt) => (
+                          <div
+                            key={evt.id}
+                            className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white sm:text-caption"
+                            style={{ backgroundColor: evt.color || calendar.color }}
+                          >
+                            {evt.private ? t('event.privateBusy') : evt.title}
+                          </div>
+                        ))}
+                        {dayEvents.length > 3 && (
+                          <div className="text-center text-micro tabular-nums text-[var(--color-text-secondary)]">
+                            +{dayEvents.length - 3}
+                          </div>
+                        )}
                       </div>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <div className="text-center text-micro tabular-nums text-[var(--color-text-secondary)]">
-                        +{dayEvents.length - 3}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
 
         {/* A used-up join link still shows the calendar it named, so say why
             the button is gone rather than leaving the visitor to guess. */}
