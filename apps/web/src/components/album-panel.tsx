@@ -4,7 +4,7 @@ import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import { fromISOInZone } from '@/lib/date-utils';
 import { readCaptureTime } from '@/lib/exif';
-import { prepareImageForAlbum } from '@/lib/image-resize';
+import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -15,6 +15,11 @@ interface AlbumPhoto {
   id: string;
   caption: string;
   imageUrl: string;
+  /**
+   * The grid-sized copy of the photo, absent when it has none. Photos uploaded
+   * before thumbnails existed never get one, so this stays optional.
+   */
+  thumbnailUrl?: string;
   createdAt: string;
   takenAt: string;
   /** Public id of the event this photo belongs to, empty when it belongs to none. */
@@ -30,6 +35,8 @@ interface AlbumListResponse {
 interface PresignResponse {
   photoId: string;
   uploadUrl: string;
+  /** Only issued when the presign request declared a thumbnail. */
+  thumbnailUploadUrl?: string;
 }
 
 export function AlbumPanel() {
@@ -182,6 +189,9 @@ export function AlbumPanel() {
         // the EXIF block, and this is the value the album orders by.
         const takenAt = await readCaptureTime(file);
         const resized = await prepareImageForAlbum(file);
+        // The grid draws the photo itself when there is no thumbnail, so
+        // failing to make one is not a reason to fail the upload.
+        const thumbnail = await prepareAlbumThumbnail(file, resized).catch(() => null);
         const presign = await uploadViaPresign<PresignResponse>({
           kind: 'album',
           presignPath: `/calendars/${activeCalendarId}/albums/presign`,
@@ -194,11 +204,30 @@ export function AlbumPanel() {
             // capture time as the upload time, and saying "taken now" for a
             // photo with no metadata would be a claim rather than a default.
             ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
+            // Declaring nothing is how the server is told this photo has no
+            // thumbnail, which is a normal outcome rather than an error.
+            ...(thumbnail
+              ? {
+                  thumbnailContentType: thumbnail.contentType,
+                  thumbnailByteSize: thumbnail.bytes.byteLength,
+                }
+              : {}),
           },
           contentType: resized.contentType,
           body: resized.bytes,
           byteSize: resized.bytes.byteLength,
         });
+        if (thumbnail && presign.thumbnailUploadUrl) {
+          // Neither a rejection nor a non-ok response is acted on: the photo
+          // is already stored, confirm does not need the thumbnail, and the
+          // grid falls back to the photo. Losing it costs bandwidth, not the
+          // picture, so it must not surface as a failed upload.
+          await fetch(presign.thumbnailUploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': thumbnail.contentType },
+            body: thumbnail.bytes,
+          }).catch(() => undefined);
+        }
         // The row is created disabled; confirm enables it once the object is stored.
         await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
         await reload();
@@ -390,7 +419,11 @@ export function AlbumPanel() {
                     className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-surface-secondary)]"
                   >
                     <img
-                      src={p.imageUrl}
+                      // A tile is about 134px, so the stored photo here is
+                      // megabytes per screenful. Photos uploaded before
+                      // thumbnails existed have none and never will, which
+                      // makes the fallback permanent rather than temporary.
+                      src={p.thumbnailUrl ?? p.imageUrl}
                       alt={p.caption}
                       loading="lazy"
                       onError={() => handleImageError(p.id)}

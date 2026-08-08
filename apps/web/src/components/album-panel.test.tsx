@@ -6,8 +6,11 @@ vi.mock('@/lib/api', () => ({
   errorMessage: (e: unknown) => String(e),
 }));
 
+// getT is what the upload helper reaches for when it refuses a file, so the
+// upload path only runs with it mocked too.
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
+  getT: () => (key: string) => key,
 }));
 
 const uiState = {
@@ -464,5 +467,184 @@ describe('AlbumPanel lightbox keyboard', () => {
 
     await waitFor(() => expect(screen.queryByText('Sports day')).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'album.photo' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * A grid tile is about 134px inside a 420px panel, and it used to be drawn
+ * from the stored photo -- up to 2048px on its longest edge, hundreds of
+ * kilobytes each, so megabytes to show one screenful.
+ */
+describe('AlbumPanel thumbnails', () => {
+  it('draws the grid from the thumbnail and the lightbox from the photo', async () => {
+    mockApi.get.mockResolvedValue({
+      items: [{ ...photo('https://storage/photo'), thumbnailUrl: 'https://storage/thumb' }],
+    });
+
+    render(<AlbumPanel />);
+
+    expect(await screen.findByAltText('a photo')).toHaveAttribute('src', 'https://storage/thumb');
+
+    fireEvent.click(screen.getByAltText('a photo'));
+    await waitFor(() => expect(screen.getAllByAltText('a photo')).toHaveLength(2));
+
+    // The lightbox is the one place the photo itself is worth downloading, so
+    // the two images have to be reading different URLs.
+    expect(screen.getAllByAltText('a photo').map((img) => img.getAttribute('src'))).toEqual([
+      'https://storage/thumb',
+      'https://storage/photo',
+    ]);
+  });
+
+  it('falls back to the photo for one that has no thumbnail', async () => {
+    // Every photo uploaded before thumbnails existed is this case, permanently.
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/photo')] });
+
+    render(<AlbumPanel />);
+
+    expect(await screen.findByAltText('a photo')).toHaveAttribute('src', 'https://storage/photo');
+  });
+});
+
+/**
+ * jsdom decodes no images and implements no canvas, so the resize path has to
+ * be handed both. `encodedBytes` follows the canvas width, which is what makes
+ * a thumbnail come out smaller than the photo it was made from -- and what a
+ * test can invert to say it did not.
+ */
+function stubImagePipeline(longestEdge: number, encodedBytes: (width: number) => number) {
+  Object.defineProperty(HTMLImageElement.prototype, 'src', {
+    configurable: true,
+    set(this: HTMLImageElement) {
+      Object.defineProperty(this, 'naturalWidth', { value: longestEdge, configurable: true });
+      Object.defineProperty(this, 'naturalHeight', { value: longestEdge, configurable: true });
+      setTimeout(() => this.dispatchEvent(new Event('load')), 0);
+    },
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage: () => {},
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (
+    this: HTMLCanvasElement,
+    callback: BlobCallback,
+    type?: string,
+  ) {
+    callback(new Blob([new Uint8Array(encodedBytes(this.width))], { type: type ?? '' }));
+  });
+}
+
+function pickFile(file: File) {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+  expect(input).not.toBeNull();
+  if (!input) return;
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  fireEvent.change(input);
+}
+
+/** The first argument of the nth call the presign step made. */
+function presignBody(): Record<string, unknown> {
+  return (mockApi.post.mock.calls[0]?.[1] ?? {}) as Record<string, unknown>;
+}
+
+describe('AlbumPanel thumbnail upload', () => {
+  const originalSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+
+  beforeEach(() => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner' }];
+    // jsdom implements neither, and the resize path is built on both.
+    Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:stub', configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, configurable: true });
+    mockApi.get.mockResolvedValue({ items: [] });
+    mockApi.post.mockResolvedValue({
+      photoId: 'photo-1',
+      uploadUrl: 'https://storage/put-photo',
+      thumbnailUploadUrl: 'https://storage/put-thumb',
+    });
+  });
+
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+    if (originalSrc) Object.defineProperty(HTMLImageElement.prototype, 'src', originalSrc);
+    vi.unstubAllGlobals();
+  });
+
+  it('declares a PNG thumbnail as a PNG, not as JPEG', async () => {
+    // A JPEG thumbnail of a transparent PNG draws the transparency black.
+    stubImagePipeline(3000, (width) => width * 100);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response),
+    );
+
+    render(<AlbumPanel />);
+    await screen.findByText('panel.noPhotos');
+    pickFile(new File([new Uint8Array(9000)], 'photo.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
+    expect(presignBody()).toMatchObject({
+      contentType: 'image/png',
+      thumbnailContentType: 'image/png',
+    });
+    expect(presignBody().thumbnailByteSize).toBe(400 * 100);
+  });
+
+  it('declares no thumbnail for a GIF', async () => {
+    // Canvas draws one frame. The grid animates a GIF today because it shows
+    // the stored photo, and a still thumbnail would quietly take that away.
+    stubImagePipeline(3000, (width) => width * 100);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AlbumPanel />);
+    await screen.findByText('panel.noPhotos');
+    pickFile(new File([new Uint8Array(9000)], 'photo.gif', { type: 'image/gif' }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
+    expect(presignBody()).not.toHaveProperty('thumbnailContentType');
+    expect(presignBody()).not.toHaveProperty('thumbnailByteSize');
+    // Only the photo is uploaded, however willing the server was to sign a
+    // second URL.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('https://storage/put-photo', expect.anything());
+  });
+
+  it('declares no thumbnail when it would not come out smaller', async () => {
+    // A small PNG re-encoded at 400px can encode larger than the file being
+    // stored; sending it would cost a request and save nothing.
+    stubImagePipeline(1000, () => 40000);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AlbumPanel />);
+    await screen.findByText('panel.noPhotos');
+    pickFile(new File([new Uint8Array(9000)], 'photo.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
+    expect(presignBody()).not.toHaveProperty('thumbnailContentType');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the photo when its thumbnail fails to upload', async () => {
+    stubImagePipeline(3000, (width) => width * 100);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 } as unknown as Response)
+      .mockRejectedValueOnce(new Error('thumbnail unreachable'));
+    vi.stubGlobal('fetch', fetchMock);
+    mockApi.get
+      .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValue({ items: [photo('https://storage/photo')] });
+
+    render(<AlbumPanel />);
+    await screen.findByText('panel.noPhotos');
+    pickFile(new File([new Uint8Array(9000)], 'photo.jpg', { type: 'image/jpeg' }));
+
+    // The photo is stored either way: confirm does not need the thumbnail, and
+    // the grid falls back to the photo.
+    await waitFor(() =>
+      expect(mockApi.post).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1/confirm'),
+    );
+    expect(await screen.findByAltText('a photo')).toHaveAttribute('src', 'https://storage/photo');
+    expect(screen.queryByText('Error: thumbnail unreachable')).not.toBeInTheDocument();
   });
 });
