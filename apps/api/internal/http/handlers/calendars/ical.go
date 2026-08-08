@@ -375,31 +375,53 @@ func loadLocationOrUTC(tz string) *time.Location {
 }
 
 // writeFolded writes a content line, folding at 75 octets per RFC 5545 §3.1.
-// Continuation lines start with a single space.
+// Continuation lines start with a single space, which counts against the same
+// limit and so leaves 74 octets for the text.
+//
+// §3.1 asks for two things at once: the limit is counted in octets, and a
+// multi-octet character is never split across the fold. Counting characters
+// instead would satisfy the second and break the first, since one character
+// can be four octets; cutting at the octet count without regard for where a
+// character begins breaks the second, and the file then carries a byte
+// sequence that is not a character. Anything reading it -- another calendar
+// application, this product's own import, a JSON encoder carrying the file --
+// substitutes or drops it, so the corruption reaches the copy the owner kept.
 func writeFolded(b *strings.Builder, line string) {
 	const limit = 75
-	bs := []byte(line)
-	if len(bs) <= limit {
-		b.Write(bs)
-		b.WriteString("\r\n")
-		return
-	}
-	// First chunk
-	b.Write(bs[:limit])
+	const cont = limit - 1
+
+	n := foldPoint(line, limit)
+	b.WriteString(line[:n])
 	b.WriteString("\r\n")
-	bs = bs[limit:]
-	// 74 octets per continuation (1 reserved for the leading space).
-	const cont = 74
-	for len(bs) > 0 {
-		n := cont
-		if n > len(bs) {
-			n = len(bs)
-		}
+
+	rest := line[n:]
+	for rest != "" {
+		n = foldPoint(rest, cont)
 		b.WriteByte(' ')
-		b.Write(bs[:n])
+		b.WriteString(rest[:n])
 		b.WriteString("\r\n")
-		bs = bs[n:]
+		rest = rest[n:]
 	}
+}
+
+// foldPoint returns how many octets of s fit in limit without ending inside a
+// character. It backs up off the continuation octets of a split sequence,
+// which costs at most three octets of a line.
+func foldPoint(s string, limit int) int {
+	if len(s) <= limit {
+		return len(s)
+	}
+	n := limit
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	if n == 0 {
+		// Only reachable if the text is not valid UTF-8 to begin with. Writing
+		// the full run is what keeps this from folding nothing forever; the
+		// bytes are already not characters, and the limit still holds.
+		return limit
+	}
+	return n
 }
 
 // icsRRule renders an internal recurrence rule as an RFC 5545 RRULE value.
