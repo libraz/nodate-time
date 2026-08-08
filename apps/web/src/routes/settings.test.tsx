@@ -263,6 +263,23 @@ describe('CalendarsSection invite listing', () => {
    * own reach, so the API accepts only editor and viewer. Offering any other
    * role produces a rejected request for having used the control on offer.
    */
+  /**
+   * The same picker, on the other screen that creates join links. The API
+   * gives a link with no stated expiry seven days, so an option promising
+   * "never" would produce one that dies in a week under that label.
+   */
+  it('offers no expiry the API cannot honour', async () => {
+    calendarState.calendars = [calendar('owner')];
+    calendarState.membersMap = {};
+
+    render(<CalendarsSection />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
+
+    expect(await screen.findByRole('button', { name: 'invites.expiry30d' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'invites.expiryNever' })).toBeNull();
+  });
+
   it('offers only the roles an invite link may grant', async () => {
     calendarState.calendars = [calendar('owner')];
     calendarState.membersMap = {};

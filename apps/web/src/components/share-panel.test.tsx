@@ -128,6 +128,22 @@ describe('SharePanel invites', () => {
   });
 
   /**
+   * The API gives a join link seven days when the request states no expiry,
+   * and takes nothing that means "never", so the picker must not offer one:
+   * the option produced a link that died in a week under a label promising it
+   * would not.
+   */
+  it('offers no expiry that outlives what the server will grant', async () => {
+    render(<SharePanel />);
+
+    // The trigger shows the current choice; the list arrives through a portal.
+    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
+
+    expect(await screen.findByRole('button', { name: 'invites.expiry30d' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'invites.expiryNever' })).toBeNull();
+  });
+
+  /**
    * A link that could hand out management would let whoever holds it widen its
    * own reach, so the API accepts editor and viewer and nothing else.
    */
