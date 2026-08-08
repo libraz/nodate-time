@@ -14,6 +14,9 @@ import (
 )
 
 type Deps struct {
+	// DB opens the transactions the guards need. Revoking an administrator
+	// has to hold its count across the write, which a bare Queries cannot do.
+	DB      *sql.DB
 	Queries *generated.Queries
 	Cipher  *secrets.Cipher
 	// EnvFallback reports whether the static environment-variable config has a

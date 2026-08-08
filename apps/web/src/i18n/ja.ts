@@ -559,6 +559,8 @@ export const ja = {
   'apiError.MEMBER.ALREADY_EXISTS': 'このユーザは既にカレンダーのメンバーです',
   'apiError.MEMBER.LAST_ADMIN': '最後の管理者は外せません',
   'apiError.MEMBER.SELF_MODIFY': '自分のメンバーシップは変更できません',
+  'apiError.ADMIN.SELF_REVOKE': '自分の管理者権限は、ほかの管理者に外してもらってください',
+  'apiError.ADMIN.LAST_INSTANCE_ADMIN': 'このインスタンス最後の管理者は外せません',
   'apiError.INVITE.NOT_FOUND': '招待リンクが見つからないか、有効期限が切れています',
   'apiError.INVITE.EXPIRED': '招待リンクの有効期限が切れたか、使用回数の上限に達しています',
   'apiError.INVITE.PUBLIC_VIEW_ONLY': 'これは閲覧専用の公開リンクのため、参加はできません',

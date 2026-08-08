@@ -136,6 +136,20 @@ var (
 	MemberSelfModify    = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
 )
 
+// --- Instance admin errors ---
+
+var (
+	// AdminSelfRevoke refuses an administrator taking away their own rights.
+	// Stepping down is asked of another administrator, so one careless click
+	// cannot be the thing that leaves an instance with nobody to run it.
+	AdminSelfRevoke = &Spec{Status: 400, Code: "ADMIN.SELF_REVOKE", Message: "You cannot revoke your own instance administrator rights"}
+	// AdminLastInstanceAdmin refuses the revocation that would leave the
+	// instance with no administrator at all. Granting the rights back is not
+	// an API operation, so recovering from it means a hand-written statement
+	// against the database -- the thing this endpoint exists to avoid.
+	AdminLastInstanceAdmin = &Spec{Status: 400, Code: "ADMIN.LAST_INSTANCE_ADMIN", Message: "Cannot revoke the last instance administrator"}
+)
+
 // --- Invite errors ---
 
 var (

@@ -538,6 +538,8 @@ export const en: Record<TranslationKey, string> = {
   'apiError.MEMBER.ALREADY_EXISTS': 'User is already a member of this calendar',
   'apiError.MEMBER.LAST_ADMIN': 'Cannot remove the last admin',
   'apiError.MEMBER.SELF_MODIFY': 'You cannot change your own membership',
+  'apiError.ADMIN.SELF_REVOKE': 'Ask another administrator to remove your rights',
+  'apiError.ADMIN.LAST_INSTANCE_ADMIN': 'Cannot remove the last administrator of this instance',
   'apiError.INVITE.NOT_FOUND': 'Invite not found or expired',
   'apiError.INVITE.EXPIRED': 'Invite has expired or reached max uses',
   'apiError.INVITE.PUBLIC_VIEW_ONLY': 'This is a public view-only link and cannot be joined',

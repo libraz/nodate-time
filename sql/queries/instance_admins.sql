@@ -16,6 +16,15 @@ ON DUPLICATE KEY UPDATE revoked_at = NULL, enabled = TRUE, granted_by_user_id = 
 -- name: RevokeInstanceAdmin :exec
 UPDATE instance_admins SET revoked_at = NOW(3) WHERE user_id = ? AND revoked_at IS NULL;
 
+-- CountInstanceAdminsForUpdate guards the last-administrator case. Nothing in
+-- the API grants these rights, so an instance that loses its last one can only
+-- get another by a statement typed against this database. The count has to be
+-- held across the revocation or two concurrent ones both pass: each sees the
+-- other still counted, and between them they remove everybody.
+-- name: CountInstanceAdminsForUpdate :one
+SELECT COUNT(*) FROM instance_admins
+WHERE revoked_at IS NULL AND enabled = TRUE FOR UPDATE;
+
 -- name: ListInstanceAdmins :many
 SELECT ia.*, u.public_id AS user_public_id, u.email, u.display_name
 FROM instance_admins ia

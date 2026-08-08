@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+const countInstanceAdminsForUpdate = `-- name: CountInstanceAdminsForUpdate :one
+SELECT COUNT(*) FROM instance_admins
+WHERE revoked_at IS NULL AND enabled = TRUE FOR UPDATE
+`
+
+// CountInstanceAdminsForUpdate guards the last-administrator case. Nothing in
+// the API grants these rights, so an instance that loses its last one can only
+// get another by a statement typed against this database. The count has to be
+// held across the revocation or two concurrent ones both pass: each sees the
+// other still counted, and between them they remove everybody.
+func (q *Queries) CountInstanceAdminsForUpdate(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countInstanceAdminsForUpdate)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const grantInstanceAdmin = `-- name: GrantInstanceAdmin :exec
 INSERT INTO instance_admins (public_id, user_id, granted_by_user_id)
 VALUES (?, ?, ?)

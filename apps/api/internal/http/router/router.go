@@ -771,7 +771,7 @@ func Build(deps Deps) http.Handler {
 			}
 			return false
 		}
-		adminDeps := admin.Deps{Queries: deps.Queries, Cipher: deps.Cipher, EnvFallback: envHas, AllowedDomains: deps.GoogleAllowedDomains}
+		adminDeps := admin.Deps{DB: deps.DB, Queries: deps.Queries, Cipher: deps.Cipher, EnvFallback: envHas, AllowedDomains: deps.GoogleAllowedDomains}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "list-oauth-providers",
@@ -797,6 +797,23 @@ func Build(deps Deps) http.Handler {
 			Tags:          []string{"Admin"},
 			DefaultStatus: 204,
 		}, admin.DeleteOAuthProvider(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "list-instance-admins",
+			Method:      http.MethodGet,
+			Path:        "/admin/instance-admins",
+			Summary:     "List instance administrators (admin only)",
+			Tags:        []string{"Admin"},
+		}, admin.ListInstanceAdmins(adminDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID:   "revoke-instance-admin",
+			Method:        http.MethodDelete,
+			Path:          "/admin/instance-admins/{userId}",
+			Summary:       "Revoke a user's instance administrator rights (admin only)",
+			Tags:          []string{"Admin"},
+			DefaultStatus: http.StatusNoContent,
+		}, admin.RevokeInstanceAdmin(adminDeps))
 
 		huma.Register(api, huma.Operation{
 			OperationID: "list-allowed-emails",
