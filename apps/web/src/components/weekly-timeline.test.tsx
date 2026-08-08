@@ -125,6 +125,73 @@ describe('WeeklyTimeline across a daylight-saving transition', () => {
   });
 });
 
+/**
+ * An event whose end equals its start is a marker at a moment. The API returns
+ * one and attributes it to the day it opens; this view discarded it before
+ * layout, so none of that reached anybody.
+ *
+ * Surviving the filter is not enough to be seen: a block with no duration is a
+ * block of no height, so these assert what is drawn rather than what exists.
+ */
+describe('WeeklyTimeline markers', () => {
+  const marker: CalendarEvent = {
+    ...probe,
+    id: 'm1',
+    title: 'Deploy',
+    startAt: `${DAY}T05:00:00-04:00`,
+    endAt: `${DAY}T05:00:00-04:00`,
+  };
+
+  afterEach(() => {
+    calendarState.events = [probe];
+  });
+
+  it('draws a marker tall enough to see, at the time it marks', () => {
+    calendarState.events = [marker];
+
+    render(<WeeklyTimeline />);
+
+    const block = screen.getByText('Deploy').closest('button') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(Number.parseFloat(block.style.top)).toBe(hourRuleTop(5));
+    expect(Number.parseFloat(block.style.height)).toBeGreaterThanOrEqual(20);
+  });
+
+  it('gives a marker one time rather than a range from itself to itself', () => {
+    calendarState.events = [marker];
+
+    render(<WeeklyTimeline />);
+
+    expect(screen.getByText('5:00')).toBeInTheDocument();
+    expect(screen.queryByText('5:00 - 5:00')).toBeNull();
+  });
+
+  /**
+   * The marker is drawn across the event that follows it, so the two are packed
+   * side by side. Laid out by the nothing it occupies in time, it would sit at
+   * full width on top of it.
+   */
+  it('shares the width with the event it is drawn across', () => {
+    calendarState.events = [
+      marker,
+      {
+        ...probe,
+        id: 'e2',
+        title: 'Standup',
+        startAt: `${DAY}T05:10:00-04:00`,
+        endAt: `${DAY}T06:00:00-04:00`,
+      },
+    ];
+
+    render(<WeeklyTimeline />);
+
+    const markerBlock = screen.getByText('Deploy').closest('button') as HTMLElement;
+    const eventBlock = screen.getByText('Standup').closest('button') as HTMLElement;
+    expect(markerBlock.style.width).toBe('calc(50% - 4px)');
+    expect(eventBlock.style.width).toBe('calc(50% - 4px)');
+  });
+});
+
 // A resize registers three window listeners and drops them on pointerup. Switch
 // view mid-drag and that pointerup arrives at a component that is gone, so the
 // listeners — and the event they close over — stayed on window for the life of

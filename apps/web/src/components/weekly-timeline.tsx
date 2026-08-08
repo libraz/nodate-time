@@ -18,7 +18,11 @@ import {
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
-import { layoutTimedEventsForDay, resizedEndForDaySegment } from '@/lib/timed-layout';
+import {
+  layoutTimedEventsForDay,
+  MIN_RENDERED_MINUTES,
+  resizedEndForDaySegment,
+} from '@/lib/timed-layout';
 import { useEventDrag } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { useAuthStore } from '@/stores/auth-store';
@@ -358,17 +362,24 @@ export function WeeklyTimeline() {
                   // Clamped to this day, so a block that spans midnight fills
                   // the column rather than running off it.
                   const top = minutesToY(minutesIntoDay(startDt, dayStart));
+                  // The floor the layout packs against, in this view's pixels:
+                  // a block shorter than this -- a marker at a moment most of
+                  // all -- is still drawn tall enough to read and to click.
+                  const minHeight = minutesToY(MIN_RENDERED_MINUTES);
                   const baseHeight = Math.max(
                     minutesToY(minutesIntoDay(endDt, dayStart)) - top,
-                    20,
+                    minHeight,
                   );
                   const resizing = resizePreview?.id === evt.id && resizePreview.dayKey === key;
                   const height = resizing
-                    ? Math.max(minutesToY(resizePreview.endMin) - top, 20)
+                    ? Math.max(minutesToY(resizePreview.endMin) - top, minHeight)
                     : baseHeight;
                   const endLabel = resizing
                     ? atMinutesIntoDay(dayStart, resizePreview.endMin).toFormat('H:mm')
                     : endDt.toFormat('H:mm');
+                  // A moment has one time, not a range from itself to itself.
+                  // While the end is being dragged there is a range again.
+                  const marker = !resizing && +endDt === +startDt;
                   const movable = canMove(evt);
 
                   return (
@@ -404,7 +415,9 @@ export function WeeklyTimeline() {
                         {evt.title}
                       </p>
                       <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
-                        {startDt.toFormat('H:mm')} - {endLabel}
+                        {marker
+                          ? startDt.toFormat('H:mm')
+                          : `${startDt.toFormat('H:mm')} - ${endLabel}`}
                       </p>
                       {movable && (
                         <div
