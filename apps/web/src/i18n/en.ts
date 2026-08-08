@@ -542,6 +542,7 @@ export const en: Record<TranslationKey, string> = {
   'apiError.INVITE.EXPIRED': 'Invite has expired or reached max uses',
   'apiError.INVITE.PUBLIC_VIEW_ONLY': 'This is a public view-only link and cannot be joined',
   'apiError.INVITE.PUBLIC_ALREADY_EXISTS': 'An active public link already exists for this calendar',
+  'apiError.INVITE.CALENDAR_GONE': 'The calendar this link points to no longer exists',
   'apiError.MEMO.NOT_FOUND': 'Memo not found',
   'apiError.INTERNAL.UNEXPECTED': 'An unexpected error occurred',
   'apiError.REQUEST.INVALID': 'Invalid request',

@@ -145,6 +145,11 @@ var (
 	// such links exist only for read-only embedding, not for claiming membership.
 	InvitePublicViewOnly      = &Spec{Status: 403, Code: "INVITE.PUBLIC_VIEW_ONLY", Message: "This is a public view-only link and cannot be joined"}
 	InvitePublicAlreadyExists = &Spec{Status: 409, Code: "INVITE.PUBLIC_ALREADY_EXISTS", Message: "An active public link already exists for this calendar"}
+	// InviteCalendarGone answers a link whose calendar has since been deleted.
+	// Nothing is wrong with the link, so saying it is invalid sends the holder
+	// back to ask for another one that cannot exist either; what they need to
+	// know is that the other end of it is gone.
+	InviteCalendarGone = &Spec{Status: 410, Code: "INVITE.CALENDAR_GONE", Message: "The calendar this link points to no longer exists"}
 )
 
 // --- Memo errors ---

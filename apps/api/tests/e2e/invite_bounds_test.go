@@ -48,12 +48,14 @@ func TestInviteBoundsAreHonoured(t *testing.T) {
 		testServerURL+"/invites/"+bounded.Token+"/accept", second.AccessToken, nil)
 	require.Equal(t, 410, exhausted)
 
-	// A link created without bounds says so, rather than reporting a limit it
-	// does not have.
+	// A link created without bounds reports what it actually has: the expiry
+	// it was given by default, and no use limit, since a link handed to a
+	// household is meant to admit all of them.
 	var unbounded inviteResponse
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
 		map[string]any{"role": "viewer"}, &unbounded)
-	require.Nil(t, unbounded.ExpiresAt)
+	require.NotNil(t, unbounded.ExpiresAt,
+		"a link that never expires outlives the reason it was sent")
 	require.Nil(t, unbounded.MaxUses)
 
 	// Both appear in the listing with their bounds intact.
@@ -64,7 +66,7 @@ func TestInviteBoundsAreHonoured(t *testing.T) {
 		byID[inv.ID] = inv
 	}
 	require.NotNil(t, byID[bounded.ID].ExpiresAt)
-	require.Nil(t, byID[unbounded.ID].ExpiresAt)
+	require.Nil(t, byID[unbounded.ID].MaxUses)
 }
 
 // TestExpiredInviteIsRefused verifies the expiry is a real gate rather than a

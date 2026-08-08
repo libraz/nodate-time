@@ -11,7 +11,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
@@ -39,9 +38,29 @@ const defaultMemberColor = "#42A5F5"
 // than a history, and a ceiling is enough.
 const maxInvitesListed = 500
 
-func isDuplicateKey(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+// joinInviteLife bounds a link that was created without terms. A join link
+// that never expires makes removing a member reversible by anyone still
+// holding it, so taking someone's access away is not taking it away; a week
+// is long enough to invite the people it was made for and short enough that
+// what is left over stops working on its own.
+const joinInviteLife = 7 * 24 * time.Hour
+
+// defaultInviteExpiry supplies that life when the caller states no terms.
+//
+// A public link is left alone: it grants no membership, so nothing is taken
+// back by removing a member, and it is a publication rather than an
+// invitation -- an embedded calendar that went dark every week would be a
+// failure of its own. Ending one is what revoking it is for.
+//
+// The default belongs to creation rather than to acceptance. Reading it when
+// a link is followed would apply it to every link already handed out, and
+// their holders would be turned away by a rule that did not exist when they
+// were given the link.
+func defaultInviteExpiry(isPublic bool, now time.Time) sql.NullTime {
+	if isPublic {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: now.Add(joinInviteLife), Valid: true}
 }
 
 func parseUUID(s string) ([]byte, error) {
@@ -177,7 +196,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			maxUses = sql.NullInt32{Int32: *in.Body.MaxUses, Valid: true}
 		}
 
-		var expiresAt sql.NullTime
+		expiresAt := defaultInviteExpiry(isPublic, time.Now())
 		if in.Body.ExpiresInHours != nil {
 			expiresAt = sql.NullTime{Time: time.Now().Add(time.Duration(*in.Body.ExpiresInHours) * time.Hour), Valid: true}
 		}
@@ -254,26 +273,25 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		// A link that has run out is a different answer from one that never
-		// existed, and the holder is entitled to it: they have the token, so
-		// nothing is disclosed, and "expired" is what prompts asking for
-		// another rather than concluding the calendar is gone.
-		if invite.ExpiresAt.Valid && !invite.ExpiresAt.Time.After(time.Now()) {
-			return nil, apierrors.ToHuma(apierrors.InviteExpired)
-		}
-		if invite.MaxUses.Valid && invite.UseCount >= uint32(invite.MaxUses.Int32) {
-			return nil, apierrors.ToHuma(apierrors.InviteExpired)
-		}
-
 		cal, err := deps.Queries.GetCalendarByID(ctx, invite.CalendarID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				// The link is intact and the calendar it points at is not.
+				// Answering with a server error tells the holder the site is
+				// broken, when nothing they did or hold is wrong.
+				return nil, apierrors.ToHuma(apierrors.InviteCalendarGone)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out := &AcceptInviteOutput{}
 		out.Body.CalendarID = pubIDToHex(cal.PublicID)
 
-		// Idempotent re-accept: an existing member must not burn a use.
+		// Idempotent re-accept: an existing member must not burn a use. This
+		// comes before the link's own limits are read, because none of them
+		// describe this caller -- they are already on the calendar, and a
+		// second click on a link they have used cannot be turned away as
+		// expired when the access it offered is access they hold.
 		existing, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 			CalendarID: invite.CalendarID,
 			UserID:     userID,
@@ -284,6 +302,17 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// A link that has run out is a different answer from one that never
+		// existed, and the holder is entitled to it: they have the token, so
+		// nothing is disclosed, and "expired" is what prompts asking for
+		// another rather than concluding the calendar is gone.
+		if invite.ExpiresAt.Valid && !invite.ExpiresAt.Time.After(time.Now()) {
+			return nil, apierrors.ToHuma(apierrors.InviteExpired)
+		}
+		if invite.MaxUses.Valid && invite.UseCount >= uint32(invite.MaxUses.Int32) {
+			return nil, apierrors.ToHuma(apierrors.InviteExpired)
 		}
 
 		// A public link publishes the calendar for reading; it must never
@@ -301,7 +330,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		alreadyMember := false
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			// Claim a use atomically; zero rows means the link is exhausted.
 			// Checking the limit inside the UPDATE is what makes two
@@ -318,6 +346,10 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				return apierrors.InviteExpired
 			}
 
+			// AddCalendarMember revives a grant that was revoked rather than
+			// colliding with it, so someone removed from the calendar who
+			// still holds a live link comes back through it -- which is what
+			// makes the link's own expiry the thing that ends their access.
 			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
 				PublicID:        memberPubID[:],
 				WorkspaceID:     deps.WorkspaceID,
@@ -327,10 +359,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				MemberColor:     defaultMemberColor,
 				InvitedByUserID: sql.NullInt32{Int32: int32(invite.CreatedByUserID), Valid: true},
 			}); err != nil {
-				if isDuplicateKey(err) {
-					alreadyMember = true
-					return nil
-				}
 				return err
 			}
 
@@ -349,16 +377,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		})
 		if err != nil {
 			return nil, toAPIError(err)
-		}
-		if alreadyMember {
-			if current, cerr := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-				CalendarID: invite.CalendarID,
-				UserID:     userID,
-			}); cerr == nil {
-				out.Body.Role = string(current.Role)
-				return out, nil
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		out.Body.Role = string(invite.Role)

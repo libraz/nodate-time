@@ -563,6 +563,7 @@ export const ja = {
   'apiError.INVITE.EXPIRED': '招待リンクの有効期限が切れたか、使用回数の上限に達しています',
   'apiError.INVITE.PUBLIC_VIEW_ONLY': 'これは閲覧専用の公開リンクのため、参加はできません',
   'apiError.INVITE.PUBLIC_ALREADY_EXISTS': 'このカレンダーには既に有効な公開リンクがあります',
+  'apiError.INVITE.CALENDAR_GONE': 'このリンクのカレンダーは削除されています',
   'apiError.MEMO.NOT_FOUND': 'メモが見つかりません',
   'apiError.INTERNAL.UNEXPECTED': '予期しないエラーが発生しました',
   'apiError.REQUEST.INVALID': 'リクエストの内容が正しくありません',
