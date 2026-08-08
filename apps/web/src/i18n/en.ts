@@ -319,6 +319,13 @@ export const en: Record<TranslationKey, string> = {
   'settings.imported': 'Imported {count} events',
   'settings.importSkipped': '{count} could not be imported (unsupported recurrence and the like)',
   'settings.importFailed': '{count} failed to save',
+  'settings.importRejected':
+    '{count} hold something this calendar cannot, so they will not import on another try',
+  'settings.importDuplicates': '{count} were already on this calendar and were left as they are',
+  'settings.importUnknownTimezones':
+    '{count} named a timezone we do not know and were read as UTC. Check their times.',
+  'settings.importUnreadable': 'This file could not be read as a calendar',
+  'settings.importEmpty': 'This file had no events in it',
   'settings.importTruncated':
     '{count} events were past the per-import limit and were not read. Split the file and try again.',
   'settings.importAlwaysCreates':

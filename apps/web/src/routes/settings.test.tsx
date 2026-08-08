@@ -12,7 +12,10 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 vi.mock('@/i18n', () => ({
-  useT: () => (key: string) => key,
+  // Parameters are folded onto the key so a test can assert on the number a
+  // message was given, not only on which message was chosen.
+  useT: () => (key: string, params?: Record<string, string>) =>
+    params ? `${key}:${Object.values(params).join(',')}` : key,
   getT: () => (key: string) => key,
 }));
 
@@ -35,7 +38,7 @@ vi.mock('@/lib/api', () => {
 });
 
 vi.mock('@/lib/toast', () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }));
 
 function calendar(role: string): Calendar {
@@ -103,9 +106,26 @@ const apiGet = vi.mocked(api.get);
 const apiPost = vi.mocked(api.post);
 const apiGetBlob = vi.mocked(api.getBlob);
 const toastError = vi.mocked(toast.error);
+const toastSuccess = vi.mocked(toast.success);
+const toastInfo = vi.mocked(toast.info);
 
 function member(role: string, email = 'me@example.com', id = 'm1', name = 'Me'): Member {
   return { id, name, email, role, color: '#000' } as Member;
+}
+
+/** An import answer with every outcome at rest, so a test names only its own. */
+function importResult(outcome: Record<string, number | boolean>) {
+  return {
+    imported: 0,
+    skipped: 0,
+    failed: 0,
+    rejected: 0,
+    duplicates: 0,
+    truncated: 0,
+    unknownTimezones: 0,
+    unreadable: false,
+    ...outcome,
+  };
 }
 
 function invite(id: string, token: string): InviteData {
@@ -125,6 +145,8 @@ beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
   toastError.mockReset();
+  toastSuccess.mockReset();
+  toastInfo.mockReset();
   apiGet.mockResolvedValue([]);
 });
 
@@ -362,7 +384,7 @@ describe('ExportSection', () => {
     calendarState.calendars = [calendar('owner')];
     calendarState.visibleRange = vi.fn(() => fetchWindow('month', viewedMonth));
     calendarState.fetchEvents.mockReset();
-    apiPost.mockResolvedValue({ imported: 1, skipped: 0, failed: 0, truncated: 0 });
+    apiPost.mockResolvedValue(importResult({ imported: 1 }));
   });
 
   afterEach(() => {
@@ -416,6 +438,85 @@ describe('ExportSection', () => {
 
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+});
+
+/**
+ * The import answers with every outcome the file met, and the screen is the
+ * only place any of them is ever read. An outcome the screen drops is one the
+ * person who uploaded the file has no way of finding out about.
+ */
+describe('ExportSection import outcomes', () => {
+  async function importFile(outcome: Record<string, number | boolean>) {
+    apiPost.mockResolvedValue(importResult(outcome));
+    render(<ExportSection />);
+    fireEvent.change(screen.getByPlaceholderText('settings.importPlaceholder'), {
+      target: { value: 'BEGIN:VCALENDAR\nEND:VCALENDAR' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'settings.importPasted' }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    await act(async () => {});
+  }
+
+  /**
+   * Re-uploading a file to find out whether the first upload worked is the
+   * situation the deduplication exists for, and "0 imported" on its own is the
+   * one answer that does not settle it.
+   */
+  it('says how many events the calendar already held', async () => {
+    await importFile({ duplicates: 40 });
+
+    expect(toastSuccess).toHaveBeenCalledWith('settings.importDuplicates:40');
+    // Already being here is not a failure and must not be coloured as one.
+    expect(toastError).not.toHaveBeenCalled();
+    // Nothing was added, and saying so as a success beside the real answer is
+    // noise the reader has to discount.
+    expect(toastSuccess).not.toHaveBeenCalledWith('settings.imported:0');
+  });
+
+  it('tells a file it could not read apart from one that held nothing', async () => {
+    await importFile({ unreadable: true });
+
+    expect(toastError).toHaveBeenCalledWith('settings.importUnreadable');
+    expect(toastInfo).not.toHaveBeenCalledWith('settings.importEmpty');
+  });
+
+  it('says an empty file was empty rather than saying nothing', async () => {
+    await importFile({});
+
+    expect(toastInfo).toHaveBeenCalledWith('settings.importEmpty');
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A rejection is counted inside the failures, so reporting both numbers as
+   * given states the same events twice. What the two are worth apart is the
+   * advice: one is worth retrying and the other never will be.
+   */
+  it('counts a rejected event once, under the outcome that can be acted on', async () => {
+    await importFile({ failed: 3, rejected: 2 });
+
+    expect(toastError).toHaveBeenCalledWith('settings.importFailed:1');
+    expect(toastError).toHaveBeenCalledWith('settings.importRejected:2');
+    expect(toastError).not.toHaveBeenCalledWith('settings.importFailed:3');
+  });
+
+  it('leaves out the retry advice when every failure was a rejection', async () => {
+    await importFile({ failed: 2, rejected: 2 });
+
+    expect(toastError).toHaveBeenCalledWith('settings.importRejected:2');
+    expect(toastError).not.toHaveBeenCalledWith('settings.importFailed:0');
+  });
+
+  /**
+   * These events are on the calendar. Only their times are wrong, which is
+   * exactly what nobody goes back and checks unless they are told to.
+   */
+  it('reports events placed at a time it could not resolve', async () => {
+    await importFile({ imported: 5, unknownTimezones: 2 });
+
+    expect(toastSuccess).toHaveBeenCalledWith('settings.imported:5');
+    expect(toastError).toHaveBeenCalledWith('settings.importUnknownTimezones:2');
   });
 });
 
