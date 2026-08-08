@@ -932,6 +932,19 @@ type UpsertRecurrenceOverrideParams struct {
 	RecurrenceOriginalStart sql.NullTime              `json:"recurrenceOriginalStart"`
 }
 
+// UpsertRecurrenceOverride writes the row that stands in for one occurrence of
+// a series, inserting it or updating the one already standing in for that
+// occurrence.
+//
+// public_id is deliberately not among the columns this statement updates on
+// conflict, so a row keeps the id it was created with. That is how a caller
+// tells an insert from a conflict: the row it reads back carries the id that
+// call generated only if that call inserted it. Adding public_id makes every
+// caller look like the one that created the row, and the attendee write that
+// decision feeds becomes an append instead of a replacement -- somebody
+// removed from an occurrence keeps attending it, with no error raised
+// anywhere.
+// TestSecondEditOfAnOccurrenceReplacesItsParticipants is what notices.
 func (q *Queries) UpsertRecurrenceOverride(ctx context.Context, arg UpsertRecurrenceOverrideParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, upsertRecurrenceOverride,
 		arg.PublicID,
