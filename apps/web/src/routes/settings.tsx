@@ -1024,7 +1024,7 @@ export function CalendarsSection() {
       {isAdmin && (
         <Section title={t('settings.invites')}>
           <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
-            {t('share.inviteSingleUseNote')}
+            {t('share.inviteTermsNote')}
           </p>
           <CustomSelect
             value={inviteRole}
