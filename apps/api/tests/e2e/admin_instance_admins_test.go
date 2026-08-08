@@ -125,6 +125,9 @@ func TestRevokingAnotherAdminTakesTheirRightsAway(t *testing.T) {
 		testServerURL+"/admin/instance-admins", leaver.AccessToken, nil)
 	require.Equal(t, http.StatusOK, status, "body: %s", string(body))
 
+	// The handler has no path that revokes without opening the transaction, so
+	// this call runs the locking count as well as the write -- the guard is
+	// executed here even though nothing it protects against is happening.
 	status, body = helpers.DoJSONStatus(t, http.MethodDelete,
 		testServerURL+"/admin/instance-admins/"+leaver.UserID, keeper.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "body: %s", string(body))
@@ -140,6 +143,22 @@ func TestRevokingAnotherAdminTakesTheirRightsAway(t *testing.T) {
 			"a revoked grant must leave the listing of who holds the rights")
 	}
 }
+
+// The count guard in RevokeInstanceAdmin -- the one refusing a revocation that
+// would leave nobody -- has no test that makes it refuse, and cannot have one
+// here.
+//
+// instance_admins is deliberately not workspace-scoped, so its count is one
+// number for the whole database. This suite runs in parallel and every tenant
+// that needs the admin surface grants itself a row, so the count during a run
+// is never 1 and the guard's refusing branch is unreachable. A test asserting
+// it would assert nothing while reading as coverage.
+//
+// What would have to change: the count would need a scope a test could own --
+// per-workspace grants, or a fixture database per package -- or the whole run
+// would have to serialise, which trades a real property of this suite for one
+// branch. Until then the branch below exercises the guard on its passing path,
+// and self-revocation carries the rule.
 
 // TestAnAdminCannotRevokeThemselves pins the rule that keeps an instance
 // administrable. Revoking the last administrator leaves nobody who can grant

@@ -21,6 +21,13 @@ WHERE revoked_at IS NULL AND enabled = TRUE FOR UPDATE
 // get another by a statement typed against this database. The count has to be
 // held across the revocation or two concurrent ones both pass: each sees the
 // other still counted, and between them they remove everybody.
+//
+// The cost is that this locks every live grant rather than a narrowed set --
+// the question is how many there are in total, so there is nothing to narrow
+// by -- which serialises every revocation on the deployment against every
+// other. That is the intended trade and not an oversight: revoking an
+// administrator is rare and deliberate, and the alternative to queueing them
+// is the race above.
 func (q *Queries) CountInstanceAdminsForUpdate(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countInstanceAdminsForUpdate)
 	var count int64
