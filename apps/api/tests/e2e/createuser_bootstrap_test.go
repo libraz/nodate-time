@@ -22,6 +22,14 @@ import (
 // API would also see.
 func runCreateUser(t *testing.T, args ...string) (string, int) {
 	t.Helper()
+	return runCreateUserWithEnv(t, nil, args...)
+}
+
+// runCreateUserWithEnv is runCreateUser with entries appended to the child's
+// environment, for the cases where what is under test is the configuration the
+// command demands rather than what it writes.
+func runCreateUserWithEnv(t *testing.T, extraEnv []string, args ...string) (string, int) {
+	t.Helper()
 
 	port := os.Getenv("TC_DB_PORT")
 	if port == "" {
@@ -33,13 +41,14 @@ func runCreateUser(t *testing.T, args ...string) (string, int) {
 	}
 
 	cmd := exec.Command("go", append([]string{"run", "../../cmd/createuser"}, args...)...)
+	// The database and the workspace are the whole of what this command reads,
+	// so they are the whole of what it is given. It used to need TC_ENV as
+	// well, to reach an exemption that turned off guards it never used.
 	cmd.Env = append(os.Environ(),
-		// Production config validation demands a real JWT secret and SMTP host,
-		// neither of which this command uses.
-		"TC_ENV=development",
 		fmt.Sprintf("TC_DB_DSN=ttuser:ttpw@tcp(127.0.0.1:%s)/%s?parseTime=true", port, name),
 		"TC_WORKSPACE_SLUG="+helpers.TestWorkspaceSlug,
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	var exit *exec.ExitError
