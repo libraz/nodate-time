@@ -273,6 +273,8 @@ export const en: Record<TranslationKey, string> = {
   'auth.oauthState': 'Your session expired. Please try signing in again',
   'auth.oauthEmailUnverified':
     'An account already uses this email but has not confirmed it. Sign in with your password and confirm the address, then try again',
+  'auth.oauthEmailUnsupported':
+    'This email address uses characters we cannot store yet. Try an address that uses only unaccented letters and digits',
 
   // Email confirmation
   'auth.verifyEmailTitle': 'Confirm your email address',
@@ -499,6 +501,8 @@ export const en: Record<TranslationKey, string> = {
   'apiError.AUTH.TOKEN_MISSING': 'Authorization header is required',
   'apiError.AUTH.TOKEN_INVALID': 'Bearer token is invalid or expired',
   'apiError.AUTH.EMAIL_EXISTS': 'Email address is already registered',
+  'apiError.AUTH.EMAIL_UNSUPPORTED':
+    'This email address uses characters we cannot store yet. Try an address that uses only unaccented letters and digits',
   'apiError.AUTH.REGISTER_FAILED': 'Unable to register with the supplied information',
   'apiError.AUTH.BAD_CREDENTIALS': 'Invalid email or password',
   'apiError.AUTH.WRONG_PASSWORD': 'Current password is incorrect',

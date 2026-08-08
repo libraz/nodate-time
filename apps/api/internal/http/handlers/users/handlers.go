@@ -108,6 +108,15 @@ func requestOrigin(ctx context.Context) (userAgent, ipAddress string) {
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {
 	return func(ctx context.Context, in *RegisterInput) (*RegisterOutput, error) {
+		// Answered before anything is looked up, because the lookup is what the
+		// column cannot do: comparing an address it cannot store is a charset
+		// error, which reached the caller as a server fault. The OIDC callback
+		// answers the same question with the same helper, so both doors give
+		// the same reason.
+		if !storableEmail(in.Body.Email) {
+			return nil, apierrors.ToHuma(apierrors.AuthEmailUnsupported)
+		}
+
 		// Enforce the same access policy as OIDC sign-in.
 		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, in.Body.Email)
 		if err != nil {
