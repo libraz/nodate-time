@@ -57,13 +57,14 @@ db-seed: db-apply db-seed-users
 # A user has no colour of its own: the colour that identifies someone on a
 # calendar is per-membership, so the seed sets it in calendar_members.
 #
-# createuser loads the same configuration as the server and answers the same
-# guards, none of which it uses — so seeding needs the environment the API is
-# started with.
-db-seed-users: $(DEV_JWT_SECRET_FILE)
-	cd apps/api && $(DEV_API_ENV) go run ./cmd/createuser -skip-existing \
+# createuser reads the database and the workspace and nothing else, so it is
+# given nothing else. The accounts it writes are what /auth/dev-login signs in
+# later, but that endpoint is the server's to expose -- seeding does not need
+# TC_ENV to create an @example.com account.
+db-seed-users:
+	cd apps/api && go run ./cmd/createuser -skip-existing \
 		-email demo@example.com -password password123 -name "Demo User"
-	cd apps/api && $(DEV_API_ENV) go run ./cmd/createuser -skip-existing -admin \
+	cd apps/api && go run ./cmd/createuser -skip-existing -admin \
 		-email admin@example.com -password password123 -name "Admin User"
 
 # Code generation
@@ -86,8 +87,8 @@ build-api:
 
 # Create a user. Example:
 #   make create-user ARGS="-email admin@foo.com -password secret123 -admin"
-create-user: $(DEV_JWT_SECRET_FILE)
-	cd apps/api && $(DEV_API_ENV) go run ./cmd/createuser $(ARGS)
+create-user:
+	cd apps/api && go run ./cmd/createuser $(ARGS)
 
 # Testing
 test-api:
