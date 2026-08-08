@@ -6,6 +6,7 @@ import {
   clearToken,
   decodeJwtExp,
   errorMessage,
+  filenameFromDisposition,
   hasToken,
   isAbortError,
   isTokenExpired,
@@ -373,5 +374,54 @@ describe('error envelopes', () => {
 
     const err = (await api.get('/calendars').catch((e: unknown) => e)) as ApiError;
     expect(errorMessage(err)).toBe('A newer server said this');
+  });
+});
+
+/**
+ * A download is named by the server: an export is named after the calendar it
+ * came from, and the name is the only thing telling two of them apart in a
+ * downloads folder.
+ */
+describe('download filenames', () => {
+  it('reads the name the export handler quotes', () => {
+    expect(filenameFromDisposition('attachment; filename="Family.ics"')).toBe('Family.ics');
+  });
+
+  it('prefers the encoded name, which is the one that survives a name in Japanese', () => {
+    // What the storage client sends: both spellings, the ASCII one lossy.
+    const header = `attachment; filename="_____.ics"; filename*=UTF-8''%E5%AE%B6%E6%97%8F.ics`;
+    expect(filenameFromDisposition(header)).toBe('家族.ics');
+  });
+
+  it('keeps the name and drops any path in front of it', () => {
+    expect(filenameFromDisposition('attachment; filename="../../etc/passwd"')).toBe('passwd');
+  });
+
+  it('reads an unquoted name', () => {
+    expect(filenameFromDisposition('attachment; filename=Work.csv')).toBe('Work.csv');
+  });
+
+  it('has nothing to say about a header that names no file', () => {
+    expect(filenameFromDisposition(null)).toBe('');
+    expect(filenameFromDisposition('attachment')).toBe('');
+  });
+
+  it('falls back to the quoted name when the encoding is malformed', () => {
+    const header = `attachment; filename="Family.ics"; filename*=UTF-8''%E5%AE`;
+    expect(filenameFromDisposition(header)).toBe('Family.ics');
+  });
+
+  it('carries the name off the response, alongside the body', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('BEGIN:VCALENDAR', {
+        status: 200,
+        headers: { 'Content-Disposition': 'attachment; filename="Family.ics"' },
+      }),
+    );
+
+    const { blob, filename } = await api.getBlob('/calendars/cal-1/export?format=ics');
+
+    expect(filename).toBe('Family.ics');
+    expect(await blob.text()).toBe('BEGIN:VCALENDAR');
   });
 });

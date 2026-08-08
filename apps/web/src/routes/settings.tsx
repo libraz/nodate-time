@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
-import { ApiError, api, errorMessage } from '@/lib/api';
+import { ApiError, api, errorMessage, isAbortError } from '@/lib/api';
 import { detectHolidayCountry } from '@/lib/holidays';
 import {
   DEFAULT_INVITE_ROLE,
@@ -551,19 +551,26 @@ function SessionsSection() {
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      setSessions(await api.get<SessionData[]>('/user/sessions'));
+      setSessions(await api.get<SessionData[]>('/user/sessions', false, signal));
     } catch (e) {
+      // A request the screen itself called off is not a failure to report.
+      if (isAbortError(e)) return;
       toast.error(errorMessage(e));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // The list is dropped rather than landing late: a response that arrives
+  // after the screen is gone, or after a newer request overtook it, would
+  // otherwise put a stale set of sign-ins on a screen nobody asked again.
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   const revoke = async (id: string) => {
@@ -1127,11 +1134,16 @@ export function ExportSection() {
   const downloadFile = async (format: 'ics' | 'csv') => {
     setExporting(format);
     try {
-      const blob = await api.getBlob(`/calendars/${selectedId}/export?format=${format}`);
+      const { blob, filename } = await api.getBlob(
+        `/calendars/${selectedId}/export?format=${format}`,
+      );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `calendar.${format}`;
+      // The server names the export after the calendar it came from. Naming it
+      // here instead gives every calendar the same filename, so exporting a
+      // second one saves over the first in the downloads folder.
+      a.download = filename || `calendar.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1278,20 +1290,29 @@ function AdminSection() {
   const [providers, setProviders] = useState<OAuthProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await api.get<{ providers: OAuthProviderInfo[] }>('/admin/oauth-providers');
+      const res = await api.get<{ providers: OAuthProviderInfo[] }>(
+        '/admin/oauth-providers',
+        false,
+        signal,
+      );
       setProviders(res.providers);
     } catch (e) {
+      if (isAbortError(e)) return;
       toast.error(e instanceof ApiError ? e.detail : 'Error');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Called off with the screen. A provider list that lands afterwards would
+  // report credentials the reader has since navigated away from.
   useEffect(() => {
-    void refresh();
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
   }, [refresh]);
 
   return (
@@ -1333,16 +1354,20 @@ export function AllowedEmailsSection() {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
-      setData(await api.get<AllowedEmailsResponse>('/admin/allowed-emails'));
+      setData(await api.get<AllowedEmailsResponse>('/admin/allowed-emails', false, signal));
     } catch (e) {
+      if (isAbortError(e)) return;
       toast.error(e instanceof ApiError ? e.detail : 'Error');
     }
   }, []);
 
+  // As above: the allow list is not written to a screen that has gone.
   useEffect(() => {
-    void refresh();
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
   }, [refresh]);
 
   const add = async (e: React.FormEvent) => {
