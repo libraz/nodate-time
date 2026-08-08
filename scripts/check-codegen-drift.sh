@@ -278,11 +278,6 @@ ALLOWED = {
     # and this table was left out of the loop.
     "DeleteExpiredEmailVerifications",
 
-    # No endpoint yet. Instance admin can be granted from the createuser
-    # command, but nothing in the API lists the grants or takes one back,
-    # which leaves an admin removable only by hand in SQL.
-    "ListInstanceAdmins",
-    "RevokeInstanceAdmin",
     # No account screen yet. Listing a user's linked identities and
     # disabling one are the read and write halves of a connected-accounts
     # page that has not been built.
