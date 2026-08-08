@@ -22,7 +22,6 @@ interface UiState {
   eventDraftStart: DateTime | null;
   showDayDetail: boolean;
   rightPanel: RightPanelId;
-  leftSidebarExpanded: boolean;
   showSearch: boolean;
   searchQuery: string;
   mobileTab: MobileTab;
@@ -48,7 +47,6 @@ interface UiState {
   closeDayDetail: () => void;
   navigateMonth: (delta: number) => void;
   toggleRightPanel: (panel: RightPanelId) => void;
-  toggleLeftSidebar: () => void;
   toggleSearch: () => void;
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
@@ -58,8 +56,6 @@ interface UiState {
   triggerScrollToToday: () => void;
   setTheme: (theme: ThemeStyle) => void;
   setColorMode: (mode: ColorMode) => void;
-  setLocale: (locale: Locale) => void;
-  setTimezone: (tz: string) => void;
   setHolidaysCountry: (country: string | null) => void;
   /**
    * Takes on the preferences stored against the signed-in account.
@@ -81,7 +77,6 @@ export const useUiStore = create<UiState>((set) => ({
   eventDraftStart: null,
   showDayDetail: false,
   rightPanel: null,
-  leftSidebarExpanded: false,
   showSearch: false,
   searchQuery: '',
   mobileTab: 'calendar' as MobileTab,
@@ -124,8 +119,6 @@ export const useUiStore = create<UiState>((set) => ({
       rightPanel: s.rightPanel === panel ? null : panel,
     })),
 
-  toggleLeftSidebar: () => set((s) => ({ leftSidebarExpanded: !s.leftSidebarExpanded })),
-
   toggleSearch: () => set((s) => ({ showSearch: !s.showSearch, searchQuery: '' })),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setMobileTab: (tab) => set({ mobileTab: tab }),
@@ -141,14 +134,6 @@ export const useUiStore = create<UiState>((set) => ({
   setColorMode: (mode) => {
     saveJson('colorMode', mode);
     set({ colorMode: mode });
-  },
-  setLocale: (locale) => {
-    saveJson('locale', locale);
-    set({ locale });
-  },
-  setTimezone: (tz) => {
-    saveJson('timezone', tz);
-    set({ timezone: tz });
   },
   setHolidaysCountry: (country) => {
     saveJson('holidaysCountry', country);
