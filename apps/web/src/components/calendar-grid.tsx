@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { type PointerEvent as ReactPointerEvent, useCallback, useMemo, useRef } from 'react';
 import { type DragLanding, MonthWeekRow } from '@/components/month-week-row';
-import { fromISOInZone, getMonthDays, getWeekDays, getWeekdayLabel } from '@/lib/date-utils';
+import { fromISOInZone, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import { useEventDrag } from '@/lib/use-event-drag';
@@ -17,7 +17,6 @@ export function CalendarGrid() {
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
   const selectedDate = useUiStore((s) => s.selectedDate);
-  const calendarView = useUiStore((s) => s.calendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const holidayRevision = useHolidayLoader(holidaysCountry, [
     currentMonth.year - 1,
@@ -101,12 +100,13 @@ export function CalendarGrid() {
     [dragLanding],
   );
 
-  const days = useMemo(() => {
-    if (calendarView === 'week') {
-      return getWeekDays(selectedDate, timezone);
-    }
-    return getMonthDays(currentMonth.year, currentMonth.month - 1, timezone);
-  }, [calendarView, currentMonth, selectedDate, timezone]);
+  // The month surface, and only that: the app mounts this for the month view
+  // and the weekly timeline for the week. A week branch here was a second
+  // implementation of a view this component never renders.
+  const days = useMemo(
+    () => getMonthDays(currentMonth.year, currentMonth.month - 1, timezone),
+    [currentMonth, timezone],
+  );
 
   const visibleEvents = useMemo(
     () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
@@ -127,10 +127,10 @@ export function CalendarGrid() {
     [visibleEvents, timezone],
   );
 
-  // The week view shows one week wherever it falls, so nothing is out of month.
+  // The month the grid is paging, so days either side of it can be greyed.
   const pagedMonth = useMemo(
-    () => (calendarView === 'week' ? null : { year: currentMonth.year, month: currentMonth.month }),
-    [calendarView, currentMonth],
+    () => ({ year: currentMonth.year, month: currentMonth.month }),
+    [currentMonth],
   );
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -146,14 +146,16 @@ export function CalendarGrid() {
       if (!touch) return;
       const dx = touch.clientX - touchStartRef.current.x;
       const dy = touch.clientY - touchStartRef.current.y;
+      // Up switches to the week. The way back belongs to the weekly timeline:
+      // once the view changes this component is unmounted, so a downward swipe
+      // never reaches it.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 60) {
-        if (calendarView === 'month' && dy < 0) setCalendarView('week');
-        else if (calendarView === 'week' && dy > 0) setCalendarView('month');
+        if (dy < 0) setCalendarView('week');
       } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 80) {
         navigateMonth(dx < 0 ? 1 : -1);
       }
     },
-    [calendarView, setCalendarView, navigateMonth],
+    [setCalendarView, navigateMonth],
   );
 
   const handleDayDoubleClick = useCallback(
@@ -197,7 +199,7 @@ export function CalendarGrid() {
       </div>
 
       <div
-        key={`${currentMonth.year}-${currentMonth.month}-${calendarView}`}
+        key={`${currentMonth.year}-${currentMonth.month}`}
         className="calendar-enter grid flex-1"
         style={{ gridTemplateRows: `repeat(${weekStarts.length}, minmax(0, 1fr))` }}
       >
