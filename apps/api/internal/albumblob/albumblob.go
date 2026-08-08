@@ -21,9 +21,25 @@ func nullInt32(v uint32) sql.NullInt32 {
 	return sql.NullInt32{Int32: int32(v), Valid: true}
 }
 
+// ThumbnailKey puts a photo's grid-sized rendering underneath the photo's own
+// key, so it is derivable from the photo alone.
+//
+// It lives here rather than beside the handler that signs the upload because
+// the sweep needs it too, and for the case where nothing else can supply it: a
+// thumbnail whose upload was never confirmed reached no storage object, so
+// after the photo's row is deleted the only thing that could still have named
+// those bytes is this rule.
+func ThumbnailKey(photoKey string) string {
+	return photoKey + "/thumb"
+}
+
 // Photo is what attaching needs to know about the row being moved. It is
 // spelled out rather than taking generated.AlbumPhoto because the backfill
 // sweep reads only these columns.
+//
+// ID and WorkspaceID name the row. The blob fields describe whichever rendering
+// is being attached: the picture itself for Attach, the smaller one for
+// AttachThumbnail.
 type Photo struct {
 	ID          uint32
 	WorkspaceID uint32
@@ -50,9 +66,64 @@ type Photo struct {
 //
 // q may be transaction-bound: the caller decides what else lands with this.
 func Attach(ctx context.Context, q *generated.Queries, photo Photo) error {
-	objectPubID, err := uuid.NewV7()
+	object, err := ensureObject(ctx, q, photo)
 	if err != nil {
 		return err
+	}
+	res, err := q.AttachAlbumPhotoStorageObject(ctx, generated.AttachAlbumPhotoStorageObjectParams{
+		StorageObjectID: nullInt32(object.ID),
+		ID:              photo.ID,
+	})
+	if err != nil {
+		return err
+	}
+	return referenceIfAttached(ctx, q, res, object.ID)
+}
+
+// AttachThumbnail does the same for a photo's grid-sized rendering, which is a
+// second object the same photo holds -- the same reference count, the same
+// sweep, and released by the same delete.
+//
+// It is a separate call rather than an argument to Attach because the two
+// happen at different moments and must fail separately: a thumbnail is optional
+// and arrives (or does not) after the picture is already the photo's.
+func AttachThumbnail(ctx context.Context, q *generated.Queries, thumbnail Photo) error {
+	object, err := ensureObject(ctx, q, thumbnail)
+	if err != nil {
+		return err
+	}
+	res, err := q.AttachAlbumPhotoThumbnailObject(ctx, generated.AttachAlbumPhotoThumbnailObjectParams{
+		ThumbnailObjectID: nullInt32(object.ID),
+		ID:                thumbnail.ID,
+	})
+	if err != nil {
+		return err
+	}
+	return referenceIfAttached(ctx, q, res, object.ID)
+}
+
+// referenceIfAttached increments the object's count only when this call is the
+// one that wrote the column.
+//
+// The updates re-check the column IS NULL, so a confirm and a backfill pass
+// racing over one photo produce one attachment and one reference. Incrementing
+// without that check is how a blob acquires a count nothing will ever return.
+func referenceIfAttached(ctx context.Context, q *generated.Queries, res sql.Result, objectID uint32) error {
+	attached, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if attached != 1 {
+		return nil
+	}
+	return q.IncrementStorageObjectRefs(ctx, objectID)
+}
+
+// ensureObject finds or creates the storage object for a blob's bytes.
+func ensureObject(ctx context.Context, q *generated.Queries, photo Photo) (generated.StorageObject, error) {
+	objectPubID, err := uuid.NewV7()
+	if err != nil {
+		return generated.StorageObject{}, err
 	}
 	// Content-addressed within the workspace, never the uploader: the
 	// user-scoped foreign key is ON DELETE CASCADE, so an object owned by the
@@ -67,37 +138,14 @@ func Attach(ctx context.Context, q *generated.Queries, photo Photo) error {
 		ContentType: photo.ContentType,
 		StorageKey:  photo.StorageKey,
 	}); err != nil {
-		return err
+		return generated.StorageObject{}, err
 	}
 	// Read the row back by digest rather than by key or by LastInsertId. On
 	// the dedup path the upsert inserted nothing, and the row that was already
 	// there carries the key of whichever photo stored these bytes first --
 	// looking it up by this photo's own key would find nothing at all.
-	object, err := q.GetStorageObjectByWorkspaceDigest(ctx, generated.GetStorageObjectByWorkspaceDigestParams{
+	return q.GetStorageObjectByWorkspaceDigest(ctx, generated.GetStorageObjectByWorkspaceDigestParams{
 		WorkspaceID: nullInt32(photo.WorkspaceID),
 		Sha256:      photo.SHA256,
 	})
-	if err != nil {
-		return err
-	}
-
-	res, err := q.AttachAlbumPhotoStorageObject(ctx, generated.AttachAlbumPhotoStorageObjectParams{
-		StorageObjectID: nullInt32(object.ID),
-		ID:              photo.ID,
-	})
-	if err != nil {
-		return err
-	}
-	// The update re-checks storage_object_id IS NULL, so a confirm and a
-	// backfill pass racing over one photo produce one attachment and one
-	// reference. Incrementing without that check is how a blob acquires a
-	// count nothing will ever return.
-	attached, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if attached != 1 {
-		return nil
-	}
-	return q.IncrementStorageObjectRefs(ctx, object.ID)
 }

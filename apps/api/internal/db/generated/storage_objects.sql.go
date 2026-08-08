@@ -90,19 +90,23 @@ WHERE so.id = ?
   AND NOT EXISTS (
     SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
+  )
 `
 
 // DeleteUnreferencedStorageObject collects one named object, and only if
-// nothing holds it: the count is zero and no referring row of either kind is
+// nothing holds it: the count is zero and no referring row of any kind is
 // still pointing at it. It is what lets the caller that released the last
 // reference finish the job in the same pass, rather than leaving the bytes to
 // an age-gated sweep -- that gate exists to protect a reservation which has
 // not been confirmed yet, and an object whose last referrer was just deleted
 // cannot be one.
 //
-// The two NOT EXISTS clauses are the same ones the sweep applies. Both
-// foreign keys are RESTRICT, so without them this is an error the caller has
-// to interpret rather than an answer.
+// The NOT EXISTS clauses are the same ones the sweep applies, one per column
+// that can point at an object. Every one of those foreign keys is RESTRICT,
+// so without them this is an error the caller has to interpret rather than an
+// answer.
 func (q *Queries) DeleteUnreferencedStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteUnreferencedStorageObject, id)
 }
@@ -220,6 +224,9 @@ WHERE so.ref_count = 0
   AND NOT EXISTS (
     SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
+  )
 ORDER BY so.id
 LIMIT ?
 `
@@ -241,6 +248,13 @@ type ListUnreferencedStorageObjectsParams struct {
 // attempted and logged: a foreign key doing its job every fifteen minutes is
 // not a warning, and burying the real failures under it costs more than the
 // extra clause.
+//
+// There is one clause per column that can point at an object, and the caller
+// deletes by id without re-checking them, so a column added to any referring
+// table has to be added here too. Missing one does not corrupt anything --
+// the foreign keys are RESTRICT -- but the object is listed every tick,
+// refuses to delete every tick, and spends the batch budget it was the point
+// of this cursor to protect.
 func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUnreferencedStorageObjectsParams) ([]StorageObject, error) {
 	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {

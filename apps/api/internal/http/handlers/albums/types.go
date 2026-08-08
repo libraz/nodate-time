@@ -21,6 +21,11 @@ type AlbumPhotoResponse struct {
 	CreatedAt   time.Time     `json:"createdAt"`
 	UploadedBy  AlbumUploader `json:"uploadedBy"`
 	ImageURL    string        `json:"imageUrl"`
+	// ThumbnailURL is the grid-sized rendering, absent when the photo has
+	// none. A caller that wants a small picture asks for this and falls back
+	// to ImageURL; one that wants the picture itself -- a lightbox, a
+	// download -- uses ImageURL and never this.
+	ThumbnailURL string `json:"thumbnailUrl,omitempty"`
 }
 
 type ListPhotosInput struct {
@@ -46,6 +51,13 @@ type PresignPhotoBody struct {
 	TakenAt     time.Time `json:"takenAt" required:"false" doc:"EXIF capture time. Defaults to upload time."`
 	Width       int       `json:"width" required:"false" minimum:"1"`
 	Height      int       `json:"height" required:"false" minimum:"1"`
+	// ThumbnailContentType and ThumbnailByteSize declare a second, smaller
+	// rendering the caller intends to upload. Both absent means it is not
+	// sending one, which is a normal outcome rather than an error: an
+	// animated GIF has no still thumbnail worth having, and a photo already
+	// smaller than a tile gains nothing from one.
+	ThumbnailContentType string `json:"thumbnailContentType" required:"false" doc:"MIME type of the thumbnail, must be image/*"`
+	ThumbnailByteSize    int64  `json:"thumbnailByteSize" required:"false" minimum:"1"`
 }
 
 type PresignPhotoInput struct {
@@ -56,6 +68,11 @@ type PresignPhotoInput struct {
 type PresignPhotoResult struct {
 	PhotoID   string `json:"photoId"`
 	UploadURL string `json:"uploadUrl"`
+	// ThumbnailUploadURL is issued only when the request declared a
+	// thumbnail. Uploading to it is optional even then: the confirm looks for
+	// the object and carries on without it, because a photo that reached the
+	// server must not be lost to a second request that did not.
+	ThumbnailUploadURL string `json:"thumbnailUploadUrl,omitempty"`
 }
 
 type PresignPhotoOutput struct {

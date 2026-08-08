@@ -29,6 +29,24 @@ func (q *Queries) AttachAlbumPhotoStorageObject(ctx context.Context, arg AttachA
 	return q.db.ExecContext(ctx, attachAlbumPhotoStorageObject, arg.StorageObjectID, arg.ID)
 }
 
+const attachAlbumPhotoThumbnailObject = `-- name: AttachAlbumPhotoThumbnailObject :execresult
+UPDATE album_photos SET thumbnail_object_id = ?
+WHERE id = ? AND thumbnail_object_id IS NULL
+`
+
+type AttachAlbumPhotoThumbnailObjectParams struct {
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
+	ID                uint32        `json:"id"`
+}
+
+// AttachAlbumPhotoThumbnailObject points a photo at the object holding its
+// grid-sized rendering. The IS NULL guard is the one AttachAlbumPhotoStorageObject
+// uses, and for the same reason: two confirms racing over one photo both write,
+// one reports a row, and only that one takes the reference.
+func (q *Queries) AttachAlbumPhotoThumbnailObject(ctx context.Context, arg AttachAlbumPhotoThumbnailObjectParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, attachAlbumPhotoThumbnailObject, arg.ThumbnailObjectID, arg.ID)
+}
+
 const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
 UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
 `
@@ -110,7 +128,7 @@ func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePending
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
-SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at, storage_object_id FROM album_photos WHERE public_id = ?
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos WHERE public_id = ?
 `
 
 func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) (AlbumPhoto, error) {
@@ -136,12 +154,13 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 		&i.UpdatedAt,
 		&i.CreatedAt,
 		&i.StorageObjectID,
+		&i.ThumbnailObjectID,
 	)
 	return i, err
 }
 
 const listAbandonedAlbumPhotoStorageKeys = `-- name: ListAbandonedAlbumPhotoStorageKeys :many
-SELECT id, storage_key, storage_object_id FROM album_photos
+SELECT id, storage_key, storage_object_id, thumbnail_object_id FROM album_photos
 WHERE enabled = FALSE AND updated_at < ? AND id > ?
 ORDER BY id
 LIMIT ?
@@ -154,9 +173,10 @@ type ListAbandonedAlbumPhotoStorageKeysParams struct {
 }
 
 type ListAbandonedAlbumPhotoStorageKeysRow struct {
-	ID              uint32        `json:"id"`
-	StorageKey      string        `json:"storageKey"`
-	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
+	ID                uint32        `json:"id"`
+	StorageKey        string        `json:"storageKey"`
+	StorageObjectID   sql.NullInt32 `json:"storageObjectId"`
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
 }
 
 // ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
@@ -170,7 +190,10 @@ type ListAbandonedAlbumPhotoStorageKeysRow struct {
 //
 // storage_object_id comes along because deleting the row is what ends the
 // photo's reference to its blob: the sweep releases it there, which is the
-// one place every way of losing a photo passes through.
+// one place every way of losing a photo passes through. thumbnail_object_id is
+// read for the same reason -- a photo holds up to two objects and the row going
+// away ends both claims, so a sweep that released only the first would pin the
+// thumbnail's bytes for good.
 func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg ListAbandonedAlbumPhotoStorageKeysParams) ([]ListAbandonedAlbumPhotoStorageKeysRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAbandonedAlbumPhotoStorageKeys, arg.UpdatedAt, arg.ID, arg.Limit)
 	if err != nil {
@@ -180,7 +203,12 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 	var items []ListAbandonedAlbumPhotoStorageKeysRow
 	for rows.Next() {
 		var i ListAbandonedAlbumPhotoStorageKeysRow
-		if err := rows.Scan(&i.ID, &i.StorageKey, &i.StorageObjectID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.StorageKey,
+			&i.StorageObjectID,
+			&i.ThumbnailObjectID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -195,8 +223,9 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 }
 
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
+       tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -205,6 +234,7 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
+LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ?
@@ -244,7 +274,9 @@ type ListAlbumPhotosAfterRow struct {
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
 	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	ImageStorageKey          string         `json:"imageStorageKey"`
+	ThumbnailStorageKey      sql.NullString `json:"thumbnailStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
@@ -287,7 +319,9 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.StorageObjectID,
+			&i.ThumbnailObjectID,
 			&i.ImageStorageKey,
+			&i.ThumbnailStorageKey,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
@@ -308,8 +342,9 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 }
 
 const listAlbumPhotosFirstPage = `-- name: ListAlbumPhotosFirstPage :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
+       tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
@@ -318,6 +353,7 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
+LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
@@ -350,7 +386,9 @@ type ListAlbumPhotosFirstPageRow struct {
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
 	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	ImageStorageKey          string         `json:"imageStorageKey"`
+	ThumbnailStorageKey      sql.NullString `json:"thumbnailStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
@@ -366,6 +404,11 @@ type ListAlbumPhotosFirstPageRow struct {
 // fallback is expressed here as well as in the handler because a page holds
 // thirty photos, and resolving it per row is the lookup the avatar join above
 // exists to avoid.
+//
+// thumbnail_storage_key is the grid-sized rendering, and is joined here for the
+// same reason: it is the key the tiles are actually drawn from, so resolving it
+// per row would put the page's whole saving back. It is NULL when the photo has
+// no thumbnail, which is normal -- the reader falls back to the picture itself.
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAlbumPhotosFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -395,7 +438,9 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.StorageObjectID,
+			&i.ThumbnailObjectID,
 			&i.ImageStorageKey,
+			&i.ThumbnailStorageKey,
 			&i.UploaderPublicID,
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,

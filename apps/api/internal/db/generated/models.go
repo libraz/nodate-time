@@ -885,6 +885,8 @@ type AlbumPhoto struct {
 	CreatedAt time.Time    `json:"createdAt"`
 	// Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.
 	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
+	// Internal FK to storage_objects.id for the grid-sized rendering. NULL when the photo has none; reads fall back to the photo itself.
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
 }
 
 // Workspace audit log
