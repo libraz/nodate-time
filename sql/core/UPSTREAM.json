@@ -1,7 +1,7 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "f768775965d87b76cf91767d66a4908b1b75a061",
+  "ref": "6522b0560f43c6034f687ec32294bf0d4b3de6ed",
   "files": [
     {
       "path": "PROTOCOL.md",
@@ -13,7 +13,7 @@
     },
     {
       "path": "conformance/harness/00-procedures.sql",
-      "sha256": "771c9cb5355739e038d221c7ae4f87bb32325972c1952821a7bb6f59a60abddf"
+      "sha256": "3fcebef740a4feccf90835da446dea4dd94e4e77da7db4a2bf6a838fa2343fb7"
     },
     {
       "path": "conformance/harness/10-fixtures.sql",
@@ -21,7 +21,7 @@
     },
     {
       "path": "conformance/harness/99-teardown.sql",
-      "sha256": "553e12a8be92fc9c222b19a884006626aba6136134412f670fc5eb3b28910d4b"
+      "sha256": "ac6d091c9c24386db0e8c3d6ddf0b55a6cd2fac0294672b00ed7be8e1886c98f"
     },
     {
       "path": "conformance/run.sh",
@@ -38,6 +38,10 @@
     {
       "path": "conformance/schema/30-event-log.sql",
       "sha256": "47638c9286a35fe819385725a8853063606d2d220db51343d367f16b53c70ccb"
+    },
+    {
+      "path": "conformance/schema/40-soft-delete-uniqueness.sql",
+      "sha256": "d682889b123716bf121659abfa86df546c0b2237962c33a2dc6d29462308bc6e"
     },
     {
       "path": "tables/audit_logs.sql",
@@ -61,11 +65,15 @@
     },
     {
       "path": "tables/calendar_event_invites.sql",
-      "sha256": "547334b81c9f8e17987323bcc19655161577b6964ad23e52b534edeef965f350"
+      "sha256": "b74bb8a5b0c283c58a130ded2d39cbd2b0cc5290f67156f9fe127f724cbb1638"
+    },
+    {
+      "path": "tables/calendar_event_reminders.sql",
+      "sha256": "1150288a32338ccfde7d66f5aa09c8667e0c7f6a48856995acaf59bab7d214f4"
     },
     {
       "path": "tables/calendar_events.sql",
-      "sha256": "ebf723734641be67b522b2ec01b69b0d4c4025930cd50c1b2f3f24a641fb05c6"
+      "sha256": "ef374ca149d729d9413f67a0ff13aa338bed94028cbd1b5db71c589b6b1459b1"
     },
     {
       "path": "tables/calendar_members.sql",
@@ -77,7 +85,7 @@
     },
     {
       "path": "tables/calendar_public_share_events.sql",
-      "sha256": "fcca1fad4c739f38c62b80e6fb912dac803b4046b80c958d052e087af4889153"
+      "sha256": "a666135be26e354bcaa0d194559d64bcd10eccb0b0381f0ccb5f28ff9d3837c1"
     },
     {
       "path": "tables/calendar_public_shares.sql",
@@ -89,7 +97,7 @@
     },
     {
       "path": "tables/calendars.sql",
-      "sha256": "8747a3366f041699a6d0acc69981fff12c061d0e78cd633494bb152cab9873a7"
+      "sha256": "28127817019a5d349f279220fac3e08cf9400859149fdd91cb391ea04564198c"
     },
     {
       "path": "tables/events.sql",
@@ -125,11 +133,11 @@
     },
     {
       "path": "tables/sessions.sql",
-      "sha256": "cb7d4d4dbeda413ede5c536e2114e88453203f961b08505b7d6fae139eab834f"
+      "sha256": "b629af69762b0a505c9acc9ed56f5b57532effe3d32473b50787de16aec3a5f0"
     },
     {
       "path": "tables/storage_objects.sql",
-      "sha256": "b9ccf0f4aa193314f2c265f5502b595a7b662adf9c73fcf069b4ff36b3217b84"
+      "sha256": "97b4b91349dcad451bd8a2cce6b75084db7ab0d9615789c0b8ea49102f10d70b"
     },
     {
       "path": "tables/user_recovery_codes.sql",

@@ -25,6 +25,7 @@ CREATE TABLE storage_objects (
   content_type VARCHAR(127) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'MIME type recorded at upload time',
   storage_key VARCHAR(255) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'Computed object key in MinIO (e.g. workspace/{wsPublicId}/{sha256_hex} or user/{userPublicId}/{sha256_hex})',
   ref_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of referencing rows (attachments / users.avatar_storage_object_id); GC eligible when 0',
+  uploaded_at DATETIME(3) NULL COMMENT 'When the upload behind this row was confirmed present in object storage. NULL means the row was created to hand out an upload URL and the bytes have not been seen since: the size the client declared is unverified, so the row is not a dedup candidate and the sweeper reclaims it once the URL it was minted for has expired.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',

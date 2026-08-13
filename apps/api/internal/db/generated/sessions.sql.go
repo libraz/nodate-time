@@ -62,7 +62,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSe
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE public_id = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
@@ -88,6 +88,7 @@ func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session,
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RotatedFromHash,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
@@ -101,7 +102,7 @@ func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session,
 }
 
 const getSessionByPrevRefreshHash = `-- name: GetSessionByPrevRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE prev_refresh_hash = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
@@ -122,6 +123,7 @@ func (q *Queries) GetSessionByPrevRefreshHash(ctx context.Context, prevRefreshHa
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RotatedFromHash,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
@@ -135,7 +137,7 @@ func (q *Queries) GetSessionByPrevRefreshHash(ctx context.Context, prevRefreshHa
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE refresh_hash = ?
   AND revoked_at IS NULL
   AND enabled = TRUE
@@ -154,6 +156,7 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash strin
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RotatedFromHash,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
@@ -167,7 +170,7 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash strin
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
 WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC
 `
@@ -190,6 +193,7 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, userID uint32) ([]Ses
 			&i.IpAddress,
 			&i.ExpiresAt,
 			&i.RevokedAt,
+			&i.RotatedFromHash,
 			&i.LastUsedAt,
 			&i.SortWeight,
 			&i.Notes,

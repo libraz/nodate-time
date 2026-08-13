@@ -73,22 +73,41 @@ CREATE TABLE calendar_events (
   recurrence_parent_id INT UNSIGNED NULL COMMENT 'Set on an override row: the recurring event whose single occurrence this row replaces. NULL on ordinary and master rows.',
   recurrence_original_start DATETIME(3) NULL COMMENT 'Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.',
 
-  notification_offset INT NULL COMMENT 'Minutes before event to send notification; NULL = no notification',
-  notified_at DATETIME(3) NULL DEFAULT NULL COMMENT 'Timestamp when notification was sent; NULL = not yet notified',
+  /**
+   * notification_offset: how long before an occurrence its reminder is
+   * due. Applies to every occurrence of a recurring event, not only the
+   * first — which is why the record of what has already been sent lives
+   * in calendar_event_reminders, keyed by occurrence, rather than in a
+   * single column here. A column can only remember one answer, and a
+   * series needs one per week.
+   */
+  notification_offset INT NULL COMMENT 'Minutes before an occurrence to send its reminder; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.',
 
   -- Cross-module link to nodate-flow tasks
   task_id INT UNSIGNED NULL COMMENT 'Linked task (optional, for task-calendar sync)',
   task_role ENUM('due','scheduled') NULL COMMENT 'When task_id IS NOT NULL: which task field this event represents. due=task.due_on, scheduled=time-blocked (multi-link allowed).',
   /**
-   * task_role_key: de-NULLed projection of task_role used to build a UNIQUE
-   * key over (task_id, task_role). MySQL UNIQUE indexes treat NULLs as
-   * distinct, which would let two NULL task_role rows coexist for the same
-   * task_id and silently weaken the (task_id, task_role) invariant. By
-   * coalescing NULL to the empty string in a STORED generated column we get
-   * a NOT NULL surrogate that participates in the UNIQUE without losing the
-   * "absent role" sentinel.
+   * task_singleton_role: names the role only when the projection is one
+   * a task may hold at most once, and only while the row is live. NULL
+   * for everything else, so those rows leave the unique key below
+   * entirely — MySQL never treats an index entry containing NULL as a
+   * duplicate.
+   *
+   * The two roles are not the same kind of link and the schema has to
+   * say so. `due` mirrors a single task field, so a second live one
+   * would mean the task has two due dates. `scheduled` is a time block,
+   * and the column comment above has always said a task may hold
+   * several — a key that forbade the second one contradicted the
+   * documented model and made adding a second block fail.
+   *
+   * Excluding soft-deleted rows is the other half. A disabled
+   * projection keeps its task_id and task_role on purpose: that is the
+   * record of what the row projected, and the projection guard forbids
+   * clearing it outside the engine. Left in the key, that tombstone
+   * collided with the next projection and made the task permanently
+   * unschedulable.
    */
-  task_role_key VARCHAR(32) GENERATED ALWAYS AS (COALESCE(task_role, '')) STORED NOT NULL COMMENT 'De-NULLed surrogate for task_role; empty string when task_role IS NULL. Exists solely to power uniq_calendar_events_task_role_key over (task_id, task_role_key).',
+  task_singleton_role VARCHAR(16) GENERATED ALWAYS AS (IF(enabled AND task_role = 'due', task_role, NULL)) VIRTUAL COMMENT 'The task_role when it is a role a task may hold at most once and the row is live; NULL otherwise. Exists only to scope uniq_calendar_events_task_singleton_role to live singleton projections.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',
@@ -104,7 +123,7 @@ CREATE TABLE calendar_events (
   KEY idx_calendar_events_calendar_recurrence (calendar_id, recurrence_end),
   KEY idx_calendar_events_workspace_range (workspace_id, start_at, end_at),
   KEY idx_calendar_events_task_role (task_id, task_role, enabled),
-  UNIQUE KEY uniq_calendar_events_task_role_key (task_id, task_role_key),
+  UNIQUE KEY uniq_calendar_events_task_singleton_role (task_id, task_singleton_role),
   -- One override per occurrence. Without this, two concurrent edits of
   -- the same occurrence both insert, and the expander has to pick.
   UNIQUE KEY uniq_calendar_events_recurrence_override (recurrence_parent_id, recurrence_original_start),

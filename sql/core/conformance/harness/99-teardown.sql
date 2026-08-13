@@ -21,3 +21,4 @@ SET SESSION foreign_key_checks = @fk_checks_were;
 
 DROP PROCEDURE IF EXISTS nf_conformance_assert;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_rejected;
+DROP PROCEDURE IF EXISTS nf_conformance_expect_duplicate;
