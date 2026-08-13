@@ -1359,17 +1359,18 @@ export function EventModal() {
                 <>
                   <div className="flex items-center gap-3 py-1.5">
                     {calIcon}
-                    <select
+                    <CustomSelect
                       value={formCalendarId}
-                      onChange={(e) => setForm((f) => ({ ...f, calendarId: e.target.value }))}
-                      className="input-modern h-8 flex-1 text-sm"
-                    >
-                      {postableCalendars.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setForm((f) => ({ ...f, calendarId: v }))}
+                      ariaLabel={t('event.calendar')}
+                      className="min-w-0 flex-1"
+                      triggerClassName="input-modern"
+                      options={postableCalendars.map((c) => ({
+                        value: c.id,
+                        label: c.name,
+                        color: c.color,
+                      }))}
+                    />
                   </div>
                   <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
                 </>
@@ -2287,8 +2288,9 @@ export function EventModal() {
             isDesktop
               ? undefined
               : {
-                  // At rest, drop the transform entirely: a lingering transform makes
-                  // this a containing block and mis-positions native <select> popups.
+                  // At rest, drop the transform entirely: a lingering one makes
+                  // this a containing block, and anything fixed inside the sheet
+                  // would then be positioned against the sheet, not the viewport.
                   transform: closing
                     ? 'translateY(100%)'
                     : sheetDragY
