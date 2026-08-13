@@ -256,13 +256,32 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			return nil, toAPIError(err)
 		}
 
+		// An omitted field keeps the stored value, so a partial update does not
+		// blank out the rest of the memo.
+		title := memo.Title
+		if in.Body.Title != nil {
+			title = *in.Body.Title
+		}
+		body := memo.Body
+		if in.Body.Body != nil {
+			body = nullString(*in.Body.Body)
+		}
+		done := memo.Done
+		if in.Body.Done != nil {
+			done = *in.Body.Done
+		}
+		sortWeight := memo.SortWeight
+		if in.Body.SortOrder != nil {
+			sortWeight = *in.Body.SortOrder
+		}
+
 		var updated generated.CalendarMemo
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := q.UpdateMemo(ctx, generated.UpdateMemoParams{
-				Title:      in.Body.Title,
-				Body:       nullString(in.Body.Body),
-				Done:       in.Body.Done,
-				SortWeight: in.Body.SortOrder,
+				Title:      title,
+				Body:       body,
+				Done:       done,
+				SortWeight: sortWeight,
 				ID:         memo.ID,
 			}); err != nil {
 				return err
@@ -280,7 +299,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 				CalendarID:  cal.ID,
 				ActorUserID: userID,
 				Type:        eventlog.TypeMemoUpdated,
-				Summary:     in.Body.Title,
+				Summary:     title,
 				Subject:     memo.PublicID,
 			})
 		})
