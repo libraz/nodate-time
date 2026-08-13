@@ -65,6 +65,7 @@ apps/
   api/                 Go REST API
     cmd/api/           entrypoint
     cmd/createuser/    user-creation CLI
+    cmd/healthcheck/   container health probe
     internal/          config, auth, audit, cleanup, db/generated,
                        errors, mailer, recurrence, secrets, storage,
                        http/{handlers,middleware,router}
@@ -76,11 +77,18 @@ apps/
     src/lib/            utilities (date, recurrence, upload, theme, …)
     src/i18n/           English / Japanese locales
 sql/
-  tables/              table definitions (001-017)
+  core/                vendored shared schema contract (pinned; not edited here)
+    tables/             shared table definitions
+    triggers/           shared triggers
+    conformance/        contract conformance checks
+  time/                this application's own tables
+    tables/             table definitions
+    alters/             incremental changes
   queries/             sqlc query definitions
   schema.sql           combined schema produced by build-schema.sh
   sqlc.yaml            sqlc config
 compose.yml            local stack: MySQL + MinIO
+compose.prod.yml       self-hosting stack: MySQL + MinIO + API + web
 ```
 
 ## Quick start
@@ -180,7 +188,9 @@ Unauthenticated endpoints are rate-limited per client IP.
 ## Testing
 
 E2E tests create an independent user + calendar per test (tenant isolation) and run
-in parallel against a real MySQL.
+in parallel against a real MySQL. There are 332 of them, 310 declaring
+`t.Parallel()`, and the package finishes in about 64 s in CI — on `ubuntu-latest`
+(4 vCPU) Go's default parallelism runs four at a time.
 
 ```sh
 TC_DB_PORT=3307 make db-up      # start MySQL on the same port CI uses
@@ -202,6 +212,44 @@ CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
   `make check-core` checks that the vendored copy is unedited and current.
 - Write queries in `sql/queries/*.sql` and run `make sqlc` to generate Go code into
   `apps/api/internal/db/generated/`.
+
+## Deployment
+
+`compose.prod.yml` runs the stack — MySQL, object storage, the API and the built
+SPA — on a single host. It builds the two images rather than pulling them: the
+SPA compiles the API origin into its bundle, so no prebuilt image is correct for
+two deployments.
+
+It terminates no TLS. Both HTTP services publish on the loopback interface only
+and expect a reverse proxy on the host to hold the certificates and forward to
+`127.0.0.1:8081` (web) and `127.0.0.1:8080` (API), under two names — the SPA
+reaches the API cross-origin. Set `TC_TRUSTED_PROXIES` to the proxy's address, or
+every client collapses onto one rate-limit bucket.
+
+Configuration goes in a `.env` beside `compose.prod.yml`. `TC_DB_ROOT_PASSWORD`,
+`TC_DB_PASSWORD`, `TC_JWT_SECRET` (`openssl rand -hex 32`), `TC_WEB_URL`,
+`TC_API_PUBLIC_URL`, `TC_S3_ACCESS_KEY`, `TC_S3_SECRET_KEY`, `TC_SMTP_HOST` and
+`TC_SMTP_FROM` have no safe default: Compose stops and names whichever is
+missing. `TC_SECRETS_KEY` is optional — without it the admin panel refuses to
+save OAuth client secrets rather than storing them unencrypted.
+
+```sh
+docker compose -f compose.prod.yml up -d --build
+docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
+  -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
+```
+
+The schema is applied when the MySQL volume is first created. `sql/schema.sql`
+drops every table before creating it, so a later schema change is applied to the
+running database by hand rather than by re-running the file.
+
+Two volumes hold everything durable: `mysql_data` and `minio_data`. Back them up
+together — an attachment is a row in one pointing at an object in the other.
+
+```sh
+docker compose -f compose.prod.yml exec mysql \
+  mysqldump -u root -p"$TC_DB_ROOT_PASSWORD" --single-transaction nodate_time > backup.sql
+```
 
 ## License
 
