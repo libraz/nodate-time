@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
@@ -227,7 +228,14 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
     </div>
   );
 
-  return (
+  // Rendered into document.body rather than in place. The memo list appears
+  // inside the left sidebar and the right panel, both of which carry a
+  // backdrop-filter -- and the right panel keeps a transform after its open
+  // animation, since that animation fills both ways. Either one makes the
+  // element a containing block for fixed descendants, which would resolve
+  // this dialog's inset-0 against the pane instead of the viewport and leave
+  // it boxed inside a 260px or 420px column, backdrop and all.
+  return createPortal(
     <div ref={dialogRef}>
       {/* Mobile: bottom sheet */}
       <div className="sm:hidden">
@@ -259,6 +267,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
