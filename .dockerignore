@@ -1,0 +1,14 @@
+# Both images build from the repository root, so everything neither of them
+# reads is excluded here rather than shipped to the daemon.
+.git
+node_modules
+**/node_modules
+apps/web/dist
+bin
+backup
+secrets
+docs/images
+.github
+.claude
+*.log
+.DS_Store
