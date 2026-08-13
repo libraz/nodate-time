@@ -1,0 +1,125 @@
+# Self-hosting compose stack for nodate-time: MySQL, object storage, the API
+# and the built SPA.
+#
+#   docker compose -f compose.prod.yml up -d --build
+#
+# TLS is deliberately not here. Both HTTP services publish on the loopback
+# interface only and expect a reverse proxy on the host to terminate TLS in
+# front of them; see the README's Deployment section.
+#
+# The images are built rather than pulled. The SPA compiles the API origin
+# into its bundle, so no prebuilt image is correct for two deployments.
+#
+# Values come from a .env file beside this one. Anything written `:?` has no
+# safe default and stops the stack until it is set.
+
+name: nodate-time-prod
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:?set a MySQL root password}
+      MYSQL_DATABASE: ${TC_DB_NAME:-nodate_time}
+      MYSQL_USER: ${TC_DB_USER:-ttuser}
+      MYSQL_PASSWORD: ${TC_DB_PASSWORD:?set a MySQL application password}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=256
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Applied once, on an empty volume. A schema change after that is
+      # applied by hand -- see the README.
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # Probed over TCP, which is what the API connects on. Against `localhost`
+    # mysqladmin uses the unix socket, and that answers during initialization
+    # while the network listener is still closed -- so the API would be
+    # released to start, fail its first ping and be restarted.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${TC_DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # Attachments, album photos and avatars. Point TC_S3_* at a managed
+  # S3-compatible service instead and this service can be removed.
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${TC_S3_ACCESS_KEY:?set an object storage access key}
+      MINIO_ROOT_PASSWORD: ${TC_S3_SECRET_KEY:?set an object storage secret key}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      TC_ENV: production
+      TC_DB_DSN: "${TC_DB_USER:-ttuser}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
+      TC_JWT_SECRET: ${TC_JWT_SECRET:?generate one with `openssl rand -hex 32`}
+      # Encrypts OAuth client secrets stored in the database. Left empty, the
+      # admin panel refuses to save them rather than write them in plaintext.
+      TC_SECRETS_KEY: ${TC_SECRETS_KEY:-}
+      TC_WEB_URL: ${TC_WEB_URL:?the public URL the browser loads the SPA from}
+      TC_API_PUBLIC_URL: ${TC_API_PUBLIC_URL:?the public URL of this API}
+      # The SPA is served from its own origin, so it reaches the API
+      # cross-origin and that origin has to be named.
+      TC_CORS_ALLOWED_ORIGINS: ${TC_WEB_URL}
+      # Rate limits are per client IP. Unset, every request behind the reverse
+      # proxy shares one bucket, because X-Forwarded-For is only believed from
+      # a hop listed here.
+      TC_TRUSTED_PROXIES: ${TC_TRUSTED_PROXIES:-}
+      TC_S3_ENDPOINT: ${TC_S3_ENDPOINT:-minio:9000}
+      TC_S3_ACCESS_KEY: ${TC_S3_ACCESS_KEY}
+      TC_S3_SECRET_KEY: ${TC_S3_SECRET_KEY}
+      TC_S3_BUCKET: ${TC_S3_BUCKET:-nodate-time}
+      TC_S3_USE_SSL: ${TC_S3_USE_SSL:-false}
+      # Without a relay the server refuses to start: mail written to the log
+      # is not delivered, and password reset is one of the things it carries.
+      TC_SMTP_HOST: ${TC_SMTP_HOST:?set a mail relay, or set TC_ALLOW_CONSOLE_MAILER=true to run without password reset}
+      TC_SMTP_PORT: ${TC_SMTP_PORT:-587}
+      TC_SMTP_USERNAME: ${TC_SMTP_USERNAME:-}
+      TC_SMTP_PASSWORD: ${TC_SMTP_PASSWORD:-}
+      TC_SMTP_FROM: ${TC_SMTP_FROM:?the From address outgoing mail is sent as}
+      TC_WORKSPACE_NAME: ${TC_WORKSPACE_NAME:-Nodate Time}
+      TC_WORKSPACE_TIMEZONE: ${TC_WORKSPACE_TIMEZONE:-Asia/Tokyo}
+      TC_WORKSPACE_COUNTRY: ${TC_WORKSPACE_COUNTRY:-JP}
+      TC_GOOGLE_CLIENT_ID: ${TC_GOOGLE_CLIENT_ID:-}
+      TC_GOOGLE_CLIENT_SECRET: ${TC_GOOGLE_CLIENT_SECRET:-}
+      TC_LINE_CLIENT_ID: ${TC_LINE_CLIENT_ID:-}
+      TC_LINE_CLIENT_SECRET: ${TC_LINE_CLIENT_SECRET:-}
+    ports:
+      - "127.0.0.1:${TC_API_PORT:-8080}:8080"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE: ${TC_API_PUBLIC_URL:?the public URL of the API}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${TC_WEB_PORT:-8081}:80"
+
+volumes:
+  mysql_data:
+  minio_data:
