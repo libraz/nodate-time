@@ -122,17 +122,17 @@ export function SharePanel() {
                   {t('share.targetCalendar')}
                 </span>
                 {adminCalendars.length > 1 ? (
-                  <select
+                  <CustomSelect
                     value={target.id}
-                    onChange={(e) => setTargetId(e.target.value)}
-                    className="input-modern h-10 w-full text-sm"
-                  >
-                    {adminCalendars.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setTargetId}
+                    ariaLabel={t('share.targetCalendar')}
+                    triggerClassName="input-modern"
+                    options={adminCalendars.map((c) => ({
+                      value: c.id,
+                      label: c.name,
+                      color: c.color,
+                    }))}
+                  />
                 ) : (
                   <div className="flex items-center gap-2">
                     <span

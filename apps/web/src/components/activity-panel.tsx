@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import type { HistoryActor } from '@/components/history-timeline';
+import { CustomSelect } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
 import { api, errorMessage } from '@/lib/api';
@@ -163,17 +164,17 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
                   {t('activity.targetCalendar')}
                 </span>
                 {memberCalendars.length > 1 ? (
-                  <select
+                  <CustomSelect
                     value={target.id}
-                    onChange={(e) => setTargetId(e.target.value)}
-                    className="input-modern h-10 w-full text-sm"
-                  >
-                    {memberCalendars.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setTargetId}
+                    ariaLabel={t('activity.targetCalendar')}
+                    triggerClassName="input-modern"
+                    options={memberCalendars.map((c) => ({
+                      value: c.id,
+                      label: c.name,
+                      color: c.color,
+                    }))}
+                  />
                 ) : (
                   <div className="flex items-center gap-2">
                     <span

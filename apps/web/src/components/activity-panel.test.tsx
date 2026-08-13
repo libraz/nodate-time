@@ -259,12 +259,14 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel onClose={() => {}} />);
 
-    const picker = await screen.findByRole('combobox');
+    const picker = await screen.findByRole('button', { name: 'activity.targetCalendar' });
+    fireEvent.click(picker);
+
     expect(screen.getByRole('option', { name: 'Family' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Work' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Hidden' })).not.toBeInTheDocument();
 
-    fireEvent.change(picker, { target: { value: 'cal-2' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
 
     await waitFor(() =>
       expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-2/activity?limit=50'),

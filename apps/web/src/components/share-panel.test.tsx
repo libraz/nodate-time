@@ -139,8 +139,8 @@ describe('SharePanel invites', () => {
     // The trigger shows the current choice; the list arrives through a portal.
     fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
 
-    expect(await screen.findByRole('button', { name: 'invites.expiry30d' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'invites.expiryNever' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'invites.expiry30d' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'invites.expiryNever' })).toBeNull();
   });
 
   /**
@@ -153,9 +153,9 @@ describe('SharePanel invites', () => {
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
     fireEvent.click(await screen.findByRole('button', { name: 'members.roleEditor' }));
-    expect(await screen.findByRole('button', { name: 'members.roleViewer' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'members.roleOwner' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'members.roleManager' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'members.roleViewer' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'members.roleOwner' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'members.roleManager' })).toBeNull();
   });
 
   it('does not let a superseded listing land under another calendar', async () => {
@@ -177,7 +177,8 @@ describe('SharePanel invites', () => {
 
     render(<SharePanel />);
 
-    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'cal-2' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'share.targetCalendar' }));
+    fireEvent.click(screen.getByRole('option', { name: 'B' }));
     expect(await screen.findByDisplayValue('http://localhost:3000/share/token-b')).toBeTruthy();
 
     await act(async () => {

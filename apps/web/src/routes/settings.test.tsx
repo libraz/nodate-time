@@ -232,7 +232,7 @@ describe('CalendarsSection invite listing', () => {
     render(<CalendarsSection />);
 
     fireEvent.click(screen.getByRole('button', { name: 'A' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'B' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'B' }));
     expect(await screen.findByText('/share/token-b')).toBeTruthy();
 
     await act(async () => {
@@ -276,8 +276,8 @@ describe('CalendarsSection invite listing', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
 
-    expect(await screen.findByRole('button', { name: 'invites.expiry30d' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'invites.expiryNever' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'invites.expiry30d' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'invites.expiryNever' })).toBeNull();
   });
 
   it('offers only the roles an invite link may grant', async () => {
@@ -289,9 +289,9 @@ describe('CalendarsSection invite listing', () => {
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
     fireEvent.click(await screen.findByRole('button', { name: 'members.roleEditor' }));
-    expect(await screen.findByRole('button', { name: 'members.roleViewer' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'members.roleOwner' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'members.roleManager' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'members.roleViewer' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'members.roleOwner' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'members.roleManager' })).toBeNull();
   });
 });
 
@@ -594,7 +594,7 @@ describe('AppearanceSection holidays', () => {
     // The search box is the picker saying the list is long enough to need one.
     expect(await screen.findByLabelText('common.search')).toBeTruthy();
     // The full list arrives with a dynamically imported chunk.
-    await waitFor(() => expect(screen.getAllByRole('button').length).toBeGreaterThan(100), {
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(100), {
       timeout: 5000,
     });
   });
