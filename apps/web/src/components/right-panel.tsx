@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { MemoDialog } from '@/components/memo-dialog';
+import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canEdit } from '@/lib/permissions';
@@ -173,7 +174,7 @@ export function MemoSection() {
   const handleToggle = async (memo: Memo) => {
     if (!editable) return;
     try {
-      await toggleMemo(memo.calendarId, memo.id, !memo.done, memo.title);
+      await toggleMemo(memo.calendarId, memo.id, !memo.done);
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -193,20 +194,21 @@ export function MemoSection() {
       {editable && target && (
         <div className="space-y-2 px-5 py-4">
           {postableCalendars.length > 1 && (
-            <label className="flex items-center gap-2 text-caption text-[var(--color-text-secondary)]">
+            <div className="flex items-center gap-2 text-caption text-[var(--color-text-secondary)]">
               <span className="shrink-0">{t('panel.postTo')}</span>
-              <select
+              <CustomSelect
                 value={target.id}
-                onChange={(e) => setTargetId(e.target.value)}
-                className="input-modern h-8 flex-1 text-sm"
-              >
-                {postableCalendars.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={setTargetId}
+                ariaLabel={t('panel.postTo')}
+                className="min-w-0 flex-1"
+                triggerClassName="input-modern"
+                options={postableCalendars.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  color: c.color,
+                }))}
+              />
+            </div>
           )}
           <button
             type="button"

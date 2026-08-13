@@ -108,7 +108,7 @@ interface CalendarState {
     memoId: string,
     patch: { title: string; body: string; done: boolean },
   ) => Promise<void>;
-  toggleMemo: (calendarId: string, memoId: string, done: boolean, title: string) => Promise<void>;
+  toggleMemo: (calendarId: string, memoId: string, done: boolean) => Promise<void>;
   deleteMemo: (calendarId: string, memoId: string) => Promise<void>;
 
   toggleCalendarFilter: (calId: string) => void;
@@ -492,27 +492,22 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
+  // Position is left out of both calls below: an omitted field keeps its
+  // stored value, and sending a remembered one would let a stale copy of the
+  // list reorder a memo that someone else had already moved.
   async updateMemo(calendarId, memoId, patch) {
-    const memo = get().memos.find((m) => m.id === memoId);
     const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
       title: patch.title,
       body: patch.body,
       done: patch.done,
-      sortOrder: memo?.sortOrder ?? 0,
     });
     set((s) => ({
       memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
     }));
   },
 
-  async toggleMemo(calendarId, memoId, done, title) {
-    const memo = get().memos.find((m) => m.id === memoId);
-    const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
-      title,
-      body: memo?.body ?? '',
-      done,
-      sortOrder: memo?.sortOrder ?? 0,
-    });
+  async toggleMemo(calendarId, memoId, done) {
+    const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, { done });
     set((s) => ({
       memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
     }));
