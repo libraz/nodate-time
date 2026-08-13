@@ -54,6 +54,7 @@ apps/
   api/                 Go REST API
     cmd/api/           エントリポイント
     cmd/createuser/    ユーザー作成 CLI
+    cmd/healthcheck/   コンテナのヘルスチェック
     internal/          config, auth, audit, cleanup, db/generated,
                        errors, mailer, recurrence, secrets, storage,
                        http/{handlers,middleware,router}
@@ -65,11 +66,18 @@ apps/
     src/lib/            ユーティリティ（date, recurrence, upload, theme 等）
     src/i18n/           日本語 / 英語ロケール
 sql/
-  tables/              001-017 テーブル定義
+  core/                共有スキーマ契約の vendor コピー（上流に固定、編集不可）
+    tables/             共有テーブル定義
+    triggers/           共有トリガ
+    conformance/        契約適合チェック
+  time/                本アプリ固有のテーブル
+    tables/             テーブル定義
+    alters/             差分適用
   queries/             sqlc クエリ定義
   schema.sql           build-schema.sh で生成される結合スキーマ
   sqlc.yaml            sqlc 設定
 compose.yml            MySQL + MinIO のローカルスタック
+compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + Web）
 ```
 
 ## セットアップ
@@ -158,7 +166,7 @@ Huma v2 で OpenAPI 記述が自動生成される。認証なしで `/openapi.j
 
 ## テスト
 
-E2E はテストごとに独立ユーザー＋カレンダーを生成（テナント分離）し、実 MySQL に対して並列実行する。
+E2E はテストごとに独立ユーザー＋カレンダーを生成（テナント分離）し、実 MySQL に対して並列実行する。本数は 332 本、うち 310 本が `t.Parallel()` を宣言しており、CI ではパッケージ全体が約 64 秒で終わる（`ubuntu-latest` は 4 vCPU なので、Go の既定の並列度で 4 本同時に走る）。
 
 ```bash
 TC_DB_PORT=3307 make db-up      # CI と同じポートで MySQL 起動
@@ -173,6 +181,29 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 - `sql/build-schema.sh` が core → time の順に結合して `sql/schema.sql` を生成し、`make db-apply` が適用する。
 - `make test-conformance` で、生成したスキーマが契約を満たしているかを検証する。`make check-core` は vendor したコピーが未編集かつ最新かを確認する。
 - クエリは `sql/queries/*.sql` に書き、`make sqlc` で `apps/api/internal/db/generated/` に Go コードを生成する。
+
+## デプロイ
+
+`compose.prod.yml` が MySQL・オブジェクトストレージ・API・ビルド済み SPA を 1 台のホスト上でまとめて動かす。イメージは pull せずその場でビルドする——SPA は API のオリジンをバンドルに焼き込むため、2 つのデプロイ先に対して正しいビルド済みイメージは存在しない。
+
+TLS 終端はこのスタックの外側にある。HTTP を話す 2 つのサービスはループバックにしか公開されず、証明書はホスト上のリバースプロキシが持ち、`127.0.0.1:8081`（Web）と `127.0.0.1:8080`（API）へ別々の名前で転送する前提になっている（SPA は API をクロスオリジンで叩く）。`TC_TRUSTED_PROXIES` にプロキシのアドレスを入れること。入れないとレート制限が全クライアントで 1 バケットに潰れる。
+
+設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_HOST`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
+
+```sh
+docker compose -f compose.prod.yml up -d --build
+docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
+  -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
+```
+
+スキーマは MySQL のボリュームを最初に作ったときに適用される。`sql/schema.sql` は全テーブルを DROP してから作り直すので、以降のスキーマ変更はこのファイルを流し直すのではなく、稼働中の DB に手で当てる。
+
+永続データは `mysql_data` と `minio_data` の 2 つのボリュームに入っている。バックアップは必ず両方を揃えて取る——添付ファイルは片方の行がもう片方のオブジェクトを指す形で成立している。
+
+```sh
+docker compose -f compose.prod.yml exec mysql \
+  mysqldump -u root -p"$TC_DB_ROOT_PASSWORD" --single-transaction nodate_time > backup.sql
+```
 
 ## ライセンス
 
