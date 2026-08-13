@@ -53,6 +53,60 @@ func TestDocumentedOptionalFieldsMayBeOmitted(t *testing.T) {
 	require.NotEmpty(t, memo.ID)
 }
 
+// TestMemoUpdateKeepsOmittedFields covers the update body, where an omitted
+// field has to keep its stored value rather than arrive as a zero. Requiring
+// every field made ticking a memo off a read-then-write, and a caller that got
+// the read wrong would blank the body or move the memo to the top of the list.
+func TestMemoUpdateKeepsOmittedFields(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tenant := helpers.NewTenant(t, testServerURL)
+	memosURL := testServerURL + "/calendars/" + tenant.CalendarID + "/memos"
+
+	type memoBody struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		Done      bool   `json:"done"`
+		SortOrder int32  `json:"sortOrder"`
+	}
+
+	var created memoBody
+	helpers.DoJSON(t, http.MethodPost, memosURL, tenant.AccessToken,
+		map[string]any{"title": "打ち合わせ資料", "body": "第三会議室", "sortOrder": 7}, &created)
+	require.NotEmpty(t, created.ID)
+
+	// Ticking it off names only the flag. Everything else has to survive.
+	var toggled memoBody
+	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+		map[string]any{"done": true}, &toggled)
+	require.True(t, toggled.Done)
+	require.Equal(t, "打ち合わせ資料", toggled.Title, "an omitted title should keep the stored one")
+	require.Equal(t, "第三会議室", toggled.Body, "an omitted body should not be blanked")
+	require.EqualValues(t, 7, toggled.SortOrder, "an omitted position should not move the memo")
+
+	// Editing the text leaves the flag alone: an omitted done must not read as
+	// false and reopen a memo that was finished.
+	var edited memoBody
+	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+		map[string]any{"title": "打ち合わせ資料（改訂）"}, &edited)
+	require.Equal(t, "打ち合わせ資料（改訂）", edited.Title)
+	require.True(t, edited.Done, "an omitted done should keep the memo finished")
+	require.Equal(t, "第三会議室", edited.Body)
+	require.EqualValues(t, 7, edited.SortOrder)
+
+	// A field that is present still applies, including one carrying a zero
+	// value -- that is what separates omitted from explicitly set.
+	var cleared memoBody
+	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+		map[string]any{"body": "", "done": false, "sortOrder": 0}, &cleared)
+	require.Empty(t, cleared.Body, "an explicit empty body should clear it")
+	require.False(t, cleared.Done, "an explicit false should reopen the memo")
+	require.EqualValues(t, 0, cleared.SortOrder)
+	require.Equal(t, "打ち合わせ資料（改訂）", cleared.Title)
+}
+
 // TestAllowedEmailNeedsNoReason covers the admin surface separately, since it
 // takes a grant the ordinary sign-up flow does not hand out.
 func TestAllowedEmailNeedsNoReason(t *testing.T) {

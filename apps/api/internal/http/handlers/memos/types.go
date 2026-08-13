@@ -39,14 +39,21 @@ type CreateMemoOutput struct {
 	Body MemoResponse
 }
 
+// UpdateMemoInput carries only what the caller wants to change. Every field
+// is optional and an omitted one keeps its stored value, so ticking a memo off
+// is a body of {"done": true} rather than the whole memo read back and sent
+// again. Position in particular belongs to the list, not to whoever is editing
+// the text, and requiring it made a caller resend a number it had no reason to
+// hold. The pointers are what carry the distinction: without them an omitted
+// done would arrive as false and quietly reopen a finished memo.
 type UpdateMemoInput struct {
 	CalendarID string `path:"calendarId"`
 	MemoID     string `path:"memoId"`
 	Body       struct {
-		Title     string `json:"title" minLength:"1" maxLength:"500"`
-		Body      string `json:"body" maxLength:"16000" required:"false"`
-		Done      bool   `json:"done"`
-		SortOrder int32  `json:"sortOrder"`
+		Title     *string `json:"title,omitempty" minLength:"1" maxLength:"500" required:"false"`
+		Body      *string `json:"body,omitempty" maxLength:"16000" required:"false"`
+		Done      *bool   `json:"done,omitempty" required:"false"`
+		SortOrder *int32  `json:"sortOrder,omitempty" required:"false"`
 	}
 }
 type UpdateMemoOutput struct {
