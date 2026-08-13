@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS `calendar_event_attendees`;
 DROP TABLE IF EXISTS `calendar_event_checklist_items`;
 DROP TABLE IF EXISTS `calendar_event_comments`;
 DROP TABLE IF EXISTS `calendar_event_invites`;
+DROP TABLE IF EXISTS `calendar_event_reminders`;
 DROP TABLE IF EXISTS `calendar_events`;
 DROP TABLE IF EXISTS `calendar_members`;
 DROP TABLE IF EXISTS `calendar_memos`;
@@ -277,6 +278,17 @@ CREATE TABLE calendar_event_invites (
   UNIQUE KEY uniq_calendar_event_invites_public_id (public_id),
   UNIQUE KEY uniq_calendar_event_invites_workspace_public_id (workspace_id, public_id),
   UNIQUE KEY uniq_calendar_event_invites_token_hash (token_hash),
+  -- One row per (event, attendee), whatever its state. An invite is a
+  -- single standing grant rather than a series, so a revoked one is the
+  -- same row waiting to be revived, not a tombstone beside which a
+  -- second may be inserted. Deliberately not scoped to live rows with a
+  -- generated marker, unlike the tables that key a repeatable tuple.
+  --
+  -- The writer owes the other half: re-inviting the same attendee must
+  -- revive this row with a freshly minted token. Inserting instead
+  -- collides here, which is how a participant became permanently
+  -- un-invitable after one revocation; restoring the old token instead
+  -- would make the revocation reversible by whoever still held the link.
   UNIQUE KEY uniq_calendar_event_invites_event_attendee (event_id, attendee_id),
   KEY idx_calendar_event_invites_workspace_expires (workspace_id, expires_at),
   KEY idx_calendar_event_invites_workspace_email (workspace_id, email),
@@ -288,6 +300,59 @@ CREATE TABLE calendar_event_invites (
   CONSTRAINT fk_calendar_event_invites_event FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE SET NULL,
   CONSTRAINT fk_calendar_event_invites_attendee FOREIGN KEY (attendee_id) REFERENCES calendar_event_attendees(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Magic-link invite rows for calendar event attendees';
+
+-- >>> calendar_event_reminders.sql
+-- ====================================
+-- calendar_event_reminders
+-- One row per reminder that has been sent, keyed by the occurrence it
+-- was sent for.
+--
+-- Reminders used to be claimed on calendar_events.notified_at: one
+-- column, one claim, one reminder for the lifetime of the row. That is
+-- the right shape for an event that happens once and the wrong shape for
+-- a series — "every Monday, 15 minutes before" rang on the first Monday
+-- and was silent for the remaining fifty-one, because the column was
+-- already set. Adding a recurrence rule to an existing event that had
+-- already fired meant it never rang again at all.
+--
+-- The claim is an INSERT rather than an UPDATE because insertion is
+-- naturally once-only: the unique key below decides the winner, and the
+-- loser gets a duplicate-key error instead of a zero-rows-affected count
+-- it has to remember to check. Releasing a claim after a failed dispatch
+-- is a DELETE, which is why there is no soft-delete flag here — a
+-- released claim must genuinely stop existing so the next tick can take
+-- it, and a tombstone that still occupied the unique key would make the
+-- retry impossible.
+--
+-- Deliberately without public_id, sort_weight or notes: nothing outside
+-- the scheduler ever addresses one of these rows, and the columns the
+-- table template carries are for entities the API exposes.
+-- ====================================
+CREATE TABLE calendar_event_reminders (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  workspace_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to workspaces.id; carried so a workspace teardown reaches these rows directly',
+  event_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to calendar_events.id',
+
+  /**
+   * occurrence_start: the start instant of the specific occurrence this
+   * reminder was for, in UTC.
+   *
+   * For a non-recurring event it equals calendar_events.start_at. For a
+   * series it is one expansion of the rule, which is what makes the
+   * claim per-occurrence rather than per-row. Stored to millisecond
+   * precision so it matches the column it is derived from exactly; a
+   * truncated copy would fail to match and re-send.
+   */
+  occurrence_start DATETIME(3) NOT NULL COMMENT 'UTC start of the occurrence this reminder covered; equals calendar_events.start_at for non-recurring events',
+
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'When the claim was taken, which is also when the reminder was sent',
+
+  UNIQUE KEY uniq_calendar_event_reminders_occurrence (event_id, occurrence_start),
+  KEY idx_calendar_event_reminders_workspace (workspace_id),
+
+  CONSTRAINT fk_calendar_event_reminders_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  CONSTRAINT fk_calendar_event_reminders_event FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Sent-reminder claims, one per (event, occurrence). Replaces the single calendar_events.notified_at claim, which could only ever fire once per row.';
 
 -- >>> calendar_events.sql
 -- ====================================
@@ -365,22 +430,41 @@ CREATE TABLE calendar_events (
   recurrence_parent_id INT UNSIGNED NULL COMMENT 'Set on an override row: the recurring event whose single occurrence this row replaces. NULL on ordinary and master rows.',
   recurrence_original_start DATETIME(3) NULL COMMENT 'Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.',
 
-  notification_offset INT NULL COMMENT 'Minutes before event to send notification; NULL = no notification',
-  notified_at DATETIME(3) NULL DEFAULT NULL COMMENT 'Timestamp when notification was sent; NULL = not yet notified',
+  /**
+   * notification_offset: how long before an occurrence its reminder is
+   * due. Applies to every occurrence of a recurring event, not only the
+   * first — which is why the record of what has already been sent lives
+   * in calendar_event_reminders, keyed by occurrence, rather than in a
+   * single column here. A column can only remember one answer, and a
+   * series needs one per week.
+   */
+  notification_offset INT NULL COMMENT 'Minutes before an occurrence to send its reminder; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.',
 
   -- Cross-module link to nodate-flow tasks
   task_id INT UNSIGNED NULL COMMENT 'Linked task (optional, for task-calendar sync)',
   task_role ENUM('due','scheduled') NULL COMMENT 'When task_id IS NOT NULL: which task field this event represents. due=task.due_on, scheduled=time-blocked (multi-link allowed).',
   /**
-   * task_role_key: de-NULLed projection of task_role used to build a UNIQUE
-   * key over (task_id, task_role). MySQL UNIQUE indexes treat NULLs as
-   * distinct, which would let two NULL task_role rows coexist for the same
-   * task_id and silently weaken the (task_id, task_role) invariant. By
-   * coalescing NULL to the empty string in a STORED generated column we get
-   * a NOT NULL surrogate that participates in the UNIQUE without losing the
-   * "absent role" sentinel.
+   * task_singleton_role: names the role only when the projection is one
+   * a task may hold at most once, and only while the row is live. NULL
+   * for everything else, so those rows leave the unique key below
+   * entirely — MySQL never treats an index entry containing NULL as a
+   * duplicate.
+   *
+   * The two roles are not the same kind of link and the schema has to
+   * say so. `due` mirrors a single task field, so a second live one
+   * would mean the task has two due dates. `scheduled` is a time block,
+   * and the column comment above has always said a task may hold
+   * several — a key that forbade the second one contradicted the
+   * documented model and made adding a second block fail.
+   *
+   * Excluding soft-deleted rows is the other half. A disabled
+   * projection keeps its task_id and task_role on purpose: that is the
+   * record of what the row projected, and the projection guard forbids
+   * clearing it outside the engine. Left in the key, that tombstone
+   * collided with the next projection and made the task permanently
+   * unschedulable.
    */
-  task_role_key VARCHAR(32) GENERATED ALWAYS AS (COALESCE(task_role, '')) STORED NOT NULL COMMENT 'De-NULLed surrogate for task_role; empty string when task_role IS NULL. Exists solely to power uniq_calendar_events_task_role_key over (task_id, task_role_key).',
+  task_singleton_role VARCHAR(16) GENERATED ALWAYS AS (IF(enabled AND task_role = 'due', task_role, NULL)) VIRTUAL COMMENT 'The task_role when it is a role a task may hold at most once and the row is live; NULL otherwise. Exists only to scope uniq_calendar_events_task_singleton_role to live singleton projections.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',
@@ -396,7 +480,7 @@ CREATE TABLE calendar_events (
   KEY idx_calendar_events_calendar_recurrence (calendar_id, recurrence_end),
   KEY idx_calendar_events_workspace_range (workspace_id, start_at, end_at),
   KEY idx_calendar_events_task_role (task_id, task_role, enabled),
-  UNIQUE KEY uniq_calendar_events_task_role_key (task_id, task_role_key),
+  UNIQUE KEY uniq_calendar_events_task_singleton_role (task_id, task_singleton_role),
   -- One override per occurrence. Without this, two concurrent edits of
   -- the same occurrence both insert, and the expander has to pick.
   UNIQUE KEY uniq_calendar_events_recurrence_override (recurrence_parent_id, recurrence_original_start),
@@ -553,12 +637,17 @@ CREATE TABLE calendar_public_share_events (
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Override display order on the share page',
   notes TEXT NULL COMMENT 'Admin notes',
   enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enabled flag (soft-disable)',
+  -- Liveness marker scoping the unique key below to live rows: 1 while
+  -- enabled, NULL once soft-deleted, so tombstones leave the index
+  -- rather than colliding with each other. See the soft-delete rule in
+  -- sql/core/conformance/schema/40-soft-delete-uniqueness.sql.
+  active TINYINT UNSIGNED GENERATED ALWAYS AS (IF(enabled, 1, NULL)) VIRTUAL COMMENT 'NULL once soft-deleted; exists only to scope the unique key below to live rows',
   updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   UNIQUE KEY uniq_calendar_public_share_events_public_id (public_id),
   UNIQUE KEY uniq_calendar_public_share_events_workspace_public_id (workspace_id, public_id),
-  UNIQUE KEY uniq_calendar_public_share_events_share_event (share_id, event_id, enabled) COMMENT 'At most one enabled publication per (share, event)',
+  UNIQUE KEY uniq_calendar_public_share_events_share_event (share_id, event_id, active) COMMENT 'At most one live publication per (share, event); detached ones drop out via active',
   KEY idx_calendar_public_share_events_workspace_event (workspace_id, event_id, enabled),
 
   CONSTRAINT fk_calendar_public_share_events_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -671,6 +760,22 @@ CREATE TABLE calendars (
 
   owner_user_id INT UNSIGNED NULL COMMENT 'The user this calendar belongs to, or NULL when it belongs to no one in particular: a system feed, or a calendar shared by a group that outlives any single member. NULL is not cosmetic — the FK cascades, so naming an owner means deleting that user deletes the calendar and every event in it. A group calendar must leave this NULL or one departure takes everyone else''s history with it.',
   system_slug VARCHAR(100) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'For system calendars: provider identifier (e.g., holidays.jp)',
+
+  /**
+   * default_event_visibility: what calendar_events.visibility = 'default'
+   * resolves to on this calendar. The event column has always documented
+   * 'default' as "the calendar setting" and there was no such setting, so
+   * 'default' — which is also the column's own default, and therefore what
+   * most rows carry — resolved to nothing and was read as fully public.
+   *
+   * Deliberately narrower than the event enum: a calendar may default to
+   * public or private, never to confidential. Confidential hides the row
+   * itself, and that is a decision about one specific meeting rather than
+   * a standing property of a calendar. Keeping it out also keeps the
+   * row-level list filter free of a join on this table, which several of
+   * the event list queries do not have.
+   */
+  default_event_visibility ENUM('public','private') NOT NULL DEFAULT 'public' COMMENT 'What calendar_events.visibility = ''default'' means here. public: details are for every member. private: the time is visible, the details are for the owner and the invited. Never confidential — hiding the row is a per-event decision.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',
@@ -994,6 +1099,7 @@ CREATE TABLE sessions (
   ip_address VARBINARY(16) NULL COMMENT 'Packed IPv4/IPv6 address at issue time',
   expires_at DATETIME(3) NOT NULL COMMENT 'Refresh token expiry',
   revoked_at DATETIME(3) NULL COMMENT 'Explicit revocation time',
+  rotated_from_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'SHA-256 hex of the refresh token this session last replaced. Rotation overwrites refresh_hash, so without this the superseded token leaves no trace and a replay of it is indistinguishable from a token that was never issued. Presenting a token that matches this column is the signal that a rotated token was replayed.',
   last_used_at DATETIME(3) NULL COMMENT 'Last refresh time',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
@@ -1004,6 +1110,7 @@ CREATE TABLE sessions (
 
   UNIQUE KEY uniq_sessions_public_id (public_id),
   UNIQUE KEY uniq_sessions_refresh_hash (refresh_hash),
+  KEY idx_sessions_rotated_from_hash (rotated_from_hash),
   KEY idx_sessions_user_id_expires_at (user_id, expires_at),
 
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -1037,6 +1144,7 @@ CREATE TABLE storage_objects (
   content_type VARCHAR(127) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'MIME type recorded at upload time',
   storage_key VARCHAR(255) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'Computed object key in MinIO (e.g. workspace/{wsPublicId}/{sha256_hex} or user/{userPublicId}/{sha256_hex})',
   ref_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of referencing rows (attachments / users.avatar_storage_object_id); GC eligible when 0',
+  uploaded_at DATETIME(3) NULL COMMENT 'When the upload behind this row was confirmed present in object storage. NULL means the row was created to hand out an upload URL and the bytes have not been seen since: the size the client declared is unverified, so the row is not a dedup candidate and the sweeper reclaims it once the URL it was minted for has expired.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',

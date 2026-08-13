@@ -35,6 +35,17 @@ CREATE TABLE calendar_event_invites (
   UNIQUE KEY uniq_calendar_event_invites_public_id (public_id),
   UNIQUE KEY uniq_calendar_event_invites_workspace_public_id (workspace_id, public_id),
   UNIQUE KEY uniq_calendar_event_invites_token_hash (token_hash),
+  -- One row per (event, attendee), whatever its state. An invite is a
+  -- single standing grant rather than a series, so a revoked one is the
+  -- same row waiting to be revived, not a tombstone beside which a
+  -- second may be inserted. Deliberately not scoped to live rows with a
+  -- generated marker, unlike the tables that key a repeatable tuple.
+  --
+  -- The writer owes the other half: re-inviting the same attendee must
+  -- revive this row with a freshly minted token. Inserting instead
+  -- collides here, which is how a participant became permanently
+  -- un-invitable after one revocation; restoring the old token instead
+  -- would make the revocation reversible by whoever still held the link.
   UNIQUE KEY uniq_calendar_event_invites_event_attendee (event_id, attendee_id),
   KEY idx_calendar_event_invites_workspace_expires (workspace_id, expires_at),
   KEY idx_calendar_event_invites_workspace_email (workspace_id, email),

@@ -16,12 +16,17 @@ CREATE TABLE calendar_public_share_events (
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Override display order on the share page',
   notes TEXT NULL COMMENT 'Admin notes',
   enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enabled flag (soft-disable)',
+  -- Liveness marker scoping the unique key below to live rows: 1 while
+  -- enabled, NULL once soft-deleted, so tombstones leave the index
+  -- rather than colliding with each other. See the soft-delete rule in
+  -- sql/core/conformance/schema/40-soft-delete-uniqueness.sql.
+  active TINYINT UNSIGNED GENERATED ALWAYS AS (IF(enabled, 1, NULL)) VIRTUAL COMMENT 'NULL once soft-deleted; exists only to scope the unique key below to live rows',
   updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   UNIQUE KEY uniq_calendar_public_share_events_public_id (public_id),
   UNIQUE KEY uniq_calendar_public_share_events_workspace_public_id (workspace_id, public_id),
-  UNIQUE KEY uniq_calendar_public_share_events_share_event (share_id, event_id, enabled) COMMENT 'At most one enabled publication per (share, event)',
+  UNIQUE KEY uniq_calendar_public_share_events_share_event (share_id, event_id, active) COMMENT 'At most one live publication per (share, event); detached ones drop out via active',
   KEY idx_calendar_public_share_events_workspace_event (workspace_id, event_id, enabled),
 
   CONSTRAINT fk_calendar_public_share_events_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,

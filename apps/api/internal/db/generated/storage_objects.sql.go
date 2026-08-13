@@ -112,7 +112,7 @@ func (q *Queries) DeleteUnreferencedStorageObject(ctx context.Context, id uint32
 }
 
 const getStorageObjectByID = `-- name: GetStorageObjectByID :one
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE id = ? AND enabled = TRUE
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE id = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetStorageObjectByID(ctx context.Context, id uint32) (StorageObject, error) {
@@ -128,6 +128,7 @@ func (q *Queries) GetStorageObjectByID(ctx context.Context, id uint32) (StorageO
 		&i.ContentType,
 		&i.StorageKey,
 		&i.RefCount,
+		&i.UploadedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -138,7 +139,7 @@ func (q *Queries) GetStorageObjectByID(ctx context.Context, id uint32) (StorageO
 }
 
 const getStorageObjectByKey = `-- name: GetStorageObjectByKey :one
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE storage_key = ? AND enabled = TRUE
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE storage_key = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) (StorageObject, error) {
@@ -154,6 +155,7 @@ func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) 
 		&i.ContentType,
 		&i.StorageKey,
 		&i.RefCount,
+		&i.UploadedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -164,7 +166,7 @@ func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) 
 }
 
 const getStorageObjectByWorkspaceDigest = `-- name: GetStorageObjectByWorkspaceDigest :one
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
 WHERE workspace_id = ? AND sha256 = ? AND enabled = TRUE
 `
 
@@ -195,6 +197,7 @@ func (q *Queries) GetStorageObjectByWorkspaceDigest(ctx context.Context, arg Get
 		&i.ContentType,
 		&i.StorageKey,
 		&i.RefCount,
+		&i.UploadedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -214,7 +217,7 @@ func (q *Queries) IncrementStorageObjectRefs(ctx context.Context, id uint32) err
 }
 
 const listUnreferencedStorageObjects = `-- name: ListUnreferencedStorageObjects :many
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects so
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects so
 WHERE so.ref_count = 0
   AND so.created_at < ?
   AND so.id > ?
@@ -274,6 +277,7 @@ func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUn
 			&i.ContentType,
 			&i.StorageKey,
 			&i.RefCount,
+			&i.UploadedAt,
 			&i.SortWeight,
 			&i.Notes,
 			&i.Enabled,

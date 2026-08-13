@@ -36,7 +36,7 @@ func (q *Queries) CreateCalendar(ctx context.Context, arg CreateCalendarParams) 
 }
 
 const getCalendarByID = `-- name: GetCalendarByID :one
-SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? AND enabled = TRUE
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, default_event_visibility, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? AND enabled = TRUE
 `
 
 func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, error) {
@@ -53,6 +53,7 @@ func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, err
 		&i.CoverURL,
 		&i.OwnerUserID,
 		&i.SystemSlug,
+		&i.DefaultEventVisibility,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -63,7 +64,7 @@ func (q *Queries) GetCalendarByID(ctx context.Context, id uint32) (Calendar, err
 }
 
 const getCalendarByIDForUpdate = `-- name: GetCalendarByIDForUpdate :one
-SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? FOR UPDATE
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, default_event_visibility, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE id = ? FOR UPDATE
 `
 
 func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Calendar, error) {
@@ -80,6 +81,7 @@ func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Cale
 		&i.CoverURL,
 		&i.OwnerUserID,
 		&i.SystemSlug,
+		&i.DefaultEventVisibility,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -90,7 +92,7 @@ func (q *Queries) GetCalendarByIDForUpdate(ctx context.Context, id uint32) (Cale
 }
 
 const getCalendarByPublicID = `-- name: GetCalendarByPublicID :one
-SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
+SELECT id, public_id, workspace_id, kind, name, description, color, cover_url, owner_user_id, system_slug, default_event_visibility, sort_weight, notes, enabled, updated_at, created_at FROM calendars WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
 `
 
 type GetCalendarByPublicIDParams struct {
@@ -112,6 +114,7 @@ func (q *Queries) GetCalendarByPublicID(ctx context.Context, arg GetCalendarByPu
 		&i.CoverURL,
 		&i.OwnerUserID,
 		&i.SystemSlug,
+		&i.DefaultEventVisibility,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
@@ -122,7 +125,7 @@ func (q *Queries) GetCalendarByPublicID(ctx context.Context, arg GetCalendarByPu
 }
 
 const listCalendarsByUser = `-- name: ListCalendarsByUser :many
-SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color, c.cover_url, c.owner_user_id, c.system_slug, c.sort_weight, c.notes, c.enabled, c.updated_at, c.created_at, cm.role AS member_role, cm.member_color
+SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color, c.cover_url, c.owner_user_id, c.system_slug, c.default_event_visibility, c.sort_weight, c.notes, c.enabled, c.updated_at, c.created_at, cm.role AS member_role, cm.member_color
 FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
@@ -135,23 +138,24 @@ type ListCalendarsByUserParams struct {
 }
 
 type ListCalendarsByUserRow struct {
-	ID          uint32              `json:"id"`
-	PublicID    []byte              `json:"publicId"`
-	WorkspaceID uint32              `json:"workspaceId"`
-	Kind        CalendarsKind       `json:"kind"`
-	Name        string              `json:"name"`
-	Description sql.NullString      `json:"description"`
-	Color       string              `json:"color"`
-	CoverURL    sql.NullString      `json:"coverUrl"`
-	OwnerUserID sql.NullInt32       `json:"ownerUserId"`
-	SystemSlug  sql.NullString      `json:"systemSlug"`
-	SortWeight  int32               `json:"sortWeight"`
-	Notes       sql.NullString      `json:"notes"`
-	Enabled     bool                `json:"enabled"`
-	UpdatedAt   sql.NullTime        `json:"updatedAt"`
-	CreatedAt   time.Time           `json:"createdAt"`
-	MemberRole  CalendarMembersRole `json:"memberRole"`
-	MemberColor string              `json:"memberColor"`
+	ID                     uint32                          `json:"id"`
+	PublicID               []byte                          `json:"publicId"`
+	WorkspaceID            uint32                          `json:"workspaceId"`
+	Kind                   CalendarsKind                   `json:"kind"`
+	Name                   string                          `json:"name"`
+	Description            sql.NullString                  `json:"description"`
+	Color                  string                          `json:"color"`
+	CoverURL               sql.NullString                  `json:"coverUrl"`
+	OwnerUserID            sql.NullInt32                   `json:"ownerUserId"`
+	SystemSlug             sql.NullString                  `json:"systemSlug"`
+	DefaultEventVisibility CalendarsDefaultEventVisibility `json:"defaultEventVisibility"`
+	SortWeight             int32                           `json:"sortWeight"`
+	Notes                  sql.NullString                  `json:"notes"`
+	Enabled                bool                            `json:"enabled"`
+	UpdatedAt              sql.NullTime                    `json:"updatedAt"`
+	CreatedAt              time.Time                       `json:"createdAt"`
+	MemberRole             CalendarMembersRole             `json:"memberRole"`
+	MemberColor            string                          `json:"memberColor"`
 }
 
 // ListCalendarsByUser joins through calendar_members, which is the access
@@ -177,6 +181,7 @@ func (q *Queries) ListCalendarsByUser(ctx context.Context, arg ListCalendarsByUs
 			&i.CoverURL,
 			&i.OwnerUserID,
 			&i.SystemSlug,
+			&i.DefaultEventVisibility,
 			&i.SortWeight,
 			&i.Notes,
 			&i.Enabled,

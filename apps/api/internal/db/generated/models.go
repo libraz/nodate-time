@@ -361,6 +361,48 @@ func (ns NullCalendarMembersRole) Value() (driver.Value, error) {
 	return string(ns.CalendarMembersRole), nil
 }
 
+type CalendarsDefaultEventVisibility string
+
+const (
+	CalendarsDefaultEventVisibilityPublic  CalendarsDefaultEventVisibility = "public"
+	CalendarsDefaultEventVisibilityPrivate CalendarsDefaultEventVisibility = "private"
+)
+
+func (e *CalendarsDefaultEventVisibility) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CalendarsDefaultEventVisibility(s)
+	case string:
+		*e = CalendarsDefaultEventVisibility(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CalendarsDefaultEventVisibility: %T", src)
+	}
+	return nil
+}
+
+type NullCalendarsDefaultEventVisibility struct {
+	CalendarsDefaultEventVisibility CalendarsDefaultEventVisibility `json:"calendarsDefaultEventVisibility"`
+	Valid                           bool                            `json:"valid"` // Valid is true if CalendarsDefaultEventVisibility is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCalendarsDefaultEventVisibility) Scan(value interface{}) error {
+	if value == nil {
+		ns.CalendarsDefaultEventVisibility, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CalendarsDefaultEventVisibility.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCalendarsDefaultEventVisibility) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CalendarsDefaultEventVisibility), nil
+}
+
 type CalendarsKind string
 
 const (
@@ -973,6 +1015,8 @@ type Calendar struct {
 	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
 	// For system calendars: provider identifier (e.g., holidays.jp)
 	SystemSlug sql.NullString `json:"systemSlug"`
+	// What calendar_events.visibility = 'default' means here. public: details are for every member. private: the time is visible, the details are for the owner and the invited. Never confidential — hiding the row is a per-event decision.
+	DefaultEventVisibility CalendarsDefaultEventVisibility `json:"defaultEventVisibility"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`
 	// Admin notes
@@ -1031,16 +1075,14 @@ type CalendarEvent struct {
 	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
 	// Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.
 	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
-	// Minutes before event to send notification; NULL = no notification
+	// Minutes before an occurrence to send its reminder; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.
 	NotificationOffset sql.NullInt32 `json:"notificationOffset"`
-	// Timestamp when notification was sent; NULL = not yet notified
-	NotifiedAt sql.NullTime `json:"notifiedAt"`
 	// Linked task (optional, for task-calendar sync)
 	TaskID sql.NullInt32 `json:"taskId"`
 	// When task_id IS NOT NULL: which task field this event represents. due=task.due_on, scheduled=time-blocked (multi-link allowed).
 	TaskRole NullCalendarEventsTaskRole `json:"taskRole"`
-	// De-NULLed surrogate for task_role; empty string when task_role IS NULL. Exists solely to power uniq_calendar_events_task_role_key over (task_id, task_role_key).
-	TaskRoleKey string `json:"taskRoleKey"`
+	// The task_role when it is a role a task may hold at most once and the row is live; NULL otherwise. Exists only to scope uniq_calendar_events_task_singleton_role to live singleton projections.
+	TaskSingletonRole sql.NullString `json:"taskSingletonRole"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`
 	// Admin notes
@@ -1199,6 +1241,20 @@ type CalendarEventInvite struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Sent-reminder claims, one per (event, occurrence). Replaces the single calendar_events.notified_at claim, which could only ever fire once per row.
+type CalendarEventReminder struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// Internal FK to workspaces.id; carried so a workspace teardown reaches these rows directly
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to calendar_events.id
+	EventID uint32 `json:"eventId"`
+	// UTC start of the occurrence this reminder covered; equals calendar_events.start_at for non-recurring events
+	OccurrenceStart time.Time `json:"occurrenceStart"`
+	// When the claim was taken, which is also when the reminder was sent
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // Join-by-link calendar invitations
 type CalendarInvite struct {
 	// Internal PK, never exposed
@@ -1342,9 +1398,11 @@ type CalendarPublicShareEvent struct {
 	// Admin notes
 	Notes sql.NullString `json:"notes"`
 	// Enabled flag (soft-disable)
-	Enabled   bool         `json:"enabled"`
-	UpdatedAt sql.NullTime `json:"updatedAt"`
-	CreatedAt time.Time    `json:"createdAt"`
+	Enabled bool `json:"enabled"`
+	// NULL once soft-deleted; exists only to scope the unique key below to live rows
+	Active    sql.NullInt16 `json:"active"`
+	UpdatedAt sql.NullTime  `json:"updatedAt"`
+	CreatedAt time.Time     `json:"createdAt"`
 }
 
 // Per-user display preferences for a calendar (color, visibility). Not an ACL axis — event-level visibility is the only ws-internal ACL.
@@ -1719,6 +1777,8 @@ type Session struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 	// Explicit revocation time
 	RevokedAt sql.NullTime `json:"revokedAt"`
+	// SHA-256 hex of the refresh token this session last replaced. Rotation overwrites refresh_hash, so without this the superseded token leaves no trace and a replay of it is indistinguishable from a token that was never issued. Presenting a token that matches this column is the signal that a rotated token was replayed.
+	RotatedFromHash sql.NullString `json:"rotatedFromHash"`
 	// Last refresh time
 	LastUsedAt sql.NullTime `json:"lastUsedAt"`
 	// Display order
@@ -1783,6 +1843,8 @@ type StorageObject struct {
 	StorageKey string `json:"storageKey"`
 	// Number of referencing rows (attachments / users.avatar_storage_object_id); GC eligible when 0
 	RefCount uint32 `json:"refCount"`
+	// When the upload behind this row was confirmed present in object storage. NULL means the row was created to hand out an upload URL and the bytes have not been seen since: the size the client declared is unverified, so the row is not a dedup candidate and the sweeper reclaims it once the URL it was minted for has expired.
+	UploadedAt sql.NullTime `json:"uploadedAt"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`
 	// Admin notes
