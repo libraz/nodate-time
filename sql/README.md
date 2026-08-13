@@ -28,6 +28,12 @@ To change the contract, change it upstream and re-vendor.
 `scripts/check-vendored-core.sh` verifies both halves of that: that the
 copy is unedited, and that it still matches the pinned ref.
 
+Because it is upstream's text verbatim, `core/PROTOCOL.md` describes the
+product layer as `sql/flow/` — that is upstream's own layer. Here the
+equivalent is `time/`. The obligations it states are the same either way;
+only the directory name differs, and it is left alone so the hash keeps
+matching.
+
 ## A schema change is not finished until the generated code follows
 
 `schema.sql` and the sqlc output under `apps/api/internal/db/generated/`
