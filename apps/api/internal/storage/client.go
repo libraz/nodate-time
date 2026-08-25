@@ -45,6 +45,23 @@ func (c *Client) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
+// Ping reports whether the object store answers and still holds the bucket
+// this deployment writes to.
+//
+// Deliberately not EnsureBucket: a health check that repairs what it finds
+// missing cannot report it, and a bucket that disappeared underneath a running
+// deployment is a fact an operator needs told rather than papered over.
+func (c *Client) Ping(ctx context.Context) error {
+	exists, err := c.mc.BucketExists(ctx, c.bucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("bucket %q does not exist", c.bucket)
+	}
+	return nil
+}
+
 // PresignPut returns a presigned PUT URL for uploading an object of exactly
 // byteSize bytes. Content-Type and Content-Length are both bound into the
 // signature, so the client's actual request must carry a matching

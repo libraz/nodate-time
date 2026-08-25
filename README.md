@@ -162,6 +162,8 @@ for the full list and defaults.
 | `TC_GOOGLE_ALLOWED_DOMAINS` | allowed Google sign-in domains (comma-separated) | unrestricted |
 | `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | empty |
 | `TC_SECRETS_KEY` | key encrypting secrets stored in the DB (hex/base64, 32 bytes) | empty |
+| `TC_METRICS_ADDR` | address of the administrative listener; empty disables it | `127.0.0.1:9464` |
+| `TC_METRICS_ALLOWED_CIDRS` | networks allowed to reach that listener, matched against the direct TCP peer. Empty denies everything | loopback + private ranges |
 
 > In production, `Config.Validate()` refuses to start with the default JWT secret,
 > default MinIO credentials, wildcard CORS, or an unset SMTP host.
@@ -184,6 +186,47 @@ reference at `/docs`. Routes live in
 - **Admin** — `/admin/oauth-providers`, `/admin/allowed-emails`
 
 Unauthenticated endpoints are rate-limited per client IP.
+
+## Observability
+
+The server serves two ports. `TC_PORT` (8080) is the product. `TC_METRICS_ADDR`
+(127.0.0.1:9464) is a second listener carrying what describes the process
+rather than the product:
+
+| Path | What it answers |
+| --- | --- |
+| `/metrics` | Prometheus text format: request rate, latency histogram and response size by matched route; requests in flight; connection-pool saturation; Go runtime; rate-limit rejections by scope; outgoing mail by outcome |
+| `/debug/pprof/*` | live CPU, heap, goroutine and mutex profiles |
+| `/health/detail` | per-dependency report — database, object storage, mail relay — with the error each failing probe returned. 503 only when a *required* dependency is down, so a deployment is not pulled from rotation over an unreachable mail relay |
+
+It is guarded twice, and neither guard reads a forwarded header: it binds to
+loopback by default, and every request is matched against
+`TC_METRICS_ALLOWED_CIDRS` by its direct TCP peer. A request from outside the
+list gets 404 rather than 403 — a refusal that says "not allowed" confirms the
+endpoint exists. **Do not put a reverse-proxy rule in front of this port.**
+Proxied, every request arrives from the proxy's address, so one allow-list
+entry would admit the whole internet.
+
+`compose.prod.yml` publishes it as `127.0.0.1:9464` on the host; a scraper
+sharing the compose network reaches it at `api:9464`.
+
+```sh
+curl -s 127.0.0.1:9464/metrics | head
+curl -s 127.0.0.1:9464/health/detail | jq
+go tool pprof http://127.0.0.1:9464/debug/pprof/profile?seconds=30
+```
+
+The public `/health` stays what a load balancer needs: cheap, unauthenticated,
+and silent about which dependency is unwell.
+
+**The access log names the route, never the URL.** A share token is a path
+segment and a password reset carries its token in the query, so a conventional
+access log would file working credentials in the artifact that is kept longest
+and read most widely. Each line carries the matched route pattern, status,
+duration, response size, client IP and a request identifier; that identifier is
+also returned in `X-Request-Id` and attached to every other line the request
+logs, so one value collects the whole story. An identifier supplied by the
+caller is adopted only from a hop listed in `TC_TRUSTED_PROXIES`.
 
 ## Testing
 

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -65,6 +66,35 @@ type Config struct {
 	// deployment behind an unlisted proxy has every request collapse onto one
 	// rate-limit bucket rather than risk trusting a spoofable header.
 	TrustedProxies string `env:"TC_TRUSTED_PROXIES" envDefault:""`
+
+	// MetricsAddr is the address the administrative listener binds to:
+	// Prometheus metrics, profiles, and the detailed health report. Empty
+	// disables it entirely.
+	//
+	// The default is a loopback address rather than a port on every
+	// interface, because everything this listener serves describes the
+	// process rather than the product -- the metrics enumerate the routes and
+	// their traffic, the profiles carry fragments of live memory -- and a
+	// default that publishes them is a default that publishes them on the
+	// deployment that never read this line.
+	//
+	// The port is 9464 -- the conventional one for an application exporting
+	// its own metrics -- and not 9090, which belongs to a Prometheus server.
+	// On a self-hosted box the scraper is the most likely thing to be running
+	// beside this process, so 9090 is the one default guaranteed to collide
+	// with the tool this endpoint exists to be read by.
+	MetricsAddr string `env:"TC_METRICS_ADDR" envDefault:"127.0.0.1:9464"`
+	// MetricsAllowedCIDRs lists the networks allowed to reach that listener,
+	// checked against the direct TCP peer. It is a second guard behind the
+	// bind address, for the deployment that had to widen the bind address --
+	// a container publishing a port cannot bind to the host's loopback, so
+	// the default here covers the private ranges a container network uses
+	// while still refusing the public internet.
+	//
+	// Empty denies everything, deliberately: this is a list of who may read
+	// the process's internals, and the reading of "unset" that opens it to
+	// everyone is not one an operator would have chosen on purpose.
+	MetricsAllowedCIDRs string `env:"TC_METRICS_ALLOWED_CIDRS" envDefault:"127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"`
 
 	// AuthRateLimit is the per-IP per-minute budget for sensitive
 	// unauthenticated endpoints (sign-in, registration, password reset,
@@ -209,6 +239,19 @@ func (c *Config) Validate() error {
 	if c.SMTPHost == "" && !c.AllowConsoleMailer {
 		return fmt.Errorf("TC_SMTP_HOST must be set, or set TC_ALLOW_CONSOLE_MAILER=true to write mail to the log instead of delivering it")
 	}
+
+	// The administrative listener's guards have to be legible, because both
+	// ways of getting them wrong are quiet: an unparseable entry that was
+	// meant to grant access denies it instead, and an address that was meant
+	// to be private is only known to be private by reading it.
+	if c.MetricsEnabled() {
+		if _, invalid := parsePrefixList(c.MetricsAllowedCIDRs); len(invalid) > 0 {
+			return fmt.Errorf("TC_METRICS_ALLOWED_CIDRS has entries that are neither an IP nor a CIDR: %s", strings.Join(invalid, ", "))
+		}
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(c.MetricsAddr)); err != nil {
+			return fmt.Errorf("TC_METRICS_ADDR must be host:port (e.g. 127.0.0.1:9090), or empty to disable the metrics listener: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -228,6 +271,22 @@ func (c *Config) logRelaxations() {
 		slog.Warn("no mail relay configured: mail is written to the log rather than delivered, password-reset links included",
 			"allowed_by", "TC_ALLOW_CONSOLE_MAILER")
 	}
+	if !c.MetricsEnabled() {
+		return
+	}
+	// Whether the administrative listener is private is a property of two
+	// values read together, so the boot log states the conclusion rather than
+	// leaving it to be worked out from a compose file and a CIDR list.
+	if len(c.MetricsAllowedPeerList()) == 0 {
+		slog.Warn("metrics listener is configured but its allow-list is empty: every request to it will be refused",
+			"addr", c.MetricsAddr, "set", "TC_METRICS_ALLOWED_CIDRS")
+	}
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(c.MetricsAddr)); err == nil {
+		if addr, err := netip.ParseAddr(host); err != nil || !addr.IsLoopback() {
+			slog.Warn("metrics listener is not bound to loopback; reachability is decided by the allow-list alone",
+				"addr", c.MetricsAddr, "allowed", c.MetricsAllowedCIDRs)
+		}
+	}
 }
 
 // CORSAllowedOriginList parses CORSAllowedOrigins into a trimmed, non-empty slice.
@@ -242,31 +301,55 @@ func (c *Config) CORSAllowedOriginList() []string {
 	return out
 }
 
-// TrustedProxyList parses TrustedProxies into netip.Prefix entries. A bare IP
-// (no "/bits" suffix) is treated as an exact match. Malformed entries are
-// skipped rather than failing startup, since a typo here should degrade to
-// "trust nothing" rather than crash the process.
-func (c *Config) TrustedProxyList() []netip.Prefix {
-	var out []netip.Prefix
-	for _, raw := range strings.Split(c.TrustedProxies, ",") {
+// parsePrefixList splits a comma-separated list of CIDRs and bare addresses
+// into prefixes, returning the entries it could not parse alongside them. A
+// bare IP (no "/bits" suffix) is treated as an exact match.
+func parsePrefixList(list string) (prefixes []netip.Prefix, invalid []string) {
+	for _, raw := range strings.Split(list, ",") {
 		s := strings.TrimSpace(raw)
 		if s == "" {
 			continue
 		}
-		if !strings.Contains(s, "/") {
-			addr, err := netip.ParseAddr(s)
+		entry := s
+		if !strings.Contains(entry, "/") {
+			addr, err := netip.ParseAddr(entry)
 			if err != nil {
+				invalid = append(invalid, s)
 				continue
 			}
-			s = addr.String() + "/" + strconv.Itoa(addr.BitLen())
+			entry = addr.String() + "/" + strconv.Itoa(addr.BitLen())
 		}
-		prefix, err := netip.ParsePrefix(s)
+		prefix, err := netip.ParsePrefix(entry)
 		if err != nil {
+			invalid = append(invalid, s)
 			continue
 		}
-		out = append(out, prefix)
+		prefixes = append(prefixes, prefix)
 	}
-	return out
+	return prefixes, invalid
+}
+
+// TrustedProxyList parses TrustedProxies into netip.Prefix entries. Malformed
+// entries are skipped rather than failing startup, since a typo here should
+// degrade to "trust nothing" rather than crash the process.
+func (c *Config) TrustedProxyList() []netip.Prefix {
+	prefixes, _ := parsePrefixList(c.TrustedProxies)
+	return prefixes
+}
+
+// MetricsAllowedPeerList parses MetricsAllowedCIDRs into netip.Prefix entries.
+// Unlike the proxy list, a malformed entry here is refused at startup by
+// Validate rather than dropped: dropping one silently narrows who can read the
+// metrics, and the operator finds out by way of an endpoint that answers 404
+// with nothing anywhere saying why.
+func (c *Config) MetricsAllowedPeerList() []netip.Prefix {
+	prefixes, _ := parsePrefixList(c.MetricsAllowedCIDRs)
+	return prefixes
+}
+
+// MetricsEnabled reports whether the administrative listener is configured.
+func (c *Config) MetricsEnabled() bool {
+	return strings.TrimSpace(c.MetricsAddr) != ""
 }
 
 // IsDev reports whether the API is running in a development environment.

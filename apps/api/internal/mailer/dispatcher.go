@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/observability"
 )
 
 // SenderFunc adapts a plain function to the Mailer interface.
@@ -77,6 +79,7 @@ func (d *Dispatcher) Send(ctx context.Context, msg Message) error {
 	d.mu.Lock()
 	if d.inFlight >= d.maxInFlight {
 		d.mu.Unlock()
+		observability.RecordMailDelivery(observability.MailRefused)
 		return fmt.Errorf("mail not queued: %d deliveries already in flight", d.maxInFlight)
 	}
 	d.inFlight++
@@ -87,8 +90,11 @@ func (d *Dispatcher) Send(ctx context.Context, msg Message) error {
 		defer cancel()
 		defer d.finish()
 		if err := d.inner.Send(sendCtx, msg); err != nil {
+			observability.RecordMailDelivery(observability.MailFailed)
 			slog.ErrorContext(sendCtx, "background mail delivery failed", "subject", msg.Subject, "error", err)
+			return
 		}
+		observability.RecordMailDelivery(observability.MailSent)
 	}()
 	return nil
 }

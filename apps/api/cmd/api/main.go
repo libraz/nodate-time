@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,13 +21,61 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
+	"github.com/libraz/nodate-time/apps/api/internal/observability"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
+// healthReporter assembles the dependency checks the detailed health report
+// runs.
+//
+// Only the database is required. Running without object storage and running
+// without a mail relay are both supported configurations, and a report that
+// called either one fatal would take a deployment out of rotation over a
+// feature it was never given.
+func healthReporter(db *sql.DB, storageClient *storage.Client, cfg *config.Config) *observability.Reporter {
+	checks := []observability.Check{{
+		Name:     "database",
+		Required: true,
+		Probe:    db.PingContext,
+	}}
+
+	if storageClient != nil {
+		checks = append(checks, observability.Check{
+			Name:  "object_storage",
+			Probe: storageClient.Ping,
+		})
+	}
+
+	if cfg.SMTPHost != "" {
+		relay := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
+		// A dial rather than a delivery. It answers the question an operator
+		// actually has when a reset link does not arrive -- is the relay
+		// reachable from in here -- without putting a message on the wire
+		// every time someone reads the report.
+		checks = append(checks, observability.Check{
+			Name: "mail_relay",
+			Probe: func(ctx context.Context) error {
+				conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", relay)
+				if err != nil {
+					return err
+				}
+				return conn.Close()
+			},
+		})
+	}
+
+	return observability.NewReporter(0, checks...)
+}
+
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	// Wrapped so that every line logged with a request's context carries that
+	// request's identifier, including the ones written deep inside a handler
+	// that knows nothing about this.
+	slog.SetDefault(slog.New(observability.NewContextHandler(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}),
+	)))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -49,6 +99,13 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("database connected")
+
+	// Pool saturation is invisible from outside the driver: requests queue
+	// there rather than in the server, so the handlers and the CPU both look
+	// idle while every request waits.
+	if err := observability.RegisterDBStats("main", db); err != nil {
+		slog.Warn("failed to export database pool metrics", "error", err)
+	}
 
 	queries := generated.New(db)
 
@@ -140,7 +197,11 @@ func main() {
 		TrustedProxies:       cfg.TrustedProxyList(),
 		AuthRateLimit:        cfg.AuthRateLimit,
 		ShareRateLimit:       cfg.ShareRateLimit,
-	}, app.Options{CORSAllowedOrigins: cfg.CORSAllowedOriginList()})
+	}, app.Options{
+		CORSAllowedOrigins: cfg.CORSAllowedOriginList(),
+		AccessLogger:       slog.Default(),
+		TrustedProxies:     cfg.TrustedProxyList(),
+	})
 	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
 		slog.Info("Google sign-in restricted to domains", "domains", domains)
 	} else {
@@ -165,6 +226,27 @@ func main() {
 		}
 	}()
 
+	// The administrative listener is a separate server on a separate address
+	// so that what it serves cannot be reached through the public one by any
+	// routing mistake -- there is no rule to get wrong, only a socket that is
+	// not published.
+	var adminSrv *http.Server
+	if cfg.MetricsEnabled() {
+		adminSrv = observability.NewAdminServer(cfg.MetricsAddr, observability.NewAdminHandler(observability.AdminOptions{
+			AllowedPeers: cfg.MetricsAllowedPeerList(),
+			Health:       healthReporter(db, storageClient, cfg),
+		}))
+		go func() {
+			slog.Info("metrics listener starting", "addr", cfg.MetricsAddr, "allowed", cfg.MetricsAllowedCIDRs)
+			// A failure here is reported and survived. Losing the ability to
+			// observe the process is a bad afternoon; refusing to serve the
+			// product over it is an outage.
+			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics listener stopped", "addr", cfg.MetricsAddr, "error", err)
+			}
+		}()
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -176,6 +258,14 @@ func main() {
 		slog.Info("shutting down", "signal", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// The administrative listener goes first and is not waited on beyond
+		// the shared deadline: an in-progress CPU profile would otherwise hold
+		// the process open for as long as the profile was asked to run.
+		if adminSrv != nil {
+			if err := adminSrv.Shutdown(ctx); err != nil {
+				slog.Warn("metrics listener shutdown error", "error", err)
+			}
+		}
 		if err := srv.Shutdown(ctx); err != nil {
 			slog.Error("shutdown error", "error", err)
 			os.Exit(1)
