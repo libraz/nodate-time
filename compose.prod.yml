@@ -107,8 +107,20 @@ services:
       TC_GOOGLE_CLIENT_SECRET: ${TC_GOOGLE_CLIENT_SECRET:-}
       TC_LINE_CLIENT_ID: ${TC_LINE_CLIENT_ID:-}
       TC_LINE_CLIENT_SECRET: ${TC_LINE_CLIENT_SECRET:-}
+      # Metrics, profiles and the detailed health report. A container cannot
+      # bind the host's loopback, so this binds every interface *inside the
+      # container* and is kept private by the two lines below: the allow-list,
+      # and a published port that only the host's loopback can reach.
+      TC_METRICS_ADDR: ":9464"
+      TC_METRICS_ALLOWED_CIDRS: ${TC_METRICS_ALLOWED_CIDRS:-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
     ports:
       - "127.0.0.1:${TC_API_PORT:-8080}:8080"
+      # Reachable from the host as 127.0.0.1:9464 and from a scraper sharing
+      # this compose network as api:9464. Not from anywhere else. Do not add a
+      # reverse-proxy rule for it: nothing here reads X-Forwarded-For, so a
+      # proxied request is judged by the proxy's own address and would let
+      # every client through together.
+      - "127.0.0.1:${TC_METRICS_PORT:-9464}:9464"
 
   web:
     build:

@@ -26,7 +26,9 @@ COPY --from=build /out/api /api
 COPY --from=build /out/createuser /createuser
 COPY --from=build /out/healthcheck /healthcheck
 USER nonroot:nonroot
-EXPOSE 8080
+# 8080 serves the product; 9464 serves metrics, profiles and the detailed
+# health report and is expected to stay inside the host or the compose network.
+EXPOSE 8080 9464
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
     CMD ["/healthcheck"]
 ENTRYPOINT ["/api"]

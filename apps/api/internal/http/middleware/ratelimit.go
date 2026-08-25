@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/observability"
 )
 
 // rateBucket is a fixed-window counter for a single client key.
@@ -23,6 +24,7 @@ type rateBucket struct {
 type RateLimiter struct {
 	mu             sync.Mutex
 	buckets        map[string]*rateBucket
+	scope          string
 	limit          int
 	window         time.Duration
 	trustedProxies []netip.Prefix
@@ -31,9 +33,15 @@ type RateLimiter struct {
 // NewRateLimiter creates a limiter allowing limit requests per window per
 // client IP. trustedProxies lists the reverse-proxy hops allowed to set
 // X-Forwarded-For (see ClientIP); pass nil to trust only the direct peer.
-func NewRateLimiter(limit int, window time.Duration, trustedProxies []netip.Prefix) *RateLimiter {
+//
+// scope names this limiter in the metrics. The budgets are separate for a
+// reason -- a shared calendar's audience must not be able to exhaust the
+// sign-in budget -- and a single rejection count would hide exactly the
+// distinction the split exists to make.
+func NewRateLimiter(scope string, limit int, window time.Duration, trustedProxies []netip.Prefix) *RateLimiter {
 	rl := &RateLimiter{
 		buckets:        make(map[string]*rateBucket),
+		scope:          scope,
 		limit:          limit,
 		window:         window,
 		trustedProxies: trustedProxies,
@@ -85,6 +93,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 					retryAfter = 1
 				}
 				h.Set("Retry-After", strconv.Itoa(retryAfter))
+				observability.RecordRateLimitRejection(rl.scope)
 				// Through the shared writer rather than a hand-written literal,
 				// so this envelope cannot drift from the one every handler
 				// returns — the client maps a single shape, not two.

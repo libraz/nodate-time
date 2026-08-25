@@ -7,7 +7,9 @@
 package app
 
 import (
+	"log/slog"
 	"net/http"
+	"net/netip"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -22,6 +24,16 @@ type Options struct {
 	// which is what a same-origin deployment wants -- see corsOptions for why
 	// that takes saying so explicitly.
 	CORSAllowedOrigins []string
+	// AccessLogger receives one line per request. Nil disables the access log
+	// while leaving the metrics in place, which is what the tests want: a
+	// suite that builds a server per test would otherwise bury its own
+	// failures under the traffic it generates.
+	AccessLogger *slog.Logger
+	// TrustedProxies lists the hops allowed to supply an inbound request
+	// identifier. It is the same list router.Deps carries for rate limiting;
+	// it is repeated here because the identifier is stamped before the routes
+	// are reached.
+	TrustedProxies []netip.Prefix
 }
 
 // corsOptions translates the origin list into a CORS configuration.
@@ -48,13 +60,19 @@ func corsOptions(allowedOrigins []string) cors.Options {
 	return opts
 }
 
-// NewHandler builds the full stack: recovery, then security headers, then
-// CORS, then the routes.
+// NewHandler builds the full stack: request identity and measurement, then
+// recovery, then security headers, then CORS, then the routes.
 //
-// Recovery is outermost so it also covers a panic raised by another middleware,
-// and so it runs before anything has been written.
+// Recovery sits outside everything that can fail on behalf of a request, so it
+// also covers a panic raised by another middleware and runs before anything
+// has been written. The two observability middlewares are the only ones
+// outside it, and deliberately so: a request that panicked is one of the
+// requests worth counting, and counting it from within the recovery would
+// record the status as whatever had been written before the panic -- nothing.
 func NewHandler(deps router.Deps, opts Options) http.Handler {
 	outer := chi.NewRouter()
+	outer.Use(middleware.RequestID(opts.TrustedProxies))
+	outer.Use(middleware.Observe(opts.AccessLogger))
 	outer.Use(middleware.Recoverer())
 	outer.Use(middleware.SecurityHeaders())
 	outer.Use(cors.Handler(corsOptions(opts.CORSAllowedOrigins)))

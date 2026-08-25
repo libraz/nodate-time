@@ -105,7 +105,7 @@ func Build(deps Deps) http.Handler {
 	}
 	r.Group(func(pub chi.Router) {
 		if authLimit > 0 {
-			pub.Use(middleware.NewRateLimiter(authLimit, time.Minute, deps.TrustedProxies).Middleware())
+			pub.Use(middleware.NewRateLimiter("auth", authLimit, time.Minute, deps.TrustedProxies).Middleware())
 		}
 		api := humachi.New(pub, apiConfig)
 
@@ -227,7 +227,7 @@ func Build(deps Deps) http.Handler {
 	// --- Public share links (no auth, counted on their own budget) ---
 	r.Group(func(share chi.Router) {
 		if shareLimit > 0 {
-			share.Use(middleware.NewRateLimiter(shareLimit, time.Minute, deps.TrustedProxies).Middleware())
+			share.Use(middleware.NewRateLimiter("share", shareLimit, time.Minute, deps.TrustedProxies).Middleware())
 		}
 		api := humachi.New(share, apiConfig)
 		invPubDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
