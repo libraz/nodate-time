@@ -249,7 +249,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("TC_METRICS_ALLOWED_CIDRS has entries that are neither an IP nor a CIDR: %s", strings.Join(invalid, ", "))
 		}
 		if _, _, err := net.SplitHostPort(strings.TrimSpace(c.MetricsAddr)); err != nil {
-			return fmt.Errorf("TC_METRICS_ADDR must be host:port (e.g. 127.0.0.1:9090), or empty to disable the metrics listener: %w", err)
+			return fmt.Errorf("TC_METRICS_ADDR must be host:port (e.g. 127.0.0.1:9464), or empty to disable the metrics listener: %w", err)
 		}
 	}
 	return nil
