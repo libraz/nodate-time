@@ -3,13 +3,11 @@
 #
 #   docker compose -f compose.prod.yml up -d --build
 #
-# TLS is deliberately not here. Both HTTP services publish on the loopback
-# interface only and expect a reverse proxy on the host to terminate TLS in
-# front of them; see the README's Deployment section.
-#
-# Object storage publishes nothing at all: it is reachable only from this
-# network, and the browser gets at blobs through the API. One hostname is
-# therefore enough for the whole deployment.
+# The web service is the only way in. It terminates TLS, serves the SPA, and
+# passes /api to the API over this network. The API and the object store are
+# reached through it rather than published beside it, so one hostname and one
+# certificate cover the whole deployment; see the README's Deployment section
+# for obtaining the certificate, and for putting a proxy on the host instead.
 #
 # The images are built rather than pulled. The SPA compiles the API origin
 # into its bundle, so no prebuilt image is correct for two deployments.
@@ -136,6 +134,9 @@ services:
       TC_METRICS_ADDR: ":9464"
       TC_METRICS_ALLOWED_CIDRS: ${TC_METRICS_ALLOWED_CIDRS:-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
     ports:
+      # Not how the browser reaches the API -- that goes through the web
+      # service, over this network. Published on the host's loopback only, for
+      # diagnosis and for the reverse-proxy-on-the-host arrangement.
       - "127.0.0.1:${TC_API_PORT:-8080}:8080"
       # Reachable from the host as 127.0.0.1:9464 and from a scraper sharing
       # this compose network as api:9464. Not from anywhere else. Do not add a
@@ -144,6 +145,13 @@ services:
       # every client through together.
       - "127.0.0.1:${TC_METRICS_PORT:-9464}:9464"
 
+  # Serves the SPA and terminates TLS, and is the only service the internet
+  # reaches. Requests under /api are passed to the API on this network, so one
+  # hostname and one certificate cover the whole deployment.
+  #
+  # To put a reverse proxy on the host instead, drop the TLS template mount and
+  # the two certificate volumes below and publish 127.0.0.1:8081:80 -- the
+  # image falls back to plain HTTP, which already proxies /api the same way.
   web:
     build:
       context: .
@@ -151,8 +159,26 @@ services:
       args:
         VITE_API_BASE: ${TC_API_PUBLIC_URL:?the public URL of the API}
     restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # Substituted into the TLS template: it names the server and the
+      # certificate directory. The filter keeps the substitution to TC_ names,
+      # so nginx's own $$host and $$scheme survive into the generated file.
+      TC_PUBLIC_HOST: ${TC_PUBLIC_HOST:?the hostname the certificate is issued for}
+      NGINX_ENVSUBST_FILTER: "^TC_"
+    volumes:
+      - ./apps/web/nginx/tls.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Mounted whole rather than by certificate directory: under live/ the
+      # files are symlinks into archive/, which resolve to nothing if only
+      # live/ is brought in.
+      - ${TC_TLS_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+      # Where certbot --webroot writes its challenge. Renewal is answered by
+      # the running server, so nothing has to be stopped to hold port 80.
+      - ${TC_ACME_WEBROOT:-./acme}:/var/www/acme:ro
     ports:
-      - "127.0.0.1:${TC_WEB_PORT:-8081}:80"
+      - "80:80"
+      - "443:443"
 
 volumes:
   mysql_data:

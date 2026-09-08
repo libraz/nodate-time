@@ -1,0 +1,42 @@
+# TLS terminated here, in the container that serves the SPA. Mounted by
+# compose.prod.yml over /etc/nginx/templates/default.conf.template, where the
+# nginx image substitutes environment variables into it at startup and writes
+# the result to /etc/nginx/conf.d/default.conf, replacing http.conf.
+#
+# Only TC_-prefixed names are substituted (NGINX_ENVSUBST_FILTER), so nginx's
+# own $host, $scheme and $request_uri survive into the generated file.
+#
+# The certificate has to exist before this starts -- nginx refuses to load a
+# server block whose certificate is missing. See the README's Deployment
+# section for obtaining one first.
+
+server {
+    listen 80;
+    server_name ${TC_PUBLIC_HOST};
+
+    # Renewal is served over plain HTTP by definition, so it is answered here
+    # rather than redirected. certbot --webroot writes into the directory this
+    # is mounted from.
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${TC_PUBLIC_HOST};
+
+    ssl_certificate     /etc/letsencrypt/live/${TC_PUBLIC_HOST}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${TC_PUBLIC_HOST}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    include /etc/nginx/app.conf;
+}
