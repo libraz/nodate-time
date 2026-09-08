@@ -287,8 +287,9 @@ certbot renew --webroot -w /path/to/acme \
 ```
 
 `TC_API_PUBLIC_URL` has to carry the `/api` prefix
-(`https://app.example.com/api`): it is the address the OAuth callback returns to
-and the address every blob URL points back at. Set `TC_TRUSTED_PROXIES` to the
+(`https://app.example.com/api`): it is the address the OAuth callback returns
+to, the address every blob URL points back at, and the path the `$schema` links
+in responses are built from. Set `TC_TRUSTED_PROXIES` to the
 compose network's range (`172.16.0.0/12` covers the default) or every client
 collapses onto one rate-limit bucket, since all of them arrive through nginx.
 

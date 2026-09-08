@@ -57,7 +57,9 @@ func TestOpenAPIDescribesTheWholeAPI(t *testing.T) {
 
 	docsStatus, docsBody := getRaw(t, testServerURL+"/docs")
 	require.Equal(t, 200, docsStatus)
-	require.Contains(t, docsBody, "/openapi.yaml")
+	// Fetched next to the page rather than from the host root, so the page
+	// still finds it when the API is published under a path.
+	require.Contains(t, docsBody, `apiDescriptionUrl="openapi.yaml"`)
 }
 
 // TestResponseSchemaLinksResolve verifies that the $schema URL a response

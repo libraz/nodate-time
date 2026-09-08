@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -26,14 +27,47 @@ import (
 // the groups and registered on the bare mux instead, where nothing gates them.
 
 // docConfig is the shared configuration every route group is built from.
-// SchemasPath is left at its default because it is also what the schema-link
-// transformer writes into each response's $schema field; the route it names is
-// re-registered on the bare mux so those links resolve without a token.
-func docConfig(title, version string) huma.Config {
+//
+// SchemasPath is set to the path a client would fetch a schema at, not the one
+// this server receives. huma writes it verbatim into each response's $schema
+// field and Link header, and resolves those against the request's host alone --
+// so under a reverse proxy publishing the API at /api, the default names
+// https://host/schemas/... while the schema is only reachable at
+// https://host/api/schemas/.... The route itself is registered separately, at
+// the path requests actually arrive on. See serveDocs.
+func docConfig(title, version, apiPublicURL string) huma.Config {
 	cfg := huma.DefaultConfig(title, version)
 	cfg.OpenAPIPath = ""
 	cfg.DocsPath = ""
+	cfg.SchemasPath = publicPathPrefix(apiPublicURL) + schemasRoutePath
 	return cfg
+}
+
+// schemasRoutePath is where the schema route is registered: the path a request
+// arrives on, which is this server's own root whatever it is published under.
+// Its public counterpart is cfg.SchemasPath, which carries the prefix.
+const schemasRoutePath = "/schemas"
+
+// publicPathPrefix is the path the API is published under, as a prefix that can
+// be put in front of a route: "" when it is served at the root of its host, and
+// otherwise a leading slash with no trailing one ("/api").
+//
+// An unparseable or absent URL yields "", which is the no-prefix deployment --
+// the same answer as a URL naming a bare host, and the one that leaves every
+// link pointing where it did before.
+func publicPathPrefix(apiPublicURL string) string {
+	if apiPublicURL == "" {
+		return ""
+	}
+	u, err := url.Parse(apiPublicURL)
+	if err != nil {
+		return ""
+	}
+	p := strings.Trim(u.Path, "/")
+	if p == "" {
+		return ""
+	}
+	return "/" + p
 }
 
 // rxSchemaRef rewrites internal component references into the URLs the schema
@@ -69,7 +103,12 @@ func serveDocs(r chi.Router, cfg huma.Config) {
 	// The schema route is registered by every group as well; this one is last
 	// and therefore the one the tree keeps, which is what makes the $schema
 	// links in responses reachable without authenticating.
-	r.Get(cfg.SchemasPath+"/{schema}", func(w http.ResponseWriter, req *http.Request) {
+	//
+	// Registered at the path requests arrive on, while the links written into
+	// responses carry the public prefix -- the two differ whenever a proxy
+	// strips one. What the body refers to is likewise the public path, because
+	// it is a client that follows it.
+	r.Get(schemasRoutePath+"/{schema}", func(w http.ResponseWriter, req *http.Request) {
 		name := strings.TrimSuffix(chi.URLParam(req, "schema"), ".json")
 		schema, ok := cfg.Components.Schemas.Map()[name]
 		if !ok {
@@ -99,7 +138,10 @@ func serveDocs(r chi.Router, cfg huma.Config) {
     <link rel="stylesheet" href="https://unpkg.com/@stoplight/elements@9.0.15/styles.min.css">
   </head>
   <body style="height: 100vh;">
-    <elements-api apiDescriptionUrl="/openapi.yaml" router="hash" layout="sidebar" tryItCredentialsPolicy="same-origin"></elements-api>
+    <!-- Relative, so the document is fetched next to this page rather than at
+         the host's root: under a proxy publishing the API at /api, an absolute
+         path would ask the SPA for it and be answered with the SPA. -->
+    <elements-api apiDescriptionUrl="openapi.yaml" router="hash" layout="sidebar" tryItCredentialsPolicy="same-origin"></elements-api>
     <script src="https://unpkg.com/@stoplight/elements@9.0.15/web-components.min.js" integrity="sha384-ug0XVxoAdgcaAsyjrRZWXORhs7ja9Ims0KVvxLyGqAM/wCoJvVFA84kcMU1ZJMzc" crossorigin="anonymous"></script>
   </body>
 </html>`)

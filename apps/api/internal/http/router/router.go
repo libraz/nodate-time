@@ -45,8 +45,14 @@ type Deps struct {
 	Signer *storage.Signer
 	Mailer mailer.Mailer
 	WebURL string
-	OAuth  users.OAuthConfig
-	Cipher *secrets.Cipher
+	// APIPublicURL is the address this API answers at from outside, including
+	// any path a reverse proxy serves it under. The $schema links in responses
+	// are built from the path part: they are followed by a client that only
+	// knows the public address, so a link naming the API's own root leads
+	// nowhere when the API is published under a prefix. See openapi.go.
+	APIPublicURL string
+	OAuth        users.OAuthConfig
+	Cipher       *secrets.Cipher
 	// GoogleAllowedDomains restricts Google sign-in to these email domains.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	GoogleAllowedDomains []string
@@ -88,7 +94,7 @@ func Build(deps Deps) http.Handler {
 
 	// One document, three groups: see openapi.go for why the config is shared
 	// and the document routes live on the bare mux.
-	apiConfig := docConfig("Nodate Time", "1.0.0")
+	apiConfig := docConfig("Nodate Time", "1.0.0", deps.APIPublicURL)
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
