@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
+import { APP_NAME } from '@/lib/app-name';
 import { useAuthStore } from '@/stores/auth-store';
 
 export interface OAuthSearch {
@@ -61,7 +62,7 @@ function OAuthCompletePage() {
   }, [redirect, navigate, fetchMe]);
 
   return (
-    <AuthShell title="Nodate Time" subtitle={t('auth.signingIn')}>
+    <AuthShell title={APP_NAME} subtitle={t('auth.signingIn')}>
       <div className="flex flex-col items-center gap-4 py-6">
         <div
           aria-hidden

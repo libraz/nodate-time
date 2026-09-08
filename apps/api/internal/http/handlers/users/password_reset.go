@@ -23,6 +23,8 @@ type ResetDeps struct {
 	Queries *generated.Queries
 	Mailer  mailer.Mailer
 	WebURL  string
+	// AppName is the product the mail names itself as. See Deps.AppName.
+	AppName string
 }
 
 // The budget every automated mail answers to. The per-client half stops an
@@ -152,7 +154,7 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 		// token) so operators can still notice.
 		if err := deps.Mailer.Send(ctx, mailer.Message{
 			To:      user.Email,
-			Subject: "Reset your Nodate Time password",
+			Subject: fmt.Sprintf("Reset your %s password", deps.AppName),
 			Text:    body,
 		}); err != nil {
 			slog.ErrorContext(ctx, "failed to send password reset email", "userID", user.ID, "error", err)

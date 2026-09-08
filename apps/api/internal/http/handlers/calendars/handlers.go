@@ -23,6 +23,9 @@ type Deps struct {
 	Queries     *generated.Queries
 	Storage     *storage.Client
 	WorkspaceID uint32
+	// AppName names the software in the PRODID of an exported calendar, which
+	// is what the importing client reports as the file's source.
+	AppName string
 }
 
 // defaultCalendarColor is applied when a client sends no colour.

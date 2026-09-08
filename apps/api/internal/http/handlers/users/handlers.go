@@ -44,6 +44,9 @@ type Deps struct {
 	// the registration.
 	Mailer mailer.Mailer
 	WebURL string
+	// AppName is the product the mail names itself as. A rebranded deployment
+	// sends mail under its own name rather than the software's.
+	AppName string
 }
 
 func pubIDToHex(b []byte) string {

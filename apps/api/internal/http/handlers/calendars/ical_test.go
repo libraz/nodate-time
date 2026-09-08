@@ -22,7 +22,7 @@ func TestBuildICSAllDayUsesEventTimezone(t *testing.T) {
 		AllDay:   true,
 		Timezone: "Asia/Tokyo",
 	}
-	out := buildICS("Cal", []exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}})
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}})
 	if !strings.Contains(out, "DTSTART;VALUE=DATE:20250624") {
 		t.Errorf("all-day DTSTART should be local 20250624, got:\n%s", out)
 	}
@@ -64,7 +64,7 @@ func TestBuildICSTimedEmitsUTC(t *testing.T) {
 		Title:    "Meeting",
 		Timezone: "Asia/Tokyo",
 	}
-	out := buildICS("Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour)}})
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour)}})
 	if !strings.Contains(out, "DTSTART:20250624T010000Z") {
 		t.Errorf("timed event should emit a UTC instant, got:\n%s", out)
 	}
@@ -82,7 +82,7 @@ func TestBuildICSEscaping(t *testing.T) {
 		URL:      sql.NullString{String: "https://example.com/a,b;c", Valid: true},
 		Timezone: "UTC",
 	}
-	out := buildICS("Cal", []exportEvent{{event: ev, startAt: time.Now().UTC(), endAt: time.Now().UTC()}})
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: time.Now().UTC(), endAt: time.Now().UTC()}})
 	if !strings.Contains(out, `SUMMARY:A\, B\; C`) {
 		t.Errorf("SUMMARY commas/semicolons must be TEXT-escaped:\n%s", out)
 	}
@@ -111,7 +111,7 @@ func TestBuildICSWritesASeriesAsOneVEventWithItsRule(t *testing.T) {
 		rule:       &recurrence.Rule{Freq: "daily", Interval: 1, Count: 30},
 		exceptions: recurrence.Exceptions{base.AddDate(0, 0, 2)},
 	}}
-	out := buildICS("Cal", rows)
+	out := buildICS("Nodate Time", "Cal", rows)
 	if n := strings.Count(out, "BEGIN:VEVENT"); n != 1 {
 		t.Errorf("expected 1 VEVENT for the series, got %d:\n%s", n, out)
 	}
@@ -142,7 +142,7 @@ func TestBuildICSTiesAChangedOccurrenceToItsSeries(t *testing.T) {
 			endAt:         base.AddDate(0, 0, 1).Add(5 * time.Hour),
 			originalStart: base.AddDate(0, 0, 1), isOverride: true},
 	}
-	out := buildICS("Cal", rows)
+	out := buildICS("Nodate Time", "Cal", rows)
 	if n := strings.Count(out, "UID:0102030405060708090a0b0c0d0e0f10@nodate-time"); n != 2 {
 		t.Errorf("both must carry the series UID, got %d:\n%s", n, out)
 	}

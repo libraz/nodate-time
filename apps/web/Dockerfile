@@ -20,6 +20,13 @@ COPY apps/web ./apps/web
 # for one deployment cannot be pointed at another. Moving it means rebuilding.
 ARG VITE_API_BASE
 ENV VITE_API_BASE=${VITE_API_BASE}
+
+# What the deployment calls itself, in the document title and wherever the SPA
+# names itself. Compiled in for the same reason as the origin above, and left
+# unset by a build that is content with the software's own name.
+ARG VITE_APP_NAME
+ENV VITE_APP_NAME=${VITE_APP_NAME}
+
 RUN cd apps/web && bun run build
 
 FROM nginx:1.29-alpine

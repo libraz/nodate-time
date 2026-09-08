@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { type TranslationKey, useT } from '@/i18n';
 import { api } from '@/lib/api';
+import { APP_NAME } from '@/lib/app-name';
 import { useAuthStore } from '@/stores/auth-store';
 
 type OAuthProvider = 'google' | 'line';
@@ -185,7 +186,7 @@ function LoginPage() {
 
   return (
     <AuthShell
-      title="Nodate Time"
+      title={APP_NAME}
       subtitle={
         !passwordEnabled
           ? t('auth.oauthOnlySubtitle')

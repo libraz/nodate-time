@@ -45,6 +45,11 @@ type Deps struct {
 	Signer *storage.Signer
 	Mailer mailer.Mailer
 	WebURL string
+	// AppName is what the deployment calls itself: the title of the OpenAPI
+	// document, the product named in outgoing mail, and the PRODID of an
+	// exported calendar. Empty applies defaultAppName, so a caller that does
+	// not care -- every test server -- does not have to name it.
+	AppName string
 	// APIPublicURL is the address this API answers at from outside, including
 	// any path a reverse proxy serves it under. The $schema links in responses
 	// are built from the path part: they are followed by a client that only
@@ -88,13 +93,22 @@ const (
 	defaultShareRateLimit = 600
 )
 
+// What the deployment is called when it has not been told. The SPA falls back
+// to the same name, in vite.config.ts and src/lib/app-name.ts.
+const defaultAppName = "Nodate Time"
+
 func Build(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.ClientIPMiddleware(deps.TrustedProxies))
 
+	appName := deps.AppName
+	if appName == "" {
+		appName = defaultAppName
+	}
+
 	// One document, three groups: see openapi.go for why the config is shared
 	// and the document routes live on the bare mux.
-	apiConfig := docConfig("Nodate Time", "1.0.0", deps.APIPublicURL)
+	apiConfig := docConfig(appName, "1.0.0", deps.APIPublicURL)
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -129,7 +143,7 @@ func Build(deps Deps) http.Handler {
 		}
 		api := humachi.New(pub, apiConfig)
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
 
 		// Email+password auth (register, login, password reset) is registered
 		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
@@ -177,7 +191,7 @@ func Build(deps Deps) http.Handler {
 
 		// Password reset only makes sense when password login is enabled.
 		if deps.PasswordLoginEnabled {
-			resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL}
+			resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
 
 			huma.Register(api, huma.Operation{
 				OperationID: "request-password-reset",
@@ -274,8 +288,8 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, apiConfig)
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL}
-		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
+		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AppName: appName}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, WorkspacePublicID: deps.WorkspacePublicID}
 		memoDeps := memos.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
 		invDeps := invites.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}

@@ -147,6 +147,7 @@ for the full list and defaults.
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `TC_ENV` | `development` enables dev conveniences | `production` |
+| `TC_APP_NAME` | what the deployment calls itself (OpenAPI title, outgoing mail, iCalendar `PRODID`); the SPA takes the same name from the `VITE_APP_NAME` build argument | `Nodate Time` |
 | `TC_PORT` | API port | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT signing key (≥32 bytes required in prod) | dev fallback |
