@@ -568,7 +568,7 @@ func TestAttachmentPresignedPutRejectsMismatchedContentLength(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
 		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1, "sha256": helpers.SHA256Hex(body)}, &pres)
 
-	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "application/pdf", body)
+	status, _ := helpers.UploadToSignedURLStatus(t, pres.UploadURL, "application/pdf", body)
 	require.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
 }
 

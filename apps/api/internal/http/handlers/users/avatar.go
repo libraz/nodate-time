@@ -53,7 +53,7 @@ func parseSHA256(s string) ([]byte, bool) {
 	return raw, true
 }
 
-// PresignAvatar issues a presigned PUT URL for uploading the current user's avatar.
+// PresignAvatar issues a signed PUT URL for uploading the current user's avatar.
 // The caller must then call ConfirmAvatar with the returned avatarId to finalize
 // the change.
 func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*PresignAvatarOutput, error) {
@@ -99,7 +99,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, in.Body.ByteSize, avatarUploadTTL)
+		url, err := deps.Storage.SignedPutURL(key, in.Body.ContentType, in.Body.ByteSize, avatarUploadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

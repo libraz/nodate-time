@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/blobs"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/albums"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/audit"
@@ -38,10 +39,14 @@ type Deps struct {
 	// unique key uses -- see events.PresignUpload.
 	WorkspacePublicID []byte
 	Storage           *storage.Client
-	Mailer            mailer.Mailer
-	WebURL            string
-	OAuth             users.OAuthConfig
-	Cipher            *secrets.Cipher
+	// Signer mints and checks the URLs the browser reads and writes blobs
+	// through. It is the same signer the storage client mints with, because a
+	// URL minted by one and checked by the other would never verify.
+	Signer *storage.Signer
+	Mailer mailer.Mailer
+	WebURL string
+	OAuth  users.OAuthConfig
+	Cipher *secrets.Cipher
 	// GoogleAllowedDomains restricts Google sign-in to these email domains.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	GoogleAllowedDomains []string
@@ -90,6 +95,15 @@ func Build(deps Deps) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	// Blob relay. On the bare mux for the same reason /health is: it is not
+	// part of the typed API surface, it is addressed only by URLs the API
+	// itself minted, and it carries raw bytes rather than a JSON body huma
+	// would parse and cap. No auth middleware -- the URL's own signature is
+	// what authorizes it. See the blobs package.
+	if deps.Signer != nil {
+		r.Mount(storage.BlobPath, blobs.Handler(blobs.Deps{Storage: deps.Storage, Signer: deps.Signer}))
+	}
 
 	// --- Public routes (no auth) ---
 	// Sensitive unauthenticated endpoints (login, register, password reset,

@@ -5,9 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,13 +13,20 @@ import (
 )
 
 // Client wraps the MinIO S3 client.
+//
+// It also mints the URLs a browser reads and writes blobs through. Those URLs
+// address this API rather than the object store: the store is reachable only
+// from the private network, so every transfer is relayed. See Signer.
 type Client struct {
 	mc     *minio.Client
 	bucket string
+	signer *Signer
 }
 
-// NewClient creates a new MinIO storage client.
-func NewClient(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Client, error) {
+// NewClient creates a new MinIO storage client. signer mints the browser-facing
+// URLs; a nil signer leaves the deployment able to store and read blobs
+// server-side but unable to hand any of them to a client.
+func NewClient(endpoint, accessKey, secretKey, bucket string, useSSL bool, signer *Signer) (*Client, error) {
 	mc, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
@@ -30,7 +34,7 @@ func NewClient(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*Cli
 	if err != nil {
 		return nil, err
 	}
-	return &Client{mc: mc, bucket: bucket}, nil
+	return &Client{mc: mc, bucket: bucket, signer: signer}, nil
 }
 
 // EnsureBucket creates the bucket if it does not exist.
@@ -62,69 +66,40 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// PresignPut returns a presigned PUT URL for uploading an object of exactly
-// byteSize bytes. Content-Type and Content-Length are both bound into the
-// signature, so the client's actual request must carry a matching
-// Content-Type and a body of exactly that length or the signature is
-// rejected — this is what keeps a byteSize the caller validated against its
-// own limit (e.g. 100MB attachments) from being a value trusted only at
-// Confirm time, when a much larger object could already have been written.
-//
-// A byteSize that is not positive is refused rather than signed without the
-// length binding: an unbound URL accepts a body of any size, so a caller that
-// let a zero through would be handing out an unlimited write to the bucket.
-// contentType == "" skips the type binding.
-func (c *Client) PresignPut(ctx context.Context, key string, contentType string, byteSize int64, expires time.Duration) (string, error) {
-	if byteSize <= 0 {
-		return "", fmt.Errorf("presign put %s: byte size must be positive, got %d", key, byteSize)
+// SignedPutURL returns a URL the browser uploads an object of exactly byteSize
+// bytes of contentType through. See Signer.PutURL for what the signature binds.
+func (c *Client) SignedPutURL(key, contentType string, byteSize int64, expires time.Duration) (string, error) {
+	if c.signer == nil {
+		return "", ErrSignerUnconfigured
 	}
-	headers := http.Header{}
-	if contentType != "" {
-		headers.Set("Content-Type", contentType)
-	}
-	headers.Set("Content-Length", strconv.FormatInt(byteSize, 10))
-	u, err := c.mc.PresignHeader(ctx, http.MethodPut, c.bucket, key, expires, url.Values{}, headers)
-	if err != nil {
-		return "", err
-	}
-	return u.String(), nil
+	return c.signer.PutURL(key, contentType, byteSize, expires)
 }
 
-// PresignGet returns a presigned GET URL for downloading an object.
-func (c *Client) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {
-	u, err := c.mc.PresignedGetObject(ctx, c.bucket, key, expires, nil)
-	if err != nil {
-		return "", err
+// SignedGetURL returns a URL the browser reads the object through.
+func (c *Client) SignedGetURL(key string, expires time.Duration) (string, error) {
+	if c.signer == nil {
+		return "", ErrSignerUnconfigured
 	}
-	return u.String(), nil
+	return c.signer.GetURL(key, expires)
 }
 
-// PresignDownload returns a presigned GET URL that forces browsers to download
-// the object as inert bytes instead of rendering potentially active content.
-// filename, if non-empty, is carried in Content-Disposition so the saved file
-// keeps its original name (including non-ASCII characters) instead of the
-// bucket's opaque, extensionless object key.
-func (c *Client) PresignDownload(ctx context.Context, key string, filename string, expires time.Duration) (string, error) {
-	params := downloadResponseParams(filename)
-	u, err := c.mc.PresignedGetObject(ctx, c.bucket, key, expires, params)
-	if err != nil {
-		return "", err
+// SignedDownloadURL returns a URL that makes browsers save the object as inert
+// bytes instead of rendering potentially active content. filename, if
+// non-empty, is carried into Content-Disposition so the saved file keeps its
+// original name (including non-ASCII characters) rather than the bucket's
+// opaque, extensionless object key.
+func (c *Client) SignedDownloadURL(key, filename string, expires time.Duration) (string, error) {
+	if c.signer == nil {
+		return "", ErrSignerUnconfigured
 	}
-	return u.String(), nil
+	return c.signer.DownloadURL(key, filename, expires)
 }
 
-func downloadResponseParams(filename string) url.Values {
-	params := url.Values{}
-	params.Set("response-content-disposition", contentDisposition(filename))
-	params.Set("response-content-type", "application/octet-stream")
-	return params
-}
-
-// contentDisposition builds an attachment Content-Disposition value per
+// ContentDisposition builds an attachment Content-Disposition value per
 // RFC 6266 / RFC 5987: filename carries an ASCII-safe fallback for older
 // clients, filename* carries the exact, percent-encoded UTF-8 name for
 // clients that support it (all modern browsers).
-func contentDisposition(filename string) string {
+func ContentDisposition(filename string) string {
 	if filename == "" {
 		return "attachment"
 	}
@@ -179,6 +154,59 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 type ObjectInfo struct {
 	Size        int64
 	ContentType string
+}
+
+// Object is an open object body.
+//
+// It is seekable because that is what lets the relay answer a Range request --
+// a resumed download, or a player seeking within a large attachment -- without
+// reading from the start and discarding the part nobody asked for.
+type Object struct {
+	obj     *minio.Object
+	Info    ObjectInfo
+	ModTime time.Time
+}
+
+func (o *Object) Read(p []byte) (int, error) { return o.obj.Read(p) }
+
+func (o *Object) Seek(offset int64, whence int) (int64, error) { return o.obj.Seek(offset, whence) }
+
+func (o *Object) Close() error { return o.obj.Close() }
+
+// Open returns the object's bytes for reading, and whether it exists.
+//
+// The metadata is read here rather than left to the first Read: minio-go opens
+// lazily, so a missing object would otherwise surface partway through a
+// response that had already claimed to be a success.
+func (c *Client) Open(ctx context.Context, key string) (*Object, bool, error) {
+	obj, err := c.mc.GetObject(ctx, c.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, false, err
+	}
+	stat, err := obj.Stat()
+	if err != nil {
+		obj.Close()
+		resp := minio.ToErrorResponse(err)
+		if resp.StatusCode == 404 || resp.Code == "NoSuchKey" {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return &Object{
+		obj:     obj,
+		Info:    ObjectInfo{Size: stat.Size, ContentType: stat.ContentType},
+		ModTime: stat.LastModified,
+	}, true, nil
+}
+
+// Put stores exactly byteSize bytes read from r under key.
+//
+// The size is passed rather than discovered so the object is streamed straight
+// through: given a length, minio-go sends it as one request without staging a
+// copy, which is what keeps a 100MB attachment from being 100MB of API memory.
+func (c *Client) Put(ctx context.Context, key string, r io.Reader, byteSize int64, contentType string) error {
+	_, err := c.mc.PutObject(ctx, c.bucket, key, r, byteSize, minio.PutObjectOptions{ContentType: contentType})
+	return err
 }
 
 // SHA256 streams the stored object and returns the digest of its bytes.

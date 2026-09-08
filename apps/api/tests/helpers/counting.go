@@ -3,12 +3,10 @@ package helpers
 import (
 	"context"
 	"database/sql"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
-	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 )
 
 // CountingDB wraps a database handle and counts the statements sent through
@@ -58,17 +56,17 @@ func (c *CountingDB) Count() int { return int(c.queries.Load()) }
 func NewCountingTestServer(t *testing.T, db *sql.DB) (*TestServer, *CountingDB) {
 	t.Helper()
 	mc := NewCapturingMailer()
-	sc, bucket, err := newTestStorage(context.Background())
+	signer := newTestSigner()
+	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
 		t.Fatalf("storage init: %v", err)
 	}
 
 	counter := &CountingDB{inner: db}
-	deps := buildHandler(db, mc, sc)
+	deps := buildHandler(db, mc, sc, signer)
 	deps.Queries = generated.New(counter)
 
-	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
-	t.Cleanup(func() { srv.Close() })
+	srv := startTestServer(t, deps, testAppOptions(), signer)
 
 	return &TestServer{
 		BaseURL: srv.URL,

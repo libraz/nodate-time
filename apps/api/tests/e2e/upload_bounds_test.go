@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
@@ -65,9 +66,9 @@ func TestAlbumImageURLsOutlastABrowsingSession(t *testing.T) {
 
 	parsed, err := url.Parse(list.Items[0].ImageURL)
 	require.NoError(t, err)
-	expires, err := strconv.Atoi(parsed.Query().Get("X-Amz-Expires"))
+	exp, err := strconv.ParseInt(parsed.Query().Get("exp"), 10, 64)
 	require.NoError(t, err, "the image URL should carry a signed expiry")
-	require.GreaterOrEqual(t, expires, 3600,
+	require.GreaterOrEqual(t, time.Until(time.Unix(exp, 0)), time.Hour-time.Minute,
 		"a thumbnail loaded lazily must still resolve an hour after the listing")
 }
 

@@ -334,13 +334,13 @@ func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albu
 		resp.Height = &h
 	}
 	if deps.Storage != nil {
-		if url, err := deps.Storage.PresignGet(ctx, p.storageKey, imageTTL); err == nil {
+		if url, err := deps.Storage.SignedGetURL(p.storageKey, imageTTL); err == nil {
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.id, "error", err)
 		}
 		if p.thumbnailStorageKey.Valid {
-			if url, err := deps.Storage.PresignGet(ctx, p.thumbnailStorageKey.String, imageTTL); err == nil {
+			if url, err := deps.Storage.SignedGetURL(p.thumbnailStorageKey.String, imageTTL); err == nil {
 				resp.ThumbnailURL = url
 			} else {
 				slog.WarnContext(ctx, "failed to presign album thumbnail URL", "photoID", p.id, "error", err)
@@ -371,13 +371,13 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 		resp.Height = &h
 	}
 	if deps.Storage != nil {
-		if url, err := deps.Storage.PresignGet(ctx, photoObjectKey(ctx, deps, p), imageTTL); err == nil {
+		if url, err := deps.Storage.SignedGetURL(photoObjectKey(ctx, deps, p), imageTTL); err == nil {
 			resp.ImageURL = url
 		} else {
 			slog.WarnContext(ctx, "failed to presign album photo URL", "photoID", p.ID, "error", err)
 		}
 		if key := thumbnailObjectKey(ctx, deps, p); key != "" {
-			if url, err := deps.Storage.PresignGet(ctx, key, imageTTL); err == nil {
+			if url, err := deps.Storage.SignedGetURL(key, imageTTL); err == nil {
 				resp.ThumbnailURL = url
 			} else {
 				slog.WarnContext(ctx, "failed to presign album thumbnail URL", "photoID", p.ID, "error", err)
@@ -568,7 +568,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		url, err := deps.Storage.PresignPut(ctx, key, in.Body.ContentType, in.Body.ByteSize, uploadTTL)
+		url, err := deps.Storage.SignedPutURL(key, in.Body.ContentType, in.Body.ByteSize, uploadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
@@ -583,7 +583,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			// nothing needs -- the same rule the confirm applies when the
 			// thumbnail does not arrive. The caller sees the field absent,
 			// which it already has to handle.
-			thumbURL, terr := deps.Storage.PresignPut(ctx, albumblob.ThumbnailKey(key),
+			thumbURL, terr := deps.Storage.SignedPutURL(albumblob.ThumbnailKey(key),
 				in.Body.ThumbnailContentType, in.Body.ThumbnailByteSize, uploadTTL)
 			if terr != nil {
 				slog.WarnContext(ctx, "failed to presign album thumbnail upload", "key", key, "error", terr)
@@ -920,7 +920,7 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
-		url, err := deps.Storage.PresignDownload(ctx, photoObjectKey(ctx, deps, photo), photoDownloadFilename(photo), downloadTTL)
+		url, err := deps.Storage.SignedDownloadURL(photoObjectKey(ctx, deps, photo), photoDownloadFilename(photo), downloadTTL)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

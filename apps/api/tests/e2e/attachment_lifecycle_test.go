@@ -43,7 +43,7 @@ func attachEventWithAttachment(
 	// Bytes something already stands behind come back with no upload URL: the
 	// object is there and re-uploading would only be a chance to replace it.
 	if pres.UploadURL != "" {
-		helpers.UploadToPresignedURL(t, pres.UploadURL, "application/pdf", body)
+		helpers.UploadToSignedURL(t, pres.UploadURL, "application/pdf", body)
 	}
 	helpers.DoJSON(t, http.MethodPost,
 		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil, nil)

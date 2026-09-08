@@ -47,7 +47,7 @@ func TestAvatarUploadHappyPath(t *testing.T) {
 	require.NotEmpty(t, pres.UploadURL)
 	require.NotEmpty(t, pres.AvatarID)
 
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	var confirmed userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -120,7 +120,7 @@ func TestAvatarPresignedPutRejectsMismatchedContentLength(t *testing.T) {
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png) - 1, "sha256": helpers.SHA256Hex(png)}, &pres)
-	status, _ := helpers.UploadToPresignedURLStatus(t, pres.UploadURL, "image/png", png)
+	status, _ := helpers.UploadToSignedURLStatus(t, pres.UploadURL, "image/png", png)
 	assert.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
 
 	// Nothing was ever stored, so Confirm legitimately finds no object.
@@ -194,7 +194,7 @@ func TestAvatarDeleteLeavesTheAccountIntact(t *testing.T) {
 	var pres avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	var confirmed userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -264,7 +264,7 @@ func TestAvatarReplaceServesTheNewImageAndReleasesTheOld(t *testing.T) {
 	var pres1 avatarPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(first), "sha256": helpers.SHA256Hex(first)}, &pres1)
-	helpers.UploadToPresignedURL(t, pres1.UploadURL, "image/png", first)
+	helpers.UploadToSignedURL(t, pres1.UploadURL, "image/png", first)
 	var u1 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
 		map[string]any{"avatarId": pres1.AvatarID}, &u1)
@@ -277,7 +277,7 @@ func TestAvatarReplaceServesTheNewImageAndReleasesTheOld(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(second), "sha256": helpers.SHA256Hex(second)}, &pres2)
 	require.NotEqual(t, pres1.AvatarID, pres2.AvatarID)
-	helpers.UploadToPresignedURL(t, pres2.UploadURL, "image/png", second)
+	helpers.UploadToSignedURL(t, pres2.UploadURL, "image/png", second)
 	var u2 userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
 		map[string]any{"avatarId": pres2.AvatarID}, &u2)
