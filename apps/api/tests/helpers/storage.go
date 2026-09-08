@@ -39,23 +39,23 @@ func AttachmentStorageKey(workspacePublicID, sha256Hex string) string {
 	return fmt.Sprintf("workspace/%s/%s", workspacePublicID, sha256Hex)
 }
 
-// UploadToPresignedURL performs an HTTP PUT to a presigned URL, mimicking what
+// UploadToSignedURL performs an HTTP PUT to a signed URL, mimicking what
 // a browser would do. It fatals on any non-2xx response.
-func UploadToPresignedURL(t *testing.T, presignedURL, contentType string, body []byte) {
+func UploadToSignedURL(t *testing.T, signedURL, contentType string, body []byte) {
 	t.Helper()
-	status, respBody := UploadToPresignedURLStatus(t, presignedURL, contentType, body)
+	status, respBody := UploadToSignedURLStatus(t, signedURL, contentType, body)
 	if status < 200 || status >= 300 {
-		t.Fatalf("presigned PUT failed: status=%d body=%s", status, string(respBody))
+		t.Fatalf("signed PUT failed: status=%d body=%s", status, string(respBody))
 	}
 }
 
-// UploadToPresignedURLStatus is like UploadToPresignedURL but returns the
+// UploadToSignedURLStatus is like UploadToSignedURL but returns the
 // status instead of failing the test, for negative-path tests — e.g. a body
-// whose length does not match what was bound into the presigned URL's
+// whose length does not match what was bound into the signed URL's
 // signature.
-func UploadToPresignedURLStatus(t *testing.T, presignedURL, contentType string, body []byte) (int, []byte) {
+func UploadToSignedURLStatus(t *testing.T, signedURL, contentType string, body []byte) (int, []byte) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPut, presignedURL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPut, signedURL, bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -64,7 +64,7 @@ func UploadToPresignedURLStatus(t *testing.T, presignedURL, contentType string, 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("put presigned: %v", err)
+		t.Fatalf("put signed: %v", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
@@ -72,8 +72,8 @@ func UploadToPresignedURLStatus(t *testing.T, presignedURL, contentType string, 
 }
 
 // PutRawObject writes bytes directly into a bucket using the same test MinIO
-// credentials the API's storage client uses, bypassing any presigned URL —
-// and so bypassing the Content-Type/Content-Length binding a presigned PUT
+// credentials the API's storage client uses, bypassing the signed relay —
+// and so bypassing the Content-Type/Content-Length binding a signed PUT
 // enforces. Used to simulate an object landing in storage with metadata that
 // disagrees with what was declared at presign time, to exercise the
 // Confirm-time mismatch cleanup as defense-in-depth independent of how such a
@@ -101,17 +101,17 @@ func PutRawObject(t *testing.T, bucket, key, contentType string, body []byte) {
 	}
 }
 
-// FetchURL does an HTTP GET on a presigned URL and returns the bytes. Fatals
+// FetchURL does an HTTP GET on a signed URL and returns the bytes. Fatals
 // on any non-2xx response.
 func FetchURL(t *testing.T, url string) []byte {
 	t.Helper()
 	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("get presigned: %v", err)
+		t.Fatalf("get signed: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		t.Fatalf("presigned GET failed: status=%d", resp.StatusCode)
+		t.Fatalf("signed GET failed: status=%d", resp.StatusCode)
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {

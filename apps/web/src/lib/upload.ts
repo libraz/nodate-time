@@ -81,9 +81,10 @@ const DIGEST_SLICE_BYTES = 4 * 1024 * 1024;
  *
  * The server stores blobs content-addressed: the digest is the unique key,
  * so the same file attached twice is stored once, and it is what the storage
- * key is built from rather than the filename. The digest has to come from
- * the client because the server does not see the bytes -- the upload goes
- * straight to object storage through a presigned URL.
+ * key is built from rather than the filename. It has to be computed here
+ * because it is needed before the bytes are sent -- it names the object the
+ * upload URL is issued for, and when those bytes are already stored it is what
+ * lets the server answer with no upload URL at all.
  *
  * A Blob is read a slice at a time: a File is backed by disk until something
  * asks for its bytes, and `crypto.subtle` can only be given all of them at
@@ -127,8 +128,8 @@ interface UploadViaPresignArgs {
 
 /**
  * Runs the shared presign -> PUT -> (caller confirms) upload flow:
- * validates the file client-side, requests a presigned URL, uploads the bytes
- * with the matching `Content-Type`, and verifies the PUT succeeded.
+ * validates the file client-side, requests a signed upload URL, uploads the
+ * bytes with the matching `Content-Type`, and verifies the PUT succeeded.
  * Returns the presign response so callers can run their own confirm step.
  *
  * @throws ApiError when validation, presigning, or the PUT fails.

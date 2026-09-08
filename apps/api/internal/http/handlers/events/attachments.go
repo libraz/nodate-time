@@ -175,7 +175,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		out := &PresignUploadOutput{}
 		out.Body.AttachmentID = attachPubID.String()
 		if !alreadyStored {
-			url, err := deps.Storage.PresignPut(ctx, storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
+			url, err := deps.Storage.SignedPutURL(storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 			}
@@ -262,7 +262,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
-		url, err := deps.Storage.PresignDownload(ctx, att.StorageKey, att.Filename, 5*time.Minute)
+		url, err := deps.Storage.SignedDownloadURL(att.StorageKey, att.Filename, 5*time.Minute)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}

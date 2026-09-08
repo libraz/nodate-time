@@ -208,7 +208,7 @@ type PresignAvatarInput struct {
 type PresignAvatarOutput struct {
 	Body struct {
 		AvatarID  string `json:"avatarId" doc:"Opaque ID to send back to ConfirmAvatar"`
-		UploadURL string `json:"uploadUrl" doc:"Presigned PUT URL, valid for 15 minutes"`
+		UploadURL string `json:"uploadUrl" doc:"Signed PUT URL, valid for 15 minutes"`
 	}
 }
 

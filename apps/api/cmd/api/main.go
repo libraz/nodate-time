@@ -121,10 +121,15 @@ func main() {
 	}
 	slog.Info("workspace ready", "slug", ws.Slug, "timezone", ws.Timezone)
 
-	// Storage (MinIO)
+	// Object storage, reached only from the private network. The bytes a
+	// browser reads and writes are relayed by this API through signed URLs
+	// pointing back at it, so the signer needs the address the API is public
+	// at -- and the same signer has to both mint and check them.
+	blobSigner := storage.NewSigner(cfg.APIPublic, []byte(cfg.JWTSecret))
+
 	var storageClient *storage.Client
 	if cfg.S3Endpoint != "" {
-		sc, err := storage.NewClient(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL)
+		sc, err := storage.NewClient(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL, blobSigner)
 		if err != nil {
 			slog.Warn("failed to create storage client, file uploads disabled", "error", err)
 		} else {
@@ -187,6 +192,7 @@ func main() {
 		WorkspaceID:          ws.ID,
 		WorkspacePublicID:    ws.PublicID,
 		Storage:              storageClient,
+		Signer:               blobSigner,
 		Mailer:               mailerClient,
 		WebURL:               cfg.WebURL,
 		OAuth:                oauthCfg,

@@ -56,7 +56,7 @@ func StorageEnabled() bool {
 
 // newTestStorage builds a storage client against the local MinIO if enabled,
 // using a unique bucket per server so parallel tests do not collide.
-func newTestStorage(ctx context.Context) (*storage.Client, string, error) {
+func newTestStorage(ctx context.Context, signer *storage.Signer) (*storage.Client, string, error) {
 	if !StorageEnabled() {
 		return nil, "", nil
 	}
@@ -73,7 +73,7 @@ func newTestStorage(ctx context.Context) (*storage.Client, string, error) {
 		secret = testMinioSecret
 	}
 	bucket := fmt.Sprintf("nodate-test-%d-%d", time.Now().UnixNano(), testBucketSeq.Add(1))
-	c, err := storage.NewClient(endpoint, access, secret, bucket, false)
+	c, err := storage.NewClient(endpoint, access, secret, bucket, false, signer)
 	if err != nil {
 		return nil, "", fmt.Errorf("new storage client: %w", err)
 	}
@@ -106,7 +106,7 @@ func TestWorkspacePublicID(db *sql.DB) string {
 	return u.String()
 }
 
-func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client) *router.Deps {
+func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client, signer *storage.Signer) *router.Deps {
 	queries := generated.New(db)
 	ws := TestWorkspace(queries)
 	return &router.Deps{
@@ -118,6 +118,7 @@ func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client) *router.Deps
 		Mailer:            mc,
 		WebURL:            TestWebURL,
 		Storage:           sc,
+		Signer:            signer,
 		// Tests register tenants over the email+password flow.
 		PasswordLoginEnabled: true,
 		// Parallel tenants register from one loopback IP; the per-IP limiter would
@@ -139,6 +140,28 @@ func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client) *router.Deps
 // itself brings its own options through NewTestServerWithOptions.
 func testAppOptions() app.Options { return app.Options{} }
 
+// newTestSigner builds the blob-URL signer a test server mints and checks with.
+// Its base is filled in by startTestServer, because the URLs have to name the
+// address the listener ends up on and that is not known until it is listening.
+func newTestSigner() *storage.Signer {
+	return storage.NewSigner("", []byte(TestJWTSecret))
+}
+
+// startTestServer starts the handler and tells the signer where it answers.
+//
+// The blob URLs the API hands back are absolute -- a browser is given them
+// with no page to resolve against -- so the signer has to name this listener.
+// Setting the base after the server is up is safe because nothing can have
+// reached it yet: the address it is being told about is the address a caller
+// would need in order to make a request at all.
+func startTestServer(t *testing.T, deps *router.Deps, opts app.Options, signer *storage.Signer) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(app.NewHandler(*deps, opts))
+	signer.SetBase(srv.URL)
+	t.Cleanup(func() { srv.Close() })
+	return srv
+}
+
 // LoopbackProxies is the trusted-proxy set the test server runs with.
 func LoopbackProxies() []netip.Prefix {
 	return []netip.Prefix{
@@ -152,14 +175,14 @@ func LoopbackProxies() []netip.Prefix {
 // The returned server has no CapturingMailer -- the test brought its own.
 func NewTestServerWithMailer(t *testing.T, db *sql.DB, m mailer.Mailer) *TestServer {
 	t.Helper()
-	sc, bucket, err := newTestStorage(context.Background())
+	signer := newTestSigner()
+	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
 		t.Fatalf("storage init: %v", err)
 	}
 
-	deps := buildHandler(db, m, sc)
-	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
-	t.Cleanup(func() { srv.Close() })
+	deps := buildHandler(db, m, sc, signer)
+	srv := startTestServer(t, deps, testAppOptions(), signer)
 
 	return &TestServer{
 		BaseURL: srv.URL,
@@ -177,9 +200,9 @@ func NewTestServerWithMailer(t *testing.T, db *sql.DB, m mailer.Mailer) *TestSer
 func NewTestServerWithOptions(t *testing.T, db *sql.DB, opts app.Options) *TestServer {
 	t.Helper()
 	mc := NewCapturingMailer()
-	deps := buildHandler(db, mc, nil)
-	srv := httptest.NewServer(app.NewHandler(*deps, opts))
-	t.Cleanup(func() { srv.Close() })
+	signer := newTestSigner()
+	deps := buildHandler(db, mc, nil, signer)
+	srv := startTestServer(t, deps, opts, signer)
 
 	return &TestServer{
 		BaseURL: srv.URL,
@@ -193,14 +216,14 @@ func NewTestServerWithOptions(t *testing.T, db *sql.DB, opts app.Options) *TestS
 func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	t.Helper()
 	mc := NewCapturingMailer()
-	sc, bucket, err := newTestStorage(context.Background())
+	signer := newTestSigner()
+	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
 		t.Fatalf("storage init: %v", err)
 	}
 
-	deps := buildHandler(db, mc, sc)
-	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
-	t.Cleanup(func() { srv.Close() })
+	deps := buildHandler(db, mc, sc, signer)
+	srv := startTestServer(t, deps, testAppOptions(), signer)
 
 	return &TestServer{
 		BaseURL: srv.URL,
@@ -261,13 +284,15 @@ func OpenTestDB(t *testing.T) *sql.DB {
 // NewTestServerForMain is like NewTestServer but for use in TestMain (no *testing.T).
 func NewTestServerForMain(db *sql.DB) *TestServer {
 	mc := NewCapturingMailer()
-	sc, bucket, err := newTestStorage(context.Background())
+	signer := newTestSigner()
+	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
 		// We deliberately do not abort the process — when MinIO is not running
 		// but TC_TEST_MINIO is set, tests will still skip individually.
 		fmt.Fprintf(os.Stderr, "warn: test storage unavailable: %v\n", err)
 	}
-	deps := buildHandler(db, mc, sc)
+	deps := buildHandler(db, mc, sc, signer)
 	srv := httptest.NewServer(app.NewHandler(*deps, testAppOptions()))
+	signer.SetBase(srv.URL)
 	return &TestServer{BaseURL: srv.URL, Server: srv, DB: db, Mailer: mc, Storage: sc, Bucket: bucket}
 }

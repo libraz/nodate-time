@@ -27,7 +27,7 @@ func TestAbandonedRepeatAvatarUploadKeepsTheLivePicture(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)},
 		&pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	var confirmed userResp
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/user/avatar", tt.AccessToken,
@@ -76,7 +76,7 @@ func TestAbandonedAvatarUploadReclaimsItsOwnBytes(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)},
 		&pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	var storageKey string
 	require.NoError(t, testDB.QueryRow(

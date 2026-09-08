@@ -50,8 +50,8 @@ func uploadPhotoWithThumbnail(t *testing.T, tt *helpers.TestTenant, calendarID, 
 	require.NotEmpty(t, pres.ThumbnailUploadURL, "a declared thumbnail must be answered with a URL to put it at")
 	require.NotEqual(t, pres.UploadURL, pres.ThumbnailUploadURL, "the two uploads must not land on one key")
 
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", photo)
-	helpers.UploadToPresignedURL(t, pres.ThumbnailUploadURL, "image/png", thumbnail)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", photo)
+	helpers.UploadToSignedURL(t, pres.ThumbnailUploadURL, "image/png", thumbnail)
 
 	var confirmed albumPhotoResp
 	helpers.DoJSON(t, http.MethodPost,
@@ -116,7 +116,7 @@ func TestAPhotoWithoutAThumbnailHasNone(t *testing.T) {
 		tt.AccessToken, map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres)
 	require.Empty(t, pres.ThumbnailUploadURL, "nothing was declared, so there is nothing to sign")
 
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 	var confirmed albumPhotoResp
 	helpers.DoJSON(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm",
@@ -148,7 +148,7 @@ func TestAThumbnailThatNeverArrivesDoesNotCostThePhoto(t *testing.T) {
 	require.NotEmpty(t, pres.ThumbnailUploadURL)
 
 	// Only the photo is uploaded.
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)

@@ -70,7 +70,7 @@ func uploadOnePhoto(t *testing.T, tt *helpers.TestTenant, body map[string]any) a
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
 		tt.AccessToken, body, &pres)
 	pres.Bytes = png
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 	// Presign creates the row disabled; confirm makes it visible.
 	helpers.DoJSON(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm",

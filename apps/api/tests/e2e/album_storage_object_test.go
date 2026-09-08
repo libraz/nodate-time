@@ -39,7 +39,7 @@ func uploadPhotoBytes(t *testing.T, tt *helpers.TestTenant, calendarID string, b
 		tt.AccessToken, map[string]any{
 			"caption": caption, "contentType": "image/png", "byteSize": len(body),
 		}, &pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", body)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
 	helpers.DoJSON(t, http.MethodPost,
 		testServerURL+"/calendars/"+calendarID+"/albums/"+pres.PhotoID+"/confirm",
 		tt.AccessToken, nil, nil)

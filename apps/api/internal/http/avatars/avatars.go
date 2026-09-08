@@ -86,7 +86,7 @@ func (r *Resolver) sign(ctx context.Context, storageKey string, present bool) st
 	if url, ok := r.signed[storageKey]; ok {
 		return url
 	}
-	url, err := r.storage.PresignGet(ctx, storageKey, TTL)
+	url, err := r.storage.SignedGetURL(storageKey, TTL)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to presign avatar URL", "key", storageKey, "error", err)
 		return ""

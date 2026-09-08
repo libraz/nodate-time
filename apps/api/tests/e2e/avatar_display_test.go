@@ -21,7 +21,7 @@ func uploadAvatar(t *testing.T, baseURL string, tt *helpers.TestTenant) []byte {
 	helpers.DoJSON(t, http.MethodPost, baseURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)},
 		&pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 
 	var confirmed userResp
 	helpers.DoJSON(t, http.MethodPut, baseURL+"/user/avatar", tt.AccessToken,
@@ -206,7 +206,7 @@ func uploadOnePhotoAs(t *testing.T, calURL string, tt *helpers.TestTenant, body 
 	body["byteSize"] = len(png)
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, calURL+"/albums/presign", tt.AccessToken, body, &pres)
-	helpers.UploadToPresignedURL(t, pres.UploadURL, "image/png", png)
+	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 	helpers.DoJSON(t, http.MethodPost, fmt.Sprintf("%s/albums/%s/confirm", calURL, pres.PhotoID),
 		tt.AccessToken, nil, nil)
 }
