@@ -212,36 +212,27 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 
 `compose.prod.yml` が MySQL・オブジェクトストレージ・API・ビルド済み SPA を 1 台のホスト上でまとめて動かす。イメージは pull せずその場でビルドする——SPA は API のオリジンをバンドルに焼き込むため、2 つのデプロイ先に対して正しいビルド済みイメージは存在しない。
 
-TLS 終端はこのスタックの外側にある。HTTP を話す 2 つのサービスはループバックにしか公開されず、証明書はホスト上のリバースプロキシが持ち、`127.0.0.1:8081`（Web）と `127.0.0.1:8080`（API）へ転送する前提になっている。`TC_TRUSTED_PROXIES` にプロキシのアドレスを入れること。入れないとレート制限が全クライアントで 1 バケットに潰れる。
+ホスト名 1 つ、証明書 1 枚、公開するポートはそれだけ。入口は web サービスひとつで、そこが TLS を終端し、SPA を配信し、`/api` を compose ネットワーク越しに API へ渡す。API もオブジェクトストレージもインターネットからの経路を必要としないし、与えてもいない——添付・アルバム写真・アバターは API が中継する。ブラウザには API 自身へ戻る短命の署名付き URL を渡し、バイトはその上をコピーして流す。
 
-ホスト名は全体で 1 つあれば足りる。オブジェクトストレージを公開しないためだ。添付・アルバム写真・アバターは API が中継する——ブラウザには API 自身へ戻る短命の署名付き URL を渡し、バイトはその上をコピーして流す。ストレージは compose のネットワークにしか listen せず、ポートを 1 つも publish しないので、インターネットからの経路が存在しない。
+証明書はスタックを起動する前に存在している必要がある。証明書のない server ブロックを nginx が読み込まないためだ。ポート 80 を空けた状態で先に取得する。
 
-```nginx
-server {
-    server_name app.example.com;
-
-    # 書き換えない。API は /auth や /calendars をルート直下に生やしている。
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        # 添付は最大 100MB で、この location を通る。nginx の既定は 1MB な
-        # ので、そのままだとアップロードがプロキシで落ちる。
-        client_max_body_size 128m;
-        proxy_request_buffering off;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_set_header Host $host;
-    }
-}
+```sh
+mkdir -p acme
+certbot certonly --standalone -d app.example.com
 ```
 
-API を `/api` の下に置く場合、`TC_API_PUBLIC_URL` にもその prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先でもあるため。API を別ホスト名で公開する構成も従来どおり動く——上記のどれも単一オリジンを前提にしていないし、`TC_CORS_ALLOWED_ORIGINS` はどちらの場合も SPA のオリジンを指す。
+更新は稼働中のサーバが `acme/` から応答するので、止めるものは何もない。ただし nginx は言われるまで古い証明書を持ち続ける。
 
-設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_HOST`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
+```sh
+certbot renew --webroot -w /path/to/acme \
+  --deploy-hook 'docker compose -f /path/to/compose.prod.yml exec web nginx -s reload'
+```
+
+`TC_API_PUBLIC_URL` には `/api` の prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先でもあるため。`TC_TRUSTED_PROXIES` には compose ネットワークのレンジを入れること（既定なら `172.16.0.0/12` で足りる）。全クライアントが nginx を通って届くので、入れないとレート制限が 1 バケットに潰れる。
+
+TLS を別の場所で終端したい場合——ホスト上のリバースプロキシ、あるいはトンネル——は、`web` サービスから TLS テンプレートのマウントと証明書の 2 つのボリュームを外し、`127.0.0.1:8081:80` を publish する。イメージは平文 HTTP で応答し、`/api` は同じように自分で API へ流すので、ブラウザから見た構成は上と変わらない。ホスト側のプロキシはその 1 ポートだけを向けばよい。
+
+設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_HOST`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
 
 ```sh
 docker compose -f compose.prod.yml up -d --build

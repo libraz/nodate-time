@@ -23,6 +23,10 @@ ENV VITE_API_BASE=${VITE_API_BASE}
 RUN cd apps/web && bun run build
 
 FROM nginx:1.29-alpine
-COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+# app.conf holds what is served either way and is included by both server
+# blocks. The default is plain HTTP, for a deployment where something else
+# terminates TLS; compose.prod.yml mounts the TLS template over it.
+COPY apps/web/nginx/app.conf /etc/nginx/app.conf
+COPY apps/web/nginx/http.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /src/apps/web/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 80 443

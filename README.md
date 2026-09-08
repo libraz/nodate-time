@@ -263,52 +263,47 @@ SPA — on a single host. It builds the two images rather than pulling them: the
 SPA compiles the API origin into its bundle, so no prebuilt image is correct for
 two deployments.
 
-It terminates no TLS. Both HTTP services publish on the loopback interface only
-and expect a reverse proxy on the host to hold the certificates and forward to
-`127.0.0.1:8081` (web) and `127.0.0.1:8080` (API). Set `TC_TRUSTED_PROXIES` to
-the proxy's address, or every client collapses onto one rate-limit bucket.
+One hostname, one certificate, and nothing else published. The web service is
+the only way in: it terminates TLS, serves the SPA, and passes `/api` to the API
+over the compose network. Neither the API nor object storage needs a route from
+the internet, and neither is given one — attachments, album photos and avatars
+are relayed by the API, which hands the browser a short-lived signed URL back to
+itself and copies the bytes through.
 
-One hostname is enough for the whole deployment, because object storage is not
-one of the things exposed. Attachments, album photos and avatars are relayed by
-the API: it hands the browser a short-lived signed URL back to itself, and
-copies the bytes through. The store listens only on the compose network and
-publishes no port, so it has no route from the internet at all.
+The certificate has to exist before the stack starts; nginx will not load a
+server block whose certificate is missing. Obtain one first, with port 80 free:
 
-```nginx
-server {
-    server_name app.example.com;
-
-    # Not rewritten: the API serves /auth, /calendars and the rest at its root.
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        # Attachments are up to 100MB and travel through this location.
-        # nginx defaults to 1MB, which fails the upload at the proxy.
-        client_max_body_size 128m;
-        proxy_request_buffering off;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_set_header Host $host;
-    }
-}
+```sh
+mkdir -p acme
+certbot certonly --standalone -d app.example.com
 ```
 
-With the API under `/api`, `TC_API_PUBLIC_URL` has to carry that prefix
+Renewal is answered by the running server out of `acme/`, so nothing has to be
+stopped for it. nginx keeps the old certificate until it is told to look again:
+
+```sh
+certbot renew --webroot -w /path/to/acme \
+  --deploy-hook 'docker compose -f /path/to/compose.prod.yml exec web nginx -s reload'
+```
+
+`TC_API_PUBLIC_URL` has to carry the `/api` prefix
 (`https://app.example.com/api`): it is the address the OAuth callback returns to
-and the address every blob URL points back at. Serving the API on its own
-hostname works too — nothing above depends on the single-origin arrangement,
-and `TC_CORS_ALLOWED_ORIGINS` already names the SPA's origin either way.
+and the address every blob URL points back at. Set `TC_TRUSTED_PROXIES` to the
+compose network's range (`172.16.0.0/12` covers the default) or every client
+collapses onto one rate-limit bucket, since all of them arrive through nginx.
+
+To terminate TLS somewhere else instead — a reverse proxy on the host, or a
+tunnel — drop the TLS template mount and the two certificate volumes from the
+`web` service and publish `127.0.0.1:8081:80`. The image then serves plain HTTP
+and still proxies `/api` to the API itself, so the arrangement above is
+unchanged from the browser's side; point the host's proxy at that one port.
 
 Configuration goes in a `.env` beside `compose.prod.yml`. `TC_DB_ROOT_PASSWORD`,
 `TC_DB_PASSWORD`, `TC_JWT_SECRET` (`openssl rand -hex 32`), `TC_WEB_URL`,
-`TC_API_PUBLIC_URL`, `TC_S3_ACCESS_KEY`, `TC_S3_SECRET_KEY`, `TC_SMTP_HOST` and
-`TC_SMTP_FROM` have no safe default: Compose stops and names whichever is
-missing. `TC_SECRETS_KEY` is optional — without it the admin panel refuses to
-save OAuth client secrets rather than storing them unencrypted.
+`TC_API_PUBLIC_URL`, `TC_PUBLIC_HOST`, `TC_S3_ACCESS_KEY`, `TC_S3_SECRET_KEY`,
+`TC_SMTP_HOST` and `TC_SMTP_FROM` have no safe default: Compose stops and names
+whichever is missing. `TC_SECRETS_KEY` is optional — without it the admin panel
+refuses to save OAuth client secrets rather than storing them unencrypted.
 
 ```sh
 docker compose -f compose.prod.yml up -d --build
