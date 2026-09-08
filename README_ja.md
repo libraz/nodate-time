@@ -134,6 +134,7 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | 変数 | 用途 | デフォルト |
 | --- | --- | --- |
 | `TC_ENV` | `development` で開発用機能を有効化 | `production` |
+| `TC_APP_NAME` | デプロイの名乗り（OpenAPI のタイトル、送信メール、iCalendar の `PRODID`）。SPA へはビルド引数 `VITE_APP_NAME` で同じ名前を渡す | `Nodate Time` |
 | `TC_PORT` | API ポート | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT 署名鍵（本番は 32 バイト以上必須） | dev フォールバック |

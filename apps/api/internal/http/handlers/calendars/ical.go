@@ -210,7 +210,7 @@ func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, window ex
 		ContentType:        "text/calendar; charset=utf-8",
 		ContentDisposition: fmt.Sprintf(`attachment; filename="%s.ics"`, sanitizeFilename(cal.Name)),
 		ExportWindow:       window.header(),
-		Body:               []byte(buildICS(cal.Name, exports)),
+		Body:               []byte(buildICS(deps.AppName, cal.Name, exports)),
 	}, nil
 }
 
@@ -499,11 +499,14 @@ func icsExdate(ex recurrence.Exceptions, allDay bool, tz string) string {
 	return "EXDATE:" + strings.Join(values, ",")
 }
 
-func buildICS(calName string, rows []exportEvent) string {
+func buildICS(appName, calName string, rows []exportEvent) string {
 	var b strings.Builder
 	writeFolded(&b, "BEGIN:VCALENDAR")
 	writeFolded(&b, "VERSION:2.0")
-	writeFolded(&b, "PRODID:-//Nodate Time//EN")
+	// Escaped like any other TEXT value: the name comes from configuration,
+	// and an unescaped separator in it would end the property early and leave
+	// the rest of the line to be read as something else.
+	writeFolded(&b, "PRODID:-//"+icsEscape(appName)+"//EN")
 	writeFolded(&b, "CALSCALE:GREGORIAN")
 	writeFolded(&b, "X-WR-CALNAME:"+icsEscape(calName))
 	stamp := icsTime(time.Now())

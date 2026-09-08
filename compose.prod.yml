@@ -87,6 +87,11 @@ services:
         condition: service_healthy
     environment:
       TC_ENV: production
+      # What this deployment calls itself: the OpenAPI title, the product named
+      # in outgoing mail, and the PRODID of an exported calendar. The SPA is
+      # given the same name as a build argument below, and the two are expected
+      # to agree.
+      TC_APP_NAME: ${TC_APP_NAME:-Nodate Time}
       TC_DB_DSN: "${TC_DB_USER:-ttuser}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
       TC_JWT_SECRET: ${TC_JWT_SECRET:?generate one with `openssl rand -hex 32`}
       # Encrypts OAuth client secrets stored in the database. Left empty, the
@@ -158,6 +163,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_API_BASE: ${TC_API_PUBLIC_URL:?the public URL of the API}
+        # Compiled into the bundle and the document title, so renaming the
+        # deployment means rebuilding this image, not restarting it.
+        VITE_APP_NAME: ${TC_APP_NAME:-Nodate Time}
     restart: unless-stopped
     depends_on:
       - api

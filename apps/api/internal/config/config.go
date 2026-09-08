@@ -24,6 +24,17 @@ type Config struct {
 	DbDsn     string `env:"TC_DB_DSN" envDefault:"ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true"`
 	JWTSecret string `env:"TC_JWT_SECRET" envDefault:"dev-secret-change-me-in-production"`
 
+	// AppName is what this deployment calls itself. It reaches a reader in the
+	// OpenAPI document, in outgoing mail, and in the PRODID of an exported
+	// calendar; the SPA carries its own copy, compiled in at build time, for
+	// the places it names itself before the first request returns.
+	//
+	// It is not the workspace name below. That names the group of people
+	// sharing the calendars; this names the installation they are using, and a
+	// self-hosted one is not obliged to present itself under the name of the
+	// software it runs.
+	AppName string `env:"TC_APP_NAME" envDefault:"Nodate Time"`
+
 	// The single workspace this deployment runs in. The shared schema scopes
 	// every row by workspace because a second product on the same database
 	// will not be single-tenant; this application is, so it names one at

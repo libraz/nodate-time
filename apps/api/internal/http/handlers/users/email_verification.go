@@ -56,13 +56,13 @@ func sendEmailVerification(ctx context.Context, deps Deps, user generated.User) 
 
 	link := fmt.Sprintf("%s/verify-email?token=%s", deps.WebURL, token)
 	body := fmt.Sprintf(
-		"Hello %s,\n\nConfirm this address to finish setting up your Nodate Time account. "+
+		"Hello %s,\n\nConfirm this address to finish setting up your %s account. "+
 			"This link expires in 7 days:\n\n%s\n\nIf you did not create this account, ignore this email.",
-		user.DisplayName, link,
+		user.DisplayName, deps.AppName, link,
 	)
 	if err := deps.Mailer.Send(ctx, mailer.Message{
 		To:      user.Email,
-		Subject: "Confirm your Nodate Time email address",
+		Subject: fmt.Sprintf("Confirm your %s email address", deps.AppName),
 		Text:    body,
 	}); err != nil {
 		slog.ErrorContext(ctx, "failed to send email verification", "userID", user.ID, "error", err)

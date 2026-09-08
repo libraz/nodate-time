@@ -19,7 +19,7 @@ func TestReminderIsWrittenIntoTheFile(t *testing.T) {
 		Timezone:           "Asia/Tokyo",
 		NotificationOffset: sql.NullInt32{Int32: 30, Valid: true},
 	}
-	out := buildICS("Cal", []exportEvent{{event: ev}})
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev}})
 
 	for _, want := range []string{"BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Clinic", "TRIGGER:-PT30M", "END:VALARM"} {
 		if !strings.Contains(out, want) {
@@ -35,7 +35,7 @@ func TestReminderIsWrittenIntoTheFile(t *testing.T) {
 // client does not raise a reminder nobody asked for.
 func TestNoReminderWritesNoAlarm(t *testing.T) {
 	ev := generated.CalendarEvent{Title: "Lunch", Timezone: "UTC"}
-	if out := buildICS("Cal", []exportEvent{{event: ev}}); strings.Contains(out, "VALARM") {
+	if out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev}}); strings.Contains(out, "VALARM") {
 		t.Errorf("an event with no reminder should carry no alarm:\n%s", out)
 	}
 }
