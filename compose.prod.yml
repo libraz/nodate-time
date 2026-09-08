@@ -7,6 +7,10 @@
 # interface only and expect a reverse proxy on the host to terminate TLS in
 # front of them; see the README's Deployment section.
 #
+# Object storage publishes nothing at all: it is reachable only from this
+# network, and the browser gets at blobs through the API. One hostname is
+# therefore enough for the whole deployment.
+#
 # The images are built rather than pulled. The SPA compiles the API origin
 # into its bundle, so no prebuilt image is correct for two deployments.
 #
@@ -46,8 +50,19 @@ services:
 
   # Attachments, album photos and avatars. Point TC_S3_* at a managed
   # S3-compatible service instead and this service can be removed.
+  #
+  # No published port, deliberately: nothing outside this compose network can
+  # reach it, including the browser. The bytes a browser reads and writes are
+  # relayed by the API over signed URLs, so the store never needs a route from
+  # the internet -- and does not get one. Do not add `ports:` to "make it
+  # work"; a blob that will not load is an API or reverse-proxy problem.
+  #
+  # Pinned to the last image the upstream project published. Its final source
+  # release, a month later, never got one, and the repository was archived in
+  # April 2026 -- there will be no further official builds of either kind. See
+  # the README's Deployment section for what that means for this service.
   minio:
-    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     command: ["server", "/data"]
     environment:
@@ -80,14 +95,21 @@ services:
       # admin panel refuses to save them rather than write them in plaintext.
       TC_SECRETS_KEY: ${TC_SECRETS_KEY:-}
       TC_WEB_URL: ${TC_WEB_URL:?the public URL the browser loads the SPA from}
+      # Also what the browser is sent back to for blobs, so it has to be the
+      # address the API is actually reachable at from outside -- including any
+      # path the reverse proxy serves it under.
       TC_API_PUBLIC_URL: ${TC_API_PUBLIC_URL:?the public URL of this API}
-      # The SPA is served from its own origin, so it reaches the API
-      # cross-origin and that origin has to be named.
+      # Named even when the SPA and the API share an origin: an empty list is
+      # refused at startup rather than treated as "no CORS needed", because the
+      # two deployments cannot be told apart from here.
       TC_CORS_ALLOWED_ORIGINS: ${TC_WEB_URL}
       # Rate limits are per client IP. Unset, every request behind the reverse
       # proxy shares one bucket, because X-Forwarded-For is only believed from
       # a hop listed here.
       TC_TRUSTED_PROXIES: ${TC_TRUSTED_PROXIES:-}
+      # Reached over the compose network. This is not an address the browser
+      # ever sees: it names where the API fetches and stores bytes, not where
+      # a client is sent.
       TC_S3_ENDPOINT: ${TC_S3_ENDPOINT:-minio:9000}
       TC_S3_ACCESS_KEY: ${TC_S3_ACCESS_KEY}
       TC_S3_SECRET_KEY: ${TC_S3_SECRET_KEY}

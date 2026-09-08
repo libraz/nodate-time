@@ -142,8 +142,8 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_TRUSTED_PROXIES` | `X-Forwarded-For` の設定を信頼するリバースプロキシ（CIDR または IP、カンマ区切り）。プロキシ配下で未設定だと全クライアントが 1 つのレート制限バケットに集約される | 信頼しない |
 | `TC_AUTH_RATE_LIMIT` | サインイン・登録・パスワード再設定・OAuth の IP あたり req/min | `60` |
 | `TC_SHARE_RATE_LIMIT` | 公開共有リンクの IP あたり req/min（サインインとは別枠） | `600` |
-| `TC_WEB_URL` / `TC_API_PUBLIC_URL` | フロント / API の公開 URL | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ | MinIO デフォルト |
+| `TC_WEB_URL` / `TC_API_PUBLIC_URL` | フロント / API の公開 URL。`TC_API_PUBLIC_URL` は blob URL が指し戻す先でもあるため、API を置いたパスまで含める必要がある | localhost |
+| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない | MinIO デフォルト |
 | `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信（未設定時は stdout、本番は必須） | コンソール出力 |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | 空 |
 | `TC_GOOGLE_ALLOWED_DOMAINS` | Google サインイン許可ドメイン（カンマ区切り） | 制限なし |
@@ -212,7 +212,34 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 
 `compose.prod.yml` が MySQL・オブジェクトストレージ・API・ビルド済み SPA を 1 台のホスト上でまとめて動かす。イメージは pull せずその場でビルドする——SPA は API のオリジンをバンドルに焼き込むため、2 つのデプロイ先に対して正しいビルド済みイメージは存在しない。
 
-TLS 終端はこのスタックの外側にある。HTTP を話す 2 つのサービスはループバックにしか公開されず、証明書はホスト上のリバースプロキシが持ち、`127.0.0.1:8081`（Web）と `127.0.0.1:8080`（API）へ別々の名前で転送する前提になっている（SPA は API をクロスオリジンで叩く）。`TC_TRUSTED_PROXIES` にプロキシのアドレスを入れること。入れないとレート制限が全クライアントで 1 バケットに潰れる。
+TLS 終端はこのスタックの外側にある。HTTP を話す 2 つのサービスはループバックにしか公開されず、証明書はホスト上のリバースプロキシが持ち、`127.0.0.1:8081`（Web）と `127.0.0.1:8080`（API）へ転送する前提になっている。`TC_TRUSTED_PROXIES` にプロキシのアドレスを入れること。入れないとレート制限が全クライアントで 1 バケットに潰れる。
+
+ホスト名は全体で 1 つあれば足りる。オブジェクトストレージを公開しないためだ。添付・アルバム写真・アバターは API が中継する——ブラウザには API 自身へ戻る短命の署名付き URL を渡し、バイトはその上をコピーして流す。ストレージは compose のネットワークにしか listen せず、ポートを 1 つも publish しないので、インターネットからの経路が存在しない。
+
+```nginx
+server {
+    server_name app.example.com;
+
+    # 書き換えない。API は /auth や /calendars をルート直下に生やしている。
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # 添付は最大 100MB で、この location を通る。nginx の既定は 1MB な
+        # ので、そのままだとアップロードがプロキシで落ちる。
+        client_max_body_size 128m;
+        proxy_request_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+API を `/api` の下に置く場合、`TC_API_PUBLIC_URL` にもその prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先でもあるため。API を別ホスト名で公開する構成も従来どおり動く——上記のどれも単一オリジンを前提にしていないし、`TC_CORS_ALLOWED_ORIGINS` はどちらの場合も SPA のオリジンを指す。
 
 設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_HOST`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
 
@@ -225,6 +252,14 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 スキーマは MySQL のボリュームを最初に作ったときに適用される。`sql/schema.sql` は全テーブルを DROP してから作り直すので、以降のスキーマ変更はこのファイルを流し直すのではなく、稼働中の DB に手で当てる。
 
 永続データは `mysql_data` と `minio_data` の 2 つのボリュームに入っている。バックアップは必ず両方を揃えて取る——添付ファイルは片方の行がもう片方のオブジェクトを指す形で成立している。
+
+### オブジェクトストレージ
+
+同梱のストレージは単一ノード・単一ドライブで動く。erasure coding もバージョニングもレプリケーションもない。耐久性は下のボリュームと上記のバックアップに依存する——データベースと同じ足場の上にある。
+
+上流のリポジトリは 2026 年 4 月にアーカイブされた。`compose.prod.yml` が固定しているのは最後に公開されたイメージ `RELEASE.2025-09-07T16-13-09Z` である。最後の**ソース**リリースはその 1 か月後だが、対応するイメージはついに公開されなかったので、そちらのタグを指定するとスタックが起動しない。
+
+メンテナンスの止まったストレージを使い続けるのは見落としではなく判断による。プライベートネットワークにしか応答しないので、もう修正されないコードは認証を持たない呼び出し元が到達できるコードではない。加えて、イメージ化されなかった最終リリースの修正はサービスアカウントと STS に関するもので、このデプロイはどちらも使っていない。この釣り合いが受け入れられないなら、`TC_S3_*` を任意の S3 互換エンドポイントに向ければよく、設定より上は何も変わらない——どちらにせよストレージに触るのは API で、ブラウザではない。
 
 ```sh
 docker compose -f compose.prod.yml exec mysql \
