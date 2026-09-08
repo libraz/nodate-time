@@ -56,6 +56,11 @@ test-results/
 *.swp
 .DS_Store
 
+# ---- Private deployment ----
+# Inventory, vault and playbooks for one specific installation. Nothing here
+# generalizes to another deployment, and it carries host addresses.
+/ansible/
+
 # ---- AI assistants ----
 .claude/
 CLAUDE.md
