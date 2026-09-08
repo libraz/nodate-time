@@ -155,8 +155,8 @@ for the full list and defaults.
 | `TC_TRUSTED_PROXIES` | reverse-proxy hops allowed to set `X-Forwarded-For` (CIDR or bare IP, comma-separated). Unset behind a proxy collapses every client onto one rate-limit bucket | none trusted |
 | `TC_AUTH_RATE_LIMIT` | per-IP requests/min for sign-in, registration, password reset and OAuth | `60` |
 | `TC_SHARE_RATE_LIMIT` | per-IP requests/min for public share links, counted separately from sign-in | `600` |
-| `TC_WEB_URL` / `TC_API_PUBLIC_URL` | public URLs for web / API | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage | MinIO defaults |
+| `TC_WEB_URL` / `TC_API_PUBLIC_URL` | public URLs for web / API. `TC_API_PUBLIC_URL` is also the address blob URLs point back at, so it must include any path the API is served under | localhost |
+| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage, reached by the API only — never by the browser | MinIO defaults |
 | `TC_SMTP_HOST` and other `TC_SMTP_*` | mail delivery (stdout when unset; required in prod) | console output |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | empty |
 | `TC_GOOGLE_ALLOWED_DOMAINS` | allowed Google sign-in domains (comma-separated) | unrestricted |
@@ -265,9 +265,43 @@ two deployments.
 
 It terminates no TLS. Both HTTP services publish on the loopback interface only
 and expect a reverse proxy on the host to hold the certificates and forward to
-`127.0.0.1:8081` (web) and `127.0.0.1:8080` (API), under two names — the SPA
-reaches the API cross-origin. Set `TC_TRUSTED_PROXIES` to the proxy's address, or
-every client collapses onto one rate-limit bucket.
+`127.0.0.1:8081` (web) and `127.0.0.1:8080` (API). Set `TC_TRUSTED_PROXIES` to
+the proxy's address, or every client collapses onto one rate-limit bucket.
+
+One hostname is enough for the whole deployment, because object storage is not
+one of the things exposed. Attachments, album photos and avatars are relayed by
+the API: it hands the browser a short-lived signed URL back to itself, and
+copies the bytes through. The store listens only on the compose network and
+publishes no port, so it has no route from the internet at all.
+
+```nginx
+server {
+    server_name app.example.com;
+
+    # Not rewritten: the API serves /auth, /calendars and the rest at its root.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Attachments are up to 100MB and travel through this location.
+        # nginx defaults to 1MB, which fails the upload at the proxy.
+        client_max_body_size 128m;
+        proxy_request_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+With the API under `/api`, `TC_API_PUBLIC_URL` has to carry that prefix
+(`https://app.example.com/api`): it is the address the OAuth callback returns to
+and the address every blob URL points back at. Serving the API on its own
+hostname works too — nothing above depends on the single-origin arrangement,
+and `TC_CORS_ALLOWED_ORIGINS` already names the SPA's origin either way.
 
 Configuration goes in a `.env` beside `compose.prod.yml`. `TC_DB_ROOT_PASSWORD`,
 `TC_DB_PASSWORD`, `TC_JWT_SECRET` (`openssl rand -hex 32`), `TC_WEB_URL`,
@@ -288,6 +322,25 @@ running database by hand rather than by re-running the file.
 
 Two volumes hold everything durable: `mysql_data` and `minio_data`. Back them up
 together — an attachment is a row in one pointing at an object in the other.
+
+### Object storage
+
+The bundled store runs single-node, single-drive: no erasure coding, no
+versioning, no replication. Durability is the underlying volume plus the backup
+above, which is the same footing the database is on.
+
+Its upstream repository was archived in April 2026. `compose.prod.yml` pins
+`RELEASE.2025-09-07T16-13-09Z`, the last image it published; the last *source*
+release is a month later and no image was ever built for it, so pinning that
+tag would leave the stack unable to start.
+
+Keeping an unmaintained store is a considered choice rather than an oversight:
+it answers only on the private network, so the code that will not be patched
+again is not code an unauthenticated caller can reach, and the fixes in that
+final unbuilt release concern service accounts and STS — neither of which this
+deployment uses. If the tradeoff is not acceptable, `TC_S3_*` points at any
+S3-compatible endpoint and nothing above the configuration changes: the API
+reaches the store, the browser never does, either way.
 
 ```sh
 docker compose -f compose.prod.yml exec mysql \
