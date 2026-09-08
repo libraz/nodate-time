@@ -152,6 +152,8 @@ for the full list and defaults.
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT signing key (≥32 bytes required in prod) | dev fallback |
 | `TC_PASSWORD_LOGIN_ENABLED` | enable email+password auth | `true` |
+| `TC_WORKSPACE_TIMEZONE` | IANA zone a new account starts in — neither signing up nor a first provider sign-in asks, and the column is NOT NULL. Rejected at startup if the tz database does not know it | `Asia/Tokyo` |
+| `TC_DEFAULT_LOCALE` | BCP 47 tag a new account starts with, for the same reason | `ja` |
 | `TC_CORS_ALLOWED_ORIGINS` | allowed CORS origins (no wildcard in prod) | localhost:5173 |
 | `TC_TRUSTED_PROXIES` | reverse-proxy hops allowed to set `X-Forwarded-For` (CIDR or bare IP, comma-separated). Unset behind a proxy collapses every client onto one rate-limit bucket | none trusted |
 | `TC_AUTH_RATE_LIMIT` | per-IP requests/min for sign-in, registration, password reset and OAuth | `60` |

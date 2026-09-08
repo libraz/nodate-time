@@ -32,8 +32,8 @@ func main() {
 	email := flag.String("email", "", "email address (required)")
 	password := flag.String("password", "", "plaintext password (required, 8-128 characters)")
 	name := flag.String("name", "", "display name (defaults to the email local part)")
-	locale := flag.String("locale", "ja", "BCP 47 locale tag")
-	timezone := flag.String("timezone", "Asia/Tokyo", "IANA timezone")
+	locale := flag.String("locale", "", "BCP 47 locale tag (default: TC_DEFAULT_LOCALE)")
+	timezone := flag.String("timezone", "", "IANA timezone (default: TC_WORKSPACE_TIMEZONE)")
 	admin := flag.Bool("admin", false, "grant instance admin rights")
 	skipExisting := flag.Bool("skip-existing", false, "exit successfully if the email already exists (for seeding)")
 	flag.Parse()
@@ -90,6 +90,16 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 	cfg, err := config.LoadForTooling()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// An account this command writes is one people then sign in to, so it
+	// starts where the deployment's own accounts start rather than where this
+	// command's flags happen to default.
+	if locale == "" {
+		locale = cfg.DefaultLocale
+	}
+	if timezone == "" {
+		timezone = cfg.WorkspaceTimezone
 	}
 
 	db, err := sql.Open("mysql", cfg.DbDsn)

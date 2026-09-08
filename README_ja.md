@@ -139,6 +139,8 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT 署名鍵（本番は 32 バイト以上必須） | dev フォールバック |
 | `TC_PASSWORD_LOGIN_ENABLED` | メール+パスワード認証の有効化 | `true` |
+| `TC_WORKSPACE_TIMEZONE` | 新規アカウントの初期タイムゾーン（IANA 名）。サインアップもプロバイダ初回サインインもゾーンを聞かず、列は NOT NULL。tz データベースにない名前は起動時に弾く | `Asia/Tokyo` |
+| `TC_DEFAULT_LOCALE` | 新規アカウントの初期ロケール（BCP 47 タグ）。理由は上と同じ | `ja` |
 | `TC_CORS_ALLOWED_ORIGINS` | CORS 許可オリジン（本番はワイルドカード不可） | localhost:5173 |
 | `TC_TRUSTED_PROXIES` | `X-Forwarded-For` の設定を信頼するリバースプロキシ（CIDR または IP、カンマ区切り）。プロキシ配下で未設定だと全クライアントが 1 つのレート制限バケットに集約される | 信頼しない |
 | `TC_AUTH_RATE_LIMIT` | サインイン・登録・パスワード再設定・OAuth の IP あたり req/min | `60` |

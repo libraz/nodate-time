@@ -17,6 +17,7 @@ func baseConfig() *Config {
 		S3SecretKey:        "real-secret-key",
 		CORSAllowedOrigins: "https://app.example.com",
 		SMTPHost:           "smtp.example.com",
+		WorkspaceTimezone:  "Asia/Tokyo",
 	}
 }
 
@@ -34,6 +35,12 @@ func TestValidateGuards(t *testing.T) {
 		{"cors wildcard rejected", func(c *Config) { c.CORSAllowedOrigins = "*" }, true},
 		{"empty cors rejected", func(c *Config) { c.CORSAllowedOrigins = "" }, true},
 		{"missing smtp host rejected", func(c *Config) { c.SMTPHost = "" }, true},
+		// The zone every account created from here on is stamped with. An
+		// unknown name is not refused downstream: it is stored, and read in the
+		// browser as a calendar drawn in the wrong place.
+		{"unknown workspace timezone rejected", func(c *Config) { c.WorkspaceTimezone = "Mars/Olympus" }, true},
+		{"offset instead of a zone name rejected", func(c *Config) { c.WorkspaceTimezone = "+09:00" }, true},
+		{"a zone outside the default accepted", func(c *Config) { c.WorkspaceTimezone = "America/New_York" }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

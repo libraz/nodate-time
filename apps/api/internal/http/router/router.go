@@ -50,6 +50,10 @@ type Deps struct {
 	// exported calendar. Empty applies defaultAppName, so a caller that does
 	// not care -- every test server -- does not have to name it.
 	AppName string
+	// AccountDefaults seed the locale and timezone of an account created by
+	// signing up or by a first provider sign-in. Neither collects them, and
+	// both columns are NOT NULL. Zero applies the software's own defaults.
+	AccountDefaults users.AccountDefaults
 	// APIPublicURL is the address this API answers at from outside, including
 	// any path a reverse proxy serves it under. The $schema links in responses
 	// are built from the path part: they are followed by a client that only
@@ -143,7 +147,7 @@ func Build(deps Deps) http.Handler {
 		}
 		api := humachi.New(pub, apiConfig)
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName, Defaults: deps.AccountDefaults}
 
 		// Email+password auth (register, login, password reset) is registered
 		// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
@@ -230,6 +234,7 @@ func Build(deps Deps) http.Handler {
 			Cipher:               deps.Cipher,
 			AllowedDomains:       deps.GoogleAllowedDomains,
 			PasswordLoginEnabled: deps.PasswordLoginEnabled,
+			Defaults:             deps.AccountDefaults,
 		}
 
 		huma.Register(api, huma.Operation{
@@ -288,7 +293,7 @@ func Build(deps Deps) http.Handler {
 		prot.Use(middleware.RequireAuth(deps.JWTSecret, deps.Queries))
 		api := humachi.New(prot, apiConfig)
 
-		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
+		userDeps := users.Deps{DB: deps.DB, Queries: deps.Queries, JWTSecret: deps.JWTSecret, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AllowedDomains: deps.GoogleAllowedDomains, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName, Defaults: deps.AccountDefaults}
 		calDeps := calendars.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, AppName: appName}
 		evtDeps := events.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID, WorkspacePublicID: deps.WorkspacePublicID}
 		memoDeps := memos.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
