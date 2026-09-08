@@ -195,6 +195,7 @@ func main() {
 		Signer:               blobSigner,
 		Mailer:               mailerClient,
 		WebURL:               cfg.WebURL,
+		APIPublicURL:         cfg.APIPublic,
 		OAuth:                oauthCfg,
 		Cipher:               cipher,
 		GoogleAllowedDomains: cfg.GoogleAllowedDomainList(),

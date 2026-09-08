@@ -228,7 +228,7 @@ certbot renew --webroot -w /path/to/acme \
   --deploy-hook 'docker compose -f /path/to/compose.prod.yml exec web nginx -s reload'
 ```
 
-`TC_API_PUBLIC_URL` には `/api` の prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先でもあるため。`TC_TRUSTED_PROXIES` には compose ネットワークのレンジを入れること（既定なら `172.16.0.0/12` で足りる）。全クライアントが nginx を通って届くので、入れないとレート制限が 1 バケットに潰れる。
+`TC_API_PUBLIC_URL` には `/api` の prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先であり、レスポンスの `$schema` リンクを組み立てる元でもあるため。`TC_TRUSTED_PROXIES` には compose ネットワークのレンジを入れること（既定なら `172.16.0.0/12` で足りる）。全クライアントが nginx を通って届くので、入れないとレート制限が 1 バケットに潰れる。
 
 TLS を別の場所で終端したい場合——ホスト上のリバースプロキシ、あるいはトンネル——は、`web` サービスから TLS テンプレートのマウントと証明書の 2 つのボリュームを外し、`127.0.0.1:8081:80` を publish する。イメージは平文 HTTP で応答し、`/api` は同じように自分で API へ流すので、ブラウザから見た構成は上と変わらない。ホスト側のプロキシはその 1 ポートだけを向けばよい。
 
