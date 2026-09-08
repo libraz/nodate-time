@@ -33,3 +33,31 @@ func TestDummyPasswordHashIsRealWork(t *testing.T) {
 		t.Fatal("the timing equalizer accepted a password")
 	}
 }
+
+// The columns are NOT NULL and neither sign-up path asks, so whatever comes
+// out of here is what the account is created with. A deployment that named a
+// zone must get it; one that named nothing must still get something storable.
+func TestAccountDefaultsFallBackOnlyWhereUnset(t *testing.T) {
+	tests := []struct {
+		name             string
+		in               AccountDefaults
+		locale, timezone string
+	}{
+		{"nothing named", AccountDefaults{}, fallbackLocale, fallbackTimezone},
+		{
+			"deployment outside the software's own default",
+			AccountDefaults{Locale: "en", Timezone: "America/New_York"},
+			"en", "America/New_York",
+		},
+		{"only the zone named", AccountDefaults{Timezone: "Europe/Berlin"}, fallbackLocale, "Europe/Berlin"},
+		{"only the locale named", AccountDefaults{Locale: "en"}, "en", fallbackTimezone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.in.resolved()
+			if got.Locale != tt.locale || got.Timezone != tt.timezone {
+				t.Fatalf("resolved() = %+v, want locale %q timezone %q", got, tt.locale, tt.timezone)
+			}
+		})
+	}
+}

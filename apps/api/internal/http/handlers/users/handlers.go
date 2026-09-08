@@ -47,6 +47,8 @@ type Deps struct {
 	// AppName is the product the mail names itself as. A rebranded deployment
 	// sends mail under its own name rather than the software's.
 	AppName string
+	// Defaults seed the profile of an account this handler creates.
+	Defaults AccountDefaults
 }
 
 func pubIDToHex(b []byte) string {
@@ -91,13 +93,39 @@ func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserRes
 	return resp
 }
 
-// defaultLocale and defaultTimezone seed a new account. Both are
-// overridable from the profile; they exist because the columns are NOT NULL
-// and a sign-up form does not ask.
+// AccountDefaults seeds an account created without anything to ask: signing
+// up collects an address and a password, and signing in through a provider
+// collects nothing at all. Both columns are NOT NULL and both values are
+// editable from the profile afterwards, so this is where an account starts
+// rather than what it is held to.
+//
+// The deployment supplies them, because the answer is where its people are.
+// An installation whose users are not in Japan would otherwise put every
+// account nine hours off its own clock and have each of them correct it by
+// hand.
+type AccountDefaults struct {
+	// Locale is a BCP 47 tag; Timezone is an IANA name.
+	Locale   string
+	Timezone string
+}
+
+// The software's own answer, for a caller that named none -- every test
+// server, and a deployment that never set the variables. The database refuses
+// an empty value in either column, so something has to be here.
 const (
-	defaultLocale   = "ja"
-	defaultTimezone = "Asia/Tokyo"
+	fallbackLocale   = "ja"
+	fallbackTimezone = "Asia/Tokyo"
 )
+
+func (d AccountDefaults) resolved() AccountDefaults {
+	if d.Locale == "" {
+		d.Locale = fallbackLocale
+	}
+	if d.Timezone == "" {
+		d.Timezone = fallbackTimezone
+	}
+	return d
+}
 
 // requestOrigin pulls the client hints stored on a session, so a user can
 // later tell their devices apart. Both come from the middleware rather than
@@ -151,6 +179,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		defaults := deps.Defaults.resolved()
 		var created generated.User
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			// The account and the credential are two rows and must land
@@ -161,8 +190,8 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 				PublicID:    userPubID[:],
 				Email:       in.Body.Email,
 				DisplayName: in.Body.Name,
-				Locale:      defaultLocale,
-				Timezone:    defaultTimezone,
+				Locale:      defaults.Locale,
+				Timezone:    defaults.Timezone,
 			})
 			if err != nil {
 				return err

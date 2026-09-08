@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -43,10 +44,22 @@ type Config struct {
 	// The slug is the identity: pointing a deployment at a different slug
 	// gives it a different (initially empty) workspace rather than renaming
 	// this one.
-	WorkspaceSlug     string `env:"TC_WORKSPACE_SLUG" envDefault:"default"`
-	WorkspaceName     string `env:"TC_WORKSPACE_NAME" envDefault:"Nodate Time"`
+	WorkspaceSlug string `env:"TC_WORKSPACE_SLUG" envDefault:"default"`
+	WorkspaceName string `env:"TC_WORKSPACE_NAME" envDefault:"Nodate Time"`
+	// WorkspaceTimezone is also where a new account starts. Neither signing up
+	// nor signing in through a provider asks for a zone, and the column is NOT
+	// NULL, so a deployment outside this default would otherwise put every
+	// account hours off its own clock and leave each person to correct it.
+	//
+	// Read from configuration rather than from the workspace row, which is
+	// written on first start only: the row would freeze the answer at whatever
+	// the first boot happened to say.
 	WorkspaceTimezone string `env:"TC_WORKSPACE_TIMEZONE" envDefault:"Asia/Tokyo"`
 	WorkspaceCountry  string `env:"TC_WORKSPACE_COUNTRY" envDefault:"JP"`
+	// DefaultLocale is the BCP 47 tag a new account starts with, for the same
+	// reason and at the same moment as the timezone above. It has no workspace
+	// column of its own.
+	DefaultLocale string `env:"TC_DEFAULT_LOCALE" envDefault:"ja"`
 
 	// PasswordLoginEnabled controls whether email+password authentication
 	// (register, login, password reset) is available. Set to false to allow
@@ -224,6 +237,15 @@ func (c *Config) Validate() error {
 	}
 	if len(c.JWTSecret) < 32 {
 		return fmt.Errorf("TC_JWT_SECRET must be at least 32 bytes")
+	}
+
+	// Checked here because nothing downstream can. Every account created from
+	// now on is stamped with this zone, and a name the tz database does not
+	// know is not rejected on the way in -- it is stored, handed to the
+	// browser, and read there as a calendar that renders every event in the
+	// wrong place.
+	if _, err := time.LoadLocation(c.WorkspaceTimezone); err != nil {
+		return fmt.Errorf("TC_WORKSPACE_TIMEZONE must be an IANA timezone name (e.g. Asia/Tokyo): %w", err)
 	}
 
 	// The object store's published defaults.

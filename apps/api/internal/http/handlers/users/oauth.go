@@ -58,6 +58,10 @@ type OAuthDeps struct {
 	// PasswordLoginEnabled reflects whether email+password auth is available,
 	// surfaced to the login screen so it can hide the password form.
 	PasswordLoginEnabled bool
+	// Defaults seed the profile of an account a first sign-in creates. A
+	// provider hands over an address and a display name and nothing else, so
+	// this is the only say the deployment gets.
+	Defaults AccountDefaults
 }
 
 // resolveProvider returns the merged provider configuration: DB row overrides
@@ -554,7 +558,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		// The browser is mid-redirect here, so a failure has to land on the login
 		// page like every other failure above. Returning a Huma error instead
 		// would render a raw JSON body in the address bar the user is watching.
-		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified)
+		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified, deps.Defaults.resolved())
 		if errors.Is(err, errUnverifiedAccountExists) {
 			return oauthRedirect(deps, "oauth_email_unverified"), nil
 		}
@@ -591,7 +595,7 @@ var errUnverifiedAccountExists = errors.New("an unverified account already holds
 // upsertOAuthUser links an OAuth identity to a user, creating one if needed.
 // Wrapped in a transaction so concurrent callbacks for the same subject cannot
 // produce duplicate users or orphan oauth_account rows.
-func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name string, emailVerified bool) (uint32, error) {
+func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -667,8 +671,8 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 		PublicID:    pubID[:],
 		Email:       userEmail,
 		DisplayName: name,
-		Locale:      defaultLocale,
-		Timezone:    defaultTimezone,
+		Locale:      defaults.Locale,
+		Timezone:    defaults.Timezone,
 	})
 	if err != nil {
 		return 0, err
