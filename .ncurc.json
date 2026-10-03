@@ -1,4 +1,0 @@
-{
-  "packageManager": "bun",
-  "reject": ["typescript"]
-}

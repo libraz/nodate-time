@@ -1,0 +1,5 @@
+# Packages `ncu -u` must not raise, and why. Drop an entry once its blocker is
+# gone so the next run picks the package up again.
+packageManager: bun
+# Checked, nothing held.
+reject: []

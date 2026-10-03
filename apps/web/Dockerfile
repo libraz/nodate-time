@@ -3,7 +3,7 @@
 # The build context is the repository root: the lockfile and the shared
 # TypeScript configuration live there.
 
-FROM oven/bun:1.3-alpine AS build
+FROM oven/bun:1.4-alpine AS build
 WORKDIR /src
 
 COPY package.json bun.lock bunfig.toml tsconfig.base.json tsconfig.json ./
