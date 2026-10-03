@@ -116,19 +116,22 @@ export function canDeleteComment(
   role: string | undefined | null,
   myUserId: string | undefined,
 ): boolean {
-  return canEditComment(comment, myUserId) || canManage(role);
+  return canEditComment(comment, role, myUserId) || canManage(role);
 }
 
 /**
  * Returns true when the caller may rewrite this comment. Only its author may:
  * taking words off the wall and putting different words in someone's mouth
- * are not the same power.
+ * are not the same power. Authorship is not enough on its own -- a member
+ * demoted to viewer writes nothing on the calendar, their own comments
+ * included. This mirrors the server's rule.
  */
 export function canEditComment(
   comment: { userPublicId: string },
+  role: string | undefined | null,
   myUserId: string | undefined,
 ): boolean {
-  return !!myUserId && comment.userPublicId === myUserId;
+  return canEdit(role) && !!myUserId && comment.userPublicId === myUserId;
 }
 
 /**

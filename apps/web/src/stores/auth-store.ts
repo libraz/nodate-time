@@ -3,7 +3,7 @@ import { getT, type Locale } from '@/i18n';
 import {
   ApiError,
   api,
-  clearToken,
+  endSession,
   errorMessage,
   hasToken,
   SESSION_EXPIRED_EVENT,
@@ -77,11 +77,6 @@ interface AuthResponse {
   user: User;
 }
 
-function extractErrorMessage(e: unknown, fallback: string): string {
-  if (e instanceof ApiError) return e.detail || fallback;
-  return fallback;
-}
-
 let fetchMeInFlight = false;
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -100,7 +95,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
-      set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
+      set({ isLoading: false, error: errorMessage(e, getT()('auth.loginFailed')) });
       throw e;
     }
   },
@@ -113,7 +108,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
-      set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.loginFailed')) });
+      set({ isLoading: false, error: errorMessage(e, getT()('auth.loginFailed')) });
       throw e;
     }
   },
@@ -140,23 +135,15 @@ export const useAuthStore = create<AuthState>((set) => ({
         // defaults and the settings screen can still change them.
       }
     } catch (e) {
-      set({ isLoading: false, error: extractErrorMessage(e, getT()('auth.registerFailed')) });
+      set({ isLoading: false, error: errorMessage(e, getT()('auth.registerFailed')) });
       throw e;
     }
   },
 
   logout: () => {
-    // End the session on the server as well, best effort. Dropping the local
-    // token only makes this browser forget: anyone who copied the storage of a
-    // shared machine keeps working access until the token expires on its own,
-    // which is the whole day the user believed they had just ended.
-    //
-    // Not awaited: signing out must not depend on the network being up, and
-    // the local state is cleared either way.
-    if (hasToken()) {
-      void api.post('/auth/logout').catch(() => {});
-    }
-    clearToken();
+    // Ends the session on the server as well, best effort and not awaited:
+    // signing out must not depend on the network being up.
+    endSession();
     set({
       user: null,
       isAuthenticated: false,

@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import { fromISOInZone } from '@/lib/date-utils';
+import { seriesId } from '@/lib/event-move';
 import { readCaptureTime } from '@/lib/exif';
 import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
+import { useCalendarPages } from '@/lib/use-calendar-pages';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -45,32 +49,38 @@ export function AlbumPanel() {
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const calendars = useCalendarStore((s) => s.calendars);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const events = useCalendarStore((s) => s.events);
   const timezone = useUiStore((s) => s.timezone);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
-  const [nextCursor, setNextCursor] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<AlbumPhoto | null>(null);
   const [captionDraft, setCaptionDraft] = useState('');
   const [savingCaption, setSavingCaption] = useState(false);
   const [linkingEvent, setLinkingEvent] = useState(false);
-  // The cursors of the pages currently on screen, in order. An image URL is
-  // signed for a limited time, and thumbnails load as they are scrolled to, so
-  // one can expire while the panel is still open; re-listing these same pages
-  // is what replaces the dead URLs without throwing away what was paged in.
-  const loadedCursorsRef = useRef<string[]>([]);
   // Photos already retried once. A URL that expired comes back working; an
   // object that is genuinely missing does not, and without this the second
   // failure would ask for another listing, forever.
   const retriedRef = useRef<Set<string>>(new Set());
   const refreshingRef = useRef(false);
 
-  const activeCalendarId = activeCalendarIds[0] ?? calendars[0]?.id ?? '';
+  const { options, target, setTargetId } = usePanelCalendar();
+  const activeCalendarId = target?.id ?? '';
+  const {
+    items: photos,
+    nextCursor,
+    // The cursors of the pages on screen. An image URL is signed for a limited
+    // time and thumbnails load as they are scrolled to, so one can expire while
+    // the panel is open; re-listing these pages replaces the dead URLs without
+    // throwing away what was paged in.
+    cursors: loadedCursors,
+    loading,
+    loadingMore,
+    error,
+    setError,
+    reload,
+    loadMore,
+    updateItems,
+  } = useCalendarPages<AlbumPhoto>(activeCalendarId, 'albums', rightPanel === 'album');
   const myRole = roleOnCalendar(calendars, activeCalendarId);
   const editable = canEdit(myRole);
 
@@ -98,44 +108,9 @@ export function AlbumPanel() {
   // container, and the containers are disjoint -- and a picker's portalled list
   // is deliberately outside both, so opening one hands it the keyboard.
 
-  const reload = useCallback(async () => {
-    if (!activeCalendarId) {
-      setPhotos([]);
-      setNextCursor('');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.get<AlbumListResponse>(`/calendars/${activeCalendarId}/albums`);
-      setPhotos(data.items ?? []);
-      setNextCursor(data.nextCursor ?? '');
-      loadedCursorsRef.current = [''];
-      retriedRef.current.clear();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    if (activeCalendarId) retriedRef.current.clear();
   }, [activeCalendarId]);
-
-  const loadMore = useCallback(async () => {
-    if (!activeCalendarId || !nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    setError(null);
-    try {
-      const data = await api.get<AlbumListResponse>(
-        `/calendars/${activeCalendarId}/albums?cursor=${encodeURIComponent(nextCursor)}`,
-      );
-      setPhotos((cur) => [...cur, ...(data.items ?? [])]);
-      setNextCursor(data.nextCursor ?? '');
-      loadedCursorsRef.current = [...loadedCursorsRef.current, nextCursor];
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [activeCalendarId, nextCursor, loadingMore]);
 
   /**
    * Re-lists every page on screen so each photo gets a freshly signed URL.
@@ -145,17 +120,18 @@ export function AlbumPanel() {
    */
   const refreshImageUrls = useCallback(async () => {
     if (!activeCalendarId || refreshingRef.current) return;
+    const calendarId = activeCalendarId;
     refreshingRef.current = true;
     try {
       const refreshed: AlbumPhoto[] = [];
-      for (const cursor of loadedCursorsRef.current) {
+      for (const cursor of loadedCursors) {
         const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
         const data = await api.get<AlbumListResponse>(
           `/calendars/${activeCalendarId}/albums${query}`,
         );
         refreshed.push(...(data.items ?? []));
       }
-      setPhotos(refreshed);
+      updateItems(calendarId, () => refreshed);
       setLightbox((cur) => (cur ? (refreshed.find((p) => p.id === cur.id) ?? cur) : cur));
     } catch {
       // Leave what is on screen alone: a failed refresh is no reason to empty
@@ -163,7 +139,7 @@ export function AlbumPanel() {
     } finally {
       refreshingRef.current = false;
     }
-  }, [activeCalendarId]);
+  }, [activeCalendarId, loadedCursors, updateItems]);
 
   const handleImageError = useCallback(
     (photoId: string) => {
@@ -173,12 +149,6 @@ export function AlbumPanel() {
     },
     [refreshImageUrls],
   );
-
-  useEffect(() => {
-    if (rightPanel === 'album') {
-      reload();
-    }
-  }, [rightPanel, reload]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -231,6 +201,7 @@ export function AlbumPanel() {
         }
         // The row is created disabled; confirm enables it once the object is stored.
         await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
+        retriedRef.current.clear();
         await reload();
       } catch (e) {
         setError(errorMessage(e));
@@ -238,7 +209,7 @@ export function AlbumPanel() {
         setUploading(false);
       }
     },
-    [activeCalendarId, reload],
+    [activeCalendarId, reload, setError],
   );
 
   const handleDelete = useCallback(
@@ -246,13 +217,13 @@ export function AlbumPanel() {
       if (!activeCalendarId) return;
       try {
         await api.delete(`/calendars/${activeCalendarId}/albums/${photoId}`);
-        setPhotos((cur) => cur.filter((p) => p.id !== photoId));
+        updateItems(activeCalendarId, (cur) => cur.filter((p) => p.id !== photoId));
         setLightbox(null);
       } catch (e) {
         setError(errorMessage(e));
       }
     },
-    [activeCalendarId],
+    [activeCalendarId, updateItems, setError],
   );
 
   const openLightbox = useCallback((photo: AlbumPhoto) => {
@@ -268,14 +239,16 @@ export function AlbumPanel() {
         `/calendars/${activeCalendarId}/albums/${lightbox.id}`,
         { caption: captionDraft },
       );
-      setPhotos((cur) => cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)));
+      updateItems(activeCalendarId, (cur) =>
+        cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)),
+      );
       setLightbox((cur) => (cur ? { ...cur, ...updated } : cur));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setSavingCaption(false);
     }
-  }, [activeCalendarId, lightbox, captionDraft]);
+  }, [activeCalendarId, lightbox, captionDraft, updateItems, setError]);
 
   /**
    * Events the open photo could belong to: the ones on the day it was taken.
@@ -288,12 +261,16 @@ export function AlbumPanel() {
   const linkableEvents = useMemo(() => {
     if (!lightbox) return [];
     const day = fromISOInZone(lightbox.takenAt, timezone).toISODate();
-    return events
-      .filter(
-        (evt) =>
-          evt.calendarId === activeCalendarId && eventStartDay(evt, timezone).toISODate() === day,
-      )
-      .sort((a, b) => a.startAt.localeCompare(b.startAt));
+    // A photo links to the series, so an occurrence is offered under its
+    // series id, once.
+    const offered = new Map<string, { id: string; title: string; startAt: string }>();
+    for (const evt of events) {
+      if (evt.calendarId !== activeCalendarId) continue;
+      if (eventStartDay(evt, timezone).toISODate() !== day) continue;
+      const id = seriesId(evt.id);
+      if (!offered.has(id)) offered.set(id, { id, title: evt.title, startAt: evt.startAt });
+    }
+    return [...offered.values()].sort((a, b) => a.startAt.localeCompare(b.startAt));
   }, [lightbox, events, activeCalendarId, timezone]);
 
   const handleLinkEvent = useCallback(
@@ -307,7 +284,9 @@ export function AlbumPanel() {
           `/calendars/${activeCalendarId}/albums/${lightbox.id}`,
           { caption: lightbox.caption, eventId },
         );
-        setPhotos((cur) => cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)));
+        updateItems(activeCalendarId, (cur) =>
+          cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)),
+        );
         setLightbox((cur) => (cur ? { ...cur, ...updated } : cur));
       } catch (e) {
         setError(errorMessage(e));
@@ -315,7 +294,7 @@ export function AlbumPanel() {
         setLinkingEvent(false);
       }
     },
-    [activeCalendarId, lightbox],
+    [activeCalendarId, lightbox, updateItems, setError],
   );
 
   const handleDownload = useCallback(
@@ -330,7 +309,7 @@ export function AlbumPanel() {
         setError(errorMessage(e));
       }
     },
-    [activeCalendarId],
+    [activeCalendarId, setError],
   );
 
   if (rightPanel !== 'album') return null;
@@ -396,6 +375,17 @@ export function AlbumPanel() {
             </button>
           </div>
         </div>
+
+        {target && (
+          <div className="border-b border-[var(--color-border)] px-5 py-3">
+            <PanelCalendarPicker
+              label={t('panel.targetCalendar')}
+              options={options}
+              target={target}
+              onChange={setTargetId}
+            />
+          </div>
+        )}
 
         {error && <div className="px-5 py-2 text-footnote text-[var(--color-danger)]">{error}</div>}
 

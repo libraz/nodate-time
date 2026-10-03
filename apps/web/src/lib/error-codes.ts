@@ -4,8 +4,8 @@ import { ja } from '@/i18n/ja';
 /**
  * The i18n key for an API error code, or null when there is none.
  *
- * Every code the server can return is meant to have an entry, and a Go test
- * walks the error definitions and fails when one is missing. The lookup is
+ * Every code the server can return is meant to have an entry, and
+ * scripts/check-error-messages.sh fails when one is missing. The lookup is
  * still guarded: an unknown key renders as the key itself, so a code added on
  * the server before its message lands here would put `apiError.SOMETHING` in
  * front of a user -- worse than the English sentence the server sent.

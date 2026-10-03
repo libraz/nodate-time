@@ -15,6 +15,9 @@ function visibleFocusable(container: HTMLElement): HTMLElement[] {
   );
 }
 
+/** Open modals, innermost last. Only the innermost answers the keyboard. */
+const openModals: object[] = [];
+
 /**
  * Wires the behaviour a modal owes the keyboard: a scroll lock, Escape, a Tab
  * trap, and returning focus to wherever it was when the modal took over.
@@ -40,6 +43,8 @@ export function useModalA11y<T extends HTMLElement>(
     // What had focus before the modal opened, so the keyboard lands back there
     // rather than at the top of the document once it closes.
     const restoreTo = document.activeElement as HTMLElement | null;
+    const self = {};
+    openModals.push(self);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
@@ -50,6 +55,8 @@ export function useModalA11y<T extends HTMLElement>(
     }, 0);
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // A modal opened over this one owns Escape and Tab until it closes.
+      if (openModals[openModals.length - 1] !== self) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         onCloseRef.current();
@@ -78,6 +85,7 @@ export function useModalA11y<T extends HTMLElement>(
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', onKeyDown);
+      openModals.splice(openModals.indexOf(self), 1);
       document.body.style.overflow = previousOverflow;
       // An element that left the document while the modal was open cannot be
       // focused; leaving focus where it is beats throwing an error.

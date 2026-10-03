@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 
 export const Route = createFileRoute('/forgot-password')({
   component: ForgotPasswordPage,
@@ -23,7 +23,7 @@ function ForgotPasswordPage() {
       await api.post('/auth/password-reset/request', { email });
       setDone(true);
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'Error');
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

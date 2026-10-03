@@ -61,6 +61,39 @@ describe('useModalA11y', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // A chooser opened over a dialog: Escape answers the chooser, and the
+  // dialog underneath stays open.
+  it('lets only the innermost open modal answer Escape', () => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+    const { unmount } = render(
+      <>
+        <Dialog onClose={outerClose} />
+        <Dialog onClose={innerClose} />
+      </>,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(innerClose).toHaveBeenCalledTimes(1);
+    expect(outerClose).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('hands Escape back to the outer modal once the inner one closes', () => {
+    const outerClose = vi.fn();
+    const Pair = ({ inner }: { inner: boolean }) => (
+      <>
+        <Dialog onClose={outerClose} />
+        {inner && <Dialog onClose={() => {}} />}
+      </>
+    );
+    const { rerender } = render(<Pair inner />);
+    rerender(<Pair inner={false} />);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(outerClose).toHaveBeenCalledTimes(1);
+  });
+
   it('focuses the control the caller names', async () => {
     render(<DialogWithInitialFocus />);
 

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { Avatar } from '@/components/avatar';
 import type { HistoryActor } from '@/components/history-timeline';
-import { CustomSelect } from '@/components/pickers';
+import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { type TranslationKey, useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
-import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
+import { useCalendarPages } from '@/lib/use-calendar-pages';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { useCalendarStore } from '@/stores/calendar-store';
+import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { useUiStore } from '@/stores/ui-store';
 
 interface FeedItem {
@@ -21,11 +21,6 @@ interface FeedItem {
   actor: HistoryActor | null;
   entityType: string;
   entityId: string;
-}
-
-interface ActivityPage {
-  items: FeedItem[];
-  nextCursor?: string;
 }
 
 const ENTITY_LABEL: Record<string, TranslationKey> = {
@@ -55,64 +50,23 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
   // Mounted only while the feed is open, so the trap is live for as long as it is.
   const panelRef = useModalA11y<HTMLDivElement>(true, onClose);
   const locale = useUiStore((s) => s.locale);
-  const calendars = useCalendarStore((s) => s.calendars);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-
-  // Only calendars the user is currently viewing. The list the server returns
-  // is already scoped to the ones they are a member of, so being in it is the
-  // membership -- there is nothing further to check.
-  const memberCalendars = useMemo(
-    () => calendars.filter((c) => activeCalendarIds.includes(c.id)),
-    [calendars, activeCalendarIds],
-  );
-
-  const [targetId, setTargetId] = useState('');
-  const target = memberCalendars.find((c) => c.id === targetId) ?? memberCalendars[0] ?? null;
+  // The calendar list the server returns is already scoped to the caller's
+  // memberships, so every shown calendar has a feed they may read.
+  const { options, target, setTargetId } = usePanelCalendar();
   const calendarId = target?.id ?? '';
 
-  const [items, setItems] = useState<FeedItem[]>([]);
-  const [nextCursor, setNextCursor] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const {
+    items,
+    nextCursor,
+    loading: isLoading,
+    loadingMore: isLoadingMore,
+    error,
+    loadMore,
+  } = useCalendarPages<FeedItem>(calendarId, 'activity?limit=50', true);
 
   useEffect(() => {
-    if (!calendarId) return;
-    let cancelled = false;
-    setIsLoading(true);
-    setNextCursor('');
-    (async () => {
-      try {
-        const data = await api.get<ActivityPage>(`/calendars/${calendarId}/activity?limit=50`);
-        if (!cancelled) {
-          setItems(data.items);
-          setNextCursor(data.nextCursor ?? '');
-        }
-      } catch (e) {
-        if (!cancelled) toast.error(errorMessage(e));
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [calendarId]);
-
-  const loadMore = async () => {
-    if (!calendarId || !nextCursor || isLoadingMore) return;
-    setIsLoadingMore(true);
-    try {
-      const data = await api.get<ActivityPage>(
-        `/calendars/${calendarId}/activity?limit=50&cursor=${encodeURIComponent(nextCursor)}`,
-      );
-      setItems((prev) => [...prev, ...data.items]);
-      setNextCursor(data.nextCursor ?? '');
-    } catch (e) {
-      toast.error(errorMessage(e));
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
+    if (error) toast.error(error);
+  }, [error]);
 
   return (
     <>
@@ -158,35 +112,12 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
             </p>
           ) : (
             <div className="space-y-4">
-              {/* Target calendar */}
-              <div className="space-y-1.5">
-                <span className="block text-caption font-medium text-[var(--color-text-secondary)]">
-                  {t('activity.targetCalendar')}
-                </span>
-                {memberCalendars.length > 1 ? (
-                  <CustomSelect
-                    value={target.id}
-                    onChange={setTargetId}
-                    ariaLabel={t('activity.targetCalendar')}
-                    triggerClassName="input-modern"
-                    options={memberCalendars.map((c) => ({
-                      value: c.id,
-                      label: c.name,
-                      color: c.color,
-                    }))}
-                  />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: target.color }}
-                    />
-                    <span className="truncate text-callout font-medium text-[var(--color-text-primary)]">
-                      {target.name}
-                    </span>
-                  </div>
-                )}
-              </div>
+              <PanelCalendarPicker
+                label={t('panel.targetCalendar')}
+                options={options}
+                target={target}
+                onChange={setTargetId}
+              />
 
               {isLoading && items.length === 0 && (
                 <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">

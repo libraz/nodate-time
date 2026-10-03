@@ -24,6 +24,8 @@ export interface CalendarMembers {
    * the calendar itself is gone and a screen holding a selection needs another.
    */
   removeMember: (member: Member) => Promise<boolean>;
+  /** Sets the colour a member's layer is drawn in. Call once per finished choice. */
+  changeColor: (member: Member, color: string) => Promise<void>;
 }
 
 /**
@@ -41,6 +43,7 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
   const membersMap = useCalendarStore((s) => s.membersMap);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
   const leaveCalendar = useCalendarStore((s) => s.leaveCalendar);
+  const updateMemberColor = useCalendarStore((s) => s.updateMemberColor);
   const me = useAuthStore((s) => s.user);
 
   useEffect(() => {
@@ -98,6 +101,18 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
     [calendarId, fetchMembers, leaveCalendar, me?.id, t],
   );
 
+  const changeColor = useCallback(
+    async (member: Member, color: string) => {
+      if (color.toLowerCase() === member.color.toLowerCase()) return;
+      try {
+        await updateMemberColor(calendarId, member.id, color);
+      } catch (e) {
+        toast.error(errorMessage(e));
+      }
+    },
+    [calendarId, updateMemberColor],
+  );
+
   return {
     members,
     myRole,
@@ -107,5 +122,6 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
     ownerCount,
     changeRole,
     removeMember,
+    changeColor,
   };
 }

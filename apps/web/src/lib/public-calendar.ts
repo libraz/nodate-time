@@ -1,20 +1,38 @@
-import type { DateTime } from 'luxon';
-import { fromISOInZone } from '@/lib/date-utils';
+/** What `GET /share/{token}` answers. */
+export interface PublicCalendar {
+  calendarId: string;
+  name: string;
+  color: string;
+  joinable: boolean;
+  /** The link was a join link, but it has been followed as often as it allowed. */
+  spent: boolean;
+}
 
-export interface PublicCalendarEventLike {
+/** An event as a published link shows it. */
+export interface PublicEvent {
+  id: string;
+  title: string;
+  allDay: boolean;
   startAt: string;
   endAt: string;
   timezone?: string;
+  color: string;
+  location?: string;
+  /** The event's details are withheld; only the time is published. */
+  private?: boolean;
 }
 
-export function publicEventOccursOnDay(event: PublicCalendarEventLike, day: DateTime): boolean {
-  const zone = event.timezone || undefined;
-  const zonedDay = zone ? day.setZone(zone, { keepLocalTime: true }) : day;
-  const dayStart = zonedDay.startOf('day');
-  const dayEnd = dayStart.plus({ days: 1 });
-  const eventStart = fromISOInZone(event.startAt, zone);
-  const eventEnd = fromISOInZone(event.endAt, zone);
-  return eventStart < dayEnd && eventEnd > dayStart;
+/**
+ * Whether this link publishes the calendar, and so has events to draw.
+ *
+ * A join link is an offer of access rather than access itself: the server
+ * refuses it the events endpoint by design, and it stays an offer once it has
+ * been used up. Drawing a grid for one produces six weeks of empty cells,
+ * which reads as a calendar with nothing in it rather than as an invitation
+ * waiting to be accepted.
+ */
+export function publishesEvents(cal: PublicCalendar): boolean {
+  return !cal.joinable && !cal.spent;
 }
 
 /**

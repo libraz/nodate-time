@@ -6,6 +6,7 @@ export const ja = {
   'common.delete': '削除',
   'common.create': '作成',
   'common.close': '閉じる',
+  'common.notifications': '通知',
   'common.loading': '読み込み中...',
   'common.copy': 'コピー',
   'common.copied': 'コピーしました',
@@ -135,6 +136,7 @@ export const ja = {
 
   // Panels
   'panel.memo': 'メモ',
+  'panel.targetCalendar': '対象カレンダー',
   'panel.album': 'アルバム',
   'panel.members': 'メンバーリスト',
   'panel.settings': 'カレンダー設定',
@@ -168,7 +170,6 @@ export const ja = {
   'share.joinFailed': '参加に失敗しました',
   'share.calendarNotFound': 'カレンダーが見つかりません',
   'share.poweredBy': 'Powered by Nodate Time',
-  'share.targetCalendar': '対象カレンダー',
   'share.inviteSection': '招待リンク',
   'share.inviteTermsNote': 'リンクごとに権限・有効期限・使える人数を選べます。複数発行できます',
   'share.createInvite': '招待リンクを作成',
@@ -385,6 +386,7 @@ export const ja = {
   'members.roleEditor': '編集者',
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このメンバーを削除しますか?',
+  'members.leave': 'カレンダーから退出',
   'members.leaveConfirm': 'このカレンダーから抜けますか? 予定は他のメンバーには残ります',
   'members.leftCalendar': 'カレンダーから抜けました',
   'members.lastOwner': 'オーナーは最低 1 人必要です',
@@ -448,7 +450,7 @@ export const ja = {
   'event.recurrenceNthSecond': '第2',
   'event.recurrenceNthThird': '第3',
   'event.recurrenceNthFourth': '第4',
-  'event.recurrenceNthLast': '最終',
+  'event.recurrenceNthFifth': '第5',
 
   // Assignee
   'event.assignee': '担当者',
@@ -496,7 +498,6 @@ export const ja = {
   // Activity feed
   'activity.title': 'アクティビティ',
   'activity.empty': 'アクティビティはありません',
-  'activity.targetCalendar': '対象カレンダー',
   'activity.entityEvent': '予定',
   'activity.entityMemo': 'メモ',
   'activity.entityMember': 'メンバー',

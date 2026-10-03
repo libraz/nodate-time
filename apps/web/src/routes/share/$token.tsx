@@ -3,48 +3,20 @@ import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage, hasToken } from '@/lib/api';
-import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
-import { publicEventOccursOnDay, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
+import { formatMonthYear, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import {
+  type PublicCalendar,
+  publishesEvents,
+  type ShareFailure,
+  shareFailureOf,
+} from '@/lib/public-calendar';
+import { usePublicEvents } from '@/lib/use-public-events';
+import { eventOccupiesDay } from '@/lib/week-layout';
 import { useUiStore } from '@/stores/ui-store';
-
-interface PublicCalendar {
-  calendarId: string;
-  name: string;
-  color: string;
-  joinable: boolean;
-  /** The link was a join link, but it has been followed as often as it allowed. */
-  spent: boolean;
-}
-
-interface PublicEvent {
-  id: string;
-  title: string;
-  allDay: boolean;
-  startAt: string;
-  endAt: string;
-  timezone?: string;
-  color: string;
-  location?: string;
-  /** The event's details are withheld; only the time is published. */
-  private?: boolean;
-}
 
 export const Route = createFileRoute('/share/$token')({
   component: SharedCalendarView,
 });
-
-/**
- * Whether this link publishes the calendar, and so has events to draw.
- *
- * A join link is an offer of access rather than access itself: the server
- * refuses it the events endpoint by design, and it stays an offer once it has
- * been used up. Drawing a grid for one produces six weeks of empty cells,
- * which reads as a calendar with nothing in it rather than as an invitation
- * waiting to be accepted.
- */
-function publishesEvents(cal: PublicCalendar): boolean {
-  return !cal.joinable && !cal.spent;
-}
 
 /** Exported for testing: what a link publishes decides what this page draws. */
 export function SharedCalendarView() {
@@ -54,7 +26,6 @@ export function SharedCalendarView() {
   const { token } = Route.useParams();
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
-  const [events, setEvents] = useState<PublicEvent[]>([]);
   // Whether the calendar could be read at all, kept apart from why. The words
   // shown come from the reason below; holding a sentence here as well would
   // put the translator in this callback, and `useT` hands back a new function
@@ -110,20 +81,16 @@ export function SharedCalendarView() {
     loadCalendar();
   }, [loadCalendar]);
 
-  useEffect(() => {
-    if (!calendar || !publishesEvents(calendar)) return;
-    // The grid draws part of the neighbouring months, and the dates are days
-    // in the zone this page renders -- both have to be said, or the edge cells
-    // stay empty and an event near a month boundary lands in the wrong one.
-    const { start, end } = gridRange(currentMonth, timezone);
-    const tz = encodeURIComponent(timezone);
-    api
-      .get<PublicEvent[]>(`/share/${token}/events?start=${start}&end=${end}&tz=${tz}`, true)
-      .then(setEvents)
-      .catch(() => setEvents([]));
-  }, [token, calendar, currentMonth, timezone]);
+  const {
+    events,
+    failure: eventsFailure,
+    retry: retryEvents,
+  } = usePublicEvents(token, !!calendar && publishesEvents(calendar), currentMonth, timezone);
 
-  if (failed) {
+  // A month whose events did not arrive is not an empty month: it is reported
+  // the same way a calendar that did not arrive is.
+  const shownFailure = failed ? failure : eventsFailure;
+  if (shownFailure) {
     return (
       <div className="app-bg flex min-h-screen items-center justify-center">
         <div className="glass-surface auth-card rounded-2xl px-8 py-12 text-center">
@@ -139,15 +106,19 @@ export function SharedCalendarView() {
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
           <p className="text-subhead font-medium text-[var(--color-text-primary)]">
-            {failure === 'busy' ? t('share.temporarilyUnavailable') : t('share.invalidLink')}
+            {shownFailure === 'busy' ? t('share.temporarilyUnavailable') : t('share.invalidLink')}
           </p>
           <p className="mt-2 text-body text-[var(--color-text-secondary)]">
-            {failure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
+            {shownFailure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
           </p>
-          {failure === 'busy' && (
+          {shownFailure === 'busy' && (
             <button
               type="button"
               onClick={() => {
+                if (!failed) {
+                  retryEvents();
+                  return;
+                }
                 setFailed(false);
                 setFailure(null);
                 loadCalendar();
@@ -178,7 +149,7 @@ export function SharedCalendarView() {
   }
 
   const getEventsForDay = (day: DateTime) => {
-    return events.filter((e) => publicEventOccursOnDay(e, day));
+    return events.filter((e) => eventOccupiesDay(e, day, timezone));
   };
 
   const today = DateTime.now();
@@ -220,6 +191,7 @@ export function SharedCalendarView() {
               <button
                 type="button"
                 onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))}
+                aria-label={t('calendar.prevMonth')}
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
               >
                 <svg
@@ -239,6 +211,7 @@ export function SharedCalendarView() {
               <button
                 type="button"
                 onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))}
+                aria-label={t('calendar.nextMonth')}
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
               >
                 <svg

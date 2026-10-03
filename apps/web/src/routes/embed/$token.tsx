@@ -3,28 +3,16 @@ import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { api } from '@/lib/api';
-import { formatMonthYear, getMonthDays, getWeekdayLabel, gridRange } from '@/lib/date-utils';
-import { publicEventOccursOnDay, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
+import { formatMonthYear, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import {
+  type PublicCalendar,
+  publishesEvents,
+  type ShareFailure,
+  shareFailureOf,
+} from '@/lib/public-calendar';
+import { usePublicEvents } from '@/lib/use-public-events';
+import { eventOccupiesDay } from '@/lib/week-layout';
 import { useUiStore } from '@/stores/ui-store';
-
-interface PublicCalendar {
-  calendarId: string;
-  name: string;
-  color: string;
-}
-
-interface PublicEvent {
-  id: string;
-  title: string;
-  allDay: boolean;
-  startAt: string;
-  endAt: string;
-  timezone?: string;
-  color: string;
-  location?: string;
-  /** The event's details are withheld; only the time is published. */
-  private?: boolean;
-}
 
 export const Route = createFileRoute('/embed/$token')({
   component: EmbeddedCalendarView,
@@ -34,14 +22,12 @@ export const Route = createFileRoute('/embed/$token')({
  * Chrome-less read-only month view designed to be embedded via <iframe>.
  * No app shell, no join action — purely public, view-only calendar data.
  */
-function EmbeddedCalendarView() {
+export function EmbeddedCalendarView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
   const { token } = Route.useParams();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
-  const [events, setEvents] = useState<PublicEvent[]>([]);
-  const [error, setError] = useState(false);
   const [failure, setFailure] = useState<ShareFailure | null>(null);
   const [currentMonth, setCurrentMonth] = useState(DateTime.now().startOf('month'));
 
@@ -49,29 +35,25 @@ function EmbeddedCalendarView() {
     api
       .get<PublicCalendar>(`/share/${token}`, true)
       .then(setCalendar)
-      .catch((e: unknown) => {
-        setFailure(shareFailureOf(e));
-        setError(true);
-      });
+      .catch((e: unknown) => setFailure(shareFailureOf(e)));
   }, [token]);
 
-  useEffect(() => {
-    if (!calendar) return;
-    // The grid draws part of the neighbouring months, and the dates are days
-    // in the zone this page renders -- both have to be said, or the edge cells
-    // stay empty and an event near a month boundary lands in the wrong one.
-    const { start, end } = gridRange(currentMonth, timezone);
-    const tz = encodeURIComponent(timezone);
-    api
-      .get<PublicEvent[]>(`/share/${token}/events?start=${start}&end=${end}&tz=${tz}`, true)
-      .then(setEvents)
-      .catch(() => setEvents([]));
-  }, [token, calendar, currentMonth, timezone]);
+  // Only a published link has events to embed. A join link answers the
+  // calendar lookup too, but it is an invitation, and an embed has nobody to
+  // accept it: drawn as a grid it is a calendar with nothing in it.
+  const publishes = calendar !== null && publishesEvents(calendar);
+  const { events, failure: eventsFailure } = usePublicEvents(
+    token,
+    publishes,
+    currentMonth,
+    timezone,
+  );
+  const shownFailure = failure ?? (calendar && !publishes ? 'gone' : eventsFailure);
 
-  if (error) {
+  if (shownFailure) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-surface)] px-6 text-center text-body text-[var(--color-text-secondary)]">
-        {failure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
+        {shownFailure === 'busy' ? t('share.tryAgainShortly') : t('share.linkExpired')}
       </div>
     );
   }
@@ -91,7 +73,7 @@ function EmbeddedCalendarView() {
   }
 
   const getEventsForDay = (day: DateTime) => {
-    return events.filter((e) => publicEventOccursOnDay(e, day));
+    return events.filter((e) => eventOccupiesDay(e, day, timezone));
   };
 
   const today = DateTime.now();
@@ -113,7 +95,7 @@ function EmbeddedCalendarView() {
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
         <button
           type="button"
-          aria-label="prev"
+          aria-label={t('calendar.prevMonth')}
           onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))}
           className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
         >
@@ -133,7 +115,7 @@ function EmbeddedCalendarView() {
         </span>
         <button
           type="button"
-          aria-label="next"
+          aria-label={t('calendar.nextMonth')}
           onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))}
           className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
         >

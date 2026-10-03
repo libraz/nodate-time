@@ -569,3 +569,119 @@ describe('EventModal save payload', () => {
     expect(Object.keys(payload).sort()).toEqual(wireFields);
   });
 });
+
+describe('EventModal recurrence end', () => {
+  const weeklyWithCount: CalendarEvent = {
+    ...event,
+    recurrenceRule: { freq: 'weekly', interval: 1, byDay: ['FR'], count: 5 },
+  };
+
+  function openWith(evt: CalendarEvent) {
+    calendarState.events = [evt];
+    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
+    render(<EventModal />);
+  }
+
+  // A weekly rule with a count reads as the weekly preset, and the end
+  // controls lived only in the custom editor, so the count was invisible.
+  it('shows the end condition of a rule that reads as a preset', async () => {
+    openWith(weeklyWithCount);
+
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    expect(screen.getByDisplayValue('5')).toBeInTheDocument();
+  });
+
+  // Moving the start rebuilt the preset's rule from scratch, so a series of
+  // five became endless on the next save.
+  it('keeps the end condition when the start date moves', async () => {
+    openWith(weeklyWithCount);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const [startDate] = screen.getAllByRole('button', { name: '2026年8月7日(金)' });
+    if (!startDate) throw new Error('no start date field');
+    fireEvent.click(startDate);
+    fireEvent.click(screen.getByRole('button', { name: '2026-08-13' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload.recurrenceRule).toMatchObject({ freq: 'weekly', byDay: ['TH'], count: 5 });
+  });
+
+  // The end date is stored as the end of that day in the event's zone; read in
+  // a zone further east it fell on the next day.
+  it('shows the end date in the event’s zone, not the viewer’s', async () => {
+    uiState.timezone = 'Pacific/Auckland';
+    openWith({
+      ...event,
+      recurrenceRule: {
+        freq: 'weekly',
+        interval: 1,
+        byDay: ['FR'],
+        until: '2026-08-31T23:59:59.999+09:00',
+      },
+    });
+
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    expect(screen.getByRole('button', { name: '2026年8月31日(月)' })).toBeInTheDocument();
+  });
+});
+
+describe('EventModal RSVP', () => {
+  const invited: CalendarEvent = {
+    ...event,
+    participants: ['u1'],
+    attendees: [{ userId: 'u1', rsvp: 'pending', canEdit: false }],
+  };
+
+  // The answer was kept only in the modal, so reopening read the store's old
+  // copy and showed the previous answer again.
+  it('reads the events back once the answer is stored', async () => {
+    calendarState.events = [invited];
+    mockApi.put.mockResolvedValue(undefined);
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'event.rsvpAccepted' }));
+
+    await waitFor(() => expect(calendarState.fetchEvents).toHaveBeenCalledTimes(1));
+    expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/events/ev-1/rsvp', {
+      rsvp: 'accepted',
+    });
+  });
+
+  it('leaves the store alone when the answer is refused', async () => {
+    calendarState.events = [invited];
+    mockApi.put.mockRejectedValue(new Error('nope'));
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'event.rsvpAccepted' }));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(calendarState.fetchEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe('EventModal monthly weekday position', () => {
+  // A start on the 29th-31st is the fifth weekday of its month. The picker
+  // stopped at the fourth and offered a "last" the server refuses, so the
+  // rule showed nothing selected and the one extra choice could not be saved.
+  it('shows the fifth weekday and offers only positions the server accepts', async () => {
+    const fifthFriday: CalendarEvent = {
+      ...event,
+      startAt: '2026-07-31T00:00:00Z',
+      endAt: '2026-07-31T01:00:00Z',
+      recurrenceRule: { freq: 'monthly', interval: 2, bySetPos: 5, byDay: ['FR'] },
+    };
+    calendarState.events = [fifthFriday];
+    mockApi.getWithRevision.mockResolvedValue({ data: fifthFriday, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNthFifth/ }));
+
+    expect(screen.queryByRole('option', { name: 'event.recurrenceNthLast' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'event.recurrenceNthFifth' })).toBeInTheDocument();
+  });
+});

@@ -7,6 +7,7 @@ export const en: Record<TranslationKey, string> = {
   'common.delete': 'Delete',
   'common.create': 'Create',
   'common.close': 'Close',
+  'common.notifications': 'Notifications',
   'common.loading': 'Loading...',
   'common.copy': 'Copy',
   'common.copied': 'Copied',
@@ -131,6 +132,7 @@ export const en: Record<TranslationKey, string> = {
   'event.rsvpDeclined': 'Not going',
 
   'panel.memo': 'Memo',
+  'panel.targetCalendar': 'Calendar',
   'panel.album': 'Album',
   'panel.members': 'Members',
   'panel.settings': 'Calendar Settings',
@@ -163,7 +165,6 @@ export const en: Record<TranslationKey, string> = {
   'share.joinFailed': 'Failed to join',
   'share.calendarNotFound': 'Calendar not found',
   'share.poweredBy': 'Powered by Nodate Time',
-  'share.targetCalendar': 'Target calendar',
   'share.inviteSection': 'Invite link',
   'share.inviteTermsNote':
     'Each link carries the role, expiry and number of uses you choose below. You can issue several',
@@ -369,6 +370,7 @@ export const en: Record<TranslationKey, string> = {
   'members.roleEditor': 'Editor',
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'Remove this member?',
+  'members.leave': 'Leave calendar',
   'members.leaveConfirm': 'Leave this calendar? Its events stay with the other members.',
   'members.leftCalendar': 'You have left the calendar',
   'members.lastOwner': 'A calendar must keep at least one owner',
@@ -430,7 +432,7 @@ export const en: Record<TranslationKey, string> = {
   'event.recurrenceNthSecond': 'Second',
   'event.recurrenceNthThird': 'Third',
   'event.recurrenceNthFourth': 'Fourth',
-  'event.recurrenceNthLast': 'Last',
+  'event.recurrenceNthFifth': 'Fifth',
 
   // Assignee
   'event.assignee': 'Assignee',
@@ -478,7 +480,6 @@ export const en: Record<TranslationKey, string> = {
   // Activity feed
   'activity.title': 'Activity',
   'activity.empty': 'No activity yet',
-  'activity.targetCalendar': 'Calendar',
   'activity.entityEvent': 'Event',
   'activity.entityMemo': 'Memo',
   'activity.entityMember': 'Member',

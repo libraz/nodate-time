@@ -177,7 +177,7 @@ describe('SharePanel invites', () => {
 
     render(<SharePanel />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'share.targetCalendar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'panel.targetCalendar' }));
     fireEvent.click(screen.getByRole('option', { name: 'B' }));
     expect(await screen.findByDisplayValue('http://localhost:3000/share/token-b')).toBeTruthy();
 

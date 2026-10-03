@@ -16,9 +16,10 @@ vi.mock('@/lib/api', () => {
     ApiError,
     api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
     setToken: vi.fn(),
-    clearToken: vi.fn(),
+    endSession: vi.fn(),
     hasToken: vi.fn(() => false),
-    errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error.generic'),
+    errorMessage: (e: unknown, fallback?: string) =>
+      e instanceof ApiError ? e.detail : (fallback ?? 'error.generic'),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module export
     SESSION_EXPIRED_EVENT: 'nodate:session-expired',
   };
@@ -32,14 +33,14 @@ vi.mock('@/lib/image-resize', () => ({
   resizeImageForAvatar: vi.fn(),
 }));
 
-import { ApiError, api, clearToken, hasToken, setToken } from '@/lib/api';
+import { ApiError, api, endSession, hasToken, setToken } from '@/lib/api';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
 const mockApi = vi.mocked(api);
 const mockSetToken = vi.mocked(setToken);
-const mockClearToken = vi.mocked(clearToken);
+const mockEndSession = vi.mocked(endSession);
 const mockHasToken = vi.mocked(hasToken);
 
 const sampleUser = {
@@ -117,23 +118,11 @@ describe('login', () => {
 
 describe('logout', () => {
   // Forgetting the token locally is not signing out. Anyone who copied the
-  // storage of a shared machine keeps working access until it expires, which
-  // is the whole day the user believed they had just ended.
+  // storage of a shared machine keeps working access until it expires.
   it('ends the session on the server too', () => {
-    mockHasToken.mockReturnValue(true);
-    mockApi.post.mockResolvedValue(undefined as never);
-
     useAuthStore.getState().logout();
 
-    expect(mockApi.post).toHaveBeenCalledWith('/auth/logout');
-  });
-
-  it('does not call the server when there was nothing to end', () => {
-    mockHasToken.mockReturnValue(false);
-
-    useAuthStore.getState().logout();
-
-    expect(mockApi.post).not.toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalledTimes(1);
   });
 
   it('clears the token, tt_ keys, and resets the calendar store', () => {
@@ -174,7 +163,7 @@ describe('logout', () => {
 
     useAuthStore.getState().logout();
 
-    expect(mockClearToken).toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalled();
     expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
     expect(localStorage.getItem('unrelated')).toBe('keep');
     const auth = useAuthStore.getState();
@@ -222,7 +211,7 @@ describe('logout', () => {
 
     window.dispatchEvent(new Event('nodate:session-expired'));
 
-    expect(mockClearToken).toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalled();
     expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useCalendarStore.getState()).toMatchObject({
@@ -251,7 +240,7 @@ describe('changePassword', () => {
     });
     expect(mockSetToken).toHaveBeenCalledWith('rotated-token', 'rotated-refresh');
     // The current session is preserved, not cleared.
-    expect(mockClearToken).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
   });
 
   it('does not persist a token and rethrows when the change fails', async () => {
@@ -276,7 +265,7 @@ describe('visibilitychange', () => {
 
     document.dispatchEvent(new Event('visibilitychange'));
 
-    expect(mockClearToken).toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalled();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 
@@ -290,7 +279,7 @@ describe('visibilitychange', () => {
 
     document.dispatchEvent(new Event('visibilitychange'));
 
-    expect(mockClearToken).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
   });
 });
@@ -323,7 +312,7 @@ describe('fetchMe', () => {
 
     await useAuthStore.getState().fetchMe();
 
-    expect(mockClearToken).toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalled();
     const s = useAuthStore.getState();
     expect(s.user).toBeNull();
     expect(s.isAuthenticated).toBe(false);
@@ -359,7 +348,7 @@ describe('fetchMe', () => {
 
     await useAuthStore.getState().fetchMe();
 
-    expect(mockClearToken).not.toHaveBeenCalled();
+    expect(mockEndSession).not.toHaveBeenCalled();
     const s = useAuthStore.getState();
     expect(s.user).toEqual(sampleUser);
     expect(s.isAuthenticated).toBe(true);

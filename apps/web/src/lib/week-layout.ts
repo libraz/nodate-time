@@ -15,11 +15,14 @@ export interface PositionedEvent {
   continuesRight: boolean;
 }
 
+/** What placing an event on calendar days reads; a published event carries the same. */
+export type DayEvent = Pick<CalendarEvent, 'startAt' | 'endAt' | 'allDay' | 'timezone'>;
+
 /**
  * Returns the first calendar day an event occupies, expressed in the grid's
  * zone. All-day events are measured in their own zone (see `eventDayZone`).
  */
-export function eventStartDay(evt: CalendarEvent, zone: string): DateTime {
+export function eventStartDay(evt: DayEvent, zone: string): DateTime {
   const own = eventDayZone(evt, zone);
   return toGridDay(fromISOInZone(evt.startAt, own), zone);
 }
@@ -33,7 +36,7 @@ export function eventStartDay(evt: CalendarEvent, zone: string): DateTime {
  * next day's midnight). An end that lands exactly on midnight therefore belongs to
  * the previous day and must not bleed the event onto the next cell.
  */
-export function eventEndDay(evt: CalendarEvent, zone: string): DateTime {
+export function eventEndDay(evt: DayEvent, zone: string): DateTime {
   const own = eventDayZone(evt, zone);
   const start = fromISOInZone(evt.startAt, own);
   const end = fromISOInZone(evt.endAt, own);
@@ -43,12 +46,12 @@ export function eventEndDay(evt: CalendarEvent, zone: string): DateTime {
 }
 
 /** Returns true when an event spans more than one calendar day in the given zone. */
-export function isMultiDay(evt: CalendarEvent, zone: string): boolean {
+export function isMultiDay(evt: DayEvent, zone: string): boolean {
   return eventEndDay(evt, zone) > eventStartDay(evt, zone);
 }
 
 /** Returns true when an event occupies the given calendar day. */
-export function eventOccupiesDay(evt: CalendarEvent, day: DateTime, zone: string): boolean {
+export function eventOccupiesDay(evt: DayEvent, day: DateTime, zone: string): boolean {
   const target = toGridDay(day, zone);
   return eventStartDay(evt, zone) <= target && eventEndDay(evt, zone) >= target;
 }

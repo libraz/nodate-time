@@ -19,6 +19,7 @@ import {
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
@@ -268,6 +269,7 @@ function MobileSettingsView() {
 function MemoPanel() {
   const t = useT();
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const panelRef = useModalA11y<HTMLDivElement>(true, () => toggleRightPanel('memo'));
 
   return (
     <>
@@ -277,7 +279,13 @@ function MemoPanel() {
         className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
         onClick={() => toggleRightPanel('memo')}
       />
-      <div className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.memo')}
+        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
           <h2 className="truncate text-subhead font-semibold">{t('panel.memo')}</h2>
           <button

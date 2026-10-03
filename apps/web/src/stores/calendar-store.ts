@@ -85,6 +85,11 @@ interface CalendarState {
    * to be refetched.
    */
   leaveCalendar: (calendarId: string, memberId: string) => Promise<void>;
+  /**
+   * Changes the colour a member's layer is drawn in. An event's colour is its
+   * owner's, so the events already loaded take the new one with the member.
+   */
+  updateMemberColor: (calendarId: string, memberId: string, color: string) => Promise<void>;
 
   addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
   updateEvent: (
@@ -414,6 +419,25 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((s) => forgetCalendar(s, calendarId));
   },
 
+  async updateMemberColor(calendarId, memberId, color) {
+    const currentAccountGeneration = accountGeneration;
+    const updated = await api.put<Member>(`/calendars/${calendarId}/members/${memberId}/color`, {
+      color,
+    });
+    if (currentAccountGeneration !== accountGeneration) return;
+    set((s) => ({
+      events: s.events.map((e) =>
+        e.calendarId === calendarId && e.ownerId === memberId ? { ...e, color: updated.color } : e,
+      ),
+      membersMap: {
+        ...s.membersMap,
+        [calendarId]: (s.membersMap[calendarId] ?? []).map((m) =>
+          m.id === memberId ? { ...m, color: updated.color } : m,
+        ),
+      },
+    }));
+  },
+
   async addEvent(calendarId, evt) {
     const currentAccountGeneration = accountGeneration;
     const newEvt = await api.post<CalendarEvent>(`/calendars/${calendarId}/events`, evt);
@@ -443,12 +467,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     );
     const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
     if (updated.recurrenceRule || wasRecurring) {
-      // Recurring event: expanded instances change, so re-fetch the visible range
-      // to replace the stale (or removed) occurrences with fresh ones.
-      const parentId = eventId.includes('_') ? eventId.substring(0, 36) : eventId;
-      set((s) => ({
-        events: s.events.filter((e) => !e.id.startsWith(parentId)),
-      }));
+      // Recurring event: expanded instances change, so re-fetch the visible
+      // range. Only a calendar that answers has its events replaced; clearing
+      // the series first left it blank whenever the refetch failed.
       const { start, end } = get().visibleRange();
       await get().fetchEvents(start, end);
     } else {
@@ -462,13 +483,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const query = scope ? `?scope=${scope}` : '';
     await api.delete(`/calendars/${calendarId}/events/${eventId}${query}`);
     if (eventId.includes('_')) {
-      // Recurring instance: drop the affected occurrences, then re-fetch the
-      // visible range so a single-occurrence delete leaves the rest of the
-      // series intact rather than clearing every instance.
-      const parentId = eventId.substring(0, 36);
-      set((s) => ({
-        events: s.events.filter((e) => !e.id.startsWith(parentId)),
-      }));
+      // Recurring instance: re-fetch the visible range so a single-occurrence
+      // delete leaves the rest of the series intact. The answer replaces the
+      // calendar's events; a failed refetch leaves the series on screen.
       const { start, end } = get().visibleRange();
       await get().fetchEvents(start, end);
     } else {
