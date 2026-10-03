@@ -284,8 +284,6 @@ export const ja = {
   'auth.oauthFailed': 'OAuth ログインに失敗しました。もう一度お試しください',
   'auth.oauthDenied': 'ログインがキャンセルされました',
   'auth.oauthState': 'セッションの有効期限が切れました。もう一度ログインしてください',
-  'auth.oauthEmailUnverified':
-    'このメールアドレスを使うアカウントがすでにありますが、確認が済んでいません。パスワードでログインしてアドレスを確認してから、もう一度お試しください',
   'auth.oauthEmailUnsupported':
     'このメールアドレスには、現在ご利用いただけない文字が含まれています。半角英数字のみのアドレスでお試しください',
 

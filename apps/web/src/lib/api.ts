@@ -282,6 +282,19 @@ async function send(
 }
 
 /**
+ * Whether a request speaks for the signed-in session, and so renews it first.
+ *
+ * The rest of /auth/* is how a session is obtained and has none to renew.
+ * Confirming an email is the exception: the server treats a confirmation
+ * that arrives without the account's own session as someone else's, and
+ * revokes the account's password and sessions -- so an owner whose access
+ * token merely expired must not send it bare.
+ */
+function carriesSession(path: string): boolean {
+  return !path.startsWith('/auth/') || path === '/auth/verify-email/confirm';
+}
+
+/**
  * Runs a request through the session handling (pre-emptive renewal, one retry
  * after a 401, the shared error envelope) and hands back the raw response, for
  * the callers that need something out of its headers.
@@ -293,13 +306,13 @@ async function requestRaw(
 ): Promise<Response> {
   // An expired access token is not an ended session while a refresh token
   // remains. Renewing before the request saves a guaranteed 401.
-  if (!getToken() && getRefreshToken() && !path.startsWith('/auth/')) {
+  if (!getToken() && getRefreshToken() && carriesSession(path)) {
     await renewSession();
   }
 
   let res = await send(path, options);
 
-  if (res.status === 401 && !path.startsWith('/auth/') && (await renewSession()) !== null) {
+  if (res.status === 401 && carriesSession(path) && (await renewSession()) !== null) {
     res = await send(path, options);
   }
 

@@ -273,8 +273,6 @@ export const en: Record<TranslationKey, string> = {
   'auth.oauthFailed': 'OAuth sign-in failed. Please try again',
   'auth.oauthDenied': 'Sign-in was cancelled',
   'auth.oauthState': 'Your session expired. Please try signing in again',
-  'auth.oauthEmailUnverified':
-    'An account already uses this email but has not confirmed it. Sign in with your password and confirm the address, then try again',
   'auth.oauthEmailUnsupported':
     'This email address uses characters we cannot store yet. Try an address that uses only unaccented letters and digits',
 
