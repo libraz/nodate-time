@@ -1,14 +1,19 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
 
-vi.mock('@/i18n', () => ({
-  useT: () => (key: string) => key,
+vi.mock('@/i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/i18n')>()),
+  useT: () => (key: string, params?: Record<string, string>) =>
+    params ? `${key} ${params.from}..${params.to}` : key,
 }));
 
 const uiState = {
   locale: 'en',
   timezone: 'Asia/Tokyo',
+  calendarView: 'month',
+  currentMonth: DateTime.fromISO('2026-08-01', { zone: 'Asia/Tokyo' }),
   showSearch: true,
   searchQuery: '',
   setSearchQuery: vi.fn(),
@@ -117,6 +122,17 @@ describe('SearchPanel', () => {
     expect(screen.queryAllByText('Lunch')).toHaveLength(0);
   });
 
+  // Search runs over the loaded window only; "no results" alone claims the
+  // event does not exist anywhere.
+  it('says which months an empty search covered', () => {
+    calendarState.events = [event('e1', 'cal-1', 'Lunch')];
+    uiState.searchQuery = 'dentist';
+
+    render(<SearchPanel />);
+
+    expect(screen.getAllByText('search.noResults July 2026..September 2026')).toHaveLength(2);
+  });
+
   it('leaves out events from a calendar the reader has switched off', () => {
     calendarState.events = [
       event('e1', 'cal-1', 'Rehearsal at home'),
@@ -213,5 +229,52 @@ describe('SearchPanel keyboard', () => {
     rerender(<Harness />);
 
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+// An all-day event is a date, not an instant: read in the viewer's zone, a
+// Tokyo birthday on 5 August starts on the 4th in New York.
+describe('SearchPanel dates', () => {
+  afterEach(() => {
+    uiState.timezone = 'Asia/Tokyo';
+  });
+
+  it('names and jumps to an all-day event on its own date in any viewer zone', () => {
+    uiState.timezone = 'America/New_York';
+    calendarState.events = [
+      {
+        ...event('e1', 'cal-1', 'Birthday'),
+        allDay: true,
+        startAt: '2026-08-05T00:00:00+09:00',
+        endAt: '2026-08-06T00:00:00+09:00',
+        timezone: 'Asia/Tokyo',
+      },
+    ];
+    uiState.searchQuery = 'birthday';
+
+    render(<SearchPanel />);
+
+    expect(screen.getAllByText('2026/08/05 (Wed)')).toHaveLength(2);
+
+    const [first] = screen.getAllByText('Birthday');
+    if (!first) throw new Error('no result');
+    fireEvent.click(first);
+
+    const selected = uiState.setSelectedDate.mock.calls[0]?.[0];
+    const month = uiState.setCurrentMonth.mock.calls[0]?.[0];
+    expect(selected?.toISODate()).toBe('2026-08-05');
+    expect(month?.toISODate()).toBe('2026-08-01');
+    expect(uiState.openEventModal).toHaveBeenCalledWith('e1');
+  });
+
+  it('keeps a timed event on the viewer clock', () => {
+    uiState.timezone = 'America/New_York';
+    calendarState.events = [event('e1', 'cal-1', 'Call')];
+    uiState.searchQuery = 'call';
+
+    render(<SearchPanel />);
+
+    // 10:00 in Tokyo is 21:00 the previous evening in New York.
+    expect(screen.getAllByText('2026/08/04 (Tue) 21:00 - 22:00')).toHaveLength(2);
   });
 });

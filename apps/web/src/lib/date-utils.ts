@@ -64,15 +64,17 @@ export function gridRange(month: DateTime, zone?: string): { start: string; end:
  * dots; given three months of events, nine of them are permanently blank and
  * read as a year with nothing in it.
  *
- * The end is exclusive, matching the API's own range handling.
+ * The end is the inclusive last day, as the API reads it: an exclusive end
+ * asks for one day more, which takes a leap year past the widest window the
+ * API accepts.
  */
 export function fetchWindow(view: CalendarView, month: DateTime): { start: string; end: string } {
   const [from, to] =
     view === 'year'
-      ? [month.startOf('year'), month.startOf('year').plus({ years: 1 })]
+      ? [month.startOf('year'), month.endOf('year')]
       : // A month either side, so scrolling to the neighbouring month has
         // something to show before its own fetch lands.
-        [month.minus({ months: 1 }).startOf('month'), month.plus({ months: 2 }).startOf('month')];
+        [month.minus({ months: 1 }).startOf('month'), month.plus({ months: 1 }).endOf('month')];
   const fallback = month.toISODate() ?? '';
   return { start: from.toISODate() ?? fallback, end: to.toISODate() ?? fallback };
 }

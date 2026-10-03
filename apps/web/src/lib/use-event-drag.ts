@@ -11,9 +11,13 @@ import type { CalendarEvent } from '@/types/calendar';
 export interface DragDropContext {
   /** Key (from resolveKey) of the cell where the drag started. */
   originKey: string | null;
-  /** Arbitrary metadata captured at drag start (e.g. grab offset). */
-  meta: unknown;
+  /** Pointer position at the press, so a drop can be measured as travel. */
+  startX: number;
+  startY: number;
 }
+
+/** Pixels a press must travel before it moves or resizes anything. */
+export const DRAG_THRESHOLD_PX = 5;
 
 /** Live drag state for rendering a cursor-following ghost / target highlight. */
 export interface DragState {
@@ -42,7 +46,6 @@ interface Pending {
   startY: number;
   pointerType: string;
   originKey: string | null;
-  meta: unknown;
   active: boolean;
   ctrl: AbortController;
   timer: number;
@@ -56,7 +59,12 @@ const TOUCH_CANCEL_PX = 12;
  * movement threshold; touch requires a long press first so taps and scrolling
  * keep working. The click that follows a real drag is suppressed.
  */
-export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 350 }: Options) {
+export function useEventDrag({
+  onDrop,
+  resolveKey,
+  threshold = DRAG_THRESHOLD_PX,
+  longPressMs = 350,
+}: Options) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const pending = useRef<Pending | null>(null);
   const suppressClick = useRef(false);
@@ -132,7 +140,11 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
         window.setTimeout(() => {
           suppressClick.current = false;
         }, 0);
-        onDrop(s.event, e.clientX, e.clientY, { originKey: s.originKey, meta: s.meta });
+        onDrop(s.event, e.clientX, e.clientY, {
+          originKey: s.originKey,
+          startX: s.startX,
+          startY: s.startY,
+        });
       }
     },
     [onDrop, endPending, cancelFrame],
@@ -144,7 +156,7 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
   }, []);
 
   const start = useCallback(
-    (event: CalendarEvent, e: ReactPointerEvent, meta?: unknown) => {
+    (event: CalendarEvent, e: ReactPointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const ctrl = new AbortController();
       const { signal } = ctrl;
@@ -154,7 +166,6 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
         startY: e.clientY,
         pointerType: e.pointerType,
         originKey: resolveKey ? resolveKey(e.clientX, e.clientY) : null,
-        meta,
         active: false,
         ctrl,
         timer: 0,
@@ -200,4 +211,75 @@ export function useEventDrag({ onDrop, resolveKey, threshold = 5, longPressMs = 
   );
 
   return { drag, start, consumeClick };
+}
+
+interface ResizeOptions<T> {
+  /** Called per pointer sample once the press has passed the threshold. */
+  onPreview: (event: CalendarEvent, clientY: number, origin: T) => void;
+  /** Called on release after a real drag; never for a tap. */
+  onCommit: (event: CalendarEvent, clientY: number, origin: T) => void;
+  /** Called whenever the gesture ends, committed or not, to clear any preview. */
+  onEnd: () => void;
+  threshold?: number;
+}
+
+/**
+ * Drag of an event's edge (resize). The press starts nothing until the pointer
+ * travels past the same threshold a move uses, so a tap on the handle falls
+ * through to the block's click. Listeners end with the gesture or on unmount,
+ * whichever comes first. `origin` is whatever the caller resolved at the press.
+ */
+export function useEventResize<T>({
+  onPreview,
+  onCommit,
+  onEnd,
+  threshold = DRAG_THRESHOLD_PX,
+}: ResizeOptions<T>) {
+  const ctrlRef = useRef<AbortController | null>(null);
+  const suppressClick = useRef(false);
+
+  useEffect(() => () => ctrlRef.current?.abort(), []);
+
+  const start = useCallback(
+    (event: CalendarEvent, e: ReactPointerEvent, origin: T) => {
+      e.stopPropagation();
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      ctrlRef.current?.abort();
+      const ctrl = new AbortController();
+      ctrlRef.current = ctrl;
+      const startY = e.clientY;
+      let moved = false;
+      const onMove = (ev: globalThis.PointerEvent) => {
+        if (!moved && Math.abs(ev.clientY - startY) < threshold) return;
+        moved = true;
+        onPreview(event, ev.clientY, origin);
+      };
+      const onUp = (ev: globalThis.PointerEvent) => {
+        ctrl.abort();
+        onEnd();
+        if (!moved) return;
+        // The release lands on the block, whose click would open the event.
+        suppressClick.current = true;
+        window.setTimeout(() => {
+          suppressClick.current = false;
+        }, 0);
+        onCommit(event, ev.clientY, origin);
+      };
+      window.addEventListener('pointermove', onMove, { signal: ctrl.signal });
+      window.addEventListener('pointerup', onUp, { signal: ctrl.signal });
+      window.addEventListener('pointercancel', onUp, { signal: ctrl.signal });
+    },
+    [onPreview, onCommit, onEnd, threshold],
+  );
+
+  /** Returns true if the click follows a resize and should be ignored. */
+  const consumeClick = useCallback(() => {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return true;
+    }
+    return false;
+  }, []);
+
+  return { start, consumeClick };
 }

@@ -260,7 +260,7 @@ export const ja = {
   // Search
   'search.searchEvents': '予定を検索',
   'search.placeholder': '予定を検索...',
-  'search.noResults': '見つかりませんでした',
+  'search.noResults': '読み込み済みの予定（{from}〜{to}）には見つかりませんでした',
 
   // Password reset
   'auth.forgotPassword': 'パスワードをお忘れですか？',

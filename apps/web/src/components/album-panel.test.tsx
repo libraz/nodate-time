@@ -240,6 +240,38 @@ describe('AlbumPanel event link', () => {
     expect(await screen.findByText('Sports day')).toBeInTheDocument();
   });
 
+  // An all-day event is a date in its own zone: read as an instant in New
+  // York, a Tokyo all-day 20 April starts on the 19th and missed the photo.
+  it('offers an all-day event on its own date to a viewer in another zone', async () => {
+    const events = calendarState.events;
+    uiState.timezone = 'America/New_York';
+    calendarState.events = [
+      {
+        id: 'evt-2',
+        calendarId: 'cal-1',
+        title: 'Field trip',
+        startAt: '2026-04-20T00:00:00+09:00',
+        allDay: true,
+        timezone: 'Asia/Tokyo',
+      } as (typeof events)[number],
+    ];
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({
+      items: [{ ...photo('https://storage/one'), takenAt: '2026-04-20T12:00:00-04:00' }],
+    });
+
+    try {
+      render(<AlbumPanel />);
+      fireEvent.click(await screen.findByAltText('a photo'));
+      fireEvent.click(await screen.findByText('album.noEvent'));
+
+      expect(await screen.findByText('Field trip')).toBeInTheDocument();
+    } finally {
+      uiState.timezone = 'Asia/Tokyo';
+      calendarState.events = events;
+    }
+  });
+
   it('attaches the photo to the event that was chosen', async () => {
     mockApi.get.mockReset();
     mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });

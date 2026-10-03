@@ -25,9 +25,11 @@ const openEventModal = vi.fn();
 const uiState = {
   locale: 'en',
   selectedDate: DateTime.fromISO(DAY, { zone: ZONE }),
+  currentMonth: DateTime.fromISO(DAY, { zone: ZONE }).startOf('month'),
   timezone: ZONE,
   openEventModal,
   setSelectedDate: vi.fn(),
+  setCurrentMonth: vi.fn(),
 };
 
 vi.mock('@/stores/ui-store', () => ({
@@ -229,5 +231,194 @@ describe('WeeklyTimeline resize listeners', () => {
 
     // The gesture committed, so the event was asked to change.
     expect(calendarState.updateEvent).toHaveBeenCalled();
+  });
+});
+
+describe('WeeklyTimeline week model', () => {
+  afterEach(() => {
+    uiState.selectedDate = DateTime.fromISO(DAY, { zone: ZONE });
+    uiState.currentMonth = DateTime.fromISO(DAY, { zone: ZONE }).startOf('month');
+    calendarState.events = [probe];
+  });
+
+  // The events fetched follow currentMonth. Arriving at this week from a month
+  // the reader paged to, nothing had moved it to the week drawn.
+  it('re-anchors the fetched month to the week it draws', () => {
+    uiState.currentMonth = DateTime.fromISO('2026-01-01', { zone: ZONE });
+
+    render(<WeeklyTimeline />);
+
+    const anchored = uiState.setCurrentMonth.mock.calls[0]?.[0] as DateTime | undefined;
+    expect(anchored?.toISODate()).toBe('2026-03-01');
+  });
+
+  it('leaves the month alone when it already holds the week', () => {
+    render(<WeeklyTimeline />);
+
+    expect(uiState.setCurrentMonth).not.toHaveBeenCalled();
+  });
+
+  // An all-day event is a date in its own zone. Measured as instants in New
+  // York, a Tokyo all-day 5 August runs 4 Aug 11:00 to 5 Aug 11:00 and was
+  // drawn in two columns.
+  it('puts an all-day event on its own date for a viewer in another zone', () => {
+    uiState.selectedDate = DateTime.fromISO('2026-08-05', { zone: ZONE });
+    uiState.currentMonth = DateTime.fromISO('2026-08-01', { zone: ZONE });
+    calendarState.events = [
+      {
+        ...probe,
+        id: 'a1',
+        title: 'Birthday',
+        allDay: true,
+        startAt: '2026-08-05T00:00:00+09:00',
+        endAt: '2026-08-06T00:00:00+09:00',
+        timezone: 'Asia/Tokyo',
+      },
+    ];
+
+    render(<WeeklyTimeline />);
+
+    const chips = screen.getAllByText('Birthday');
+    expect(chips).toHaveLength(1);
+    const cell = chips[0]?.parentElement;
+    const row = cell?.parentElement;
+    // The row opens with the gutter label; Wednesday is the fourth column.
+    expect(row && Array.from(row.children).indexOf(cell as Element)).toBe(4);
+  });
+
+  // A marker opening the day belongs to it. A pre-filter asking that the span
+  // reach past midnight dropped it before the layout saw it.
+  it('draws a marker at midnight on the day it opens', () => {
+    calendarState.events = [
+      {
+        ...probe,
+        id: 'm0',
+        title: 'Midnight',
+        startAt: `${DAY}T00:00:00-05:00`,
+        endAt: `${DAY}T00:00:00-05:00`,
+      },
+    ];
+
+    render(<WeeklyTimeline />);
+
+    const blocks = screen.getAllByText('Midnight');
+    expect(blocks).toHaveLength(1);
+    const block = blocks[0]?.closest('button') as HTMLElement;
+    expect(block.closest('[data-daycol]')?.getAttribute('data-daycol')).toBe(DAY);
+    expect(Number.parseFloat(block.style.top)).toBe(0);
+  });
+});
+
+/** Points `document.elementsFromPoint` at the day column whose index is x / 100. */
+function stubColumnsAtX() {
+  const original = document.elementsFromPoint;
+  document.elementsFromPoint = (x: number) => {
+    const cols = document.querySelectorAll<HTMLElement>('[data-daycol]');
+    const col = cols[Math.floor(x / 100)];
+    return col ? [col] : [];
+  };
+  return () => {
+    document.elementsFromPoint = original;
+  };
+}
+
+function mouse(x: number, y: number) {
+  return { pointerType: 'mouse', button: 0, clientX: x, clientY: y };
+}
+
+function blockIn(dayKey: string, title: string): HTMLElement {
+  const col = document.querySelector<HTMLElement>(`[data-daycol="${dayKey}"]`);
+  const text = col && Array.from(col.querySelectorAll('p')).find((p) => p.textContent === title);
+  if (!text) throw new Error(`no ${title} in ${dayKey}`);
+  return text;
+}
+
+function movedPayload(): { startAt: string; endAt: string } {
+  return calendarState.updateEvent.mock.calls[0]?.[2] as { startAt: string; endAt: string };
+}
+
+describe('WeeklyTimeline move drop', () => {
+  let restore = () => {};
+  afterEach(() => {
+    restore();
+    calendarState.events = [probe];
+  });
+
+  // The grab offset was read from whatever element was pressed, so pressing
+  // the title instead of the block's padding moved the event by the title's
+  // own offset inside it.
+  it('moves by the pointer travel when the title inside the block is pressed', () => {
+    render(<WeeklyTimeline />);
+    restore = stubColumnsAtX();
+    // 2026-03-08 is the Sunday, column 0.
+    const title = blockIn(DAY, probe.title);
+
+    fireEvent.pointerDown(title, mouse(50, 300));
+    fireEvent.pointerMove(window, mouse(50, 320));
+    fireEvent.pointerUp(window, mouse(50, 300 + HOUR_HEIGHT));
+
+    expect(movedPayload().startAt).toBe('2026-03-08T06:00:00.000-04:00');
+    expect(movedPayload().endAt).toBe('2026-03-08T07:00:00.000-04:00');
+  });
+
+  // A 22:00-02:00 event draws its Tuesday segment from midnight. Placing the
+  // start at the drop position moved it a whole day plus an hour.
+  it('moves an overnight event by the travel of whichever segment was grabbed', () => {
+    calendarState.events = [
+      {
+        ...probe,
+        id: 'n1',
+        title: 'Night shift',
+        startAt: '2026-03-09T22:00:00-04:00',
+        endAt: '2026-03-10T02:00:00-04:00',
+      },
+    ];
+    render(<WeeklyTimeline />);
+    restore = stubColumnsAtX();
+    const tuesday = blockIn('2026-03-10', 'Night shift');
+
+    fireEvent.pointerDown(tuesday, mouse(250, 10));
+    fireEvent.pointerMove(window, mouse(250, 30));
+    fireEvent.pointerUp(window, mouse(250, 10 + HOUR_HEIGHT));
+
+    expect(movedPayload().startAt).toBe('2026-03-09T23:00:00.000-04:00');
+    expect(movedPayload().endAt).toBe('2026-03-10T03:00:00.000-04:00');
+  });
+});
+
+describe('WeeklyTimeline resize gesture', () => {
+  afterEach(() => {
+    calendarState.events = [probe];
+  });
+
+  it('does not touch the event when the handle is only tapped', () => {
+    render(<WeeklyTimeline />);
+    const handle = document.querySelector<HTMLElement>('.cursor-ns-resize');
+    if (!handle) throw new Error('no resize handle');
+
+    fireEvent.pointerDown(handle, mouse(50, 288));
+    fireEvent.pointerMove(window, mouse(50, 290));
+    fireEvent.pointerUp(window, mouse(50, 290));
+
+    expect(calendarState.updateEvent).not.toHaveBeenCalled();
+  });
+
+  // The first day's segment of an overnight event ends at midnight on screen,
+  // and resizing it there rewrote the real next-day end.
+  it('offers the handle only on the segment holding the real end', () => {
+    calendarState.events = [
+      {
+        ...probe,
+        id: 'n1',
+        title: 'Night shift',
+        startAt: '2026-03-09T22:00:00-04:00',
+        endAt: '2026-03-10T02:00:00-04:00',
+      },
+    ];
+    render(<WeeklyTimeline />);
+
+    const handles = document.querySelectorAll('.cursor-ns-resize');
+    expect(handles).toHaveLength(1);
+    expect(handles[0]?.closest('[data-daycol]')?.getAttribute('data-daycol')).toBe('2026-03-10');
   });
 });

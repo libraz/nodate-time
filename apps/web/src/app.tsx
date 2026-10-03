@@ -9,14 +9,21 @@ import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
-import { fetchWindow, fromISOInZone } from '@/lib/date-utils';
-import { filterEventsForSearch } from '@/lib/search';
+import { fetchWindow } from '@/lib/date-utils';
+import {
+  filterEventsForSearch,
+  searchedMonths,
+  searchResultDay,
+  searchResultLabel,
+} from '@/lib/search';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
+import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
+import type { CalendarEvent } from '@/types/calendar';
 
 const ActivityPanel = lazy(() =>
   import('@/components/activity-panel').then((module) => ({ default: module.ActivityPanel })),
@@ -78,12 +85,14 @@ function MobileSearchView() {
   );
 
   const timezone = useUiStore((s) => s.timezone);
-  const handleSelect = (eventId: string, startAt: string) => {
-    const dt = fromISOInZone(startAt, timezone);
-    setCurrentMonth(dt.startOf('month'));
-    setSelectedDate(dt);
+  const calendarView = useUiStore((s) => s.calendarView);
+  const currentMonth = useUiStore((s) => s.currentMonth);
+  const handleSelect = (evt: CalendarEvent) => {
+    const day = searchResultDay(evt, timezone);
+    setCurrentMonth(day.startOf('month'));
+    setSelectedDate(day);
     setMobileTab('calendar');
-    openEventModal(eventId);
+    openEventModal(evt.id);
   };
 
   return (
@@ -132,21 +141,17 @@ function MobileSearchView() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]">
-            {t('search.noResults')}
+            {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
           </div>
         ) : (
           <div className="py-1">
             {filtered.map((evt) => {
-              const dt = fromISOInZone(evt.startAt, timezone);
-              const endDt = fromISOInZone(evt.endAt, timezone);
-              const dateLabel = evt.allDay
-                ? dt.toFormat('yyyy/MM/dd (EEE)', { locale })
-                : `${dt.toFormat('yyyy/MM/dd (EEE) HH:mm', { locale })} - ${endDt.toFormat('HH:mm')}`;
+              const dateLabel = searchResultLabel(evt, timezone, locale);
               return (
                 <button
                   key={evt.id}
                   type="button"
-                  onClick={() => handleSelect(evt.id, evt.startAt)}
+                  onClick={() => handleSelect(evt)}
                   className="flex w-full items-start gap-3 px-4 py-3.5 text-left hover:bg-[var(--color-hover)]"
                 >
                   <span
@@ -385,6 +390,9 @@ export function App() {
   const calendarView = useUiStore((s) => s.calendarView);
   const currentMonth = useUiStore((s) => s.currentMonth);
   const mobileTab = useUiStore((s) => s.mobileTab);
+  // CSS hides the other layout; the calendar inside it is not mounted at all,
+  // or it re-renders on every change and measures itself while undisplayed.
+  const isDesktop = useIsDesktop();
   const setMobileTab = useUiStore((s) => s.setMobileTab);
   const showActivity = useUiStore((s) => s.showActivity);
   const showDayDetail = useUiStore((s) => s.showDayDetail);
@@ -512,13 +520,13 @@ export function App() {
       {/* PC layout: sidebar + calendar */}
       <div className="relative z-[1] hidden flex-1 overflow-hidden sm:flex">
         <LeftSidebar />
-        {calendarContent}
+        {isDesktop && calendarContent}
         <RightSidebar />
       </div>
 
       {/* SP layout: tab-switched content */}
       <div className="relative z-[1] flex flex-1 flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom))] sm:hidden">
-        {mobileTab === 'calendar' && mobileCalendarContent}
+        {mobileTab === 'calendar' && !isDesktop && mobileCalendarContent}
         {mobileTab === 'memo' && (
           <Deferred>
             <MemoSection />

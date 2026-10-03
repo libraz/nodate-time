@@ -1,6 +1,7 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
-import { filterEventsForSearch } from './search';
+import { filterEventsForSearch, searchedMonths } from './search';
 
 function event(id: string, overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
@@ -62,5 +63,13 @@ describe('filterEventsForSearch', () => {
 
     expect(filterEventsForSearch(events, shown, 'rehearsal').map((e) => e.id)).toEqual(['shown']);
     expect(filterEventsForSearch(events, [], 'rehearsal')).toEqual([]);
+  });
+});
+
+describe('searchedMonths', () => {
+  it('names the months the view loaded, the only ones a search covers', () => {
+    const aug = DateTime.fromISO('2026-08-01', { zone: 'Asia/Tokyo' });
+    expect(searchedMonths('month', aug, 'en')).toEqual({ from: 'July 2026', to: 'September 2026' });
+    expect(searchedMonths('year', aug, 'ja')).toEqual({ from: '2026年1月', to: '2026年12月' });
   });
 });

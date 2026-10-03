@@ -17,15 +17,16 @@ import {
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
-import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
 import {
   layoutTimedEventsForDay,
   MIN_RENDERED_MINUTES,
   resizedEndForDaySegment,
 } from '@/lib/timed-layout';
-import { useEventDrag } from '@/lib/use-event-drag';
+import { useCanMoveEvent } from '@/lib/use-can-move-event';
+import { type DragDropContext, useEventDrag, useEventResize } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import { useAuthStore } from '@/stores/auth-store';
+import { weekDropStart } from '@/lib/week-drag';
+import { eventEndDay, eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -33,17 +34,33 @@ import type { CalendarEvent } from '@/types/calendar';
 const HOUR_HEIGHT = 48;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+/** The day segment a resize was started on, resolved at the press. */
+interface ResizeSegment {
+  dayKey: string;
+  colTop: number;
+  dayStart: DateTime;
+}
+
+/** The `yyyy-MM-dd` of the day column under a viewport point. */
+function resolveDayColumn(x: number, y: number): string | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const day = el.closest('[data-daycol]')?.getAttribute('data-daycol');
+    if (day) return day;
+  }
+  return null;
+}
+
 export function WeeklyTimeline() {
   const t = useT();
   const selectedDate = useUiStore((s) => s.selectedDate);
+  const currentMonth = useUiStore((s) => s.currentMonth);
+  const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const calendars = useCalendarStore((s) => s.calendars);
-  const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -58,108 +75,78 @@ export function WeeklyTimeline() {
     dayKey: string;
     endMin: number;
   } | null>(null);
-  const resizeRef = useRef<{ evt: CalendarEvent; colTop: number; dayStart: DateTime } | null>(null);
-  // A resize in progress holds three window listeners, and the pointerup that
-  // ends them never arrives if the view is switched away mid-drag. Keeping the
-  // controller lets unmount end the gesture the pointer never did.
-  const resizeAbort = useRef<AbortController | null>(null);
-  useEffect(() => () => resizeAbort.current?.abort(), []);
-  // A resize ends with a pointerup inside the block, which the browser turns into
-  // a click on the parent button. Suppress that click so it doesn't open the modal.
-  const suppressClick = useRef(false);
   // Size of the block being dragged, so the move ghost mirrors it exactly.
   const dragGeom = useRef<{ width: number; height: number }>({ width: 160, height: 40 });
 
-  const canMove = useCallback(
-    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
-    [calendars, me],
-  );
+  const canMove = useCanMoveEvent();
 
-  // Weekly drag changes both the day (column under cursor) and the time (cursor Y,
-  // minus the in-block grab offset, snapped); duration is preserved.
+  // The block moves by the pointer's travel: columns crossed and vertical
+  // distance, snapped. Duration is preserved.
   const handleMoveDrop = useCallback(
-    (evt: CalendarEvent, x: number, y: number, ctx: { meta: unknown }) => {
-      const el = document.elementFromPoint(x, y) as HTMLElement | null;
-      const col = el?.closest('[data-daycol]') as HTMLElement | null;
-      if (!col) return;
-      const dayStr = col.getAttribute('data-daycol');
-      if (!dayStr) return;
-      const grabOffsetY = typeof ctx.meta === 'number' ? ctx.meta : 0;
-      const offsetY = y - col.getBoundingClientRect().top - grabOffsetY;
-      const rawMinutes = (offsetY / HOUR_HEIGHT) * 60;
-      const snapped = Math.round(rawMinutes / SNAP_MINUTES) * SNAP_MINUTES;
-      const clamped = Math.min(Math.max(snapped, 0), 23 * 60 + 30);
-      const newStart = atMinutesIntoDay(
-        DateTime.fromFormat(dayStr, 'yyyy-MM-dd', { zone: timezone }),
-        clamped,
-      );
-      requestUpdate(evt, buildMovedEvent(evt, newStart));
+    (evt: CalendarEvent, x: number, y: number, ctx: DragDropContext) => {
+      const targetKey = resolveDayColumn(x, y);
+      if (!targetKey || !ctx.originKey) return;
+      const newStart = weekDropStart({
+        evt,
+        originKey: ctx.originKey,
+        targetKey,
+        travelPx: y - ctx.startY,
+        hourHeight: HOUR_HEIGHT,
+        snapMinutes: SNAP_MINUTES,
+        zone: timezone,
+      });
+      if (newStart) requestUpdate(evt, buildMovedEvent(evt, newStart));
     },
     [timezone, requestUpdate],
   );
 
-  const { drag, start: startDrag, consumeClick } = useEventDrag({ onDrop: handleMoveDrop });
+  const {
+    drag,
+    start: startDrag,
+    consumeClick,
+  } = useEventDrag({ onDrop: handleMoveDrop, resolveKey: resolveDayColumn });
 
   // Resize: drag the bottom edge of a timed block to change its end time. The
-  // start and day stay fixed; the end snaps and keeps a minimum duration.
-  const startResize = useCallback(
-    (evt: CalendarEvent, e: ReactPointerEvent) => {
-      e.stopPropagation();
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if (!canMove(evt)) return;
-      const col = (e.currentTarget as HTMLElement).closest('[data-daycol]') as HTMLElement | null;
-      if (!col) return;
-      const dayKey = col.getAttribute('data-daycol');
-      if (!dayKey) return;
-      const colTop = col.getBoundingClientRect().top;
-      const dayStart = DateTime.fromFormat(dayKey, 'yyyy-MM-dd', { zone: timezone }).startOf('day');
-      resizeRef.current = { evt, colTop, dayStart };
-
-      const ctrl = new AbortController();
-      resizeAbort.current = ctrl;
-      let moved = false;
-      const computeEnd = (clientY: number) => {
-        const end = resizedEndForDaySegment({
-          eventStartISO: evt.startAt,
-          dayStart,
-          clientY,
-          colTop,
-          hourHeight: HOUR_HEIGHT,
-          snapMinutes: SNAP_MINUTES,
-          minDurationMinutes: MIN_DURATION_MIN,
-          zone: timezone,
-        });
-        return {
-          end,
-          // Where the preview is drawn, so on the same clock as the grid.
-          endMin: minutesIntoDay(end, dayStart),
-        };
-      };
-      const onMove = (ev: globalThis.PointerEvent) => {
-        moved = true;
-        setResizePreview({ id: evt.id, dayKey, endMin: computeEnd(ev.clientY).endMin });
-      };
-      const onUp = (ev: globalThis.PointerEvent) => {
-        ctrl.abort();
-        const r = resizeRef.current;
-        resizeRef.current = null;
-        setResizePreview(null);
-        // A plain tap on the handle (no drag) should fall through to the click,
-        // which opens the event modal. Only a real resize commits and is guarded.
-        if (!r || !moved) return;
-        suppressClick.current = true;
-        window.setTimeout(() => {
-          suppressClick.current = false;
-        }, 0);
-        const { end } = computeEnd(ev.clientY);
-        requestUpdate(evt, buildResizedEvent(evt, end));
-      };
-      window.addEventListener('pointermove', onMove, { signal: ctrl.signal });
-      window.addEventListener('pointerup', onUp, { signal: ctrl.signal });
-      window.addEventListener('pointercancel', onUp, { signal: ctrl.signal });
-    },
-    [canMove, timezone, requestUpdate],
+  // start stays fixed; the end snaps and keeps a minimum duration.
+  const resizedEnd = useCallback(
+    (evt: CalendarEvent, clientY: number, seg: ResizeSegment) =>
+      resizedEndForDaySegment({
+        eventStartISO: evt.startAt,
+        dayStart: seg.dayStart,
+        clientY,
+        colTop: seg.colTop,
+        hourHeight: HOUR_HEIGHT,
+        snapMinutes: SNAP_MINUTES,
+        minDurationMinutes: MIN_DURATION_MIN,
+        zone: timezone,
+      }),
+    [timezone],
   );
+
+  const { start: startResizeGesture, consumeClick: consumeResizeClick } =
+    useEventResize<ResizeSegment>({
+      onPreview: (evt, clientY, seg) =>
+        setResizePreview({
+          id: evt.id,
+          dayKey: seg.dayKey,
+          // Where the preview is drawn, so on the same clock as the grid.
+          endMin: minutesIntoDay(resizedEnd(evt, clientY, seg), seg.dayStart),
+        }),
+      onCommit: (evt, clientY, seg) =>
+        requestUpdate(evt, buildResizedEvent(evt, resizedEnd(evt, clientY, seg))),
+      onEnd: () => setResizePreview(null),
+    });
+
+  const startResize = (evt: CalendarEvent, e: ReactPointerEvent) => {
+    const col = (e.currentTarget as HTMLElement).closest('[data-daycol]') as HTMLElement | null;
+    const dayKey = col?.getAttribute('data-daycol');
+    if (!col || !dayKey) return;
+    startResizeGesture(evt, e, {
+      dayKey,
+      colTop: col.getBoundingClientRect().top,
+      dayStart: DateTime.fromFormat(dayKey, 'yyyy-MM-dd', { zone: timezone }).startOf('day'),
+    });
+  };
 
   /** Open the new-event modal at the clicked time within a day column. */
   const handleSlotClick = (day: DateTime, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -172,51 +159,46 @@ export function WeeklyTimeline() {
     openEventModal(undefined, start);
   };
 
-  // Anchor week days to the user's timezone so cell boundaries match event bucketing.
-  const days = useMemo(
-    () => getWeekDays(selectedDate.setZone(timezone, { keepLocalTime: true })),
-    [selectedDate, timezone],
-  );
+  // The one week this view draws: its columns, in the viewer's zone. The
+  // fetch window follows currentMonth, so that is re-anchored to this week
+  // below rather than left to whichever path led into the view.
+  const days = useMemo(() => getWeekDays(selectedDate, timezone), [selectedDate, timezone]);
 
-  const { allDayEvents, timedEvents } = useMemo(() => {
+  useEffect(() => {
+    if (selectedDate.year !== currentMonth.year || selectedDate.month !== currentMonth.month) {
+      setCurrentMonth(selectedDate.startOf('month'));
+    }
+  }, [selectedDate, currentMonth, setCurrentMonth]);
+
+  // All-day events by the dates they occupy in their own zone, as the month
+  // grid draws them; timed events go to the layout, which owns the rule for
+  // which day a span or a marker belongs to.
+  const { allDayEvents, timedLayouts } = useMemo(() => {
     const allDay: Map<string, CalendarEvent[]> = new Map();
-    const timed: Map<string, CalendarEvent[]> = new Map();
-
+    const timed: CalendarEvent[] = [];
     for (const evt of events) {
       if (!activeCalendarIds.includes(evt.calendarId)) continue;
-      const evtStartMs = fromISOInZone(evt.startAt, timezone).toMillis();
-      const evtEndMs = fromISOInZone(evt.endAt, timezone).toMillis();
+      if (!evt.allDay) {
+        timed.push(evt);
+        continue;
+      }
       for (const day of days) {
-        const dayStart = day.startOf('day').toMillis();
-        const dayEnd = day.endOf('day').toMillis() + 1;
-        if (evtStartMs < dayEnd && evtEndMs > dayStart) {
-          const key = day.toFormat('yyyy-MM-dd');
-          if (evt.allDay) {
-            const arr = allDay.get(key) ?? [];
-            arr.push(evt);
-            allDay.set(key, arr);
-          } else {
-            const arr = timed.get(key) ?? [];
-            arr.push(evt);
-            timed.set(key, arr);
-          }
-        }
+        if (!eventOccupiesDay(evt, day, timezone)) continue;
+        const key = day.toFormat('yyyy-MM-dd');
+        const arr = allDay.get(key) ?? [];
+        arr.push(evt);
+        allDay.set(key, arr);
       }
     }
-    return { allDayEvents: allDay, timedEvents: timed };
-  }, [events, activeCalendarIds, days, timezone]);
-
-  const timedLayouts = useMemo(() => {
     const layouts: Map<string, ReturnType<typeof layoutTimedEventsForDay>> = new Map();
     for (const day of days) {
-      const key = day.toFormat('yyyy-MM-dd');
       layouts.set(
-        key,
-        layoutTimedEventsForDay(timedEvents.get(key) ?? [], day.startOf('day'), timezone),
+        day.toFormat('yyyy-MM-dd'),
+        layoutTimedEventsForDay(timed, day.startOf('day'), timezone),
       );
     }
-    return layouts;
-  }, [days, timedEvents, timezone]);
+    return { allDayEvents: allDay, timedLayouts: layouts };
+  }, [events, activeCalendarIds, days, timezone]);
 
   /** Pixel offset within the day column of a wall-clock minute of the day. */
   const minutesToY = (minutes: number): number => (minutes / 60) * HOUR_HEIGHT;
@@ -381,6 +363,8 @@ export function WeeklyTimeline() {
                   // While the end is being dragged there is a range again.
                   const marker = !resizing && +endDt === +startDt;
                   const movable = canMove(evt);
+                  // Only the segment holding the real end can move it.
+                  const holdsEnd = eventEndDay(evt, timezone).toFormat('yyyy-MM-dd') === key;
 
                   return (
                     <button
@@ -390,13 +374,10 @@ export function WeeklyTimeline() {
                         if (!movable) return;
                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                         dragGeom.current = { width: rect.width, height: rect.height };
-                        startDrag(evt, e, e.nativeEvent.offsetY);
+                        startDrag(evt, e);
                       }}
                       onClick={() => {
-                        if (consumeClick() || suppressClick.current) {
-                          suppressClick.current = false;
-                          return;
-                        }
+                        if (consumeClick() || consumeResizeClick()) return;
                         openEventModal(evt.id);
                       }}
                       className={`absolute z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
@@ -419,7 +400,7 @@ export function WeeklyTimeline() {
                           ? startDt.toFormat('H:mm')
                           : `${startDt.toFormat('H:mm')} - ${endLabel}`}
                       </p>
-                      {movable && (
+                      {movable && holdsEnd && (
                         <div
                           aria-hidden
                           onPointerDown={(e) => startResize(evt, e)}

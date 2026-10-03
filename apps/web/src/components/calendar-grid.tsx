@@ -1,17 +1,13 @@
-import { DateTime } from 'luxon';
-import { type PointerEvent as ReactPointerEvent, useCallback, useMemo, useRef } from 'react';
-import { type DragLanding, MonthWeekRow } from '@/components/month-week-row';
-import { fromISOInZone, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
-import { buildMovedEvent } from '@/lib/event-move';
-import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
-import { useEventDrag } from '@/lib/use-event-drag';
+import type { DateTime } from 'luxon';
+import { useCallback, useMemo, useRef } from 'react';
+import { MonthWeekRow } from '@/components/month-week-row';
+import { getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
+import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
-import { useAuthStore } from '@/stores/auth-store';
+import { bucketEventsByWeek, NO_EVENTS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { CalendarEvent } from '@/types/calendar';
 
 export function CalendarGrid() {
   const locale = useUiStore((s) => s.locale);
@@ -31,74 +27,19 @@ export function CalendarGrid() {
   const navigateMonth = useUiStore((s) => s.navigateMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const calendars = useCalendarStore((s) => s.calendars);
-  const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const touchStartRef = useRef({ x: 0, y: 0 });
 
-  const canMove = useCallback(
-    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
-    [calendars, me],
-  );
-
-  // Multi-day bars live in an overlay outside the day cells, so the topmost
-  // element under the cursor may not be inside a [data-day] cell. Walk every
-  // element at the point and use the first one that resolves to a date cell.
-  const resolveDayKey = useCallback((x: number, y: number): string | null => {
-    for (const el of document.elementsFromPoint(x, y)) {
-      const day = el.closest('[data-day]')?.getAttribute('data-day');
-      if (day) return day;
-    }
-    return null;
-  }, []);
-
-  // Month drag preserves time of day: shift start by the whole-day delta between
-  // the grabbed cell and the drop cell.
-  const handleMoveDrop = useCallback(
-    (evt: CalendarEvent, x: number, y: number, ctx: { originKey: string | null }) => {
-      const targetKey = resolveDayKey(x, y);
-      if (!targetKey || !ctx.originKey) return;
-      const target = DateTime.fromFormat(targetKey, 'yyyy-MM-dd', { zone: timezone });
-      const origin = DateTime.fromFormat(ctx.originKey, 'yyyy-MM-dd', { zone: timezone });
-      const deltaDays = Math.round(target.diff(origin, 'days').days);
-      if (deltaDays === 0) return;
-      const newStart = fromISOInZone(evt.startAt, timezone).plus({ days: deltaDays });
-      requestUpdate(evt, buildMovedEvent(evt, newStart));
-    },
-    [resolveDayKey, timezone, requestUpdate],
-  );
-
   const {
     drag,
-    start: startDrag,
+    dragLanding,
+    landingWeeks,
+    canMove,
     consumeClick,
-  } = useEventDrag({
-    onDrop: handleMoveDrop,
-    resolveKey: resolveDayKey,
-  });
-
-  // Where the dragged event would land after dropping. Used both to highlight
-  // the full span of destination cells and to draw a real-width ghost bar.
-  const dragLanding = useMemo<DragLanding | null>(() => {
-    if (!drag?.hoverKey || !drag.originKey) return null;
-    const startDay = fromISOInZone(drag.event.startAt, timezone).startOf('day');
-    const endDay = eventEndDay(drag.event, timezone);
-    const hover = DateTime.fromFormat(drag.hoverKey, 'yyyy-MM-dd', { zone: timezone });
-    const origin = DateTime.fromFormat(drag.originKey, 'yyyy-MM-dd', { zone: timezone });
-    const delta = Math.round(hover.diff(origin, 'days').days);
-    const span = Math.max(1, Math.round(endDay.diff(startDay, 'days').days) + 1);
-    const start = startDay.plus({ days: delta });
-    const end = start.plus({ days: span - 1 });
-    return { event: drag.event, start, end };
-  }, [drag, timezone]);
-
-  // Only the rows the ghost crosses need it; every other row keeps the same
-  // (null) prop and stays out of the re-render a pointer sample causes.
-  const landingWeeks = useMemo(
-    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end) : null),
-    [dragLanding],
-  );
+    consumeDragEnd,
+    handleEventPointerDown,
+  } = useMonthDrag({ timezone, requestUpdate });
 
   // The month surface, and only that: the app mounts this for the month view
   // and the weekly timeline for the week. A week branch here was a second
@@ -133,29 +74,34 @@ export function CalendarGrid() {
     [currentMonth],
   );
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    if (touch) {
-      touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-    }
-  }, []);
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      // A drag that ended before this touch says nothing about it.
+      consumeDragEnd();
+      const touch = e.touches[0];
+      if (touch) {
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+      }
+    },
+    [consumeDragEnd],
+  );
 
   const handleTouchEnd = useCallback(
     (e: React.TouchEvent) => {
+      // The touch moved an event; its travel is not a swipe.
+      if (consumeDragEnd()) return;
       const touch = e.changedTouches[0];
       if (!touch) return;
       const dx = touch.clientX - touchStartRef.current.x;
       const dy = touch.clientY - touchStartRef.current.y;
-      // Up switches to the week. The way back belongs to the weekly timeline:
-      // once the view changes this component is unmounted, so a downward swipe
-      // never reaches it.
+      // Up switches to the week; there is no swipe back from it.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 60) {
         if (dy < 0) setCalendarView('week');
       } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 80) {
         navigateMonth(dx < 0 ? 1 : -1);
       }
     },
-    [setCalendarView, navigateMonth],
+    [consumeDragEnd, setCalendarView, navigateMonth],
   );
 
   const handleDayDoubleClick = useCallback(
@@ -172,13 +118,6 @@ export function CalendarGrid() {
       openEventModal(eventId);
     },
     [consumeClick, openEventModal],
-  );
-
-  const handleEventPointerDown = useCallback(
-    (evt: CalendarEvent, e: ReactPointerEvent) => {
-      if (canMove(evt)) startDrag(evt, e);
-    },
-    [canMove, startDrag],
   );
 
   return (

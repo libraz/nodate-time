@@ -210,17 +210,29 @@ describe('fetchWindow', () => {
     // The year grid draws twelve months of density dots. Given the month
     // window, nine of them are permanently blank and read as a year with
     // nothing planned in it.
-    expect(fetchWindow('year', august)).toEqual({ start: '2026-01-01', end: '2027-01-01' });
+    expect(fetchWindow('year', august)).toEqual({ start: '2026-01-01', end: '2026-12-31' });
   });
 
   it('asks for a month either side for the other views', () => {
     for (const view of ['month', 'week', 'list'] as const) {
-      expect(fetchWindow(view, august)).toEqual({ start: '2026-07-01', end: '2026-10-01' });
+      expect(fetchWindow(view, august)).toEqual({ start: '2026-07-01', end: '2026-09-30' });
     }
   });
 
   it('crosses the year boundary rather than clipping at it', () => {
     const december = DateTime.fromISO('2026-12-01T00:00:00', { zone: 'Asia/Tokyo' });
-    expect(fetchWindow('month', december)).toEqual({ start: '2026-11-01', end: '2027-02-01' });
+    expect(fetchWindow('month', december)).toEqual({ start: '2026-11-01', end: '2027-01-31' });
+  });
+
+  // The API reads the end as the last day included and refuses more than 366
+  // days, so a leap year's window has to name 31 December, not 1 January.
+  it('keeps a leap year within the widest window the API accepts', () => {
+    const leap = DateTime.fromISO('2028-02-29T00:00:00', { zone: 'Asia/Tokyo' });
+    const { start, end } = fetchWindow('year', leap);
+    expect({ start, end }).toEqual({ start: '2028-01-01', end: '2028-12-31' });
+    const days = DateTime.fromISO(end, { zone: 'UTC' })
+      .plus({ days: 1 })
+      .diff(DateTime.fromISO(start, { zone: 'UTC' }), 'days').days;
+    expect(days).toBe(366);
   });
 });
