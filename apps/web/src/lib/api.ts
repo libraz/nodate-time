@@ -69,6 +69,12 @@ export function hasToken(): boolean {
   return getToken() !== null || getRefreshToken() !== null;
 }
 
+/** An access token and the refresh token issued beside it. */
+interface TokenPair {
+  token: string;
+  refreshToken?: string;
+}
+
 /**
  * The renewal currently in flight, if any.
  *
@@ -77,37 +83,86 @@ export function hasToken(): boolean {
  * both noticed a 401 and both tried would race, and the loser would present a
  * token that had just been retired and be signed out for it.
  */
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<TokenPair | null> | null = null;
 
-async function refreshSession(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
+/** Trades a refresh token for a new pair without storing it. */
+async function exchangeRefreshToken(refreshToken: string): Promise<TokenPair | null> {
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const body = (await res.json()) as { token?: string; refreshToken?: string };
-    if (!body.token) return false;
-    setToken(body.token, body.refreshToken);
-    return true;
+    if (!body.token) return null;
+    return body.refreshToken
+      ? { token: body.token, refreshToken: body.refreshToken }
+      : { token: body.token };
   } catch {
     // A renewal that fails because the network is down is not a revoked
     // session; the caller retries the original request either way and the
     // server has the last word.
-    return false;
+    return null;
   }
 }
 
-function renewSession(): Promise<boolean> {
+async function refreshSession(): Promise<TokenPair | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  const pair = await exchangeRefreshToken(refreshToken);
+  // A sign-out that landed meanwhile has already forgotten this session;
+  // storing the new pair would sign the browser back in.
+  if (pair && getRefreshToken() === refreshToken) setToken(pair.token, pair.refreshToken);
+  return pair;
+}
+
+function renewSession(): Promise<TokenPair | null> {
   if (!refreshInFlight) {
     refreshInFlight = refreshSession().finally(() => {
       refreshInFlight = null;
     });
   }
   return refreshInFlight;
+}
+
+/**
+ * Signs this browser out: forgets the tokens at once and revokes the session
+ * on the server in the background.
+ *
+ * Forgetting is not enough on its own -- anyone who copied the storage of a
+ * shared machine would keep a refresh token good for the rest of the session.
+ * An access token that has already expired cannot authenticate the logout,
+ * so the refresh token is traded for one first, and the pair it yields is
+ * used for nothing else.
+ */
+export function endSession(): void {
+  const stored = localStorage.getItem('tt_token');
+  const access = stored !== null && !isTokenExpired(stored) ? stored : null;
+  const refresh = getRefreshToken();
+  const pending = refreshInFlight;
+  clearToken();
+  if (access || refresh || pending) void revokeSession(access, refresh, pending);
+}
+
+async function revokeSession(
+  access: string | null,
+  refresh: string | null,
+  pending: Promise<TokenPair | null> | null,
+): Promise<void> {
+  const logout = (token: string) => send('/auth/logout', { method: 'POST' }, token);
+  try {
+    // A renewal in flight has already spent the refresh token; the pair it
+    // brings back is the one the session now answers to.
+    const renewed = pending ? await pending : null;
+    const token = renewed?.token ?? access;
+    if (token && (await logout(token)).status !== 401) return;
+    if (!refresh || pending) return;
+    const pair = await exchangeRefreshToken(refresh);
+    if (pair) await logout(pair.token);
+  } catch {
+    // Signing out locally does not wait on the network.
+  }
 }
 
 export class ApiError extends Error {
@@ -211,12 +266,15 @@ function expireSession(): never {
   throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
 }
 
-async function send(path: string, options: RequestInit): Promise<Response> {
+async function send(
+  path: string,
+  options: RequestInit,
+  token: string | null = getToken(),
+): Promise<Response> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) ?? {}),
   };
-  const token = getToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -241,7 +299,7 @@ async function requestRaw(
 
   let res = await send(path, options);
 
-  if (res.status === 401 && !path.startsWith('/auth/') && (await renewSession())) {
+  if (res.status === 401 && !path.startsWith('/auth/') && (await renewSession()) !== null) {
     res = await send(path, options);
   }
 
@@ -349,16 +407,7 @@ export const api = {
     path: string,
     signal?: AbortSignal,
   ): Promise<{ blob: Blob; filename: string }> => {
-    const token = getToken();
-    const headers: Record<string, string> = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}${path}`, { headers, ...(signal ? { signal } : {}) });
-    if (!res.ok) {
-      if (res.status === 401) {
-        expireSession();
-      }
-      throw await buildError(res);
-    }
+    const res = await requestRaw(path, { ...(signal ? { signal } : {}) });
     return {
       blob: await res.blob(),
       filename: filenameFromDisposition(res.headers.get('Content-Disposition')),

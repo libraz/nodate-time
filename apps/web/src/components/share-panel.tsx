@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import {
@@ -10,14 +11,17 @@ import {
 } from '@/lib/permissions';
 import { useInvites } from '@/lib/use-invites';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { useCalendarStore } from '@/stores/calendar-store';
+import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { useUiStore } from '@/stores/ui-store';
+import type { Calendar } from '@/types/calendar';
 import {
   INVITE_EXPIRY_HOURS,
   INVITE_MAX_USES,
   inviteExpiryLabelKey,
   inviteUsesLabelKey,
 } from '@/types/invite';
+
+const manages = (calendar: Calendar) => canManage(calendar.role);
 
 export function SharePanel() {
   const t = useT();
@@ -26,17 +30,8 @@ export function SharePanel() {
   const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'share', () =>
     toggleRightPanel('share'),
   );
-  const calendars = useCalendarStore((s) => s.calendars);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-
   // Inviting requires admin; only offer calendars the user administers and is viewing.
-  const adminCalendars = useMemo(
-    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canManage(c.role)),
-    [calendars, activeCalendarIds],
-  );
-
-  const [targetId, setTargetId] = useState('');
-  const target = adminCalendars.find((c) => c.id === targetId) ?? adminCalendars[0] ?? null;
+  const { options, target, setTargetId } = usePanelCalendar(manages);
   const calendarId = target?.id ?? '';
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -85,6 +80,9 @@ export function SharePanel() {
       />
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('panel.share')}
         className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
       >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
@@ -116,35 +114,12 @@ export function SharePanel() {
             </p>
           ) : (
             <div className="space-y-6">
-              {/* Target calendar */}
-              <div className="space-y-1.5">
-                <span className="block text-caption font-medium text-[var(--color-text-secondary)]">
-                  {t('share.targetCalendar')}
-                </span>
-                {adminCalendars.length > 1 ? (
-                  <CustomSelect
-                    value={target.id}
-                    onChange={setTargetId}
-                    ariaLabel={t('share.targetCalendar')}
-                    triggerClassName="input-modern"
-                    options={adminCalendars.map((c) => ({
-                      value: c.id,
-                      label: c.name,
-                      color: c.color,
-                    }))}
-                  />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: target.color }}
-                    />
-                    <span className="truncate text-callout font-medium text-[var(--color-text-primary)]">
-                      {target.name}
-                    </span>
-                  </div>
-                )}
-              </div>
+              <PanelCalendarPicker
+                label={t('panel.targetCalendar')}
+                options={options}
+                target={target}
+                onChange={setTargetId}
+              />
 
               {/* Invite links (single-use) — multiple may coexist */}
               <section className="space-y-2">

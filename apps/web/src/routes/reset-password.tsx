@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
+import { api, errorMessage } from '@/lib/api';
 
 export interface ResetSearch {
   token?: string | undefined;
@@ -53,7 +53,7 @@ function ResetPasswordPage() {
         navigate({ to: '/login' });
       }, 1800);
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : 'Error');
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }

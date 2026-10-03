@@ -63,6 +63,15 @@ export function buildResizedEvent(evt: CalendarEvent, newEnd: DateTime): EventIn
   };
 }
 
+/**
+ * The id of the series an event belongs to. An expanded occurrence carries
+ * `{seriesId}_{date}`; anything stored against the event -- history, a photo
+ * link -- is stored against the series.
+ */
+export function seriesId(eventId: string): string {
+  return eventId.split('_')[0] ?? eventId;
+}
+
 /** Returns true when an event is recurring (rule master or expanded occurrence). */
 export function isRecurringEvent(evt: CalendarEvent): boolean {
   return !!evt.recurrenceRule || evt.isRecurrence || evt.id.includes('_');

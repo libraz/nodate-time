@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
-import { ApiError, api, errorMessage, isAbortError } from '@/lib/api';
+import { api, errorMessage, isAbortError } from '@/lib/api';
 import { detectHolidayCountry } from '@/lib/holidays';
 import {
   DEFAULT_INVITE_ROLE,
@@ -332,7 +332,7 @@ function ProfileSection() {
         await uploadAvatar(file);
         toast.success(t('panel.updated'));
       } catch (e) {
-        toast.error(e instanceof ApiError ? e.detail : 'Error');
+        toast.error(errorMessage(e));
       } finally {
         setAvatarBusy(false);
       }
@@ -345,7 +345,7 @@ function ProfileSection() {
     try {
       await removeAvatar();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       setAvatarBusy(false);
     }
@@ -357,7 +357,7 @@ function ProfileSection() {
       await updateProfile({ name });
       toast.success(t('panel.updated'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -375,7 +375,7 @@ function ProfileSection() {
       setCurrentPw('');
       setNewPw('');
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : t('profile.passwordChangeFailed'));
+      toast.error(errorMessage(e, t('profile.passwordChangeFailed')));
     } finally {
       setPwSaving(false);
     }
@@ -387,7 +387,7 @@ function ProfileSection() {
       await api.post('/user/verify-email/resend', {});
       toast.success(t('profile.verificationSent'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       setResendingVerification(false);
     }
@@ -995,7 +995,7 @@ export function CalendarsSection() {
                     <button
                       type="button"
                       onClick={() => handleRemoveMember(m)}
-                      aria-label={t('common.delete')}
+                      aria-label={isMe ? t('members.leave') : t('common.delete')}
                       className="shrink-0 rounded-lg p-2 text-[var(--color-text-tertiary)] transition hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
                     >
                       <svg
@@ -1241,7 +1241,7 @@ export function ExportSection() {
       const { start, end } = visibleRange();
       await fetchEvents(start, end);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Import failed');
+      toast.error(errorMessage(e));
     } finally {
       setImporting(false);
     }
@@ -1347,7 +1347,7 @@ function AdminSection() {
       setProviders(res.providers);
     } catch (e) {
       if (isAbortError(e)) return;
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -1405,7 +1405,7 @@ export function AllowedEmailsSection() {
       setData(await api.get<AllowedEmailsResponse>('/admin/allowed-emails', false, signal));
     } catch (e) {
       if (isAbortError(e)) return;
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     }
   }, []);
 
@@ -1427,7 +1427,7 @@ export function AllowedEmailsSection() {
       await refresh();
       toast.success(t('panel.updated'));
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.detail : 'Error');
+      toast.error(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -1438,7 +1438,7 @@ export function AllowedEmailsSection() {
       await api.delete(`/admin/allowed-emails/${id}`);
       await refresh();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.detail : 'Error');
+      toast.error(errorMessage(err));
     }
   };
 
@@ -1543,7 +1543,7 @@ function ProviderCard({
       setSecret('');
       await onChange();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -1556,7 +1556,7 @@ function ProviderCard({
       toast.success(t('panel.updated'));
       await onChange();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : 'Error');
+      toast.error(errorMessage(e));
     }
   };
 

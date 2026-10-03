@@ -29,7 +29,7 @@ vi.mock('@/stores/ui-store', () => ({
  * calendar the reader can write to.
  */
 const calendarState = {
-  calendars: [{ id: 'cal-1' }] as { id: string; role?: string }[],
+  calendars: [{ id: 'cal-1' }] as { id: string; role?: string; name?: string }[],
   activeCalendarIds: ['cal-1'],
   membersMap: {} as Record<string, never[]>,
   // A photo is offered the events of the day it was taken, so the store has to
@@ -288,6 +288,43 @@ describe('AlbumPanel event link', () => {
         eventId: 'evt-1',
       }),
     );
+  });
+
+  // An occurrence's id names a date as well as its series, and the server
+  // stores the link against the series: sending the occurrence id was refused
+  // as an unknown event, and the stored link never showed as selected.
+  it('links an occurrence of a recurring event to its series, and shows it linked', async () => {
+    const series = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b';
+    const events = calendarState.events;
+    calendarState.events = [
+      {
+        id: `${series}_20260420`,
+        calendarId: 'cal-1',
+        title: 'Practice',
+        startAt: '2026-04-20T09:00:00+09:00',
+      },
+    ];
+    try {
+      mockApi.get.mockReset();
+      mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+      mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: series });
+
+      render(<AlbumPanel />);
+      fireEvent.click(await screen.findByAltText('a photo'));
+      fireEvent.click(await screen.findByText('album.noEvent'));
+      fireEvent.click(await screen.findByText('Practice'));
+
+      await waitFor(() =>
+        expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
+          caption: 'a photo',
+          eventId: series,
+        }),
+      );
+      expect(await screen.findByText('Practice')).toBeInTheDocument();
+      expect(screen.queryByText('album.noEvent')).toBeNull();
+    } finally {
+      calendarState.events = events;
+    }
   });
 
   it('detaches a photo without deleting it', async () => {
@@ -678,5 +715,31 @@ describe('AlbumPanel thumbnail upload', () => {
     );
     expect(await screen.findByAltText('a photo')).toHaveAttribute('src', 'https://storage/photo');
     expect(screen.queryByText('Error: thumbnail unreachable')).not.toBeInTheDocument();
+  });
+});
+
+describe('AlbumPanel target calendar', () => {
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+    calendarState.activeCalendarIds = ['cal-1'];
+  });
+
+  // The album used to be whichever shown calendar came first, unnamed, so an
+  // upload landed on a calendar the reader had not chosen and could not see.
+  it('names the calendar it shows and lists another when one is picked', async () => {
+    calendarState.calendars = [
+      { id: 'cal-1', name: 'Family', role: 'owner' },
+      { id: 'cal-2', name: 'Work', role: 'owner' },
+    ];
+    calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
+    mockApi.get.mockResolvedValue({ items: [] });
+
+    render(<AlbumPanel />);
+
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/albums'));
+    fireEvent.click(screen.getByRole('button', { name: 'panel.targetCalendar' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-2/albums'));
   });
 });

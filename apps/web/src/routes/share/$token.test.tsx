@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigate = vi.fn();
@@ -143,6 +144,66 @@ describe('share landing for a public link', () => {
     expect(screen.getByText('日')).toBeTruthy();
     expect(screen.getByText('share.readOnly')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'share.joinCalendar' })).toBeNull();
+  });
+});
+
+describe('share landing when the month does not arrive', () => {
+  const published = () => shareResponse({ joinable: false, spent: false });
+  const publicEvent = (id: string, title: string, startAt: string) => ({
+    id,
+    title,
+    allDay: false,
+    startAt,
+    endAt: startAt,
+    timezone: 'Asia/Tokyo',
+    color: '#000',
+  });
+
+  // A failed events request used to draw an empty month, which says the
+  // calendar has nothing on when the page simply did not hear back.
+  it('says so, and asks again on retry', async () => {
+    let eventsCalls = 0;
+    apiGet.mockImplementation((path) => {
+      if (!String(path).includes('/events')) return Promise.resolve(published());
+      eventsCalls += 1;
+      return eventsCalls === 1 ? Promise.reject(new ApiError(503, 'down')) : Promise.resolve([]);
+    });
+
+    render(<SharedCalendarView />);
+
+    expect(await screen.findByText('share.temporarilyUnavailable')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'share.retry' }));
+    await waitFor(() => expect(askedFor('/events')).toHaveLength(2));
+    expect(await screen.findByText('share.readOnly')).toBeTruthy();
+  });
+
+  // Paging quickly left the slower answer last, and the last answer won even
+  // when it was for the month the reader had already left.
+  it('does not let an earlier month’s late answer replace the month on screen', async () => {
+    let answerFirst: (events: unknown) => void = () => {};
+    apiGet.mockImplementation((path) => {
+      if (!String(path).includes('/events')) return Promise.resolve(published());
+      if (askedFor('/events').length === 1) {
+        return new Promise((resolve) => {
+          answerFirst = resolve;
+        });
+      }
+      return Promise.resolve([
+        publicEvent('next', 'Next month plan', DateTime.now().plus({ months: 1 }).toISO() ?? ''),
+      ]);
+    });
+
+    render(<SharedCalendarView />);
+    await waitFor(() => expect(askedFor('/events')).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'calendar.nextMonth' }));
+    expect(await screen.findByText('Next month plan')).toBeTruthy();
+
+    await act(async () => {
+      answerFirst([publicEvent('stale', 'Stale plan', DateTime.now().toISO() ?? '')]);
+    });
+
+    expect(screen.queryByText('Stale plan')).toBeNull();
+    expect(screen.getByText('Next month plan')).toBeTruthy();
   });
 });
 

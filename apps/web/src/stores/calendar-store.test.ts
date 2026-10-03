@@ -520,6 +520,34 @@ describe('leaveCalendar', () => {
   });
 });
 
+describe('updateMemberColor', () => {
+  // An event is drawn in its owner's colour, so the events already on screen
+  // kept the old one until the next navigation.
+  it("recolours the loaded events on that member's layer, and only those", async () => {
+    mockApi.put.mockResolvedValue({ id: 'u1', color: '#123456' } as never);
+    useCalendarStore.setState({
+      events: [
+        evt('e1', 'cal-1', { ownerId: 'u1' }),
+        evt('e2', 'cal-1', { ownerId: 'u2' }),
+        evt('e3', 'cal-2', { ownerId: 'u1' }),
+      ],
+      membersMap: {
+        'cal-1': [{ id: 'u1', name: 'A', email: '', role: 'writer', color: '#47B2F7' }],
+      },
+    });
+
+    await useCalendarStore.getState().updateMemberColor('cal-1', 'u1', '#123456');
+
+    expect(mockApi.put).toHaveBeenCalledTimes(1);
+    expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/members/u1/color', {
+      color: '#123456',
+    });
+    const s = useCalendarStore.getState();
+    expect(s.events.map((e) => e.color)).toEqual(['#123456', '#47B2F7', '#47B2F7']);
+    expect(s.membersMap['cal-1']?.[0]?.color).toBe('#123456');
+  });
+});
+
 describe('toggleCalendarFilter', () => {
   it('removes an active id and persists the change', () => {
     useCalendarStore.setState({ activeCalendarIds: ['cal-1', 'cal-2'] });
@@ -690,6 +718,37 @@ describe('deleteEvent', () => {
       `${parent}_20260410`,
       other,
     ]);
+  });
+});
+
+describe('recurring writes when the refetch fails', () => {
+  const parent = 'c'.repeat(32);
+  const series = () => [evt(`${parent}_20260403`, 'cal-1'), evt(`${parent}_20260410`, 'cal-1')];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useCalendarStore.setState({ calendars: [{ id: 'cal-1' } as never], events: series() });
+    mockApi.get.mockRejectedValue(new Error('offline'));
+  });
+
+  // The series used to be cleared before the refetch, so a refetch that did
+  // not come back left it blank and looking deleted.
+  it('keeps the series on screen after an edit', async () => {
+    mockApi.put.mockResolvedValue(evt(`${parent}_20260403`, 'cal-1') as never);
+
+    await useCalendarStore
+      .getState()
+      .updateEvent('cal-1', `${parent}_20260403`, { title: 'x' } as never, 'all');
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(series().map((e) => e.id));
+  });
+
+  it('keeps the series on screen after deleting one occurrence', async () => {
+    mockApi.delete.mockResolvedValue(undefined as never);
+
+    await useCalendarStore.getState().deleteEvent('cal-1', `${parent}_20260403`, 'this');
+
+    expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(series().map((e) => e.id));
   });
 });
 

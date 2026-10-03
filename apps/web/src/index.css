@@ -1060,6 +1060,25 @@
 }
 
 /* ============================================
+   Hover-revealed controls
+   Hidden until the row is hovered only where a pointer can hover; touch
+   screens always show them, and keyboard focus reveals them anywhere.
+   ============================================ */
+.reveal-on-hover {
+  transition: opacity 150ms;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reveal-on-hover:not(:focus-within) {
+    opacity: 0;
+  }
+
+  .group:hover .reveal-on-hover {
+    opacity: 1;
+  }
+}
+
+/* ============================================
    Glass surface utility
    ============================================ */
 .glass-surface {

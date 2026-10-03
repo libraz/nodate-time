@@ -7,10 +7,11 @@ import { canEdit } from '@/lib/permissions';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { Memo } from '@/types/calendar';
+import type { Calendar, Memo } from '@/types/calendar';
 
 export function SettingsModal() {
   const t = useT();
@@ -143,6 +144,8 @@ export function SettingsModal() {
 
 type MemoDialogState = { calendarId: string; memoId?: string } | null;
 
+const postable = (calendar: Calendar) => canEdit(calendar.role);
+
 export function MemoSection() {
   const t = useT();
   const memos = useCalendarStore((s) => s.memos);
@@ -150,17 +153,10 @@ export function MemoSection() {
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const [targetId, setTargetId] = useState('');
   const [dialog, setDialog] = useState<MemoDialogState>(null);
 
   // Calendars the user can post a memo to: active in the sidebar and editable.
-  const postableCalendars = useMemo(
-    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canEdit(c.role)),
-    [calendars, activeCalendarIds],
-  );
-
-  // Fall back to the first postable calendar when the chosen target is gone.
-  const target = postableCalendars.find((c) => c.id === targetId) ?? postableCalendars[0] ?? null;
+  const { options: postableCalendars, target, setTargetId } = usePanelCalendar(postable);
   const editable = target !== null;
 
   // Show only memos from the calendars currently active in the sidebar.

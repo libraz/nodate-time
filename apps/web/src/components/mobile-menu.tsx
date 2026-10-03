@@ -176,6 +176,9 @@ export function MobileMenu() {
       />
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('tabs.calendar')}
         className="glass-surface-heavy drawer-panel fixed left-0 top-0 z-50 flex h-full w-[280px] max-w-[82vw] flex-col border-r border-[var(--color-border)]"
       >
         <div className="flex items-center justify-between px-4 py-3">

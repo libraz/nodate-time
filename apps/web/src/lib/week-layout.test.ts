@@ -42,6 +42,36 @@ function makeEvent(
   };
 }
 
+// Share and embed pages place published events with the same helper as the
+// signed-in grid, so one event lands on the same day in every view.
+describe('eventOccupiesDay for a published event', () => {
+  const tokyo = (iso: string) => DateTime.fromISO(iso, { zone: 'Asia/Tokyo' });
+
+  it('places a timed event on the viewer’s day, not the event zone’s', () => {
+    const lateCall = {
+      startAt: '2026-04-01T23:00:00-05:00',
+      endAt: '2026-04-01T23:30:00-05:00',
+      timezone: 'America/Chicago',
+      allDay: false,
+    };
+
+    expect(eventOccupiesDay(lateCall, tokyo('2026-04-02'), 'Asia/Tokyo')).toBe(true);
+    expect(eventOccupiesDay(lateCall, tokyo('2026-04-01'), 'Asia/Tokyo')).toBe(false);
+  });
+
+  it('keeps an all-day event on its own dates', () => {
+    const holiday = {
+      startAt: '2026-04-01T00:00:00-05:00',
+      endAt: '2026-04-02T00:00:00-05:00',
+      timezone: 'America/Chicago',
+      allDay: true,
+    };
+
+    expect(eventOccupiesDay(holiday, tokyo('2026-04-01'), 'Asia/Tokyo')).toBe(true);
+    expect(eventOccupiesDay(holiday, tokyo('2026-04-02'), 'Asia/Tokyo')).toBe(false);
+  });
+});
+
 describe('isMultiDay', () => {
   it('is false for a same-day event', () => {
     const evt = makeEvent({

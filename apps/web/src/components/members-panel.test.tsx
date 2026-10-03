@@ -62,6 +62,8 @@ const calendarState = {
   activeCalendarIds: ['cal-1'],
   membersMap: { 'cal-1': members },
   fetchMembers: vi.fn(),
+  leaveCalendar: vi.fn(),
+  updateMemberColor: vi.fn(),
 };
 
 vi.mock('@/stores/calendar-store', () => ({
@@ -174,5 +176,37 @@ describe('MembersPanel keyboard', () => {
     rerender(<Harness />);
 
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe('MembersPanel membership', () => {
+  // Settings let a member leave; the panel listing the same members did not
+  // offer it at all.
+  it('lets a member leave the calendar from their own row', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    calendarState.leaveCalendar.mockResolvedValue(undefined);
+    render(<MembersPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'members.leave' }));
+
+    expect(window.confirm).toHaveBeenCalledWith('members.leaveConfirm');
+    await waitFor(() => expect(calendarState.leaveCalendar).toHaveBeenCalledWith('cal-1', 'u1'));
+  });
+
+  // The picker reports every step of a drag; each used to be a PUT.
+  it('saves a colour once, when the picker is closed on it', async () => {
+    calendarState.updateMemberColor.mockResolvedValue(undefined);
+    render(<MembersPanel />);
+    const input = screen.getByLabelText('members.color', { selector: 'input' });
+
+    fireEvent.input(input, { target: { value: '#111111' } });
+    fireEvent.input(input, { target: { value: '#222222' } });
+    fireEvent.input(input, { target: { value: '#333333' } });
+    expect(calendarState.updateMemberColor).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '#333333' } });
+
+    await waitFor(() => expect(calendarState.updateMemberColor).toHaveBeenCalledTimes(1));
+    expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#333333');
   });
 });

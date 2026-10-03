@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useT } from '@/i18n';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -25,6 +26,7 @@ export function DayDetail() {
   const locale = useUiStore((s) => s.locale);
   const showDayDetail = useUiStore((s) => s.showDayDetail);
   const closeDayDetail = useUiStore((s) => s.closeDayDetail);
+  const sheetRef = useModalA11y<HTMLDivElement>(showDayDetail, closeDayDetail);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
@@ -69,7 +71,13 @@ export function DayDetail() {
           wrapper passes clicks through so the backdrop behind it still
           closes the day. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center sm:inset-0 sm:items-center sm:p-4">
-        <div className="glass-surface-heavy bottom-sheet pointer-events-auto flex max-h-[85vh] w-full flex-col overflow-hidden sm:max-w-[420px] sm:rounded-b-[var(--radius-xl)]">
+        <div
+          ref={sheetRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={headerDate}
+          className="glass-surface-heavy bottom-sheet pointer-events-auto flex max-h-[85vh] w-full flex-col overflow-hidden sm:max-w-[420px] sm:rounded-b-[var(--radius-xl)]"
+        >
           {/* Drag handle */}
           <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30 sm:hidden" />
 

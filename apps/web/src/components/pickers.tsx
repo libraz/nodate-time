@@ -108,6 +108,7 @@ function DatePickerDropdown({
   style,
   floatingRef,
 }: DatePickerDropdownProps) {
+  const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [viewMonth, setViewMonth] = useState(value.startOf('month'));
 
@@ -146,7 +147,7 @@ function DatePickerDropdown({
           onClick={() => setViewMonth((m) => m.minus({ months: 1 }))}
           className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
-          aria-label="Previous month"
+          aria-label={t('calendar.prevMonth')}
         >
           <svg
             width="16"
@@ -167,7 +168,7 @@ function DatePickerDropdown({
           onClick={() => setViewMonth((m) => m.plus({ months: 1 }))}
           className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
-          aria-label="Next month"
+          aria-label={t('calendar.nextMonth')}
         >
           <svg
             width="16"

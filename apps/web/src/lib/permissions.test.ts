@@ -181,12 +181,12 @@ describe('comment moderation', () => {
   const mine = { userPublicId: 'u-me' };
 
   it('lets the author edit and remove their own comment', () => {
-    expect(canEditComment(mine, 'u-me')).toBe(true);
+    expect(canEditComment(mine, 'editor', 'u-me')).toBe(true);
     expect(canDeleteComment(mine, 'editor', 'u-me')).toBe(true);
   });
 
   it('does not let one editor touch another member’s comment', () => {
-    expect(canEditComment(theirs, 'u-me')).toBe(false);
+    expect(canEditComment(theirs, 'editor', 'u-me')).toBe(false);
     expect(canDeleteComment(theirs, 'editor', 'u-me')).toBe(false);
   });
 
@@ -197,8 +197,15 @@ describe('comment moderation', () => {
     expect(canDeleteComment(theirs, 'owner', 'u-me')).toBe(true);
   });
 
+  // The server asks for write access before it asks who wrote the comment, so
+  // offering a demoted author the controls only produced a refusal.
+  it('gives a member demoted to viewer no controls on their own comment', () => {
+    expect(canEditComment(mine, 'viewer', 'u-me')).toBe(false);
+    expect(canDeleteComment(mine, 'viewer', 'u-me')).toBe(false);
+  });
+
   it('still refuses to let them rewrite it', () => {
     // Removing words and substituting different ones are not the same power.
-    expect(canEditComment(theirs, 'u-me')).toBe(false);
+    expect(canEditComment(theirs, 'editor', 'u-me')).toBe(false);
   });
 });

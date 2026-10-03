@@ -259,7 +259,7 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel onClose={() => {}} />);
 
-    const picker = await screen.findByRole('button', { name: 'activity.targetCalendar' });
+    const picker = await screen.findByRole('button', { name: 'panel.targetCalendar' });
     fireEvent.click(picker);
 
     expect(screen.getByRole('option', { name: 'Family' })).toBeInTheDocument();

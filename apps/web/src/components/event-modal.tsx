@@ -7,6 +7,7 @@ import { type Locale, type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { formatRelativeTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { seriesId } from '@/lib/event-move';
 import { eventTimesForSave, shiftStartKeepingDuration } from '@/lib/event-times';
 import {
   canDeleteComment,
@@ -19,6 +20,7 @@ import {
 } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
+import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
@@ -97,6 +99,25 @@ export function presetToRule(preset: RecurrencePreset, dt: DateTime): Recurrence
     case 'custom':
       return null;
   }
+}
+
+/**
+ * The rule a preset makes for `dt`, keeping the end condition the current rule
+ * carries. A preset says how a series repeats, not when it stops, so rebuilding
+ * one on a date or preset change must not quietly make the series endless.
+ */
+export function rebuildPresetRule(
+  preset: RecurrencePreset,
+  dt: DateTime,
+  current: RecurrenceRule | null,
+): RecurrenceRule | null {
+  const next = presetToRule(preset, dt);
+  if (!next || !current) return next;
+  return {
+    ...next,
+    ...(current.until ? { until: current.until } : {}),
+    ...(current.count ? { count: current.count } : {}),
+  };
 }
 
 /**
@@ -202,7 +223,7 @@ function CommentsSection({
    * event-level grant that governs the form above.
    */
   canPost: boolean;
-  /** The viewer's role on the calendar, which is what decides moderation. */
+  /** The viewer's role on the calendar, which decides who may touch a comment. */
   moderatorRole: string | undefined;
 }) {
   const t = useT();
@@ -224,7 +245,7 @@ function CommentsSection({
   const [olderCursor, setOlderCursor] = useState('');
   const [loadingOlder, setLoadingOlder] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
-  const mayEdit = (c: EventComment) => canEditComment(c, user?.id);
+  const mayEdit = (c: EventComment) => canEditComment(c, moderatorRole, user?.id);
   const mayDelete = (c: EventComment) => canDeleteComment(c, moderatorRole, user?.id);
 
   const fetchComments = useCallback(async () => {
@@ -362,7 +383,7 @@ function CommentsSection({
                     {formatRelativeTime(c.createdAt, locale)}
                   </span>
                   {editingId !== c.id && (mayEdit(c) || mayDelete(c)) && (
-                    <span className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="reveal-on-hover flex gap-1">
                       {mayEdit(c) && (
                         <button
                           type="button"
@@ -611,7 +632,8 @@ function ChecklistSection({
                 <button
                   type="button"
                   onClick={() => handleDelete(item.id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
+                  aria-label={t('common.delete')}
+                  className="reveal-on-hover text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg
                     width="14"
@@ -800,7 +822,8 @@ function AttachmentsSection({
                 <button
                   type="button"
                   onClick={() => handleDelete(att.id)}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
+                  aria-label={t('common.delete')}
+                  className="reveal-on-hover shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg
                     width="14"
@@ -866,29 +889,6 @@ interface FormState {
   showAs: ShowAs;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
-}
-
-/**
- * Whether the viewport is at or past Tailwind's `sm` breakpoint.
- *
- * The modal's layout is CSS's job; only its motion is not expressible as a
- * class, because the sheet is dragged by an inline transform while the desktop
- * panel springs in on a keyframe, and the two would fight each other.
- */
-function useIsDesktop(): boolean {
-  const query = '(min-width: 640px)';
-  const [isDesktop, setIsDesktop] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia?.(query).matches === true,
-  );
-  useEffect(() => {
-    const mql = window.matchMedia?.(query);
-    if (!mql) return;
-    setIsDesktop(mql.matches);
-    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, []);
-  return isDesktop;
 }
 
 export function EventModal() {
@@ -993,6 +993,8 @@ export function EventModal() {
   const reduceMotion =
     typeof window !== 'undefined' &&
     window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  // Layout is CSS's job; motion is not: the sheet is dragged by an inline
+  // transform while the desktop panel springs in on a keyframe.
   const isDesktop = useIsDesktop();
 
   const [form, setForm] = useState<FormState>({
@@ -1064,7 +1066,13 @@ export function EventModal() {
     } catch (e) {
       setRsvp(previous);
       toast.error(errorMessage(e));
+      return;
     }
+    // The answer lands on the series row, or on an edited occurrence's own, so
+    // reading the range back is what puts it on every copy the store holds;
+    // without it the modal reopens on the old answer.
+    const { start, end } = visibleRange();
+    void fetchEvents(start, end);
   };
 
   useEffect(() => {
@@ -1438,7 +1446,7 @@ export function EventModal() {
                 const newStartDt = DateTime.fromISO(moved.startAt, { zone: timezone });
                 const recurrenceRule =
                   f.recurrencePreset !== 'custom' && f.recurrenceRule
-                    ? presetToRule(f.recurrencePreset, newStartDt)
+                    ? rebuildPresetRule(f.recurrencePreset, newStartDt, f.recurrenceRule)
                     : f.recurrenceRule;
                 return { ...f, startAt: moved.startAt, endAt: moved.endAt, recurrenceRule };
               });
@@ -1557,7 +1565,7 @@ export function EventModal() {
                 setForm((f) => ({
                   ...f,
                   recurrencePreset: preset,
-                  recurrenceRule: presetToRule(preset, startDt),
+                  recurrenceRule: rebuildPresetRule(preset, startDt, f.recurrenceRule),
                 }));
               }}
             />
@@ -1713,7 +1721,9 @@ export function EventModal() {
                           { value: '2', label: t('event.recurrenceNthSecond') },
                           { value: '3', label: t('event.recurrenceNthThird') },
                           { value: '4', label: t('event.recurrenceNthFourth') },
-                          { value: '-1', label: t('event.recurrenceNthLast') },
+                          // The fifth is what a start on the 29th-31st makes; the server
+                          // counts 1-5 from the start of the month and has no "last".
+                          { value: '5', label: t('event.recurrenceNthFifth') },
                         ]}
                         onChange={(pos) =>
                           setForm((f) => ({
@@ -1761,7 +1771,13 @@ export function EventModal() {
                   )}
                 </div>
               )}
+            </div>
+          )}
 
+          {/* Any repeating rule may carry an end, whichever preset it reads as,
+              so the end condition is never tucked behind the custom editor. */}
+          {form.recurrenceRule && (
+            <div className="card-section mt-2 bg-[var(--color-surface-inset)] p-4">
               <div className="space-y-1.5">
                 <span className="text-body text-[var(--color-text-secondary)]">
                   {t('event.recurrenceEndLabel')}
@@ -1810,12 +1826,12 @@ export function EventModal() {
                     {form.recurrenceRule.until && (
                       <DateTimeField
                         label=""
-                        dateValue={recurrenceUntilDateValue(form.recurrenceRule.until, timezone)}
+                        dateValue={recurrenceUntilDateValue(form.recurrenceRule.until, anchorZone)}
                         timeValue="00:00"
                         showTime={false}
                         onDateChange={(date) =>
                           setForm((f) => {
-                            const clamped = clampRecurrenceUntilDate(date, f.startAt, timezone);
+                            const clamped = clampRecurrenceUntilDate(date, f.startAt, anchorZone);
                             return {
                               ...f,
                               recurrenceRule: f.recurrenceRule
@@ -1825,7 +1841,9 @@ export function EventModal() {
                           })
                         }
                         onTimeChange={() => {}}
-                        minDate={DateTime.fromISO(form.startAt, { zone: timezone }).startOf('day')}
+                        minDate={DateTime.fromISO(form.startAt, { zone: anchorZone }).startOf(
+                          'day',
+                        )}
                       />
                     )}
                   </label>
@@ -2234,7 +2252,7 @@ export function EventModal() {
           <HistoryTimeline
             kind="event"
             calendarId={editingEvent.calendarId}
-            entityId={editingEvent.id.split('_')[0] ?? editingEvent.id}
+            entityId={seriesId(editingEvent.id)}
           />
         </div>
       )}

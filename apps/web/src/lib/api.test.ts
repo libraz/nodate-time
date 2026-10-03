@@ -5,6 +5,7 @@ import {
   api,
   clearToken,
   decodeJwtExp,
+  endSession,
   errorMessage,
   filenameFromDisposition,
   hasToken,
@@ -108,6 +109,134 @@ describe('session renewal', () => {
 
     await expect(api.get('/calendars', true)).rejects.toBeInstanceOf(ApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('downloads', () => {
+  const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+  const file = () =>
+    new Response('BEGIN:VCALENDAR', {
+      status: 200,
+      headers: { 'Content-Disposition': 'attachment; filename="Family.ics"' },
+    });
+
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/settings');
+  });
+
+  it('renews an expired access token before downloading instead of signing out', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const renewed = live();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ token: renewed, refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(file());
+
+    const { filename } = await api.getBlob('/calendars/cal-1/export?format=ics');
+
+    expect(filename).toBe('Family.ics');
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/refresh');
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${renewed}`);
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-2');
+    expect(window.location.pathname).toBe('/settings');
+  });
+
+  it('retries a download once after a 401 while the refresh token is good', async () => {
+    localStorage.setItem('tt_token', live());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ token: live(), refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(file());
+
+    await expect(api.getBlob('/calendars/cal-1/export?format=csv')).resolves.toMatchObject({
+      filename: 'Family.ics',
+    });
+    expect(hasToken()).toBe(true);
+    expect(window.location.pathname).toBe('/settings');
+  });
+});
+
+describe('endSession', () => {
+  const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+  const authorization = (call: unknown[]) =>
+    ((call[1] as RequestInit).headers as Record<string, string>).Authorization;
+
+  it('revokes the server session with the access token it holds', async () => {
+    const access = live();
+    localStorage.setItem('tt_token', access);
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+    endSession();
+
+    expect(hasToken()).toBe(false);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/logout');
+    expect(authorization(fetchMock.mock.calls[0] as unknown[])).toBe(`Bearer ${access}`);
+  });
+
+  // An expired access token cannot authenticate the logout; sending it bare
+  // left the session, and the refresh token a copied storage still holds,
+  // alive for the rest of its thirty days.
+  it('trades the refresh token for one it can sign out with when the access token expired', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const renewed = live();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ token: renewed, refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    endSession();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/refresh');
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('/auth/logout');
+    expect(authorization(fetchMock.mock.calls[1] as unknown[])).toBe(`Bearer ${renewed}`);
+    // The pair exists only to sign out with; keeping it would sign back in.
+    expect(localStorage.getItem('tt_token')).toBeNull();
+    expect(localStorage.getItem('tt_refresh')).toBeNull();
+  });
+
+  it('signs out with the pair a renewal already in flight brings back', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const renewed = live();
+    let answerRefresh: (r: Response) => void = () => {};
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/auth/refresh')) {
+        return new Promise<Response>((resolve) => {
+          answerRefresh = resolve;
+        });
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+    const request = api.get('/calendars', true).catch(() => {});
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    endSession();
+    answerRefresh(jsonResponse({ token: renewed, refreshToken: 'refresh-2' }));
+    await request;
+
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/auth/logout'))).toBe(true),
+    );
+    const logout = fetchMock.mock.calls.find(([url]) => String(url).includes('/auth/logout'));
+    expect(authorization(logout as unknown[])).toBe(`Bearer ${renewed}`);
+    // The spent refresh token is not presented a second time.
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/auth/refresh')),
+    ).toHaveLength(1);
+    expect(hasToken()).toBe(false);
+  });
+
+  it('does not call the server when there is nothing to end', async () => {
+    endSession();
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

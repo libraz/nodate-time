@@ -3,6 +3,7 @@ import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { isRecurringEvent } from '@/lib/event-move';
 import { toast } from '@/lib/toast';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -20,6 +21,7 @@ export function useScopedUpdate() {
   const t = useT();
   const updateEvent = useCalendarStore((s) => s.updateEvent);
   const [pending, setPending] = useState<PendingUpdate | null>(null);
+  const dialogRef = useModalA11y<HTMLDivElement>(pending !== null, () => setPending(null));
 
   const commit = useCallback(
     (event: CalendarEvent, payload: EventInput, scope?: 'this' | 'all') => {
@@ -57,6 +59,10 @@ export function useScopedUpdate() {
       />
       <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center p-4">
         <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('event.scopeEditTitle')}
           className="glass-surface-heavy pointer-events-auto flex w-full max-w-[360px] flex-col gap-3 p-6 ring-1 ring-[var(--color-border)]"
           style={{ borderRadius: 'var(--radius-lg)' }}
         >

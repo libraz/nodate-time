@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
+import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -17,11 +18,15 @@ interface MemoDialogProps {
 export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   const t = useT();
   const memos = useCalendarStore((s) => s.memos);
+  const calendars = useCalendarStore((s) => s.calendars);
   const addMemo = useCalendarStore((s) => s.addMemo);
   const updateMemo = useCalendarStore((s) => s.updateMemo);
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
 
   const editing = memoId ? (memos.find((m) => m.id === memoId) ?? null) : null;
+  // A reader may open a memo to read it; saving or deleting would only be refused.
+  const editable = canEdit(roleOnCalendar(calendars, calendarId));
+  const heading = !editable ? t('panel.memo') : editing ? t('memo.edit') : t('memo.add');
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalA11y<HTMLDivElement>(true, onClose);
   const [saving, setSaving] = useState(false);
@@ -36,8 +41,9 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   }, [editing]);
 
   useEffect(() => {
+    if (!editable) return;
     setTimeout(() => titleRef.current?.focus(), 100);
-  }, []);
+  }, [editable]);
 
   const handleSave = useCallback(async () => {
     const title = form.title.trim();
@@ -81,6 +87,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
         <button
           type="button"
           onClick={onClose}
+          aria-label={t('common.close')}
           className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
         >
@@ -96,7 +103,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           </svg>
         </button>
         <span className="text-callout font-medium text-[var(--color-text-secondary)]">
-          {editing ? t('memo.edit') : t('memo.add')}
+          {heading}
         </span>
       </div>
 
@@ -106,6 +113,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           <button
             type="button"
             onClick={() => setForm((f) => ({ ...f, done: !f.done }))}
+            disabled={!editable}
             aria-pressed={form.done}
             aria-label={t('memo.done')}
             className="mt-1 shrink-0"
@@ -133,6 +141,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           type="text"
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          readOnly={!editable}
           placeholder={t('memo.title')}
           className="flex-1 bg-transparent text-heading font-semibold text-[var(--color-text-primary)] outline-none placeholder:font-normal placeholder:text-[var(--color-text-tertiary)]"
           style={{
@@ -149,6 +158,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
         <textarea
           value={form.body}
           onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+          readOnly={!editable}
           placeholder={t('memo.bodyPlaceholder')}
           rows={4}
           maxLength={16000}
@@ -180,7 +190,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       )}
 
       {/* Delete (edit mode only) — a quiet text affordance, not a heavy block */}
-      {editing && (
+      {editing && editable && (
         <div className="px-6 pt-3 pb-1">
           <button
             type="button"
@@ -215,16 +225,18 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
         onClick={onClose}
         className="btn-secondary flex-1 py-3 text-default font-medium"
       >
-        {t('common.cancel')}
+        {editable ? t('common.cancel') : t('common.close')}
       </button>
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={saving || !form.title.trim()}
-        className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
-      >
-        {saving ? t('common.saving') : t('common.save')}
-      </button>
+      {editable && (
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !form.title.trim()}
+          className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+        >
+          {saving ? t('common.saving') : t('common.save')}
+        </button>
+      )}
     </div>
   );
 
@@ -236,7 +248,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   // this dialog's inset-0 against the pane instead of the viewport and leave
   // it boxed inside a 260px or 420px column, backdrop and all.
   return createPortal(
-    <div ref={dialogRef}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={heading}>
       {/* Mobile: bottom sheet */}
       <div className="sm:hidden">
         <button
