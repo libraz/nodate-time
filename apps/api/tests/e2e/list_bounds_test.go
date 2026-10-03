@@ -244,17 +244,28 @@ func TestActivityFeedDefaultIsDeclared(t *testing.T) {
 	tenant := helpers.NewTenant(t, testServerURL)
 	feedURL := testServerURL + "/calendars/" + tenant.CalendarID + "/activity"
 
-	// Omitting the parameter and asking for the declared default must be the
-	// same request.
-	var omitted, explicit struct {
+	// More entries than the default page holds, so a handler that applied no
+	// default, or a larger one, answers differently from the declared 50.
+	const total = 60
+	seedSubjectHistory(t, helpers.TestWorkspace(generated.New(testDB)).ID,
+		internalCalendarID(t, tenant.CalendarID), uuid.NewString(), total)
+
+	type feedPage struct {
 		Items []struct {
 			ID string `json:"id"`
 		} `json:"items"`
+		NextCursor string `json:"nextCursor"`
 	}
+	var omitted, explicit, all feedPage
 	helpers.DoJSON(t, http.MethodGet, feedURL, tenant.AccessToken, nil, &omitted)
 	helpers.DoJSON(t, http.MethodGet, feedURL+"?limit=50", tenant.AccessToken, nil, &explicit)
-	require.Equal(t, len(explicit.Items), len(omitted.Items),
-		"the documented default must be the one the handler applies")
+	helpers.DoJSON(t, http.MethodGet, feedURL+"?limit=200", tenant.AccessToken, nil, &all)
+
+	require.GreaterOrEqual(t, len(all.Items), total,
+		"the calendar must hold more entries than one default page")
+	require.Len(t, omitted.Items, 50, "an omitted limit must answer with the declared default")
+	require.NotEmpty(t, omitted.NextCursor, "a full page with more behind it must carry a cursor")
+	require.Equal(t, explicit, omitted, "omitting the parameter and asking for 50 must be the same request")
 }
 
 // --- seeds -----------------------------------------------------------------

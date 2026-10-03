@@ -273,11 +273,6 @@ ALLOWED = {
     "GetCalendarMemberForUpdate",
     "GetLocalIdentityByUserForUpdate",
 
-    # No caller yet. Expired verification rows accumulate: the cleanup
-    # sweeps cover password resets, signin states, sessions and storage,
-    # and this table was left out of the loop.
-    "DeleteExpiredEmailVerifications",
-
     # No account screen yet. Listing a user's linked identities and
     # disabling one are the read and write halves of a connected-accounts
     # page that has not been built.

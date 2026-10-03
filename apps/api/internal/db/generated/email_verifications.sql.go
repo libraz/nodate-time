@@ -34,13 +34,24 @@ func (q *Queries) CreateEmailVerification(ctx context.Context, arg CreateEmailVe
 	)
 }
 
-const deleteExpiredEmailVerifications = `-- name: DeleteExpiredEmailVerifications :exec
-DELETE FROM email_verifications WHERE expires_at < ? OR used_at IS NOT NULL
+const deleteExpiredEmailVerifications = `-- name: DeleteExpiredEmailVerifications :execresult
+DELETE FROM email_verifications WHERE expires_at < ? ORDER BY expires_at LIMIT ?
 `
 
-func (q *Queries) DeleteExpiredEmailVerifications(ctx context.Context, expiresAt time.Time) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredEmailVerifications, expiresAt)
-	return err
+type DeleteExpiredEmailVerificationsParams struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	Limit     int32     `json:"limit"`
+}
+
+// DeleteExpiredEmailVerifications removes one batch of tokens past their
+// expiry and reports how many, so the caller can loop until the backlog is
+// drained.
+//
+// A redeemed token is collected on its own expiry like the rest: used_at
+// cannot be answered from the expiry index, and GetEmailVerificationByTokenHash
+// already refuses a token with a redemption time.
+func (q *Queries) DeleteExpiredEmailVerifications(ctx context.Context, arg DeleteExpiredEmailVerificationsParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteExpiredEmailVerifications, arg.ExpiresAt, arg.Limit)
 }
 
 const getEmailVerificationByTokenHash = `-- name: GetEmailVerificationByTokenHash :one

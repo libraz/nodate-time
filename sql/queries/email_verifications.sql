@@ -19,5 +19,12 @@ WHERE id = ? AND used_at IS NULL;
 UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP(3)
 WHERE user_id = ? AND used_at IS NULL;
 
--- name: DeleteExpiredEmailVerifications :exec
-DELETE FROM email_verifications WHERE expires_at < ? OR used_at IS NOT NULL;
+-- DeleteExpiredEmailVerifications removes one batch of tokens past their
+-- expiry and reports how many, so the caller can loop until the backlog is
+-- drained.
+--
+-- A redeemed token is collected on its own expiry like the rest: used_at
+-- cannot be answered from the expiry index, and GetEmailVerificationByTokenHash
+-- already refuses a token with a redemption time.
+-- name: DeleteExpiredEmailVerifications :execresult
+DELETE FROM email_verifications WHERE expires_at < ? ORDER BY expires_at LIMIT ?;
