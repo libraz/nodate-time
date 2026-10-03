@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({
@@ -23,6 +23,7 @@ vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
+import { api } from '@/lib/api';
 import { MemoDialog } from './memo-dialog';
 
 afterEach(() => {
@@ -39,23 +40,27 @@ describe('MemoDialog', () => {
 
     expect(screen.queryByRole('button', { name: 'common.save' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'common.delete' })).toBeNull();
-    // Both layouts render the form; CSS shows one.
-    for (const field of [
-      ...screen.getAllByDisplayValue('Groceries'),
-      ...screen.getAllByDisplayValue('milk'),
-    ]) {
-      expect(field).toHaveAttribute('readonly');
-    }
+    expect(screen.getByDisplayValue('Groceries')).toHaveAttribute('readonly');
+    expect(screen.getByDisplayValue('milk')).toHaveAttribute('readonly');
   });
 
   it('offers saving and deleting to an editor', () => {
     calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
     render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);
 
-    expect(screen.getAllByRole('button', { name: 'common.save' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'common.delete' }).length).toBeGreaterThan(0);
-    for (const field of screen.getAllByDisplayValue('Groceries')) {
-      expect(field).not.toHaveAttribute('readonly');
-    }
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.delete' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Groceries')).not.toHaveAttribute('readonly');
+  });
+
+  // The form used to render once per layout, so the history loaded twice and
+  // the title focus could land on the copy CSS was hiding.
+  it('renders the form once and loads its history once', async () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    vi.mocked(api.get).mockClear();
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);
+
+    expect(screen.getAllByDisplayValue('Groceries')).toHaveLength(1);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
   });
 });
