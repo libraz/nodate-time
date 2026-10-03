@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
-![Bun](https://img.shields.io/badge/Bun-1.3-000000?logo=bun&logoColor=white)
+![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)
 
 A shared calendar app for running one calendar across multiple people — families,
 teams, talent agencies. It blends TimeTree's shared-calendar simplicity with a
@@ -83,7 +83,9 @@ sql/
     conformance/        contract conformance checks
   time/                this application's own tables
     tables/             table definitions
-    alters/             incremental changes
+    alters/             changes to core tables this application makes
+    views/              view definitions
+  upgrades/            bring an existing database up to the current schema
   queries/             sqlc query definitions
   schema.sql           combined schema produced by build-schema.sh
   sqlc.yaml            sqlc config
@@ -95,7 +97,7 @@ compose.prod.yml       self-hosting stack: MySQL + MinIO + API + web
 
 ### Prerequisites
 
-- [Bun](https://bun.sh)
+- [Bun](https://bun.sh) 1.4+ (the lockfile format older versions cannot read)
 - Go 1.26+
 - Docker (for MySQL / MinIO)
 - [sqlc](https://sqlc.dev) (only when regenerating DB code)
@@ -335,11 +337,39 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 ```
 
 The schema is applied when the MySQL volume is first created. `sql/schema.sql`
-drops every table before creating it, so a later schema change is applied to the
-running database by hand rather than by re-running the file.
+drops every table before creating it, so it is never re-run against a database
+that holds data; see [Upgrading](#upgrading) for how a schema change reaches one.
 
 Two volumes hold everything durable: `mysql_data` and `minio_data`. Back them up
 together — an attachment is a row in one pointing at an object in the other.
+
+### Upgrading
+
+Back up both volumes first, as described above. Then, for each
+release between yours and the one you are moving to, apply
+`sql/upgrades/from-<that release>.sql` in order, and only then rebuild:
+
+```sh
+docker compose -f compose.prod.yml exec -T mysql \
+  mysql -u root -p"$TC_DB_ROOT_PASSWORD" nodate_time < sql/upgrades/from-v0.1.0.sql
+docker compose -f compose.prod.yml up -d --build
+```
+
+An upgrade file keeps the data, and the running version keeps working against
+its result, so it is applied before the new API starts rather than after. A file
+that was already applied stops at its first statement and changes nothing.
+
+Coming from v0.1.0, the deployment itself also changed:
+
+- The web service terminates TLS and publishes 80 and 443 instead of
+  `127.0.0.1:8081`. Obtain a certificate before starting, as described above, or
+  keep the proxy on the host by following the paragraph on terminating TLS
+  elsewhere.
+- `TC_PUBLIC_HOST`, the hostname the certificate is issued for, is required.
+- Compose no longer requires `TC_SMTP_HOST`; the API still refuses to start
+  without it unless `TC_ALLOW_CONSOLE_MAILER=true`.
+- `TC_TRUSTED_PROXIES` defaults to `172.16.0.0/12`, the range Docker gives a
+  compose network.
 
 ### Object storage
 
