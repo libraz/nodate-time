@@ -7,7 +7,6 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
-	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -67,18 +66,16 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInput) (*SetAttendeeCanEditOutput, error) {
 	return func(ctx context.Context, in *SetAttendeeCanEditInput) (*SetAttendeeCanEditOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, member, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
+		seriesID, occurrenceDate := parseCompositeID(in.EventID)
+		if seriesID == "" {
+			seriesID = in.EventID
+		}
+		w, err := resolveEventAccess(ctx, deps, in.CalendarID, seriesID, occurrenceDate, actorID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
-		if err != nil {
+		if err := requireEventEdit(ctx, deps, w, actorID, editGrants); err != nil {
 			return nil, toAPIError(err)
-		}
-		// Delegating is the owner's call, not a delegate's: an attendee that
-		// could pass the grant on would make revoking it meaningless.
-		if !calresolve.CanManage(member.Role) && evt.OwnerUserID != actorID {
-			return nil, apierrors.ToHuma(apierrors.EventEditDenied)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -90,11 +87,7 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
 		}
 
-		row, err := attendeeRow(ctx, deps, evt, in.EventID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-		eventRef := sql.NullInt32{Int32: int32(row.ID), Valid: true}
+		eventRef := sql.NullInt32{Int32: int32(w.row.ID), Valid: true}
 		att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
 			EventID: eventRef,
 			UserID:  target.ID,

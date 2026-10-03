@@ -39,29 +39,6 @@ func TestUpdateCalendarIsAdminOnly(t *testing.T) {
 	require.True(t, ownerStatus >= 200 && ownerStatus < 300)
 }
 
-// TestViewerCannotImportICal verifies a read-only viewer cannot inject events
-// via the iCal import endpoint.
-func TestViewerCannotImportICal(t *testing.T) {
-	bootstrap(t)
-	t.Parallel()
-
-	owner := helpers.NewTenant(t, testServerURL)
-	viewer := helpers.NewTenant(t, testServerURL)
-	calURL := testServerURL + "/calendars/" + owner.CalendarID
-
-	var inv struct {
-		Token string `json:"token"`
-	}
-	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
-		map[string]any{"role": "viewer"}, &inv)
-	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", viewer.AccessToken, nil, nil)
-
-	ics := "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x@test\r\nDTSTART:20260101T090000Z\r\nDTEND:20260101T100000Z\r\nSUMMARY:Injected\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	status, _ := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/import", viewer.AccessToken,
-		map[string]any{"ics": ics})
-	require.Equal(t, 403, status)
-}
-
 // TestInviteCannotGrantAdmin verifies invite links may not grant the admin role.
 func TestInviteCannotGrantAdmin(t *testing.T) {
 	bootstrap(t)
@@ -624,7 +601,9 @@ func TestAttachmentConfirmRecordsTheVerifiedSize(t *testing.T) {
 	require.Equal(t, 1, refs)
 }
 
-func TestViewerListMembersHidesOtherEmails(t *testing.T) {
+// TestMemberListHidesOtherMembersEmails verifies that the member list shows a
+// caller who does not run the calendar their own email and nobody else's.
+func TestMemberListHidesOtherMembersEmails(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 

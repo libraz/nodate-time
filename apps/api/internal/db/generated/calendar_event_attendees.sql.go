@@ -14,7 +14,7 @@ import (
 const addEventAttendee = `-- name: AddEventAttendee :exec
 INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id)
 VALUES (?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE enabled = TRUE
+ON DUPLICATE KEY UPDATE can_edit = IF(enabled, can_edit, FALSE), enabled = TRUE
 `
 
 type AddEventAttendeeParams struct {
@@ -25,7 +25,9 @@ type AddEventAttendeeParams struct {
 }
 
 // AddEventAttendee revives a removed row rather than inserting beside it,
-// so re-adding somebody does not leave two rows for one person.
+// so re-adding somebody does not leave two rows for one person. A revived row
+// comes back without its edit grant: only the owner's side may give that, and
+// whoever re-adds a participant need not be.
 func (q *Queries) AddEventAttendee(ctx context.Context, arg AddEventAttendeeParams) error {
 	_, err := q.db.ExecContext(ctx, addEventAttendee,
 		arg.PublicID,
@@ -33,6 +35,39 @@ func (q *Queries) AddEventAttendee(ctx context.Context, arg AddEventAttendeePara
 		arg.EventID,
 		arg.UserID,
 	)
+	return err
+}
+
+const disableCalendarAttendee = `-- name: DisableCalendarAttendee :exec
+UPDATE calendar_event_attendees SET enabled = FALSE, can_edit = FALSE
+WHERE user_id = ? AND enabled = TRUE
+  AND event_id IN (SELECT id FROM calendar_events WHERE calendar_id = ?)
+`
+
+type DisableCalendarAttendeeParams struct {
+	UserID     uint32 `json:"userId"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+// DisableCalendarAttendee takes a departing member off every event of the
+// calendar they leave, overrides included, along with any edit grant.
+func (q *Queries) DisableCalendarAttendee(ctx context.Context, arg DisableCalendarAttendeeParams) error {
+	_, err := q.db.ExecContext(ctx, disableCalendarAttendee, arg.UserID, arg.CalendarID)
+	return err
+}
+
+const disableEventAttendee = `-- name: DisableEventAttendee :exec
+UPDATE calendar_event_attendees SET enabled = FALSE, can_edit = FALSE
+WHERE event_id = ? AND user_id = ?
+`
+
+type DisableEventAttendeeParams struct {
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+}
+
+func (q *Queries) DisableEventAttendee(ctx context.Context, arg DisableEventAttendeeParams) error {
+	_, err := q.db.ExecContext(ctx, disableEventAttendee, arg.EventID, arg.UserID)
 	return err
 }
 
@@ -67,11 +102,44 @@ func (q *Queries) GetEventAttendee(ctx context.Context, arg GetEventAttendeePara
 	return i, err
 }
 
+const listEnabledEventAttendeeIDs = `-- name: ListEnabledEventAttendeeIDs :many
+SELECT user_id FROM calendar_event_attendees
+WHERE event_id = ? AND enabled = TRUE
+`
+
+// ListEnabledEventAttendeeIDs is every live attendee row of an event, members
+// or not, so a participant replacement can disable whoever is not kept.
+func (q *Queries) ListEnabledEventAttendeeIDs(ctx context.Context, eventID sql.NullInt32) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listEnabledEventAttendeeIDs, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var user_id uint32
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEventAttendees = `-- name: ListEventAttendees :many
 SELECT a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
        u.display_name, u.avatar_url
 FROM calendar_event_attendees a
 INNER JOIN users u ON u.id = a.user_id
+INNER JOIN calendar_events e ON e.id = a.event_id
+INNER JOIN calendar_members cm
+  ON cm.calendar_id = e.calendar_id AND cm.user_id = a.user_id AND cm.enabled = TRUE
 WHERE a.event_id = ? AND a.enabled = TRUE
 ORDER BY a.created_at
 `
@@ -85,6 +153,9 @@ type ListEventAttendeesRow struct {
 	AvatarURL    sql.NullString             `json:"avatarUrl"`
 }
 
+// Attendee reads name current members only. The participant list is also the
+// write format, and a write accepts members only, so a list naming somebody
+// who has left the calendar could never be saved back.
 func (q *Queries) ListEventAttendees(ctx context.Context, eventID sql.NullInt32) ([]ListEventAttendeesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventAttendees, eventID)
 	if err != nil {
@@ -120,6 +191,9 @@ SELECT a.event_id, a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
        u.display_name, u.avatar_url
 FROM calendar_event_attendees a
 INNER JOIN users u ON u.id = a.user_id
+INNER JOIN calendar_events e ON e.id = a.event_id
+INNER JOIN calendar_members cm
+  ON cm.calendar_id = e.calendar_id AND cm.user_id = a.user_id AND cm.enabled = TRUE
 WHERE a.event_id IN (/*SLICE:event_ids*/?) AND a.enabled = TRUE
 ORDER BY a.event_id, a.created_at
 `
@@ -176,15 +250,6 @@ func (q *Queries) ListEventAttendeesByEvents(ctx context.Context, eventIds []sql
 		return nil, err
 	}
 	return items, nil
-}
-
-const removeAllEventAttendees = `-- name: RemoveAllEventAttendees :exec
-UPDATE calendar_event_attendees SET enabled = FALSE WHERE event_id = ?
-`
-
-func (q *Queries) RemoveAllEventAttendees(ctx context.Context, eventID sql.NullInt32) error {
-	_, err := q.db.ExecContext(ctx, removeAllEventAttendees, eventID)
-	return err
 }
 
 const setEventAttendeeCanEdit = `-- name: SetEventAttendeeCanEdit :exec

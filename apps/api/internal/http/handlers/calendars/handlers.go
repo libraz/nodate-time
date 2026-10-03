@@ -620,6 +620,9 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			}); err != nil {
 				return err
 			}
+			if err := releaseMemberEvents(ctx, q, cal.ID, target.ID); err != nil {
+				return err
+			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
@@ -634,6 +637,40 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		}
 		return &RemoveMemberOutput{}, nil
 	}
+}
+
+// releaseMemberEvents detaches a member who has just been revoked from the
+// calendar's events: their attendance goes, and the events they owned pass to
+// the longest-standing owner. Every event a write accepts names members only,
+// so leaving either behind would make the event impossible to save as read.
+// The series touched get a new revision, so a copy read before the departure
+// is refused as stale rather than as invalid.
+func releaseMemberEvents(ctx context.Context, q *generated.Queries, calendarID, userID uint32) error {
+	series, err := q.ListSeriesTouchingMember(ctx, generated.ListSeriesTouchingMemberParams{
+		UserID:     userID,
+		CalendarID: calendarID,
+	})
+	if err != nil || len(series) == 0 {
+		return err
+	}
+	heir, err := q.GetLongestStandingOwner(ctx, calendarID)
+	if err != nil {
+		return err
+	}
+	if err := q.ReassignCalendarEventOwner(ctx, generated.ReassignCalendarEventOwnerParams{
+		NewOwnerID: heir,
+		CalendarID: calendarID,
+		OldOwnerID: userID,
+	}); err != nil {
+		return err
+	}
+	if err := q.DisableCalendarAttendee(ctx, generated.DisableCalendarAttendeeParams{
+		UserID:     userID,
+		CalendarID: calendarID,
+	}); err != nil {
+		return err
+	}
+	return q.TouchCalendarEvents(ctx, series)
 }
 
 // labelPalette builds the colour list, one entry per colour, with the name as

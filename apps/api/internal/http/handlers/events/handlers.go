@@ -405,25 +405,48 @@ func validateEventParticipants(ctx context.Context, q *generated.Queries, calID 
 }
 
 func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, participants []eventParticipant) error {
-	// Disable every current row first, then revive the ones still wanted.
-	// A hard delete would drop the RSVP of somebody who is being re-added in
-	// the same request, silently resetting their answer to pending.
+	// Only the people leaving are disabled, and only the people arriving are
+	// added. Somebody kept keeps their row untouched -- answer and edit grant
+	// both -- while a removed row loses its grant, so re-adding a participant
+	// cannot hand back an edit right the owner's side did not give again.
 	//
 	// Only for an event that can already have attendees. Creation calls
-	// addEventParticipants instead, and the difference is not tidiness --
+	// addEventParticipants directly, and the difference is not tidiness --
 	// see there before routing the two back through one function.
-	if err := q.RemoveAllEventAttendees(ctx, sql.NullInt32{Int32: int32(eventID), Valid: true}); err != nil {
+	eventRef := sql.NullInt32{Int32: int32(eventID), Valid: true}
+	current, err := q.ListEnabledEventAttendeeIDs(ctx, eventRef)
+	if err != nil {
 		return err
 	}
-	return addEventParticipants(ctx, q, workspaceID, eventID, participants)
+	wanted := make(map[uint32]struct{}, len(participants))
+	for _, p := range participants {
+		wanted[p.userID] = struct{}{}
+	}
+	present := make(map[uint32]struct{}, len(current))
+	for _, userID := range current {
+		present[userID] = struct{}{}
+		if _, keep := wanted[userID]; keep {
+			continue
+		}
+		if err := q.DisableEventAttendee(ctx, generated.DisableEventAttendeeParams{EventID: eventRef, UserID: userID}); err != nil {
+			return err
+		}
+	}
+	arriving := make([]eventParticipant, 0, len(participants))
+	for _, p := range participants {
+		if _, ok := present[p.userID]; !ok {
+			arriving = append(arriving, p)
+		}
+	}
+	return addEventParticipants(ctx, q, workspaceID, eventID, arriving)
 }
 
 // addEventParticipants adds attendees to an event that cannot already have
 // any: one created by the same transaction that is now adding them.
 //
-// The disable step in replaceEventParticipants is deliberately absent here,
-// and restoring it to make the two symmetrical would restore an intermittent
-// 500 on event creation. An empty UPDATE is not free. Attendee rows are
+// The read and disable steps of replaceEventParticipants are deliberately
+// absent here, and restoring them to make the two symmetrical would restore an
+// intermittent 500 on event creation. An empty UPDATE is not free. Attendee rows are
 // indexed on (event_id, user_id) and a brand-new event id sorts above every
 // value in that index, so the scan for rows to disable finds nothing and
 // still takes a next-key lock running to supremum. Every concurrent creation
@@ -496,7 +519,11 @@ func validateNotificationOffset(offset *int) *apierrors.Spec {
 // cannot be filed under somebody outside it. A nil owner falls back to
 // fallbackUserID, which is the acting user: the contract requires an owner
 // on every event, and whoever put it there is the honest answer.
-func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string, fallbackUserID uint32) (uint32, *apierrors.Spec) {
+//
+// currentOwnerID is the owner the event already has, or 0 for a new event.
+// Naming it again is not filing the event under anybody, so it stays
+// acceptable even if that user has since left the calendar.
+func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string, fallbackUserID, currentOwnerID uint32) (uint32, *apierrors.Spec) {
 	if ownerID == nil || *ownerID == "" {
 		return fallbackUserID, nil
 	}
@@ -508,6 +535,9 @@ func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string,
 	if err != nil {
 		return 0, apierrors.BadRequest
 	}
+	if currentOwnerID != 0 && u.ID == currentOwnerID {
+		return u.ID, nil
+	}
 	if _, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: calID,
 		UserID:     u.ID,
@@ -515,6 +545,29 @@ func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string,
 		return 0, apierrors.BadRequest
 	}
 	return u.ID, nil
+}
+
+// changesGrants reports whether an update reaches past the event's fields:
+// handing it to another owner, or dropping an attendee who holds an edit grant,
+// which takes that grant away. row is the row the update replaces.
+func changesGrants(ctx context.Context, deps Deps, row generated.CalendarEvent, ownerID uint32, participants []eventParticipant) (bool, error) {
+	if ownerID != 0 && ownerID != row.OwnerUserID {
+		return true, nil
+	}
+	attendees, err := deps.Queries.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
+	if err != nil {
+		return false, err
+	}
+	kept := make(map[uint32]struct{}, len(participants))
+	for _, p := range participants {
+		kept[p.userID] = struct{}{}
+	}
+	for _, a := range attendees {
+		if _, ok := kept[a.UserID]; a.CanEdit && !ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // userBrief is the public identity of a user (creator/owner) for responses.
@@ -666,25 +719,41 @@ func loadEventInCalendar(ctx context.Context, deps Deps, calID uint32, eventPubl
 // an edited occurrence's own attendees decide who may change it, because they
 // are the attendees that occurrence shows.
 func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID, occurrenceDate string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
-	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	w, err := resolveEventAccess(ctx, deps, calPubID, eventPublicID, occurrenceDate, userID)
 	if err != nil {
 		return generated.Calendar{}, generated.CalendarEvent{}, err
 	}
-	if !calresolve.CanWrite(member.Role) {
-		return generated.Calendar{}, generated.CalendarEvent{}, apierrors.CalendarRoleRequired
+	if err := requireEventEdit(ctx, deps, w, userID, editFields); err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	return w.cal, w.evt, nil
+}
+
+// eventAccess is everything an edit-right decision reads. row is the row whose
+// attendees answer for the write: the series, or an edited occurrence's
+// override.
+type eventAccess struct {
+	cal    generated.Calendar
+	member generated.CalendarMember
+	evt    generated.CalendarEvent
+	row    generated.CalendarEvent
+}
+
+// resolveEventAccess loads what requireEventEdit decides on, deciding nothing.
+func resolveEventAccess(ctx context.Context, deps Deps, calPubID, eventPublicID, occurrenceDate string, userID uint32) (eventAccess, error) {
+	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
+	if err != nil {
+		return eventAccess{}, err
 	}
 	evt, err := loadEventInCalendar(ctx, deps, cal.ID, eventPublicID)
 	if err != nil {
-		return generated.Calendar{}, generated.CalendarEvent{}, err
+		return eventAccess{}, err
 	}
-	attendeeRow, err := occurrenceRow(ctx, deps.Queries, evt, occurrenceDate)
+	row, err := occurrenceRow(ctx, deps.Queries, evt, occurrenceDate)
 	if err != nil {
-		return generated.Calendar{}, generated.CalendarEvent{}, err
+		return eventAccess{}, err
 	}
-	if err := requireEventEdit(ctx, deps, member, evt, attendeeRow.ID, userID); err != nil {
-		return generated.Calendar{}, generated.CalendarEvent{}, err
-	}
-	return cal, evt, nil
+	return eventAccess{cal: cal, member: member, evt: evt, row: row}, nil
 }
 
 // resolveEventForEdit is resolveEventWrite for the paths that take an event id
@@ -730,15 +799,34 @@ func occurrenceRow(ctx context.Context, q *generated.Queries, evt generated.Cale
 	}
 }
 
-// requireEventEdit is the event-level half of resolveEventWrite. attendeeRowID
-// is the row whose attendees are asked: the series, or an edited occurrence's
-// override.
-func requireEventEdit(ctx context.Context, deps Deps, member generated.CalendarMember, evt generated.CalendarEvent, attendeeRowID, userID uint32) error {
-	if calresolve.CanManage(member.Role) || evt.OwnerUserID == userID {
+// editRight is how far a write reaches into one event.
+type editRight int
+
+const (
+	// editFields changes what the event says, which an attendee holding an
+	// edit grant may do.
+	editFields editRight = iota
+	// editGrants also changes who owns the event or who may edit it. A
+	// delegate that could do this could pass the grant on, or take the event
+	// over, and revoking a grant would mean nothing.
+	editGrants
+)
+
+// requireEventEdit is the one place an event's edit rights are decided. A
+// viewer never writes; the people running the calendar and the event's owner
+// may do anything; an attendee the owner trusted may change the fields only.
+func requireEventEdit(ctx context.Context, deps Deps, w eventAccess, userID uint32, need editRight) error {
+	if !calresolve.CanWrite(w.member.Role) {
+		return apierrors.CalendarRoleRequired
+	}
+	if calresolve.CanManage(w.member.Role) || w.evt.OwnerUserID == userID {
 		return nil
 	}
+	if need == editGrants {
+		return apierrors.EventEditDenied
+	}
 	att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
-		EventID: sql.NullInt32{Int32: int32(attendeeRowID), Valid: true},
+		EventID: sql.NullInt32{Int32: int32(w.row.ID), Valid: true},
 		UserID:  userID,
 	})
 	if err != nil {
@@ -984,7 +1072,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
 
-		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, userID)
+		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, userID, 0)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
@@ -1081,9 +1169,19 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		if isOccurrence && in.Scope == "this" {
 			grantDate = occurrenceDate
 		}
-		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, grantDate, userID)
+		w, err := resolveEventAccess(ctx, deps, in.CalendarID, eventID, grantDate, userID)
 		if err != nil {
 			return nil, toAPIError(err)
+		}
+		if err := requireEventEdit(ctx, deps, w, userID, editFields); err != nil {
+			return nil, toAPIError(err)
+		}
+		cal, evt := w.cal, w.evt
+		// A stale copy is reported as stale before its contents are judged:
+		// what it names may have changed since, a member who has left included.
+		// lockSeries checks again under the lock.
+		if !matchesETag(in.IfMatch, evt) {
+			return nil, apierrors.ToHuma(apierrors.EventStale)
 		}
 
 		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
@@ -1105,13 +1203,22 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				return nil, apierrors.ToHuma(spec)
 			}
 		}
-		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, 0)
+		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, 0, w.row.OwnerUserID)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
 		participants, spec := validateEventParticipants(ctx, deps.Queries, cal.ID, in.Body.Participants)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
+		}
+		regrants, err := changesGrants(ctx, deps, w.row, ownerID, participants)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if regrants {
+			if err := requireEventEdit(ctx, deps, w, userID, editGrants); err != nil {
+				return nil, toAPIError(err)
+			}
 		}
 
 		edit := eventEdit{
