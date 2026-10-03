@@ -163,31 +163,34 @@ func TestARecurringMarkerKeepsItsBoundaryOccurrences(t *testing.T) {
 	}
 }
 
-// A recurrence the validator accepts must not be one the storage layer chokes
-// on. interval and count are bounded independently, and their product walks the
-// series end past the last date a DATETIME column can hold -- which arrives as
-// a 500 on a request the form itself allowed the user to build.
-func TestAFarFutureSeriesIsNotAServerError(t *testing.T) {
+// A recurrence the validator accepts must be one the storage layer keeps.
+// interval and count are bounded independently, and their product walks the
+// series end past the last date a DATETIME column can hold, so the largest
+// rule the form allows is the one that has to be stored and read back.
+func TestAFarFutureSeriesIsStoredAndListed(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
-	for _, freq := range []string{"yearly", "monthly", "weekly"} {
+	for _, freq := range []string{"yearly", "monthly", "weekly", "daily"} {
 		t.Run(freq, func(t *testing.T) {
+			title := "Far future " + freq
 			rule := json.RawMessage(`{"freq":"` + freq + `","interval":999,"count":1000}`)
 			status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 				map[string]any{
-					"title": "Far future " + freq, "allDay": false,
+					"title": title, "allDay": false,
 					"startAt":        "2026-06-15T10:00:00+09:00",
 					"endAt":          "2026-06-15T11:00:00+09:00",
 					"timezone":       "Asia/Tokyo",
 					"recurrenceRule": rule,
 				})
-			require.NotEqual(t, http.StatusInternalServerError, status,
-				"a rule the validator accepted must not fall over in storage: %s", cut(string(raw), 300))
-			require.Less(t, status, 500, "unexpected server error: %s", cut(string(raw), 300))
+			require.Equal(t, http.StatusCreated, status,
+				"a rule within the documented bounds must be accepted and stored: %s", cut(string(raw), 300))
+
+			require.Contains(t, titlesOf(listDay(t, calURL, tt.AccessToken, "2026-06-15", "Asia/Tokyo")),
+				title, "the stored series must list on the day of its first occurrence")
 		})
 	}
 }

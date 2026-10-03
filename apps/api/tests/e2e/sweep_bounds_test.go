@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,11 @@ func TestExpirySweepsAreFoundByIndexNotByReadingTheTable(t *testing.T) {
 // each one is capped -- and a cap with no loop behind it would leave the rest
 // of the backlog for the next tick, fifteen minutes later, forever falling
 // behind a table that keeps growing.
+//
+// Other tests sweep the same table concurrently and would drain this test's
+// rows between batches, so the rows are seeded beyond any real expiry and the
+// session delete is scoped to this user, shifted to see them as expired, and
+// counted: one call must issue more than one statement of its own.
 func TestExpirySweepDrainsPastOneBatch(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -75,13 +81,21 @@ func TestExpirySweepDrainsPastOneBatch(t *testing.T) {
 	// More than one batch of expired rows, so a single statement cannot be the
 	// whole answer.
 	const expired = 620
-	seedSessions(t, userID, expired, expired)
+	bulkInsert(t,
+		`INSERT INTO sessions (public_id, user_id, refresh_hash, expires_at)`,
+		"(?, ?, ?, ?)", futureExpiringRows(userID, expired))
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	var statements atomic.Int64
+	db := &execInterceptDB{DB: testDB}
+	db.rewrite = scopeSweep("sessions", "DELETE FROM sessions WHERE expires_at < ?", userID, &statements)
 
+	cleanup.RunOnce(testCtx(), generated.New(db), getTestStorage())
+
+	require.GreaterOrEqual(t, statements.Load(), int64(2),
+		"one call must keep deleting until a batch comes back short")
 	var left int64
 	require.NoError(t, testDB.QueryRow(
-		`SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at < NOW(3)`, userID).Scan(&left))
+		`SELECT COUNT(*) FROM sessions WHERE user_id = ?`, userID).Scan(&left))
 	require.Zero(t, left,
 		"the sweep stopped at a batch boundary and left %d expired sessions behind", left)
 }
@@ -171,6 +185,18 @@ func expiringRows(userID uint32, total, expired int) [][]any {
 		pub := uuid.New()
 		hash := uuid.NewString() + uuid.NewString()
 		rows = append(rows, []any{pub[:], userID, hash[:64], expiresAt})
+	}
+	return rows
+}
+
+// futureExpiringRows builds rows no real sweep considers expired; see
+// scopeSweep.
+func futureExpiringRows(userID uint32, total int) [][]any {
+	rows := make([][]any, 0, total)
+	for i := range total {
+		pub := uuid.New()
+		hash := uuid.NewString() + uuid.NewString()
+		rows = append(rows, []any{pub[:], userID, hash[:64], time.Now().Add(farFuture + time.Duration(i)*time.Hour)})
 	}
 	return rows
 }

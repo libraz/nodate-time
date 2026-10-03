@@ -77,6 +77,12 @@ func runOnce(ctx context.Context, q *generated.Queries, storageClient *storage.C
 			Limit:     tokenSweepBatchSize,
 		})
 	})
+	drainExpired(ctx, "expired email verifications", func(ctx context.Context) (sql.Result, error) {
+		return q.DeleteExpiredEmailVerifications(ctx, generated.DeleteExpiredEmailVerificationsParams{
+			ExpiresAt: now,
+			Limit:     tokenSweepBatchSize,
+		})
+	})
 	drainExpired(ctx, "expired sign-in states", func(ctx context.Context) (sql.Result, error) {
 		return q.DeleteExpiredSigninStates(ctx, generated.DeleteExpiredSigninStatesParams{
 			ExpiresAt: now,

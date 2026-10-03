@@ -24,12 +24,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 -- The actor's avatar object is joined in with the row. A feed page is up to
 -- two hundred entries and looking the key up per entry would be two hundred
 -- reads for a handful of distinct people.
+--
+-- The index is named because the planner prices it equal to the contract's
+-- calendar index and then orders by walking the primary key backwards, which
+-- reads every other calendar's rows on the way to this one's.
 -- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url,
        so.storage_key AS actor_avatar_storage_key
-FROM events e
+FROM events e FORCE INDEX (idx_events_workspace_calendar_id)
 LEFT JOIN users u ON u.id = e.actor_user_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE e.workspace_id = ?
