@@ -27,8 +27,12 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 		if err != nil {
 			return nil, toAPIError(err)
 		}
+		target, err := attendeeRow(ctx, deps, evt, in.EventID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
 
-		eventRef := sql.NullInt32{Int32: int32(seriesID(evt)), Valid: true}
+		eventRef := sql.NullInt32{Int32: int32(target.ID), Valid: true}
 		if _, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
 			EventID: eventRef,
 			UserID:  userID,
@@ -86,7 +90,11 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
 		}
 
-		eventRef := sql.NullInt32{Int32: int32(seriesID(evt)), Valid: true}
+		row, err := attendeeRow(ctx, deps, evt, in.EventID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+		eventRef := sql.NullInt32{Int32: int32(row.ID), Valid: true}
 		att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
 			EventID: eventRef,
 			UserID:  target.ID,
@@ -114,13 +122,13 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 	}
 }
 
-// seriesID returns the row attendees hang off: a changed occurrence keeps its
-// participants on the series it belongs to.
-func seriesID(evt generated.CalendarEvent) uint32 {
-	if evt.RecurrenceParentID.Valid {
-		return uint32(evt.RecurrenceParentID.Int32)
-	}
-	return evt.ID
+// attendeeRow returns the row whose attendees the event id a caller named
+// shows: an edited occurrence keeps its own participants on its override row,
+// so its answers and edit grants live there too; any other occurrence shows the
+// series'.
+func attendeeRow(ctx context.Context, deps Deps, series generated.CalendarEvent, eventID string) (generated.CalendarEvent, error) {
+	_, occurrenceDate := parseCompositeID(eventID)
+	return occurrenceRow(ctx, deps.Queries, series, occurrenceDate)
 }
 
 // actorPublicID looks up the caller's public id for echoing back in a

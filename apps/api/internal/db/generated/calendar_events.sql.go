@@ -12,6 +12,37 @@ import (
 	"strings"
 )
 
+const addOverrideAttendee = `-- name: AddOverrideAttendee :exec
+INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id, rsvp, can_edit)
+VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type AddOverrideAttendeeParams struct {
+	PublicID    []byte                     `json:"publicId"`
+	WorkspaceID uint32                     `json:"workspaceId"`
+	EventID     sql.NullInt32              `json:"eventId"`
+	UserID      uint32                     `json:"userId"`
+	Rsvp        CalendarEventAttendeesRsvp `json:"rsvp"`
+	CanEdit     bool                       `json:"canEdit"`
+}
+
+// AddOverrideAttendee adds a participant to an override row created in the
+// same transaction, carrying the answer and edit grant they had on the series.
+// It is an insert rather than an add followed by an update: an update scanning
+// a brand-new event's attendees takes a gap lock to the end of the index, and
+// two first edits on different series then deadlock on each other's inserts.
+func (q *Queries) AddOverrideAttendee(ctx context.Context, arg AddOverrideAttendeeParams) error {
+	_, err := q.db.ExecContext(ctx, addOverrideAttendee,
+		arg.PublicID,
+		arg.WorkspaceID,
+		arg.EventID,
+		arg.UserID,
+		arg.Rsvp,
+		arg.CanEdit,
+	)
+	return err
+}
+
 const createCalendarEvent = `-- name: CreateCalendarEvent :execresult
 INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
@@ -77,12 +108,53 @@ func (q *Queries) CreateCalendarEvent(ctx context.Context, arg CreateCalendarEve
 	)
 }
 
-const deleteRecurrenceOverridesByParent = `-- name: DeleteRecurrenceOverridesByParent :exec
-DELETE FROM calendar_events WHERE recurrence_parent_id = ?
+const deleteAttendeesOfEvents = `-- name: DeleteAttendeesOfEvents :exec
+DELETE FROM calendar_event_attendees WHERE event_id IN (/*SLICE:event_ids*/?)
 `
 
-func (q *Queries) DeleteRecurrenceOverridesByParent(ctx context.Context, recurrenceParentID sql.NullInt32) error {
-	_, err := q.db.ExecContext(ctx, deleteRecurrenceOverridesByParent, recurrenceParentID)
+// DeleteAttendeesOfEvents hard-deletes the attendee rows of events about to
+// be hard-deleted. Left to the foreign key, each would become an
+// (event_id NULL, user) row, and the unique key over IFNULL(event_id, 0)
+// refuses the second such row for one person -- so deleting two overrides
+// sharing a participant failed outright.
+func (q *Queries) DeleteAttendeesOfEvents(ctx context.Context, eventIds []sql.NullInt32) error {
+	query := deleteAttendeesOfEvents
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const deleteRecurrenceOverrides = `-- name: DeleteRecurrenceOverrides :exec
+DELETE FROM calendar_events
+WHERE recurrence_parent_id = ? AND id IN (/*SLICE:ids*/?)
+`
+
+type DeleteRecurrenceOverridesParams struct {
+	ParentID sql.NullInt32 `json:"parentId"`
+	Ids      []uint32      `json:"ids"`
+}
+
+func (q *Queries) DeleteRecurrenceOverrides(ctx context.Context, arg DeleteRecurrenceOverridesParams) error {
+	query := deleteRecurrenceOverrides
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ParentID)
+	if len(arg.Ids) > 0 {
+		for _, v := range arg.Ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(arg.Ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 
@@ -182,6 +254,58 @@ SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flex
 
 func (q *Queries) GetCalendarEventByID(ctx context.Context, id uint32) (CalendarEvent, error) {
 	row := q.db.QueryRowContext(ctx, getCalendarEventByID, id)
+	var i CalendarEvent
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.Kind,
+		&i.Visibility,
+		&i.ShowAs,
+		&i.Flexibility,
+		&i.Title,
+		&i.AllDay,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Timezone,
+		&i.Location,
+		&i.Memo,
+		&i.OwnerUserID,
+		&i.CreatedByUserID,
+		&i.BlockLabel,
+		&i.RecurrenceRule,
+		&i.RecurrenceEnd,
+		&i.RecurrenceExceptions,
+		&i.RecurrenceParentID,
+		&i.RecurrenceOriginalStart,
+		&i.NotificationOffset,
+		&i.TaskID,
+		&i.TaskRole,
+		&i.TaskSingletonRole,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Flags,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SourceUid,
+		&i.SourceUidKey,
+		&i.URL,
+	)
+	return i, err
+}
+
+const getCalendarEventByIDForUpdate = `-- name: GetCalendarEventByIDForUpdate :one
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events WHERE id = ? AND enabled = TRUE FOR UPDATE
+`
+
+// GetCalendarEventByIDForUpdate reads a series row under its row lock. Every
+// write to a series -- its own columns, its exclusion list, or an override
+// hanging off it -- starts here, so the revision a writer compares against
+// and the exclusion list it rewrites cannot change before it commits.
+func (q *Queries) GetCalendarEventByIDForUpdate(ctx context.Context, id uint32) (CalendarEvent, error) {
+	row := q.db.QueryRowContext(ctx, getCalendarEventByIDForUpdate, id)
 	var i CalendarEvent
 	err := row.Scan(
 		&i.ID,
@@ -521,6 +645,116 @@ func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID ui
 	return items, nil
 }
 
+const listEventPeople = `-- name: ListEventPeople :many
+
+SELECT u.id, u.public_id, u.display_name, u.avatar_url, u.enabled,
+       so.storage_key AS avatar_storage_key,
+       cm.member_color
+FROM users u
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+LEFT JOIN calendar_members cm
+  ON cm.calendar_id = ? AND cm.user_id = u.id AND cm.enabled = TRUE
+WHERE u.id IN (/*SLICE:user_ids*/?)
+`
+
+type ListEventPeopleParams struct {
+	CalendarID uint32   `json:"calendarId"`
+	UserIds    []uint32 `json:"userIds"`
+}
+
+type ListEventPeopleRow struct {
+	ID               uint32         `json:"id"`
+	PublicID         []byte         `json:"publicId"`
+	DisplayName      string         `json:"displayName"`
+	AvatarURL        sql.NullString `json:"avatarUrl"`
+	Enabled          bool           `json:"enabled"`
+	AvatarStorageKey sql.NullString `json:"avatarStorageKey"`
+	MemberColor      sql.NullString `json:"memberColor"`
+}
+
+// A reminder is delivered by whatever client holds the calendar, as the
+// iCalendar alarm the export writes. Nothing here dispatches one, so the
+// queries that would drive a dispatcher are absent rather than sitting unused
+// and reading as a delivery path that exists.
+//
+// notification_offset is stored per event; a per-occurrence sent/not-sent
+// record is what a dispatcher would have to add first, since a series has one
+// row and many occurrences to remind about.
+// ListEventPeople reads everyone a listing names -- owners and creators --
+// in one round trip: identity, avatar key and colour on this calendar.
+// Asking per person made a listing's cost follow how many people a shared
+// calendar has. The colour is NULL for someone no longer a member.
+func (q *Queries) ListEventPeople(ctx context.Context, arg ListEventPeopleParams) ([]ListEventPeopleRow, error) {
+	query := listEventPeople
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.CalendarID)
+	if len(arg.UserIds) > 0 {
+		for _, v := range arg.UserIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", strings.Repeat(",?", len(arg.UserIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventPeopleRow
+	for rows.Next() {
+		var i ListEventPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.DisplayName,
+			&i.AvatarURL,
+			&i.Enabled,
+			&i.AvatarStorageKey,
+			&i.MemberColor,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecurrenceOverrideIDsByParent = `-- name: ListRecurrenceOverrideIDsByParent :many
+SELECT id FROM calendar_events WHERE recurrence_parent_id = ?
+`
+
+// ListRecurrenceOverrideIDsByParent names every override row of a series,
+// disabled ones included, for deleting them along with the series' rule.
+func (q *Queries) ListRecurrenceOverrideIDsByParent(ctx context.Context, recurrenceParentID sql.NullInt32) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listRecurrenceOverrideIDsByParent, recurrenceParentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var id uint32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecurrenceOverridesByParent = `-- name: ListRecurrenceOverridesByParent :many
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
 WHERE recurrence_parent_id = ? AND enabled = TRUE
@@ -674,7 +908,7 @@ WHERE calendar_id = ?
   AND recurrence_rule IS NOT NULL
   AND recurrence_parent_id IS NULL
   AND start_at < ?
-  AND (recurrence_end IS NULL OR recurrence_end > ?)
+  AND (recurrence_end IS NULL OR recurrence_end >= ?)
 ORDER BY start_at
 `
 
@@ -684,6 +918,11 @@ type ListRecurringCalendarEventsByCalendarAndRangeParams struct {
 	RangeStart sql.NullTime `json:"rangeStart"`
 }
 
+// ListRecurringCalendarEventsByCalendarAndRange selects the series that may
+// have an occurrence in a window; the expander does the exact overlap test.
+// recurrence_end is compared inclusively because a zero-length series ends
+// exactly where its last occurrence starts, and that marker belongs to the
+// window opening on it.
 func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Context, arg ListRecurringCalendarEventsByCalendarAndRangeParams) ([]CalendarEvent, error) {
 	rows, err := q.db.QueryContext(ctx, listRecurringCalendarEventsByCalendarAndRange, arg.CalendarID, arg.RangeEnd, arg.RangeStart)
 	if err != nil {

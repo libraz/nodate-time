@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -526,12 +525,9 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		calendarColor := row.CalendarColor
 
 		loc := daterange.Location(in.TZ, "")
-		window := daterange.Default(in.Days, loc)
-		if in.StartDate != "" && in.EndDate != "" {
-			window, err = daterange.Parse(in.StartDate, in.EndDate, loc)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.BadRequest)
-			}
+		window, err := daterange.Resolve(in.StartDate, in.EndDate, in.Days, loc)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 		startTime, endTime := window.Start, window.End
 
@@ -559,12 +555,16 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		var results []PublicEventResponse
+		// This endpoint takes no token beyond the link itself, so the cost of
+		// one request is whatever the link's holder asks for. One cap covers
+		// one-off rows and occurrences together and drops the tail of the
+		// window, never a whole series.
+		kept := daterange.NewEarliest[PublicEventResponse](daterange.MaxInstances)
 		for _, e := range rows {
 			if !e.StartAt.Valid || !e.EndAt.Valid || !publishedToLink(e) {
 				continue
 			}
-			results = append(results, render(e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time))
+			kept.Offer(e.StartAt.Time, render(e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time))
 		}
 
 		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
@@ -582,23 +582,12 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
 
-		truncated := false
 		for _, e := range recurringRows {
 			if !publishedToLink(e) {
 				continue
 			}
-			if len(results) >= daterange.MaxInstances {
-				truncated = true
-				break
-			}
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
-				// This endpoint takes no token beyond the link itself, so the
-				// cost of one request is whatever the link's holder asks for.
-				if len(results) >= daterange.MaxInstances {
-					truncated = true
-					break
-				}
 				// The series' own zone decides the day, matching the ids the
 				// authenticated event API hands out for the same occurrences.
 				dateStr := inst.OriginalStart.In(recurrence.LoadLocation(e.Timezone)).Format("20060102")
@@ -607,19 +596,15 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid || !publishedToLink(inst.Event) {
 						continue
 					}
-					results = append(results, render(inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time))
+					kept.Offer(inst.Event.StartAt.Time, render(inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time))
 					continue
 				}
-				results = append(results, render(e, id, inst.Occurrence.StartAt, inst.Occurrence.EndAt))
+				kept.Offer(inst.Occurrence.StartAt, render(e, id, inst.Occurrence.StartAt, inst.Occurrence.EndAt))
 			}
 		}
 
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].StartAt.Before(results[j].StartAt)
-		})
-
-		out := &PublicEventsOutput{Body: results}
-		if truncated {
+		out := &PublicEventsOutput{Body: kept.Items()}
+		if kept.Truncated() {
 			out.Truncated = "true"
 		}
 		if out.Body == nil {

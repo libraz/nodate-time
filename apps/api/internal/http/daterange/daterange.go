@@ -31,6 +31,8 @@ var (
 	ErrInverted = errors.New("daterange: end before start")
 	// ErrTooWide is a window past MaxDays.
 	ErrTooWide = errors.New("daterange: window too wide")
+	// ErrHalfOpen names one end of the window and not the other.
+	ErrHalfOpen = errors.New("daterange: only one of start and end given")
 )
 
 // Range is a resolved window, half-open: an event is inside it when it starts
@@ -60,10 +62,25 @@ func Parse(from, to string, loc *time.Location) (Range, error) {
 	}
 	// Inclusive: a caller asking through the 5th means the end of it.
 	end = end.AddDate(0, 0, 1)
-	if end.Sub(start) > time.Duration(MaxDays)*24*time.Hour {
+	// Counted in calendar days in loc, so a window crossing a DST change is
+	// judged by its days rather than by an hour gained or lost.
+	if end.After(start.AddDate(0, 0, MaxDays)) {
 		return Range{}, ErrTooWide
 	}
 	return Range{Start: start, End: end}, nil
+}
+
+// Resolve answers a listing's window parameters: both dates name the window,
+// neither falls back to Default. One without the other is refused rather than
+// answered with a window the caller did not describe.
+func Resolve(from, to string, days int, loc *time.Location) (Range, error) {
+	switch {
+	case from == "" && to == "":
+		return Default(days, loc), nil
+	case from == "" || to == "":
+		return Range{}, ErrHalfOpen
+	}
+	return Parse(from, to, loc)
 }
 
 // Default is the window used when the caller named no dates: a week back for

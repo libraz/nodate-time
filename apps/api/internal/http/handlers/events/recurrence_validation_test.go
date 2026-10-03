@@ -3,6 +3,7 @@ package events
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func rawRule(s string) *json.RawMessage {
@@ -10,7 +11,11 @@ func rawRule(s string) *json.RawMessage {
 	return &m
 }
 
-func TestValidateRecurrenceRule(t *testing.T) {
+// The rule combinations themselves are covered by recurrence.Rule.Validate;
+// this checks what the request boundary adds: an absent rule, a body that is
+// not a rule at all, and the series start the rule is validated against.
+func TestCheckRecurrenceRule(t *testing.T) {
+	start := time.Date(2026, 4, 3, 6, 0, 0, 0, time.UTC) // 15:00 in Tokyo
 	tests := []struct {
 		name    string
 		rule    *json.RawMessage
@@ -19,24 +24,18 @@ func TestValidateRecurrenceRule(t *testing.T) {
 		{"nil rule ok", nil, false},
 		{"null rule ok", rawRule(`null`), false},
 		{"valid daily", rawRule(`{"freq":"daily","interval":1}`), false},
-		{"valid weekly byDay", rawRule(`{"freq":"weekly","interval":1,"byDay":["MO","WE"]}`), false},
-		{"valid monthly bySetPos", rawRule(`{"freq":"monthly","interval":1,"byDay":["MO"],"bySetPos":2}`), false},
+		{"interval zero accepted and read as one", rawRule(`{"freq":"daily","interval":0}`), false},
+		{"not an object rejected", rawRule(`"daily"`), true},
 		{"unknown freq rejected", rawRule(`{"freq":"Daily","interval":1}`), true},
-		{"empty freq rejected", rawRule(`{"freq":"","interval":1}`), true},
-		{"interval zero rejected", rawRule(`{"freq":"daily","interval":0}`), false}, // ParseRule clamps interval<1 to 1
-		{"interval too large rejected", rawRule(`{"freq":"daily","interval":1000}`), true},
-		{"bad byDay rejected", rawRule(`{"freq":"weekly","byDay":["XX"]}`), true},
-		{"byMonthDay out of range rejected", rawRule(`{"freq":"monthly","byMonthDay":40}`), true},
-		{"monthly byDay without bySetPos rejected", rawRule(`{"freq":"monthly","byDay":["MO"]}`), true},
-		{"unparseable until rejected", rawRule(`{"freq":"daily","until":"not-a-date"}`), true},
-		{"valid until date", rawRule(`{"freq":"daily","until":"2025-12-31"}`), false},
-		{"count too large rejected", rawRule(`{"freq":"daily","count":5000}`), true},
+		{"field the expander ignores rejected", rawRule(`{"freq":"daily","byDay":["MO"]}`), true},
+		{"until on the start day in the event zone ok", rawRule(`{"freq":"daily","until":"2026-04-03"}`), false},
+		{"until the day before the start rejected", rawRule(`{"freq":"daily","until":"2026-04-02"}`), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := validateRecurrenceRule(tt.rule)
+			got := checkRecurrenceRule(tt.rule, start, "Asia/Tokyo")
 			if (got != nil) != tt.wantErr {
-				t.Fatalf("validateRecurrenceRule() = %v, wantErr = %v", got, tt.wantErr)
+				t.Fatalf("checkRecurrenceRule() = %v, wantErr = %v", got, tt.wantErr)
 			}
 		})
 	}

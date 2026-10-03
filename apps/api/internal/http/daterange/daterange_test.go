@@ -104,3 +104,36 @@ func TestDefaultWindowIsBounded(t *testing.T) {
 		t.Error("a zero-day request should still be a window")
 	}
 }
+
+// A window is MaxDays calendar days whichever way the DST changes inside it
+// move the clock. A 366-day window opening on a fall-back day holds two
+// 25-hour days and one 23-hour day, an hour more than 366 * 24.
+func TestWidthIsCountedInCalendarDays(t *testing.T) {
+	ny := mustLoad(t, "America/New_York")
+	for _, w := range [][2]string{{"2025-11-02", "2026-11-02"}, {"2026-03-08", "2027-03-08"}} {
+		if _, err := Parse(w[0], w[1], ny); err != nil {
+			t.Errorf("366-day window %s..%s should be accepted, got %v", w[0], w[1], err)
+		}
+	}
+	for _, w := range [][2]string{{"2025-11-02", "2026-11-03"}, {"2026-03-08", "2027-03-09"}} {
+		if _, err := Parse(w[0], w[1], ny); !errors.Is(err, ErrTooWide) {
+			t.Errorf("367-day window %s..%s should be refused, got %v", w[0], w[1], err)
+		}
+	}
+}
+
+// Naming one end of the window without the other is refused, not answered
+// with the default window.
+func TestHalfOpenWindowIsRefused(t *testing.T) {
+	for _, w := range [][2]string{{"2026-03-01", ""}, {"", "2026-03-31"}} {
+		if _, err := Resolve(w[0], w[1], 30, time.UTC); !errors.Is(err, ErrHalfOpen) {
+			t.Errorf("Resolve(%q, %q) = %v, want ErrHalfOpen", w[0], w[1], err)
+		}
+	}
+	if _, err := Resolve("", "", 30, time.UTC); err != nil {
+		t.Errorf("no dates should use the default window, got %v", err)
+	}
+	if r, err := Resolve("2026-03-01", "2026-03-31", 30, time.UTC); err != nil || !r.End.Equal(time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("both dates should be parsed, got %v %v", r, err)
+	}
+}
