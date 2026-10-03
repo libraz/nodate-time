@@ -43,7 +43,7 @@ func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
 		AllDay:   true,
 		Timezone: "Asia/Tokyo",
 	}
-	out := buildCSV([]exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}})
+	out := string(buildCSV([]exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}}))
 	if !strings.Contains(out, "Concert,2025-06-24,") {
 		t.Errorf("all-day start date should be 2025-06-24, got:\n%s", out)
 	}

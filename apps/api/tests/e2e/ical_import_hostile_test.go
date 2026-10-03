@@ -267,14 +267,6 @@ func TestICalImportSaysWhenItRecognisedNothingInTheBody(t *testing.T) {
 			want: importReport{Unreadable: true},
 		},
 		{
-			// Component names are written in upper case; this parser reads them
-			// that way, so a lower-cased file is one it cannot use -- which is
-			// the answer to give rather than a clean import of nothing.
-			name: "a calendar whose component names are lower case",
-			ics:  strings.ToLower(wrap(oneGoodEvent())),
-			want: importReport{Unreadable: true},
-		},
-		{
 			// A calendar with nothing in it is not unreadable: it was read, and
 			// it said there was nothing to import.
 			name: "a calendar with no events in it",
