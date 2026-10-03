@@ -205,6 +205,9 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 
 		var created generated.CalendarMemo
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if _, err := q.CreateMemo(ctx, generated.CreateMemoParams{
 				PublicID:        pubID[:],
 				WorkspaceID:     deps.WorkspaceID,
@@ -236,7 +239,7 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &CreateMemoOutput{Body: mapMemo(created)}, nil
@@ -277,6 +280,9 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 
 		var updated generated.CalendarMemo
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if err := q.UpdateMemo(ctx, generated.UpdateMemoParams{
 				Title:      title,
 				Body:       body,
@@ -304,7 +310,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &UpdateMemoOutput{Body: mapMemo(updated)}, nil
@@ -325,6 +331,9 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if err := q.SoftDeleteMemo(ctx, memo.ID); err != nil {
 				return err
 			}
@@ -338,7 +347,7 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &DeleteMemoOutput{}, nil

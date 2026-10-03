@@ -20,6 +20,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -1860,6 +1861,9 @@ func importSeriesHead(
 
 	var newID uint32
 	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			return err
+		}
 		res, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
 			PublicID:           pubID[:],
 			WorkspaceID:        deps.WorkspaceID,
@@ -1945,6 +1949,9 @@ func importChangedOccurrence(
 	originalRef := sql.NullTime{Time: e.recurrenceID, Valid: true}
 
 	err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		if _, err := calresolve.LockEvent(ctx, q, cal.ID, parent.id); err != nil {
+			return err
+		}
 		_, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
 			PublicID:                overridePubID[:],
 			WorkspaceID:             deps.WorkspaceID,

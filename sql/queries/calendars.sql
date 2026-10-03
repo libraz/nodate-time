@@ -7,6 +7,13 @@ SELECT * FROM calendars WHERE id = ? AND enabled = TRUE;
 -- name: GetCalendarByIDForUpdate :one
 SELECT * FROM calendars WHERE id = ? FOR UPDATE;
 
+-- LockCalendarForShare is the first statement of every write under a calendar.
+-- Locks are taken top down -- calendar, event, the rows under it, stored
+-- objects -- and a write to the calendar row itself takes it FOR UPDATE first,
+-- so a calendar delete and a write inside it queue instead of deadlocking.
+-- name: LockCalendarForShare :one
+SELECT id FROM calendars WHERE id = ? AND enabled = TRUE FOR SHARE;
+
 -- ListCalendarsByUser joins through calendar_members, which is the access
 -- grant. A calendar the user cannot reach must not appear, so this is the
 -- same table every authorization check resolves through.

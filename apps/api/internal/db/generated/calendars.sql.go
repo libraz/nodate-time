@@ -203,6 +203,20 @@ func (q *Queries) ListCalendarsByUser(ctx context.Context, arg ListCalendarsByUs
 	return items, nil
 }
 
+const lockCalendarForShare = `-- name: LockCalendarForShare :one
+SELECT id FROM calendars WHERE id = ? AND enabled = TRUE FOR SHARE
+`
+
+// LockCalendarForShare is the first statement of every write under a calendar.
+// Locks are taken top down -- calendar, event, the rows under it, stored
+// objects -- and a write to the calendar row itself takes it FOR UPDATE first,
+// so a calendar delete and a write inside it queue instead of deadlocking.
+func (q *Queries) LockCalendarForShare(ctx context.Context, id uint32) (uint32, error) {
+	row := q.db.QueryRowContext(ctx, lockCalendarForShare, id)
+	err := row.Scan(&id)
+	return id, err
+}
+
 const softDeleteCalendar = `-- name: SoftDeleteCalendar :exec
 UPDATE calendars SET enabled = FALSE WHERE id = ?
 `
