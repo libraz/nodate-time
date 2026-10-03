@@ -62,7 +62,9 @@ type Deps struct {
 	APIPublicURL string
 	OAuth        users.OAuthConfig
 	Cipher       *secrets.Cipher
-	// GoogleAllowedDomains restricts Google sign-in to these email domains.
+	// GoogleAllowedDomains restricts sign-up and sign-in (Google, LINE and
+	// password registration) to these email domains, bar addresses an admin
+	// allow-listed individually.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	GoogleAllowedDomains []string
 	// DevMode enables development-only endpoints (e.g. /auth/dev-login).

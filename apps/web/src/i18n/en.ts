@@ -351,11 +351,11 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminProviderRemoveConfirm': 'Remove {provider} configuration?',
   'settings.adminAllowedEmails': 'Allowed sign-in emails',
   'settings.adminAllowedEmailsDescription':
-    'Individually permit Google accounts to sign in when domain restriction is active.',
+    'Individually permit addresses to sign up or sign in when domain restriction is active.',
   'settings.adminAllowedEmailsRestricted':
-    'Google sign-in is restricted to: {domains}. Addresses below are allowed in addition to those domains.',
+    'Sign-up and sign-in are restricted to these domains: {domains}. Addresses below are allowed in addition to those domains.',
   'settings.adminAllowedEmailsUnrestricted':
-    'Google sign-in is currently unrestricted (any Google account may sign in), so this list is not enforced. Set TC_GOOGLE_ALLOWED_DOMAINS to restrict by domain.',
+    'Sign-up and sign-in are currently not restricted by email domain, so this list is not enforced. Set TC_GOOGLE_ALLOWED_DOMAINS to restrict by domain.',
   'settings.adminAllowedEmailsEmailPlaceholder': 'name@gmail.com',
   'settings.adminAllowedEmailsNotePlaceholder': 'Note (optional)',
   'settings.adminAllowedEmailsAdd': 'Add',

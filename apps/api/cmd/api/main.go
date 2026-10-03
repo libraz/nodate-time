@@ -225,9 +225,9 @@ func main() {
 		TrustedProxies:     cfg.TrustedProxyList(),
 	})
 	if domains := cfg.GoogleAllowedDomainList(); len(domains) > 0 {
-		slog.Info("Google sign-in restricted to domains", "domains", domains)
+		slog.Info("sign-up and sign-in restricted to email domains", "domains", domains)
 	} else {
-		slog.Info("Google sign-in is unrestricted (any Google account may sign in)")
+		slog.Info("sign-up and sign-in are not restricted by email domain")
 	}
 	if !cfg.PasswordLoginEnabled {
 		slog.Info("password login disabled; only OAuth/OIDC sign-in is available")

@@ -319,7 +319,7 @@ func (c *Config) logRelaxations() {
 			"allowed_by", "TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS")
 	}
 	if c.SMTPHost == "" && c.AllowConsoleMailer {
-		slog.Warn("no mail relay configured: mail is written to the log rather than delivered, password-reset links included",
+		slog.Warn("no mail relay configured: mail is not delivered; the log carries the subject only, or the full message in development",
 			"allowed_by", "TC_ALLOW_CONSOLE_MAILER")
 	}
 	if !c.MetricsEnabled() {
