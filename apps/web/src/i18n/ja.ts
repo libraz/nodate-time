@@ -366,11 +366,11 @@ export const ja = {
   'settings.adminProviderRemoveConfirm': '{provider} の設定を削除しますか?',
   'settings.adminAllowedEmails': 'ログイン許可メール',
   'settings.adminAllowedEmailsDescription':
-    'ドメイン制限が有効なとき、個別の Google アカウントのログインを許可します。',
+    'ドメイン制限が有効なとき、個別のアドレスのサインアップ・サインインを許可します。',
   'settings.adminAllowedEmailsRestricted':
-    'Google ログインは次のドメインに制限されています: {domains}。以下のアドレスはそれらに加えて許可されます。',
+    'サインアップ・サインインは次のドメインに制限されています: {domains}。以下のアドレスはそれらに加えて許可されます。',
   'settings.adminAllowedEmailsUnrestricted':
-    '現在 Google ログインは無制限（どの Google アカウントでもログイン可）のため、このリストは適用されません。ドメイン制限するには TC_GOOGLE_ALLOWED_DOMAINS を設定してください。',
+    '現在サインアップ・サインインはメールドメインで制限されていないため、このリストは適用されません。ドメイン制限するには TC_GOOGLE_ALLOWED_DOMAINS を設定してください。',
   'settings.adminAllowedEmailsEmailPlaceholder': 'name@gmail.com',
   'settings.adminAllowedEmailsNotePlaceholder': 'メモ（任意）',
   'settings.adminAllowedEmailsAdd': '追加',

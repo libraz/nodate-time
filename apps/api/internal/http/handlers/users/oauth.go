@@ -52,7 +52,8 @@ type OAuthDeps struct {
 	WebURL      string
 	Config      OAuthConfig
 	Cipher      *secrets.Cipher
-	// AllowedDomains restricts which email domains may sign in via Google.
+	// AllowedDomains restricts which email domains may sign in via any provider
+	// (Google, LINE); an individually allow-listed address is the exception.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	AllowedDomains []string
 	// PasswordLoginEnabled reflects whether email+password auth is available,

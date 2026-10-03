@@ -212,9 +212,9 @@ func sanitizeHeader(s string) string {
 }
 
 // New selects a mailer implementation. When cfg.Host is set, mail is delivered
-// via SMTP; otherwise a console mailer is returned (development only — the
-// config layer rejects an unset host in production). devMode enables verbose
-// console logging of message bodies.
+// via SMTP; otherwise a console mailer is returned (the config layer accepts
+// an unset host only with TC_ALLOW_CONSOLE_MAILER). devMode enables verbose
+// console logging of recipients and message bodies.
 func New(cfg SMTPConfig, devMode bool) Mailer {
 	if cfg.Host != "" && cfg.From != "" {
 		return SMTPMailer{cfg: cfg}
