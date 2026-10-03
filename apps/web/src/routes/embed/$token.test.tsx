@@ -69,7 +69,8 @@ describe('embedded calendar', () => {
     render(<EmbeddedCalendarView />);
 
     expect(await screen.findByText('share.readOnly')).toBeTruthy();
-    expect(eventsAsked()).toBe(1);
+    // The events load starts in an effect after the header has rendered.
+    await waitFor(() => expect(eventsAsked()).toBe(1));
   });
 
   // A join link answers the calendar lookup but publishes nothing; the embed

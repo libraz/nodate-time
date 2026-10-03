@@ -265,6 +265,51 @@ describe('capped listings', () => {
   });
 });
 
+describe('email confirmation', () => {
+  const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+
+  // A confirmation without the account's own session is read as a takeover
+  // and costs the account its password; an owner whose access token merely
+  // expired has to renew first, not send it bare.
+  it('renews an expired session first and confirms with the new token', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const renewed = live();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ token: renewed, refreshToken: 'refresh-2' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await api.post('/auth/verify-email/confirm', { token: 'mail-token' });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/refresh');
+    expect(fetchMock.mock.calls[1]?.[0]).toContain('/auth/verify-email/confirm');
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${renewed}`);
+  });
+
+  it('confirms with no token when signed out', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await api.post('/auth/verify-email/confirm', { token: 'mail-token' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('leaves sign-in requests alone', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ token: live(), refreshToken: 'r' }));
+
+    await api.post('/auth/login', { email: 'a@b.c', password: 'pw' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/auth/login');
+  });
+});
+
 describe('JWT expiry helpers', () => {
   it('decodes the exp claim from a well-formed token', () => {
     expect(decodeJwtExp(makeJwt({ exp: 1700000000 }))).toBe(1700000000);

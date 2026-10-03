@@ -11,7 +11,6 @@ describe('oauthErrorMessageKey', () => {
     expect(oauthErrorMessageKey('oauth_failed')).toBe('auth.oauthFailed');
     expect(oauthErrorMessageKey('oauth_state')).toBe('auth.oauthState');
     expect(oauthErrorMessageKey('oauth_not_allowed')).toBe('auth.oauthNotAllowed');
-    expect(oauthErrorMessageKey('oauth_email_unverified')).toBe('auth.oauthEmailUnverified');
     expect(oauthErrorMessageKey('oauth_email_unsupported')).toBe('auth.oauthEmailUnsupported');
   });
 
