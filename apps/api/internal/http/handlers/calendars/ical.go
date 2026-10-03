@@ -349,11 +349,13 @@ func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, window ex
 // expanded and so bounded. The bound is whatever the caller asked for, and the
 // response says what it was.
 func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow) (*ExportOutput, error) {
+	// One reading of the clock, so the default window is exactly csvMaxWindow wide.
+	now := time.Now().In(window.loc)
 	if window.start.IsZero() {
-		window.start = time.Now().In(window.loc).Add(csvWindowPast)
+		window.start = now.Add(csvWindowPast)
 	}
 	if window.end.IsZero() {
-		window.end = time.Now().In(window.loc).Add(csvWindowFuture)
+		window.end = now.Add(csvWindowFuture)
 	}
 	if window.end.Sub(window.start) > csvMaxWindow {
 		return nil, apierrors.ToHuma(apierrors.BadRequest)
