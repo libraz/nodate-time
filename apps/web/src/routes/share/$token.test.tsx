@@ -31,7 +31,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
   return {
     ...actual,
-    api: { get: vi.fn(), post: vi.fn() },
+    api: { get: vi.fn(), getListing: vi.fn(), post: vi.fn() },
     hasToken: () => true,
   };
 });
@@ -45,6 +45,15 @@ import { ApiError, api } from '@/lib/api';
 import { SharedCalendarView } from './$token';
 
 const apiGet = vi.mocked(api.get);
+const apiGetListing = vi.mocked(api.getListing);
+
+/** A listing answers through the same stub as a plain GET, uncut. */
+function listingFromGet() {
+  apiGetListing.mockImplementation(async (path, skip, signal) => ({
+    data: (await apiGet(path, skip, signal)) as never,
+    truncated: false,
+  }));
+}
 const apiPost = vi.mocked(api.post);
 
 /** What `GET /share/{token}` answers, as `PublicCalendarOutput` serialises it. */
@@ -65,6 +74,8 @@ function askedFor(fragment: string): string[] {
 
 beforeEach(() => {
   apiGet.mockReset();
+  apiGetListing.mockReset();
+  listingFromGet();
   apiPost.mockReset();
   navigate.mockReset();
 });
@@ -204,6 +215,17 @@ describe('share landing when the month does not arrive', () => {
 
     expect(screen.queryByText('Stale plan')).toBeNull();
     expect(screen.getByText('Next month plan')).toBeTruthy();
+  });
+});
+
+describe('share landing for a month cut at the cap', () => {
+  it('says the latest events are missing', async () => {
+    apiGet.mockResolvedValue(shareResponse({ joinable: false, spent: false }));
+    apiGetListing.mockResolvedValue({ data: [] as never, truncated: true });
+
+    render(<SharedCalendarView />);
+
+    expect(await screen.findByText('calendar.eventsTruncated')).toBeTruthy();
   });
 });
 

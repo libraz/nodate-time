@@ -20,6 +20,7 @@ export const en: Record<TranslationKey, string> = {
   'calendar.allDay': 'All day',
   'calendar.noEvents': 'No events',
   'calendar.prevMonth': 'Previous month',
+  'calendar.eventsTruncated': 'This period has too many events; the latest ones are not shown',
   'calendar.nextMonth': 'Next month',
   'calendar.calendarList': 'Calendars',
   'calendar.expandList': 'Expand list',

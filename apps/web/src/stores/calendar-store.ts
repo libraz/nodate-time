@@ -59,6 +59,11 @@ interface CalendarState {
    * than shown as a calendar nobody is on.
    */
   memberErrors: Record<string, string>;
+  /**
+   * Calendars whose last event listing stopped at the server's cap. The grid
+   * would otherwise read the missing tail of the window as free time.
+   */
+  truncatedCalendarIds: string[];
 
   fetchCalendars: () => Promise<void>;
   /**
@@ -143,6 +148,7 @@ function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
     activeCalendarIds: ids,
     membersMap: nextMap,
     memberErrors: nextErrors,
+    truncatedCalendarIds: s.truncatedCalendarIds.filter((cid) => cid !== id),
   };
 }
 
@@ -175,6 +181,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   isLoading: false,
   loadError: null,
   memberErrors: {},
+  truncatedCalendarIds: [],
 
   async fetchCalendars() {
     const requestGeneration = ++calendarRequestGeneration;
@@ -257,18 +264,20 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     // right after editing a recurring event, where the series disappeared and
     // looked deleted.
     const answered = new Set<string>();
+    const truncated = new Set<string>();
     const results = await Promise.allSettled(
       calendars.map(async (cal) => {
         // The dates are days, and which instants a day spans depends on where
         // it is read. Saying so keeps the grid and the server agreeing on
         // which month an early-morning event belongs to.
         const tz = encodeURIComponent(useUiStore.getState().timezone);
-        const evts = await api.get<CalendarEvent[]>(
+        const { data: evts, truncated: cut } = await api.getListing<CalendarEvent[]>(
           `/calendars/${cal.id}/events?start=${start}&end=${end}&tz=${tz}`,
           false,
           signal,
         );
         answered.add(cal.id);
+        if (cut) truncated.add(cal.id);
         for (const evt of evts) {
           allEvents.push({ ...evt, calendarId: cal.id });
         }
@@ -292,6 +301,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       events: [
         ...s.events.filter((e) => known.has(e.calendarId) && !answered.has(e.calendarId)),
         ...allEvents,
+      ],
+      truncatedCalendarIds: [
+        ...s.truncatedCalendarIds.filter((id) => known.has(id) && !answered.has(id)),
+        ...truncated,
       ],
     }));
   },
@@ -569,6 +582,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       isLoading: false,
       loadError: null,
       memberErrors: {},
+      truncatedCalendarIds: [],
     });
   },
 

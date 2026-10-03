@@ -20,6 +20,7 @@ export const ja = {
   'calendar.allDay': '終日',
   'calendar.noEvents': '予定はありません',
   'calendar.prevMonth': '前月',
+  'calendar.eventsTruncated': 'この期間は予定が多すぎるため、後半の一部を表示していません',
   'calendar.nextMonth': '次月',
   'calendar.calendarList': 'カレンダーリスト',
   'calendar.expandList': 'リストを広げる',

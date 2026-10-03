@@ -240,6 +240,31 @@ describe('endSession', () => {
   });
 });
 
+describe('capped listings', () => {
+  it('reports a listing the server cut short', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('[]', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Result-Truncated': 'true' },
+      }),
+    );
+
+    await expect(api.getListing('/calendars/c/events')).resolves.toEqual({
+      data: [],
+      truncated: true,
+    });
+  });
+
+  it('reports a whole listing as whole', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await expect(api.getListing('/calendars/c/events')).resolves.toEqual({
+      data: [],
+      truncated: false,
+    });
+  });
+});
+
 describe('JWT expiry helpers', () => {
   it('decodes the exp claim from a well-formed token', () => {
     expect(decodeJwtExp(makeJwt({ exp: 1700000000 }))).toBe(1700000000);

@@ -41,6 +41,7 @@ const calendarState = {
   memos: [],
   membersMap: {},
   memberErrors: {},
+  truncatedCalendarIds: [] as string[],
   loadError: null,
   fetchCalendars: vi.fn().mockResolvedValue(undefined),
   fetchEvents: vi.fn().mockResolvedValue(undefined),
@@ -269,5 +270,27 @@ describe('App layout mounting', () => {
 
     expect(screen.getByTestId('month-scroll')).toBeInTheDocument();
     expect(screen.queryByTestId('calendar-grid')).toBeNull();
+  });
+});
+
+describe('App capped listings', () => {
+  afterEach(() => {
+    calendarState.truncatedCalendarIds = [];
+  });
+
+  // A calendar whose listing stopped at the cap looked complete, so the days
+  // past the cut read as free time.
+  it('says when a shown calendar came back cut short', () => {
+    calendarState.truncatedCalendarIds = ['cal-1'];
+    render(<App />);
+
+    expect(screen.getByText('calendar.eventsTruncated')).toBeInTheDocument();
+  });
+
+  it('says nothing for a calendar that is switched off', () => {
+    calendarState.truncatedCalendarIds = ['cal-hidden'];
+    render(<App />);
+
+    expect(screen.queryByText('calendar.eventsTruncated')).toBeNull();
   });
 });
