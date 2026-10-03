@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,6 +107,35 @@ func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificatio
 	}
 }
 
+// holdsSessionOf reports whether authorization is a bearer token for a live
+// session of userID. Anything else, including no header, is not.
+func holdsSessionOf(ctx context.Context, q *generated.Queries, jwtSecret, authorization string, userID uint32) bool {
+	tok, ok := strings.CutPrefix(authorization, "Bearer ")
+	if !ok {
+		return false
+	}
+	claims, err := auth.ValidateToken(tok, jwtSecret)
+	if err != nil {
+		return false
+	}
+	sessionPub, err := uuid.Parse(claims.SessionID)
+	if err != nil {
+		return false
+	}
+	session, err := q.GetLiveSession(ctx, sessionPub[:])
+	return err == nil && session.UserID == userID
+}
+
+// revokePriorCredentials ends every session and refresh token of userID and
+// clears its local password. The identity row stays, so a password reset can
+// set a new one.
+func revokePriorCredentials(ctx context.Context, q *generated.Queries, userID uint32) error {
+	if err := q.UpdatePasswordHash(ctx, generated.UpdatePasswordHashParams{UserID: userID}); err != nil {
+		return err
+	}
+	return q.RevokeAllUserSessions(ctx, userID)
+}
+
 // ConfirmEmailVerification redeems a confirmation link.
 func ConfirmEmailVerification(deps Deps) func(context.Context, *ConfirmVerificationInput) (*ConfirmVerificationOutput, error) {
 	return func(ctx context.Context, in *ConfirmVerificationInput) (*ConfirmVerificationOutput, error) {
@@ -126,11 +156,21 @@ func ConfirmEmailVerification(deps Deps) func(context.Context, *ConfirmVerificat
 		// The address is matched as well as the user: a token minted for an
 		// address the account has since moved away from proves nothing about
 		// the address it holds now.
-		if _, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{
+		verified, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{
 			ID:    row.UserID,
 			Email: row.Email,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Whoever registered the address may not be whoever reads it. Proof
+		// from outside the account's own sessions hands the account to the
+		// mailbox: the registrant's password and sessions end here.
+		if n, err := verified.RowsAffected(); err == nil && n == 1 &&
+			!holdsSessionOf(ctx, q, deps.JWTSecret, in.Authorization, row.UserID) {
+			if err := revokePriorCredentials(ctx, q, row.UserID); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
 		}
 		consumed, err := q.MarkEmailVerificationUsed(ctx, row.ID)
 		if err != nil {

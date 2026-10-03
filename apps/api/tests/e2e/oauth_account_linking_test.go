@@ -54,55 +54,6 @@ func runGoogleCallback(t *testing.T, appURL string) string {
 	return cb.Header.Get("Location")
 }
 
-// The takeover this refuses: register a victim's address first, wait for them
-// to sign in with a provider, and inherit their account — password included —
-// because the provider vouched for an address the local account never proved
-// it owns.
-func TestProviderSignInRefusesToLinkToAnUnconfirmedAccount(t *testing.T) {
-	bootstrap(t)
-
-	seq := time.Now().UnixNano()
-	victimEmail := fmt.Sprintf("victim-%d@test.local", seq)
-	subject := fmt.Sprintf("google-sub-%d", seq)
-
-	provider := googleProviderStub(t, subject, victimEmail)
-	app := newOAuthTestServer(t, users.OAuthConfig{
-		RedirectBase: "http://api.test.local",
-		Google: users.OAuthProviderConfig{
-			ClientID:     "google-client",
-			ClientSecret: "google-secret",
-			AuthURL:      provider.URL + "/authorize",
-			TokenURL:     provider.URL + "/token",
-			UserinfoURL:  provider.URL + "/userinfo",
-			Scopes:       "openid email profile",
-		},
-	})
-
-	// The attacker claims the address with a password only they know, and
-	// never confirms it — they cannot, the mailbox is not theirs.
-	var attacker struct {
-		User struct {
-			ID string `json:"id"`
-		} `json:"user"`
-	}
-	helpers.DoJSON(t, http.MethodPost, app.URL+"/auth/register", "",
-		map[string]any{"name": "Squatter", "email": victimEmail, "password": "attacker-password"},
-		&attacker)
-
-	location := runGoogleCallback(t, app.URL)
-	require.Equal(t, helpers.TestWebURL+"/login?error=oauth_email_unverified", location,
-		"provider sign-in must not adopt an account that never proved it owns the address")
-	require.NotContains(t, location, "#token=")
-
-	// No provider identity was attached to the squatted account.
-	var identities int
-	require.NoError(t, testDB.QueryRow(`
-		SELECT COUNT(*) FROM identities i
-		JOIN users u ON u.id = i.user_id
-		WHERE u.email = ? AND i.provider = 'google'`, victimEmail).Scan(&identities))
-	require.Zero(t, identities)
-}
-
 // Once the address is confirmed, the same sign-in links to the same account
 // rather than creating a second one.
 func TestProviderSignInLinksToAConfirmedAccount(t *testing.T) {

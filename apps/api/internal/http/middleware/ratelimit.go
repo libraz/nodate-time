@@ -4,29 +4,23 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
-	"sync"
 	"time"
 
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/observability"
 )
 
-// rateBucket is a fixed-window counter for a single client key.
-type rateBucket struct {
-	count       int
-	windowStart time.Time
-}
+// maxRateBuckets caps the clients one limiter tracks.
+const maxRateBuckets = 10000
 
 // RateLimiter is a simple in-memory fixed-window limiter keyed by client IP.
 // It is intended for low-volume sensitive endpoints (auth, password reset,
 // OAuth) to blunt brute-force and mail-bombing; it is process-local and not a
 // substitute for an edge limiter in a multi-instance deployment.
 type RateLimiter struct {
-	mu             sync.Mutex
-	buckets        map[string]*rateBucket
+	counter        *WindowCounter
 	scope          string
 	limit          int
-	window         time.Duration
 	trustedProxies []netip.Prefix
 }
 
@@ -40,10 +34,9 @@ type RateLimiter struct {
 // distinction the split exists to make.
 func NewRateLimiter(scope string, limit int, window time.Duration, trustedProxies []netip.Prefix) *RateLimiter {
 	rl := &RateLimiter{
-		buckets:        make(map[string]*rateBucket),
+		counter:        NewWindowCounter(window, maxRateBuckets),
 		scope:          scope,
 		limit:          limit,
-		window:         window,
 		trustedProxies: trustedProxies,
 	}
 	return rl
@@ -52,28 +45,27 @@ func NewRateLimiter(scope string, limit int, window time.Duration, trustedProxie
 // allow records a request for key and reports whether it is within the limit,
 // along with the remaining quota and the window reset time.
 func (rl *RateLimiter) allow(key string, now time.Time) (ok bool, remaining int, reset time.Time) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	b, exists := rl.buckets[key]
-	if !exists || now.Sub(b.windowStart) >= rl.window {
-		b = &rateBucket{count: 0, windowStart: now}
-		rl.buckets[key] = b
-		// Opportunistic eviction to bound memory.
-		if len(rl.buckets) > 10000 {
-			for k, bb := range rl.buckets {
-				if now.Sub(bb.windowStart) >= rl.window {
-					delete(rl.buckets, k)
-				}
-			}
-		}
-	}
-	b.count++
-	reset = b.windowStart.Add(rl.window)
-	if b.count > rl.limit {
+	count, reset := rl.counter.Take(key, now)
+	if count > rl.limit {
 		return false, 0, reset
 	}
-	return true, rl.limit - b.count, reset
+	return true, rl.limit - count, reset
+}
+
+// rateKey is the budget a client address draws on. An IPv6 client is
+// normally handed a whole /64, so each of its addresses is the same client.
+func rateKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		if p, err := addr.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return addr.String()
 }
 
 // Middleware returns an http middleware enforcing the limit and advertising the
@@ -82,7 +74,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now()
-			ok, remaining, reset := rl.allow(ClientIP(r, rl.trustedProxies), now)
+			ok, remaining, reset := rl.allow(rateKey(ClientIP(r, rl.trustedProxies)), now)
 			h := w.Header()
 			h.Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
 			h.Set("X-RateLimit-Remaining", strconv.Itoa(remaining))

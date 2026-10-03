@@ -14,6 +14,11 @@
 #
 # Values come from a .env file beside this one. Anything written `:?` has no
 # safe default and stops the stack until it is set.
+#
+# The api service's environment is the only route from .env to the API, so it
+# names every variable the API reads; a variable missing here is silently
+# ignored however it is set in .env. The config package's tests hold this file
+# to that list.
 
 name: nodate-time-prod
 
@@ -80,6 +85,9 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    # Covers the API's own shutdown budgets: in-flight requests, then queued
+    # mail. Docker's default of 10s would kill it partway through.
+    stop_grace_period: 20s
     depends_on:
       mysql:
         condition: service_healthy
@@ -94,6 +102,10 @@ services:
       TC_APP_NAME: ${TC_APP_NAME:-Nodate Time}
       TC_DB_DSN: "${TC_DB_USER:-ttuser}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
       TC_JWT_SECRET: ${TC_JWT_SECRET:?generate one with `openssl rand -hex 32`}
+      # Sign-in policy. An empty domain list leaves provider sign-in open to
+      # any account the provider vouches for.
+      TC_PASSWORD_LOGIN_ENABLED: ${TC_PASSWORD_LOGIN_ENABLED:-true}
+      TC_GOOGLE_ALLOWED_DOMAINS: ${TC_GOOGLE_ALLOWED_DOMAINS:-}
       # Encrypts OAuth client secrets stored in the database. Left empty, the
       # admin panel refuses to save them rather than write them in plaintext.
       TC_SECRETS_KEY: ${TC_SECRETS_KEY:-}
@@ -106,10 +118,15 @@ services:
       # refused at startup rather than treated as "no CORS needed", because the
       # two deployments cannot be told apart from here.
       TC_CORS_ALLOWED_ORIGINS: ${TC_WEB_URL}
-      # Rate limits are per client IP. Unset, every request behind the reverse
-      # proxy shares one bucket, because X-Forwarded-For is only believed from
-      # a hop listed here.
-      TC_TRUSTED_PROXIES: ${TC_TRUSTED_PROXIES:-}
+      # Rate limits are per client IP, and X-Forwarded-For is only believed
+      # from a hop listed here. Every request arrives through the web service,
+      # so the default is the range Docker allocates compose networks from;
+      # without it every client would share the proxy's one bucket. Narrow it
+      # if this network was given an address outside that range.
+      TC_TRUSTED_PROXIES: ${TC_TRUSTED_PROXIES:-172.16.0.0/12}
+      # Requests per client per minute; 0 keeps the built-in budget.
+      TC_AUTH_RATE_LIMIT: ${TC_AUTH_RATE_LIMIT:-0}
+      TC_SHARE_RATE_LIMIT: ${TC_SHARE_RATE_LIMIT:-0}
       # Reached over the compose network. This is not an address the browser
       # ever sees: it names where the API fetches and stores bytes, not where
       # a client is sent.
@@ -118,16 +135,22 @@ services:
       TC_S3_SECRET_KEY: ${TC_S3_SECRET_KEY}
       TC_S3_BUCKET: ${TC_S3_BUCKET:-nodate-time}
       TC_S3_USE_SSL: ${TC_S3_USE_SSL:-false}
-      # Without a relay the server refuses to start: mail written to the log
-      # is not delivered, and password reset is one of the things it carries.
-      TC_SMTP_HOST: ${TC_SMTP_HOST:?set a mail relay, or set TC_ALLOW_CONSOLE_MAILER=true to run without password reset}
+      TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS: ${TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS:-false}
+      # Without a relay the API refuses to start, and its log names the way
+      # out: mail written to the log is not delivered, and password reset is
+      # one of the things it carries.
+      TC_SMTP_HOST: ${TC_SMTP_HOST:-}
+      TC_ALLOW_CONSOLE_MAILER: ${TC_ALLOW_CONSOLE_MAILER:-false}
       TC_SMTP_PORT: ${TC_SMTP_PORT:-587}
       TC_SMTP_USERNAME: ${TC_SMTP_USERNAME:-}
       TC_SMTP_PASSWORD: ${TC_SMTP_PASSWORD:-}
       TC_SMTP_FROM: ${TC_SMTP_FROM:?the From address outgoing mail is sent as}
+      # The slug is the workspace's identity: changing it starts an empty one.
+      TC_WORKSPACE_SLUG: ${TC_WORKSPACE_SLUG:-default}
       TC_WORKSPACE_NAME: ${TC_WORKSPACE_NAME:-Nodate Time}
       TC_WORKSPACE_TIMEZONE: ${TC_WORKSPACE_TIMEZONE:-Asia/Tokyo}
       TC_WORKSPACE_COUNTRY: ${TC_WORKSPACE_COUNTRY:-JP}
+      TC_DEFAULT_LOCALE: ${TC_DEFAULT_LOCALE:-ja}
       TC_GOOGLE_CLIENT_ID: ${TC_GOOGLE_CLIENT_ID:-}
       TC_GOOGLE_CLIENT_SECRET: ${TC_GOOGLE_CLIENT_SECRET:-}
       TC_LINE_CLIENT_ID: ${TC_LINE_CLIENT_ID:-}
@@ -135,9 +158,10 @@ services:
       # Metrics, profiles and the detailed health report. A container cannot
       # bind the host's loopback, so this binds every interface *inside the
       # container* and is kept private by the two lines below: the allow-list,
-      # and a published port that only the host's loopback can reach.
-      TC_METRICS_ADDR: ":9464"
-      TC_METRICS_ALLOWED_CIDRS: ${TC_METRICS_ALLOWED_CIDRS:-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
+      # and a published port that only the host's loopback can reach. Set
+      # either one empty to turn it off: no listener, or no one allowed in.
+      TC_METRICS_ADDR: ${TC_METRICS_ADDR-:9464}
+      TC_METRICS_ALLOWED_CIDRS: ${TC_METRICS_ALLOWED_CIDRS-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
     ports:
       # Not how the browser reaches the API -- that goes through the web
       # service, over this network. Published on the host's loopback only, for

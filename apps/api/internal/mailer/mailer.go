@@ -3,10 +3,15 @@ package mailer
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
+	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -25,8 +30,9 @@ type Message struct {
 
 // ConsoleMailer logs the email contents instead of sending. Use this in
 // development to inspect outgoing mail without an SMTP server. When Verbose is
-// false (the default outside development) only metadata is logged — never the
-// body, which may contain password-reset tokens or invite links.
+// false (the default outside development) only the subject is logged — never
+// the body, which may contain password-reset tokens or invite links, and never
+// the recipient, which is personal data the log has no use for.
 type ConsoleMailer struct {
 	Verbose bool
 }
@@ -34,8 +40,8 @@ type ConsoleMailer struct {
 func (c ConsoleMailer) Send(_ context.Context, msg Message) error {
 	if !c.Verbose {
 		// Do not log the body: it can contain reset tokens / invite secrets.
-		slog.Info("[mailer:console] suppressed message body (enable development mode to view)",
-			"to", msg.To, "subject", msg.Subject)
+		slog.Info("[mailer:console] suppressed message (enable development mode to view)",
+			"subject", msg.Subject)
 		return nil
 	}
 	slog.Info("[mailer:console]", "to", msg.To, "subject", msg.Subject, "body", msg.Text)
@@ -81,11 +87,15 @@ func (m SMTPMailer) Send(ctx context.Context, msg Message) error {
 	defer cancel()
 
 	// Build a minimal RFC 5322 message. Header values are sanitized to prevent
-	// header injection via attacker-controlled recipient/subject.
+	// header injection via attacker-controlled recipient/subject, and anything
+	// outside ASCII goes out as an RFC 2047 encoded-word: the deployment's
+	// name is interpolated into the subject and is not limited to ASCII.
 	from := sanitizeHeader(m.cfg.From)
+	if addr, err := mail.ParseAddress(from); err == nil {
+		from = addr.String()
+	}
 	to := sanitizeHeader(msg.To)
-	subject := sanitizeHeader(msg.Subject)
-	body := strings.ReplaceAll(msg.Text, "\r\n", "\n")
+	subject := mime.QEncoding.Encode("utf-8", sanitizeHeader(msg.Subject))
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
@@ -93,8 +103,15 @@ func (m SMTPMailer) Send(ctx context.Context, msg Message) error {
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(strings.ReplaceAll(body, "\n", "\r\n"))
+	qp := quotedprintable.NewWriter(&b)
+	if _, err := qp.Write([]byte(strings.ReplaceAll(msg.Text, "\r\n", "\n"))); err != nil {
+		return fmt.Errorf("encode body: %w", err)
+	}
+	if err := qp.Close(); err != nil {
+		return fmt.Errorf("encode body: %w", err)
+	}
 
 	if err := m.deliver(ctx, msg.To, []byte(b.String())); err != nil {
 		// A context that ended mid-conversation surfaces as whatever I/O error
@@ -158,10 +175,20 @@ func (m SMTPMailer) deliver(ctx context.Context, to string, body []byte) error {
 			}
 		}
 	}
-	if err := c.Mail(m.cfg.From); err != nil {
+	sender := m.cfg.From
+	if addr, err := mail.ParseAddress(sender); err == nil {
+		sender = addr.Address
+	}
+	if err := c.Mail(sender); err != nil {
 		return fmt.Errorf("mail from: %w", err)
 	}
 	if err := c.Rcpt(to); err != nil {
+		// A relay's refusal usually quotes the address back, and this error
+		// ends up in the log; the reply code is what an operator acts on.
+		var reply *textproto.Error
+		if errors.As(err, &reply) {
+			return fmt.Errorf("rcpt to: refused with %d", reply.Code)
+		}
 		return fmt.Errorf("rcpt to: %w", err)
 	}
 	w, err := c.Data()

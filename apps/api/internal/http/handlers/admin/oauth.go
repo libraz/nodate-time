@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -127,9 +128,8 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			if deps.EnvFallback == nil || !deps.EnvFallback(in.Provider) {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
-			encSecret = nil
 		case in.Body.ClientSecret == "__clear__":
-			encSecret = nil
+			// Stored as no secret below.
 		default:
 			encSecret, err = deps.Cipher.Encrypt([]byte(in.Body.ClientSecret))
 			if err != nil {
@@ -137,9 +137,19 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			}
 		}
 
-		_ = hadRow
+		// The column is NOT NULL: no stored secret is an empty one, and nil
+		// would be sent as NULL.
+		if encSecret == nil {
+			encSecret = []byte{}
+		}
+		// Used only when this inserts; an update leaves the stored id alone.
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		updatedBy := sql.NullInt32{Int32: int32(userID), Valid: userID > 0}
 		if err := deps.Queries.UpsertOAuthProviderConfig(ctx, generated.UpsertOAuthProviderConfigParams{
+			PublicID:               pubID[:],
 			Provider:               generated.OauthProviderConfigsProvider(in.Provider),
 			ClientID:               in.Body.ClientID,
 			ClientSecretCiphertext: encSecret,

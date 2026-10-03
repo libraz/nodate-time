@@ -413,7 +413,14 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		// The same counter as Login, so a stolen session cannot guess the
+		// current password faster than the sign-in form allows. The caller is
+		// already signed in, so saying it is locked tells them nothing new.
+		if lockStands(identity, time.Now()) {
+			return nil, apierrors.ToHuma(apierrors.RateLimited)
+		}
 		if !identity.PasswordHash.Valid || !auth.CheckPassword(in.Body.CurrentPassword, identity.PasswordHash.String) {
+			recordFailedAttempt(ctx, deps, identity)
 			return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
 		}
 

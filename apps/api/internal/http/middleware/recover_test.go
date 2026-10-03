@@ -1,10 +1,15 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestRecovererReturnsTheErrorEnvelope(t *testing.T) {
@@ -64,4 +69,28 @@ func TestRecovererRepanicsAbortHandler(t *testing.T) {
 	}()
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	t.Fatal("expected the abort to propagate")
+}
+
+// The paths served carry credentials, so the panic line names the route the
+// router matched and never the URL that reached it.
+func TestRecovererLogsRoutePatternNotPath(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	r := chi.NewRouter()
+	r.Use(Recoverer())
+	r.Get("/share/{token}", func(http.ResponseWriter, *http.Request) { panic("boom") })
+
+	const secret = "s3cr3t-share-token"
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/share/"+secret+"?code="+secret, nil))
+
+	line := buf.String()
+	if strings.Contains(line, secret) {
+		t.Fatalf("panic log contains the raw URL: %s", line)
+	}
+	if !strings.Contains(line, `"route":"/share/{token}"`) {
+		t.Fatalf("panic log lacks the route pattern: %s", line)
+	}
 }

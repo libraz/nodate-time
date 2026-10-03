@@ -4,13 +4,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAllowPasswordResetEmailThrottlesByNormalizedAddress(t *testing.T) {
-	resetEmailLimiter.Lock()
-	resetEmailLimiter.buckets = map[string]*resetEmailBucket{}
-	resetEmailLimiter.Unlock()
+	resetEmailLimiter = middleware.NewWindowCounter(passwordResetEmailWindow, 20000)
 
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	require.True(t, allowPasswordResetEmail(" User@Example.com ", "203.0.113.5", now))
@@ -25,9 +24,7 @@ func TestAllowPasswordResetEmailThrottlesByNormalizedAddress(t *testing.T) {
 // their own IP's budget against a victim's email does not consume the
 // victim's own budget for that same mailbox.
 func TestAllowPasswordResetEmailScopedByIP(t *testing.T) {
-	resetEmailLimiter.Lock()
-	resetEmailLimiter.buckets = map[string]*resetEmailBucket{}
-	resetEmailLimiter.Unlock()
+	resetEmailLimiter = middleware.NewWindowCounter(passwordResetEmailWindow, 20000)
 
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	attackerIP := "198.51.100.7"
