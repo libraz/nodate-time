@@ -73,40 +73,29 @@ func (q *Queries) DecrementStorageObjectRefs(ctx context.Context, id uint32) err
 }
 
 const deleteStorageObject = `-- name: DeleteStorageObject :execresult
-DELETE FROM storage_objects WHERE id = ? AND ref_count = 0
+DELETE so FROM storage_objects so
+INNER JOIN storage_objects_unreferenced u ON u.id = so.id
+WHERE so.id = ?
 `
 
+// DeleteStorageObject removes a listed object, re-checking through the view
+// so an object that gained a referrer since it was listed is left alone.
 func (q *Queries) DeleteStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteStorageObject, id)
 }
 
 const deleteUnreferencedStorageObject = `-- name: DeleteUnreferencedStorageObject :execresult
 DELETE so FROM storage_objects so
+INNER JOIN storage_objects_unreferenced u ON u.id = so.id
 WHERE so.id = ?
-  AND so.ref_count = 0
-  AND NOT EXISTS (
-    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
-  )
 `
 
 // DeleteUnreferencedStorageObject collects one named object, and only if
-// nothing holds it: the count is zero and no referring row of any kind is
-// still pointing at it. It is what lets the caller that released the last
+// nothing holds it. It is what lets the caller that released the last
 // reference finish the job in the same pass, rather than leaving the bytes to
 // an age-gated sweep -- that gate exists to protect a reservation which has
 // not been confirmed yet, and an object whose last referrer was just deleted
 // cannot be one.
-//
-// The NOT EXISTS clauses are the same ones the sweep applies, one per column
-// that can point at an object. Every one of those foreign keys is RESTRICT,
-// so without them this is an error the caller has to interpret rather than an
-// answer.
 func (q *Queries) DeleteUnreferencedStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteUnreferencedStorageObject, id)
 }
@@ -138,12 +127,19 @@ func (q *Queries) GetStorageObjectByID(ctx context.Context, id uint32) (StorageO
 	return i, err
 }
 
-const getStorageObjectByKey = `-- name: GetStorageObjectByKey :one
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE storage_key = ? AND enabled = TRUE
+const getStorageObjectByOwnerDigest = `-- name: GetStorageObjectByOwnerDigest :one
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
+WHERE owner_user_id = ? AND sha256 = ? AND enabled = TRUE
+FOR UPDATE
 `
 
-func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) (StorageObject, error) {
-	row := q.db.QueryRowContext(ctx, getStorageObjectByKey, storageKey)
+type GetStorageObjectByOwnerDigestParams struct {
+	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+	Sha256      []byte        `json:"sha256"`
+}
+
+func (q *Queries) GetStorageObjectByOwnerDigest(ctx context.Context, arg GetStorageObjectByOwnerDigestParams) (StorageObject, error) {
+	row := q.db.QueryRowContext(ctx, getStorageObjectByOwnerDigest, arg.OwnerUserID, arg.Sha256)
 	var i StorageObject
 	err := row.Scan(
 		&i.ID,
@@ -168,6 +164,7 @@ func (q *Queries) GetStorageObjectByKey(ctx context.Context, storageKey string) 
 const getStorageObjectByWorkspaceDigest = `-- name: GetStorageObjectByWorkspaceDigest :one
 SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
 WHERE workspace_id = ? AND sha256 = ? AND enabled = TRUE
+FOR UPDATE
 `
 
 type GetStorageObjectByWorkspaceDigestParams struct {
@@ -175,15 +172,15 @@ type GetStorageObjectByWorkspaceDigestParams struct {
 	Sha256      []byte        `json:"sha256"`
 }
 
-// GetStorageObjectByWorkspaceDigest finds the row that content addressing
-// deduplicated onto.
+// GetStorageObjectByWorkspaceDigest and GetStorageObjectByOwnerDigest find the
+// row that content addressing deduplicated onto. (scope, sha256) is the unique
+// key the upsert collides on, so it answers whatever key the row carries: an
+// album photo's bytes are written at a key chosen before anything knows the
+// digest, so the row holding them is keyed by whichever photo got there first.
 //
-// Reading it back by key only works when the key is derived from the digest,
-// which is true of attachments and avatars and not of album photos: their
-// bytes are written at a key chosen before anything knows the digest, so the
-// row already holding those bytes is keyed by whichever photo got there
-// first. (workspace_id, sha256) is the unique key the upsert collides on, so
-// it is the one that can answer for either.
+// FOR UPDATE because the caller's next step depends on the row's state --
+// whether its bytes were verified -- and a concurrent confirm may be changing
+// it.
 func (q *Queries) GetStorageObjectByWorkspaceDigest(ctx context.Context, arg GetStorageObjectByWorkspaceDigestParams) (StorageObject, error) {
 	row := q.db.QueryRowContext(ctx, getStorageObjectByWorkspaceDigest, arg.WorkspaceID, arg.Sha256)
 	var i StorageObject
@@ -217,19 +214,10 @@ func (q *Queries) IncrementStorageObjectRefs(ctx context.Context, id uint32) err
 }
 
 const listUnreferencedStorageObjects = `-- name: ListUnreferencedStorageObjects :many
-SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects so
-WHERE so.ref_count = 0
-  AND so.created_at < ?
+SELECT so.id, so.public_id, so.workspace_id, so.owner_user_id, so.sha256, so.byte_size, so.content_type, so.storage_key, so.ref_count, so.uploaded_at, so.sort_weight, so.notes, so.enabled, so.updated_at, so.created_at FROM storage_objects so
+INNER JOIN storage_objects_unreferenced u ON u.id = so.id
+WHERE so.created_at < ?
   AND so.id > ?
-  AND NOT EXISTS (
-    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
-  )
 ORDER BY so.id
 LIMIT ?
 `
@@ -240,24 +228,10 @@ type ListUnreferencedStorageObjectsParams struct {
 	Limit     int32     `json:"limit"`
 }
 
-// The cursor matters more than the limit. The attachments foreign key is
-// RESTRICT, so an object a row still points at cannot be deleted; reading each
-// page from the head of the table would put that same object first every time
-// and the sweep would spend its whole batch budget on it, never reaching the
-// rest of the backlog.
-//
-// A retired attachment row is still a row, and it holds its object until the
-// retention window passes. Those objects are excluded here rather than
-// attempted and logged: a foreign key doing its job every fifteen minutes is
-// not a warning, and burying the real failures under it costs more than the
-// extra clause.
-//
-// There is one clause per column that can point at an object, and the caller
-// deletes by id without re-checking them, so a column added to any referring
-// table has to be added here too. Missing one does not corrupt anything --
-// the foreign keys are RESTRICT -- but the object is listed every tick,
-// refuses to delete every tick, and spends the batch budget it was the point
-// of this cursor to protect.
+// The cursor matters more than the limit: an object that refuses to delete
+// would otherwise head every page and spend the whole batch budget. Which
+// objects are unreferenced is decided by storage_objects_unreferenced, the
+// same view every delete below reads.
 func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUnreferencedStorageObjectsParams) ([]StorageObject, error) {
 	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {
@@ -295,4 +269,31 @@ func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUn
 		return nil, err
 	}
 	return items, nil
+}
+
+const markStorageObjectUploaded = `-- name: MarkStorageObjectUploaded :exec
+UPDATE storage_objects
+SET storage_key = ?, byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
+WHERE id = ? AND uploaded_at IS NULL
+`
+
+type MarkStorageObjectUploadedParams struct {
+	StorageKey  string `json:"storageKey"`
+	ByteSize    uint64 `json:"byteSize"`
+	ContentType string `json:"contentType"`
+	ID          uint32 `json:"id"`
+}
+
+// MarkStorageObjectUploaded records that the bytes behind a row were read back
+// and matched its digest, which is what makes the row something another
+// referrer may reuse. The verified size, type and key replace what the
+// reservation declared; a row already verified is left as it is.
+func (q *Queries) MarkStorageObjectUploaded(ctx context.Context, arg MarkStorageObjectUploadedParams) error {
+	_, err := q.db.ExecContext(ctx, markStorageObjectUploaded,
+		arg.StorageKey,
+		arg.ByteSize,
+		arg.ContentType,
+		arg.ID,
+	)
+	return err
 }

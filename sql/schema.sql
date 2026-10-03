@@ -1366,6 +1366,7 @@ CREATE TABLE album_photos (
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',
   enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Soft-delete flag',
+  retired_at DATETIME(3) NULL COMMENT 'When a confirmed photo was deleted. NULL on a live photo and on an upload that was never confirmed, which is what keeps a deleted photo from confirming back.',
   updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
@@ -1690,6 +1691,26 @@ ALTER TABLE album_photos
   ADD CONSTRAINT fk_album_photos_thumbnail_object
     FOREIGN KEY (thumbnail_object_id) REFERENCES storage_objects(id) ON DELETE RESTRICT;
 
+-- >>> calendar_event_attachments_retired_at.sql
+-- ====================================
+-- calendar_event_attachments.retired_at — tell a deleted attachment from one
+-- that was never confirmed
+--
+-- enabled = FALSE is two states in the contract: a reservation whose upload
+-- has not been confirmed, and a confirmed attachment that was deleted. They
+-- end differently. A reservation may still be confirmed, and is dropped by the
+-- abandoned-upload sweep once its URL is long dead; a deleted attachment must
+-- never come back, and is kept for the activity history until its retention
+-- runs out. Read off enabled alone, a deleted row confirms back to life and is
+-- collected on the reservation's clock.
+--
+-- Set by every soft delete, in the same statement that clears enabled.
+-- ====================================
+ALTER TABLE calendar_event_attachments
+  ADD COLUMN retired_at DATETIME(3) NULL
+    COMMENT 'When a confirmed attachment was deleted. NULL on a live row and on a reservation that was never confirmed.'
+    AFTER enabled;
+
 -- >>> calendar_event_comments_thread.sql
 -- ====================================
 -- calendar_event_comments — read a thread from its newest end without sorting
@@ -1919,6 +1940,40 @@ ALTER TABLE sessions
   ADD COLUMN prev_refresh_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'SHA-256 hex of the refresh token this session last traded in; presenting it again is a replay',
   ADD COLUMN rotated_at DATETIME(3) NULL COMMENT 'When the refresh token was last exchanged',
   ADD KEY idx_sessions_prev_refresh_hash (prev_refresh_hash);
+
+DROP VIEW IF EXISTS `storage_objects_unreferenced`;
+
+-- >>> storage_objects_unreferenced.sql
+-- ====================================
+-- storage_objects_unreferenced — the objects nothing holds
+--
+-- The one statement of when an object may be deleted: its count is zero and
+-- no column that can point at an object does. Both the sweep's listing and
+-- every delete read it, so a referring column added later is added once here
+-- rather than to each of them.
+--
+-- Attachments and album photos refer through RESTRICT foreign keys, which
+-- would refuse the delete anyway; checking them here keeps a refusal from
+-- being attempted and logged every tick. The avatar column is ON DELETE SET
+-- NULL, so for it this clause is the only guard: without it a drifted count
+-- would clear a live avatar instead of being refused.
+-- ====================================
+CREATE VIEW storage_objects_unreferenced AS
+SELECT so.id
+FROM storage_objects so
+WHERE so.ref_count = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.avatar_storage_object_id = so.id
+  );
 
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_del`;
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_ins`;

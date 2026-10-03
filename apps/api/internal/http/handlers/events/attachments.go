@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -59,6 +60,21 @@ func mapAttachment(publicID []byte, filename, contentType string, byteSize uint6
 	}
 }
 
+// attachmentStorageKey is where an attachment upload of these bytes is
+// written when no object holds them yet.
+//
+// The key is scoped by workspace, not by calendar, because that is the scope
+// storage_objects is unique on: two calendars in one workspace uploading
+// identical bytes resolve to the same row.
+//
+// It is composed only of server-side values and the digest. The
+// client-supplied filename is stored on the attachment row (and surfaced via
+// Content-Disposition on download) but never concatenated into the key, which
+// would allow "../" traversal into another namespace.
+func attachmentStorageKey(deps Deps, digest []byte) string {
+	return fmt.Sprintf("workspace/%s/%s", pubIDToHex(deps.WorkspacePublicID), hex.EncodeToString(digest))
+}
+
 // PresignUpload reserves an attachment and returns a URL to upload to.
 //
 // Two rows are written: a storage_objects row for the blob, keyed on its
@@ -66,6 +82,10 @@ func mapAttachment(publicID []byte, filename, contentType string, byteSize uint6
 // starts disabled. The attachment takes no reference on the object until
 // the upload is confirmed, so a presign nobody ever uses leaves the object
 // at zero references for the sweep to collect.
+//
+// The object may already exist -- as another attachment, or as an album photo
+// whose bytes sit at the photo's own key -- and the upload URL, if any, is for
+// whichever key that object carries.
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -105,55 +125,19 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		objectPubID, err := uuid.NewV7()
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
 
-		// The key is scoped by workspace, not by calendar, because that is
-		// the scope storage_objects is unique on: two calendars in one
-		// workspace uploading identical bytes must resolve to the same row,
-		// and a per-calendar key would leave the second one looking up a key
-		// the deduplicated row does not carry.
-		//
-		// It is composed only of server-side values and the digest. The
-		// client-supplied filename is stored on the attachment row (and
-		// surfaced via Content-Disposition on download) but never
-		// concatenated into the key, which would allow "../" traversal into
-		// another namespace.
-		storageKey := fmt.Sprintf("workspace/%s/%s", pubIDToHex(deps.WorkspacePublicID), hex.EncodeToString(digest))
+		storageKey := attachmentStorageKey(deps, digest)
 
-		// Bytes another attachment already stands behind are never handed out
-		// for overwriting. The key is the digest of the file, so anyone who
-		// knows a file's bytes can ask for a presign at the same key from
-		// their own calendar and PUT something else there -- and every
-		// attachment in the workspace that resolved to that object would start
-		// serving the replacement. A caller with the same digest gets the
-		// object that is already there and confirms against it.
-		alreadyStored := false
-		if existing, err := deps.Queries.GetStorageObjectByKey(ctx, storageKey); err == nil && existing.RefCount > 0 {
-			_, exists, serr := deps.Storage.StatObject(ctx, storageKey)
-			if serr != nil {
-				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-			}
-			alreadyStored = exists
-		}
-
+		var object generated.StorageObject
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := q.CreateStorageObject(ctx, generated.CreateStorageObjectParams{
-				PublicID:    objectPubID[:],
-				WorkspaceID: sql.NullInt32{Int32: int32(deps.WorkspaceID), Valid: true},
-				Sha256:      digest,
+			var err error
+			object, err = blobref.Reserve(ctx, q, blobref.Blob{
+				WorkspaceID: deps.WorkspaceID,
+				SHA256:      digest,
 				ByteSize:    uint64(in.Body.ByteSize),
 				ContentType: contentType,
 				StorageKey:  storageKey,
-			}); err != nil {
-				return err
-			}
-			// Read the object back rather than using LastInsertId: on the
-			// dedup path the upsert inserted nothing and the id that matters
-			// belongs to the row that was already there.
-			object, err := q.GetStorageObjectByKey(ctx, storageKey)
+			})
 			if err != nil {
 				return err
 			}
@@ -172,10 +156,19 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		// Bytes already at the key are not handed out for writing again: the
+		// relay never overwrites a stored key, so the upload could only fail.
+		// The caller confirms against what is there, and the confirm's digest
+		// check is what decides whether it is the file they meant.
+		_, alreadyStored, err := deps.Storage.StatObject(ctx, object.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+
 		out := &PresignUploadOutput{}
 		out.Body.AttachmentID = attachPubID.String()
 		if !alreadyStored {
-			url, err := deps.Storage.SignedPutURL(storageKey, contentType, in.Body.ByteSize, 15*time.Minute)
+			url, err := deps.Storage.SignedPutURL(object.StorageKey, contentType, in.Body.ByteSize, 15*time.Minute)
 			if err != nil {
 				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 			}
@@ -213,19 +206,29 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 }
 
 // discardReservation removes a reservation whose upload did not match what
-// was declared. Only the attachment row is dropped: the object it points at
-// may be shared with an attachment that uploaded the same bytes correctly,
-// so deleting the blob here could break somebody else's file. An object
-// nothing refers to is collected by the sweep instead.
+// was declared. The attachment row is dropped; the object row is left for the
+// sweep, because other reservations of the same digest may point at it.
+//
+// The bytes go too while the object is still unverified. They are at a key
+// derived from a digest they do not match, so nobody can confirm against them,
+// and the relay never overwrites a key -- left in place they would block every
+// honest upload of that file. A verified object's bytes are never touched.
 //
 // Best-effort: errors are logged rather than surfaced, since the caller is
 // already returning the mismatch to the client.
-func discardReservation(ctx context.Context, deps Deps, attachmentID, uploaderID uint32) {
+func discardReservation(ctx context.Context, deps Deps, att generated.GetPendingAttachmentByPublicIDRow) {
 	if err := deps.Queries.DeletePendingAttachment(ctx, generated.DeletePendingAttachmentParams{
-		ID:         attachmentID,
-		UploaderID: uploaderID,
+		ID:         att.ID,
+		UploaderID: att.UploaderID,
 	}); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", attachmentID, "error", err)
+		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", att.ID, "error", err)
+	}
+	object, err := deps.Queries.GetStorageObjectByID(ctx, att.StorageObjectID)
+	if err != nil || blobref.Verified(object) || object.StorageKey != att.StorageKey {
+		return
+	}
+	if err := deps.Storage.DeleteObject(ctx, att.StorageKey); err != nil {
+		slog.WarnContext(ctx, "failed to delete mismatched attachment bytes", "key", att.StorageKey, "error", err)
 	}
 }
 
@@ -298,18 +301,29 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		// content-addressed, so the same bytes may back another attachment
 		// entirely; deleting the object here would break that one. The sweep
 		// removes it once nothing refers to it.
+		//
+		// Only the delete that actually retired the row releases: a second one
+		// racing it read the same live row, but its update finds it retired.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := q.SoftDeleteAttachment(ctx, att.ID); err != nil {
+			res, err := q.SoftDeleteAttachment(ctx, att.ID)
+			if err != nil {
 				return err
 			}
-			if err := q.DecrementStorageObjectRefs(ctx, att.StorageObjectID); err != nil {
+			retired, err := blobref.ChangedOne(res)
+			if err != nil {
+				return err
+			}
+			if !retired {
+				return apierrors.AttachmentNotFound
+			}
+			if err := blobref.Release(ctx, q, att.StorageObjectID); err != nil {
 				return err
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeAttachmentGone, att.Filename, att.PublicID)
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &DeleteAttachmentOutput{}, nil
@@ -355,26 +369,26 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 		if info.Size > maxAttachmentSize {
-			discardReservation(ctx, deps, att.ID, att.UploaderID)
+			discardReservation(ctx, deps, att)
 			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
-		}
-		if uint64(info.Size) != att.ByteSize {
-			discardReservation(ctx, deps, att.ID, att.UploaderID)
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 		// The digest decided which object these bytes are stored as, so it has
 		// to be checked against them rather than taken on trust. Without this
 		// an upload can put anything at a key it names, and every later
-		// attachment of the real file resolves to it.
+		// attachment of the real file resolves to it. It is also the size
+		// check: the declared size on an unverified object is whatever the
+		// first reservation said, and the bytes that match the digest are the
+		// ones whose size is recorded below.
 		stored, err := deps.Storage.SHA256(ctx, att.StorageKey)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 		if !bytes.Equal(stored, att.Sha256) {
-			discardReservation(ctx, deps, att.ID, att.UploaderID)
+			discardReservation(ctx, deps, att)
 			return nil, apierrors.ToHuma(apierrors.AttachmentDigestMismatch)
 		}
 
+		var object generated.StorageObject
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			res, err := q.ConfirmEventAttachment(ctx, generated.ConfirmEventAttachmentParams{
 				ID:         att.ID,
@@ -383,17 +397,31 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			if err != nil {
 				return err
 			}
-			// The update re-checks enabled = FALSE, so a second confirm of the
-			// same reservation affects no rows -- which is what stops it from
-			// taking a second reference on the blob and pinning it forever.
-			affected, err := res.RowsAffected()
+			// The update re-checks enabled = FALSE and that the event and
+			// calendar are live, so a second confirm, or one that lost a race
+			// with the parent's delete, affects no rows and takes no reference.
+			confirmed, err := blobref.ChangedOne(res)
 			if err != nil {
 				return err
 			}
-			if affected != 1 {
+			if !confirmed {
 				return apierrors.AttachmentNotFound
 			}
-			if err := q.IncrementStorageObjectRefs(ctx, att.StorageObjectID); err != nil {
+			object, err = blobref.Store(ctx, q, blobref.Blob{
+				WorkspaceID: att.WorkspaceID,
+				SHA256:      att.Sha256,
+				ByteSize:    uint64(info.Size),
+				ContentType: info.ContentType,
+				StorageKey:  att.StorageKey,
+			})
+			if err != nil {
+				return err
+			}
+			if object.ID != att.StorageObjectID {
+				return fmt.Errorf("attachment %d points at object %d, digest resolves to %d",
+					att.ID, att.StorageObjectID, object.ID)
+			}
+			if err := blobref.Acquire(ctx, q, object.ID); err != nil {
 				return err
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
@@ -402,9 +430,19 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
+		// An album photo verified the same bytes first and took the object
+		// over onto its own key, so a copy uploaded to the attachment key is
+		// held by nothing. Best-effort: left behind, it is only space.
+		if ownKey := attachmentStorageKey(deps, att.Sha256); object.StorageKey != ownKey {
+			if used, cerr := deps.Queries.CountStorageObjectsByKey(ctx, ownKey); cerr == nil && used == 0 {
+				if derr := deps.Storage.DeleteObject(ctx, ownKey); derr != nil {
+					slog.WarnContext(ctx, "failed to delete superseded attachment bytes", "key", ownKey, "error", derr)
+				}
+			}
+		}
 
 		return &ConfirmAttachmentOutput{
-			Body: mapAttachment(att.PublicID, att.Filename, att.ContentType, att.ByteSize, att.CreatedAt),
+			Body: mapAttachment(att.PublicID, att.Filename, object.ContentType, object.ByteSize, att.CreatedAt),
 		}, nil
 	}
 }

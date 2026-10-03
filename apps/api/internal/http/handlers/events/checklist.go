@@ -121,23 +121,30 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
 		}
 
-		// sortOrder is unchanged when omitted so title/done edits cannot
-		// silently reorder the item to position zero.
+		// Every field keeps its stored value when omitted.
+		title := item.Title
+		if in.Body.Title != nil {
+			title = *in.Body.Title
+		}
+		done := item.Done
+		if in.Body.Done != nil {
+			done = *in.Body.Done
+		}
 		sortOrder := item.SortWeight
 		if in.Body.SortOrder != nil {
 			sortOrder = int32(*in.Body.SortOrder)
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := q.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
-				Title:      in.Body.Title,
-				Done:       in.Body.Done,
+				Title:      title,
+				Done:       done,
 				SortWeight: sortOrder,
 				ID:         item.ID,
 			}); err != nil {
 				return err
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeChecklistSet, in.Body.Title, item.PublicID)
+				eventlog.TypeChecklistSet, title, item.PublicID)
 		}); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}

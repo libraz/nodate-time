@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -199,13 +200,28 @@ func (c *Client) Open(ctx context.Context, key string) (*Object, bool, error) {
 	}, true, nil
 }
 
-// Put stores exactly byteSize bytes read from r under key.
+// ErrObjectExists is returned by Put when the key already holds an object.
+var ErrObjectExists = errors.New("an object is already stored at this key")
+
+// Put stores exactly byteSize bytes read from r under key, and only if nothing
+// is stored there yet.
+//
+// Keys are written once. A key's bytes may already have been checked against a
+// digest and be shared by every referrer of that digest, and an upload URL
+// stays valid after its own upload is confirmed; replacing bytes in place would
+// let whoever holds such a URL change what all of them serve. Bytes that are
+// wrong are deleted by the confirm that found them, never overwritten.
 //
 // The size is passed rather than discovered so the object is streamed straight
 // through: given a length, minio-go sends it as one request without staging a
 // copy, which is what keeps a 100MB attachment from being 100MB of API memory.
 func (c *Client) Put(ctx context.Context, key string, r io.Reader, byteSize int64, contentType string) error {
-	_, err := c.mc.PutObject(ctx, c.bucket, key, r, byteSize, minio.PutObjectOptions{ContentType: contentType})
+	opts := minio.PutObjectOptions{ContentType: contentType}
+	opts.SetMatchETagExcept("*")
+	_, err := c.mc.PutObject(ctx, c.bucket, key, r, byteSize, opts)
+	if resp := minio.ToErrorResponse(err); err != nil && resp.StatusCode == 412 {
+		return ErrObjectExists
+	}
 	return err
 }
 

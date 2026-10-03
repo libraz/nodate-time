@@ -48,7 +48,11 @@ func (q *Queries) AttachAlbumPhotoThumbnailObject(ctx context.Context, arg Attac
 }
 
 const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
-UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
+UPDATE album_photos ap
+INNER JOIN calendars c ON c.id = ap.calendar_id
+SET ap.enabled = TRUE
+WHERE ap.id = ? AND ap.uploaded_by_user_id = ? AND ap.enabled = FALSE AND ap.retired_at IS NULL
+  AND c.enabled = TRUE
 `
 
 type ConfirmAlbumPhotoParams struct {
@@ -56,6 +60,13 @@ type ConfirmAlbumPhotoParams struct {
 	UploadedByUserID uint32 `json:"uploadedByUserId"`
 }
 
+// ConfirmAlbumPhoto enables a reservation only while its calendar is live, and
+// never a deleted photo: that is disabled too, and retired_at is what tells it
+// from an upload still waiting to be confirmed.
+// Deleting a calendar retires its live photos only, so a reservation confirmed
+// after that would come alive in a calendar nobody can reach and never be
+// swept. Reading the calendar in the same statement takes a shared lock on it,
+// which orders this against a delete running at the same time.
 func (q *Queries) ConfirmAlbumPhoto(ctx context.Context, arg ConfirmAlbumPhotoParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, confirmAlbumPhoto, arg.ID, arg.UploadedByUserID)
 }
@@ -111,7 +122,8 @@ func (q *Queries) DeleteAbandonedAlbumPhoto(ctx context.Context, id uint32) (sql
 }
 
 const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :exec
-DELETE FROM album_photos WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE
+DELETE FROM album_photos
+WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE AND retired_at IS NULL
 `
 
 type DeletePendingAlbumPhotoParams struct {
@@ -128,7 +140,7 @@ func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePending
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
-SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos WHERE public_id = ?
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos WHERE public_id = ?
 `
 
 func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) (AlbumPhoto, error) {
@@ -151,6 +163,7 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
+		&i.RetiredAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
 		&i.StorageObjectID,
@@ -223,7 +236,7 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 }
 
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
@@ -236,7 +249,7 @@ INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE
   AND (
@@ -271,6 +284,7 @@ type ListAlbumPhotosAfterRow struct {
 	SortWeight               int32          `json:"sortWeight"`
 	Notes                    sql.NullString `json:"notes"`
 	Enabled                  bool           `json:"enabled"`
+	RetiredAt                sql.NullTime   `json:"retiredAt"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
 	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
@@ -316,6 +330,7 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.SortWeight,
 			&i.Notes,
 			&i.Enabled,
+			&i.RetiredAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.StorageObjectID,
@@ -342,7 +357,7 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 }
 
 const listAlbumPhotosFirstPage = `-- name: ListAlbumPhotosFirstPage :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
@@ -355,7 +370,7 @@ INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?
@@ -383,6 +398,7 @@ type ListAlbumPhotosFirstPageRow struct {
 	SortWeight               int32          `json:"sortWeight"`
 	Notes                    sql.NullString `json:"notes"`
 	Enabled                  bool           `json:"enabled"`
+	RetiredAt                sql.NullTime   `json:"retiredAt"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
 	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
@@ -409,6 +425,9 @@ type ListAlbumPhotosFirstPageRow struct {
 // same reason: it is the key the tiles are actually drawn from, so resolving it
 // per row would put the page's whole saving back. It is NULL when the photo has
 // no thumbnail, which is normal -- the reader falls back to the picture itself.
+//
+// event_public_id names only a live event, the same rule the single-photo
+// responses follow: deleting an event leaves calendar_event_id in place.
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAlbumPhotosFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -435,6 +454,7 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.SortWeight,
 			&i.Notes,
 			&i.Enabled,
+			&i.RetiredAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
 			&i.StorageObjectID,
@@ -516,7 +536,7 @@ func (q *Queries) ListAlbumPhotosWithoutStorageObject(ctx context.Context, arg L
 }
 
 const softDeleteAlbumPhoto = `-- name: SoftDeleteAlbumPhoto :exec
-UPDATE album_photos SET enabled = FALSE WHERE id = ?
+UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND enabled = TRUE
 `
 
 func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
@@ -525,7 +545,8 @@ func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
 }
 
 const softDeleteAlbumPhotosByCalendar = `-- name: SoftDeleteAlbumPhotosByCalendar :exec
-UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE
+UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
+WHERE calendar_id = ? AND enabled = TRUE
 `
 
 func (q *Queries) SoftDeleteAlbumPhotosByCalendar(ctx context.Context, calendarID uint32) error {

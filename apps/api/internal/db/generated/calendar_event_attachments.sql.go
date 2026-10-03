@@ -12,8 +12,12 @@ import (
 )
 
 const confirmEventAttachment = `-- name: ConfirmEventAttachment :execresult
-UPDATE calendar_event_attachments SET enabled = TRUE
-WHERE id = ? AND uploader_id = ? AND enabled = FALSE
+UPDATE calendar_event_attachments a
+INNER JOIN calendar_events e ON e.id = a.event_id
+INNER JOIN calendars c ON c.id = e.calendar_id
+SET a.enabled = TRUE
+WHERE a.id = ? AND a.uploader_id = ? AND a.enabled = FALSE AND a.retired_at IS NULL
+  AND e.enabled = TRUE AND c.enabled = TRUE
 `
 
 type ConfirmEventAttachmentParams struct {
@@ -21,6 +25,12 @@ type ConfirmEventAttachmentParams struct {
 	UploaderID uint32 `json:"uploaderId"`
 }
 
+// ConfirmEventAttachment enables a reservation only while its event and
+// calendar are live. The deletes of both retire live rows only, so a
+// reservation confirmed after its parent went would otherwise come alive
+// under it, holding a reference nothing will ever release. Reading the parents
+// in the same statement takes a shared lock on them, which orders this against
+// a delete running at the same time.
 func (q *Queries) ConfirmEventAttachment(ctx context.Context, arg ConfirmEventAttachmentParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, confirmEventAttachment, arg.ID, arg.UploaderID)
 }
@@ -54,12 +64,14 @@ func (q *Queries) CreateEventAttachment(ctx context.Context, arg CreateEventAtta
 }
 
 const deleteAbandonedAttachment = `-- name: DeleteAbandonedAttachment :exec
-DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE
+DELETE FROM calendar_event_attachments
+WHERE id = ? AND enabled = FALSE AND retired_at IS NULL
 `
 
 // DeleteAbandonedAttachment removes a reservation whose upload never
 // landed. It re-checks enabled = FALSE so a row confirmed between the
-// sweep listing it and this delete is left alone.
+// sweep listing it and this delete is left alone, and retired_at IS NULL so a
+// deleted attachment is kept for its own, longer retention.
 func (q *Queries) DeleteAbandonedAttachment(ctx context.Context, id uint32) error {
 	_, err := q.db.ExecContext(ctx, deleteAbandonedAttachment, id)
 	return err
@@ -81,7 +93,8 @@ func (q *Queries) DeletePendingAttachment(ctx context.Context, arg DeletePending
 }
 
 const deleteRetiredAttachment = `-- name: DeleteRetiredAttachment :exec
-DELETE FROM calendar_event_attachments WHERE id = ? AND enabled = FALSE
+DELETE FROM calendar_event_attachments
+WHERE id = ? AND enabled = FALSE AND retired_at IS NOT NULL
 `
 
 func (q *Queries) DeleteRetiredAttachment(ctx context.Context, id uint32) error {
@@ -90,7 +103,7 @@ func (q *Queries) DeleteRetiredAttachment(ctx context.Context, id uint32) error 
 }
 
 const getAttachmentByPublicID = `-- name: GetAttachmentByPublicID :one
-SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size
+SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, a.retired_at, so.storage_key, so.content_type, so.byte_size
 FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.public_id = ? AND a.enabled = TRUE
@@ -109,6 +122,7 @@ type GetAttachmentByPublicIDRow struct {
 	Enabled         bool           `json:"enabled"`
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
+	RetiredAt       sql.NullTime   `json:"retiredAt"`
 	StorageKey      string         `json:"storageKey"`
 	ContentType     string         `json:"contentType"`
 	ByteSize        uint64         `json:"byteSize"`
@@ -130,6 +144,7 @@ func (q *Queries) GetAttachmentByPublicID(ctx context.Context, publicID []byte) 
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.RetiredAt,
 		&i.StorageKey,
 		&i.ContentType,
 		&i.ByteSize,
@@ -138,10 +153,10 @@ func (q *Queries) GetAttachmentByPublicID(ctx context.Context, publicID []byte) 
 }
 
 const getPendingAttachmentByPublicID = `-- name: GetPendingAttachmentByPublicID :one
-SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size, so.sha256
+SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, a.retired_at, so.storage_key, so.content_type, so.byte_size, so.sha256
 FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
-WHERE a.public_id = ? AND a.enabled = FALSE
+WHERE a.public_id = ? AND a.enabled = FALSE AND a.retired_at IS NULL
 `
 
 type GetPendingAttachmentByPublicIDRow struct {
@@ -157,6 +172,7 @@ type GetPendingAttachmentByPublicIDRow struct {
 	Enabled         bool           `json:"enabled"`
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
+	RetiredAt       sql.NullTime   `json:"retiredAt"`
 	StorageKey      string         `json:"storageKey"`
 	ContentType     string         `json:"contentType"`
 	ByteSize        uint64         `json:"byteSize"`
@@ -166,7 +182,9 @@ type GetPendingAttachmentByPublicIDRow struct {
 // GetPendingAttachmentByPublicID finds a reservation whose upload has not
 // been confirmed. It is a separate query because the enabled = TRUE filter
 // on the one above is what keeps an unconfirmed row out of every read path
-// -- and confirming is the one operation that has to see it.
+// -- and confirming is the one operation that has to see it. A deleted
+// attachment is disabled too, and retired_at is what keeps it from reading
+// as a reservation and being confirmed back.
 func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID []byte) (GetPendingAttachmentByPublicIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getPendingAttachmentByPublicID, publicID)
 	var i GetPendingAttachmentByPublicIDRow
@@ -183,6 +201,7 @@ func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID [
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.RetiredAt,
 		&i.StorageKey,
 		&i.ContentType,
 		&i.ByteSize,
@@ -194,7 +213,7 @@ func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID [
 const listAbandonedAttachments = `-- name: ListAbandonedAttachments :many
 SELECT a.id, a.storage_object_id
 FROM calendar_event_attachments a
-WHERE a.enabled = FALSE AND a.created_at < ? AND a.id > ?
+WHERE a.enabled = FALSE AND a.retired_at IS NULL AND a.created_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?
 `
@@ -242,6 +261,7 @@ SELECT a.storage_object_id
 FROM calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
 WHERE e.calendar_id = ? AND a.enabled = TRUE
+FOR UPDATE
 `
 
 func (q *Queries) ListAttachmentObjectIDsByCalendar(ctx context.Context, calendarID uint32) ([]uint32, error) {
@@ -270,6 +290,7 @@ func (q *Queries) ListAttachmentObjectIDsByCalendar(ctx context.Context, calenda
 const listAttachmentObjectIDsByEvent = `-- name: ListAttachmentObjectIDsByEvent :many
 SELECT storage_object_id FROM calendar_event_attachments
 WHERE event_id = ? AND enabled = TRUE
+FOR UPDATE
 `
 
 // Only a confirmed row holds a reference: an unconfirmed reservation never
@@ -277,6 +298,11 @@ WHERE event_id = ? AND enabled = TRUE
 // either would decrement a count nobody took, and because objects are
 // content-addressed and shared, that drives a blob another calendar is still
 // using down to zero and into the sweep.
+//
+// FOR UPDATE is what makes the listing the set of rows this transaction
+// retires. A concurrent delete of the same rows waits here, then reads them
+// as already retired, so each row is released once; a plain read would let
+// both list them and both release.
 func (q *Queries) ListAttachmentObjectIDsByEvent(ctx context.Context, eventID sql.NullInt32) ([]uint32, error) {
 	rows, err := q.db.QueryContext(ctx, listAttachmentObjectIDsByEvent, eventID)
 	if err != nil {
@@ -302,7 +328,7 @@ func (q *Queries) ListAttachmentObjectIDsByEvent(ctx context.Context, eventID sq
 
 const listEventAttachments = `-- name: ListEventAttachments :many
 
-SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, so.storage_key, so.content_type, so.byte_size
+SELECT a.id, a.public_id, a.workspace_id, a.event_id, a.uploader_id, a.storage_object_id, a.filename, a.sort_weight, a.notes, a.enabled, a.updated_at, a.created_at, a.retired_at, so.storage_key, so.content_type, so.byte_size
 FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.event_id = ? AND a.enabled = TRUE
@@ -322,6 +348,7 @@ type ListEventAttachmentsRow struct {
 	Enabled         bool           `json:"enabled"`
 	UpdatedAt       sql.NullTime   `json:"updatedAt"`
 	CreatedAt       time.Time      `json:"createdAt"`
+	RetiredAt       sql.NullTime   `json:"retiredAt"`
 	StorageKey      string         `json:"storageKey"`
 	ContentType     string         `json:"contentType"`
 	ByteSize        uint64         `json:"byteSize"`
@@ -351,6 +378,7 @@ func (q *Queries) ListEventAttachments(ctx context.Context, eventID sql.NullInt3
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.RetiredAt,
 			&i.StorageKey,
 			&i.ContentType,
 			&i.ByteSize,
@@ -371,7 +399,7 @@ func (q *Queries) ListEventAttachments(ctx context.Context, eventID sql.NullInt3
 const listRetiredAttachments = `-- name: ListRetiredAttachments :many
 SELECT a.id
 FROM calendar_event_attachments a
-WHERE a.enabled = FALSE AND a.updated_at < ? AND a.id > ?
+WHERE a.enabled = FALSE AND a.retired_at IS NOT NULL AND a.updated_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?
 `
@@ -412,19 +440,22 @@ func (q *Queries) ListRetiredAttachments(ctx context.Context, arg ListRetiredAtt
 	return items, nil
 }
 
-const softDeleteAttachment = `-- name: SoftDeleteAttachment :exec
-UPDATE calendar_event_attachments SET enabled = FALSE WHERE id = ?
+const softDeleteAttachment = `-- name: SoftDeleteAttachment :execresult
+UPDATE calendar_event_attachments SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
+WHERE id = ? AND enabled = TRUE
 `
 
-func (q *Queries) SoftDeleteAttachment(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteAttachment, id)
-	return err
+// SoftDeleteAttachment retires one live row. The enabled = TRUE guard makes
+// the affected-row count say whether this call is the one that retired it,
+// which is what decides whether it releases the reference.
+func (q *Queries) SoftDeleteAttachment(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteAttachment, id)
 }
 
 const softDeleteAttachmentsByCalendar = `-- name: SoftDeleteAttachmentsByCalendar :exec
 UPDATE calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
-SET a.enabled = FALSE
+SET a.enabled = FALSE, a.retired_at = CURRENT_TIMESTAMP(3)
 WHERE e.calendar_id = ? AND a.enabled = TRUE
 `
 
@@ -434,7 +465,7 @@ func (q *Queries) SoftDeleteAttachmentsByCalendar(ctx context.Context, calendarI
 }
 
 const softDeleteAttachmentsByEvent = `-- name: SoftDeleteAttachmentsByEvent :exec
-UPDATE calendar_event_attachments SET enabled = FALSE
+UPDATE calendar_event_attachments SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
 WHERE event_id = ? AND enabled = TRUE
 `
 
