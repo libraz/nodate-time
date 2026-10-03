@@ -456,6 +456,28 @@ describe('ExportSection', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+  /** The grid reads days in the app's zone; an export read in another covers different hours. */
+  it('exports in the zone the app shows the calendar in', async () => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:export'),
+      revokeObjectURL: vi.fn(),
+    });
+    uiState.timezone = 'America/New_York';
+    apiGetBlob.mockResolvedValue({ blob: new Blob(['a,b']), filename: 'Family.csv' });
+
+    render(<ExportSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'settings.exportCsv' }));
+
+    await waitFor(() =>
+      expect(apiGetBlob).toHaveBeenCalledWith(expect.stringContaining('tz=America%2FNew_York')),
+    );
+
+    uiState.timezone = 'Asia/Tokyo';
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 });
 
 /**

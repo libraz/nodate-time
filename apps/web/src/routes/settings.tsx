@@ -1134,6 +1134,7 @@ export function ExportSection() {
   const calendars = useCalendarStore((s) => s.calendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const visibleRange = useCalendarStore((s) => s.visibleRange);
+  const timezone = useUiStore((s) => s.timezone);
   const [selectedId, setSelectedId] = useState<string>(calendars[0]?.id ?? '');
   const [icsText, setIcsText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -1150,7 +1151,8 @@ export function ExportSection() {
     setExporting(format);
     try {
       const { blob, filename } = await api.getBlob(
-        `/calendars/${selectedId}/export?format=${format}`,
+        // The same zone the grid reads days in, so the export's window and times match it.
+        `/calendars/${selectedId}/export?format=${format}&tz=${encodeURIComponent(timezone)}`,
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
