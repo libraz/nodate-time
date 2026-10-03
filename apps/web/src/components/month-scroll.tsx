@@ -1,25 +1,13 @@
 import { DateTime } from 'luxon';
-import {
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { type DragLanding, MonthWeekRow } from '@/components/month-week-row';
-import { formatMonthYear, fromISOInZone, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
-import { buildMovedEvent } from '@/lib/event-move';
-import { canEditEvent, roleOnCalendar } from '@/lib/permissions';
-import { useEventDrag } from '@/lib/use-event-drag';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { MonthWeekRow } from '@/components/month-week-row';
+import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
+import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
-import { bucketEventsByWeek, eventEndDay, NO_EVENTS, weekKeysInRange } from '@/lib/week-layout';
-import { useAuthStore } from '@/stores/auth-store';
+import { bucketEventsByWeek, NO_EVENTS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { CalendarEvent } from '@/types/calendar';
 
 /**
  * How many months of weeks stay mounted either side of the anchor, and how far
@@ -99,8 +87,6 @@ export function MonthScroll() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
-  const calendars = useCalendarStore((s) => s.calendars);
-  const me = useAuthStore((s) => s.user);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -171,65 +157,8 @@ export function MonthScroll() {
     [setSelectedDate, openDayDetail, openEventModal],
   );
 
-  const canMove = useCallback(
-    (evt: CalendarEvent) => canEditEvent(evt, roleOnCalendar(calendars, evt.calendarId), me?.id),
-    [calendars, me],
-  );
-
-  // Multi-day bars live in an overlay outside the day cells, so the topmost
-  // element under the cursor may not be inside a [data-day] cell. Walk every
-  // element at the point and use the first one that resolves to a date cell.
-  const resolveDayKey = useCallback((x: number, y: number): string | null => {
-    for (const el of document.elementsFromPoint(x, y)) {
-      const day = el.closest('[data-day]')?.getAttribute('data-day');
-      if (day) return day;
-    }
-    return null;
-  }, []);
-
-  // Month drag preserves time of day: shift the start by the whole-day delta
-  // between the grabbed cell and the drop cell.
-  const handleMoveDrop = useCallback(
-    (evt: CalendarEvent, x: number, y: number, ctx: { originKey: string | null }) => {
-      const targetKey = resolveDayKey(x, y);
-      if (!targetKey || !ctx.originKey) return;
-      const target = DateTime.fromFormat(targetKey, 'yyyy-MM-dd', { zone: timezone });
-      const origin = DateTime.fromFormat(ctx.originKey, 'yyyy-MM-dd', { zone: timezone });
-      const deltaDays = Math.round(target.diff(origin, 'days').days);
-      if (deltaDays === 0) return;
-      const newStart = fromISOInZone(evt.startAt, timezone).plus({ days: deltaDays });
-      requestUpdate(evt, buildMovedEvent(evt, newStart));
-    },
-    [resolveDayKey, timezone, requestUpdate],
-  );
-
-  const {
-    drag,
-    start: startDrag,
-    consumeClick,
-  } = useEventDrag({ onDrop: handleMoveDrop, resolveKey: resolveDayKey });
-
-  // Where the dragged event would land after dropping. Drives both the span
-  // highlight and the grid-aligned ghost bar drawn per week.
-  const dragLanding = useMemo<DragLanding | null>(() => {
-    if (!drag?.hoverKey || !drag.originKey) return null;
-    const startDay = fromISOInZone(drag.event.startAt, timezone).startOf('day');
-    const endDay = eventEndDay(drag.event, timezone);
-    const hover = DateTime.fromFormat(drag.hoverKey, 'yyyy-MM-dd', { zone: timezone });
-    const origin = DateTime.fromFormat(drag.originKey, 'yyyy-MM-dd', { zone: timezone });
-    const delta = Math.round(hover.diff(origin, 'days').days);
-    const span = Math.max(1, Math.round(endDay.diff(startDay, 'days').days) + 1);
-    const start = startDay.plus({ days: delta });
-    const end = start.plus({ days: span - 1 });
-    return { event: drag.event, start, end };
-  }, [drag, timezone]);
-
-  // Only the rows the ghost crosses need it; every other row keeps the same
-  // (null) prop and stays out of the re-render a pointer sample causes.
-  const landingWeeks = useMemo(
-    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end) : null),
-    [dragLanding],
-  );
+  const { drag, dragLanding, landingWeeks, canMove, consumeClick, handleEventPointerDown } =
+    useMonthDrag({ timezone, requestUpdate });
 
   // Centralize the drag-suppressed click so the week row stays presentational.
   const handleEventClick = useCallback(
@@ -238,13 +167,6 @@ export function MonthScroll() {
       openEventModal(eventId);
     },
     [consumeClick, openEventModal],
-  );
-
-  const handleEventPointerDown = useCallback(
-    (evt: CalendarEvent, e: ReactPointerEvent) => {
-      if (canMove(evt)) startDrag(evt, e);
-    },
-    [canMove, startDrag],
   );
 
   const scrollToWeek = useCallback((weekKey: string, smooth: boolean) => {

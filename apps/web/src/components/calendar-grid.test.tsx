@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -233,5 +233,102 @@ describe('CalendarGrid multi-day bars past the visible tracks', () => {
     for (const more of screen.getAllByRole('button', { name: 'calendar.moreEvents' })) {
       expect(more.textContent).toMatch(/^\+[1-9]\d*$/);
     }
+  });
+});
+
+/** Resolves points to day cells by x: the key at index x / 100 of `keys`. */
+function stubCellsAtX(keys: string[]) {
+  const original = document.elementsFromPoint;
+  document.elementsFromPoint = (x: number) => {
+    const cell = document.querySelector(`[data-day="${keys[Math.floor(x / 100)]}"]`);
+    return cell ? [cell] : [];
+  };
+  return () => {
+    document.elementsFromPoint = original;
+  };
+}
+
+function press(type: string, x: number, y = 10) {
+  return { pointerType: type, button: 0, clientX: x, clientY: y };
+}
+
+// A one-day Tokyo all-day event read from New York, dragged four cells across
+// the 2026-03-08 DST change there.
+const birthday: CalendarEvent = {
+  ...event('bd', 1),
+  title: 'Birthday',
+  allDay: true,
+  startAt: '2026-03-06T00:00:00+09:00',
+  endAt: '2026-03-07T00:00:00+09:00',
+  timezone: 'Asia/Tokyo',
+};
+
+describe('CalendarGrid drag to move', () => {
+  let restore = () => {};
+  afterEach(() => {
+    restore();
+    vi.useRealTimers();
+    uiState.timezone = 'Asia/Tokyo';
+    uiState.currentMonth = DateTime.fromISO('2026-08-01', { zone: 'Asia/Tokyo' });
+  });
+
+  it('keeps an all-day event at midnight in its own zone across a DST change', async () => {
+    uiState.timezone = 'America/New_York';
+    uiState.currentMonth = DateTime.fromISO('2026-03-01', { zone: 'America/New_York' });
+    calendarState.events = [birthday];
+    await renderGrid();
+    restore = stubCellsAtX(['2026-03-06', '2026-03-10']);
+
+    const chip = screen.getByRole('button', { name: /Birthday/ });
+    fireEvent.pointerDown(chip, press('mouse', 50));
+    fireEvent.pointerMove(window, press('mouse', 150));
+    fireEvent.pointerUp(window, press('mouse', 150));
+
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as {
+      startAt: string;
+      endAt: string;
+    };
+    // Days added on the viewer's clock land at 23:00 the day before in Tokyo.
+    expect(payload.startAt).toBe('2026-03-10T00:00:00.000+09:00');
+    expect(payload.endAt).toBe('2026-03-11T00:00:00.000+09:00');
+  });
+
+  // The touchend that ends a long-press drag carries the drag's whole travel,
+  // and the grid read it as a swipe.
+  it('does not page the month at the end of a touch drag', async () => {
+    calendarState.events = [event('t', 1)];
+    await renderGrid();
+    restore = stubCellsAtX(['2026-08-05', '2026-08-06', '2026-08-07']);
+    vi.useFakeTimers();
+
+    const chip = screen.getByRole('button', { name: /Event t/ });
+    fireEvent.touchStart(chip, { touches: [{ clientX: 50, clientY: 10 }] });
+    fireEvent.pointerDown(chip, press('touch', 50));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fireEvent.pointerMove(window, press('touch', 250));
+    fireEvent.pointerUp(window, press('touch', 250));
+    fireEvent.touchEnd(chip, { changedTouches: [{ clientX: 250, clientY: 10 }] });
+
+    expect(calendarState.updateEvent).toHaveBeenCalledTimes(1);
+    expect(uiState.navigateMonth).not.toHaveBeenCalled();
+  });
+
+  it('still pages the month on a swipe after a drag', async () => {
+    calendarState.events = [event('t', 1)];
+    await renderGrid();
+    restore = stubCellsAtX(['2026-08-05', '2026-08-06', '2026-08-07']);
+
+    const chip = screen.getByRole('button', { name: /Event t/ });
+    fireEvent.pointerDown(chip, press('mouse', 50));
+    fireEvent.pointerMove(window, press('mouse', 150));
+    fireEvent.pointerUp(window, press('mouse', 150));
+
+    const grid = document.querySelector('.select-none') as HTMLElement;
+    fireEvent.touchStart(grid, { touches: [{ clientX: 250, clientY: 10 }] });
+    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 50, clientY: 10 }] });
+
+    expect(uiState.navigateMonth).toHaveBeenCalledWith(1);
   });
 });

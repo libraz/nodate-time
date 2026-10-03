@@ -1,15 +1,22 @@
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
-import { fromISOInZone } from '@/lib/date-utils';
-import { filterEventsForSearch } from '@/lib/search';
+import {
+  filterEventsForSearch,
+  searchedMonths,
+  searchResultDay,
+  searchResultLabel,
+} from '@/lib/search';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
+import type { CalendarEvent } from '@/types/calendar';
 
 export function SearchPanel() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
+  const calendarView = useUiStore((s) => s.calendarView);
+  const currentMonth = useUiStore((s) => s.currentMonth);
   const showSearch = useUiStore((s) => s.showSearch);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
@@ -29,12 +36,12 @@ export function SearchPanel() {
     [searchQuery, events, activeCalendarIds],
   );
 
-  const handleSelect = (eventId: string, startAt: string) => {
-    const dt = fromISOInZone(startAt, timezone);
-    setCurrentMonth(dt.startOf('month'));
-    setSelectedDate(dt);
+  const handleSelect = (evt: CalendarEvent) => {
+    const day = searchResultDay(evt, timezone);
+    setCurrentMonth(day.startOf('month'));
+    setSelectedDate(day);
     toggleSearch();
-    openEventModal(eventId);
+    openEventModal(evt.id);
   };
 
   if (!showSearch) return null;
@@ -59,22 +66,18 @@ export function SearchPanel() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]">
-          {t('search.noResults')}
+          {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
         </div>
       ) : (
         <div className="py-1">
           {filtered.map((evt) => {
-            const dt = fromISOInZone(evt.startAt, timezone);
-            const endDt = fromISOInZone(evt.endAt, timezone);
-            const dateLabel = evt.allDay
-              ? dt.toFormat('yyyy/MM/dd (EEE)', { locale })
-              : `${dt.toFormat('yyyy/MM/dd (EEE) HH:mm', { locale })} - ${endDt.toFormat('HH:mm')}`;
+            const dateLabel = searchResultLabel(evt, timezone, locale);
 
             return (
               <button
                 key={evt.id}
                 type="button"
-                onClick={() => handleSelect(evt.id, evt.startAt)}
+                onClick={() => handleSelect(evt)}
                 className="mx-2 flex w-[calc(100%-16px)] items-start gap-3 px-5 py-3.5 text-left hover:bg-[var(--color-hover)]"
                 style={{ borderRadius: 'var(--radius-sm)' }}
               >

@@ -221,3 +221,53 @@ describe('App month fetching', () => {
     expect(inFlight.aborted).toBe(true);
   });
 });
+
+// CSS hides one layout, but a hidden calendar still re-renders on every change
+// and measures itself as zero-sized: the phone scroller consumed its one
+// scroll-to-today while undisplayed and stayed months in the past.
+describe('App layout mounting', () => {
+  function stubViewport(desktop: boolean) {
+    let wide = desktop;
+    const listeners = new Set<(e: MediaQueryListEvent) => void>();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        get matches() {
+          return query === '(min-width: 640px)' ? wide : false;
+        },
+        media: query,
+        addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
+        removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
+          listeners.delete(cb),
+      })),
+    );
+    return (value: boolean) => {
+      wide = value;
+      for (const cb of listeners) cb({ matches: value } as MediaQueryListEvent);
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('mounts only the desktop month grid on a wide viewport', () => {
+    stubViewport(true);
+    render(<App />);
+
+    expect(screen.getByTestId('calendar-grid')).toBeInTheDocument();
+    expect(screen.queryByTestId('month-scroll')).toBeNull();
+  });
+
+  it('mounts the phone scroller, freshly, once the viewport narrows', () => {
+    const resize = stubViewport(true);
+    render(<App />);
+
+    act(() => {
+      resize(false);
+    });
+
+    expect(screen.getByTestId('month-scroll')).toBeInTheDocument();
+    expect(screen.queryByTestId('calendar-grid')).toBeNull();
+  });
+});

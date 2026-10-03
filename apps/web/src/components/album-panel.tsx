@@ -8,6 +8,7 @@ import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize'
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -290,8 +291,7 @@ export function AlbumPanel() {
     return events
       .filter(
         (evt) =>
-          evt.calendarId === activeCalendarId &&
-          fromISOInZone(evt.startAt, timezone).toISODate() === day,
+          evt.calendarId === activeCalendarId && eventStartDay(evt, timezone).toISODate() === day,
       )
       .sort((a, b) => a.startAt.localeCompare(b.startAt));
   }, [lightbox, events, activeCalendarId, timezone]);

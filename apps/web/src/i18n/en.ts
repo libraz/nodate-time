@@ -250,7 +250,7 @@ export const en: Record<TranslationKey, string> = {
 
   'search.searchEvents': 'Search events',
   'search.placeholder': 'Search events...',
-  'search.noResults': 'No results found',
+  'search.noResults': 'Nothing matches in the loaded events, {from} to {to}',
 
   // Password reset
   'auth.forgotPassword': 'Forgot your password?',
