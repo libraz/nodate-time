@@ -5,7 +5,7 @@
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
-![Bun](https://img.shields.io/badge/Bun-1.3-000000?logo=bun&logoColor=white)
+![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)
 
 共有カレンダーアプリ。家族・チーム・タレント事務所など、複数人で 1 つのカレンダーを運用するためのグループカレンダー。Go 製の REST API と React SPA のモノレポ構成。
 
@@ -72,7 +72,9 @@ sql/
     conformance/        契約適合チェック
   time/                本アプリ固有のテーブル
     tables/             テーブル定義
-    alters/             差分適用
+    alters/             このアプリが core のテーブルに加える変更
+    views/              ビュー定義
+  upgrades/            既存の DB を今のスキーマへ上げる SQL
   queries/             sqlc クエリ定義
   schema.sql           build-schema.sh で生成される結合スキーマ
   sqlc.yaml            sqlc 設定
@@ -84,7 +86,7 @@ compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + We
 
 ### 必要なもの
 
-- [Bun](https://bun.sh)
+- [Bun](https://bun.sh) 1.4 以上（それより古い版は lockfile の形式を読めない）
 - Go 1.26+
 - Docker（MySQL / MinIO 用）
 - [sqlc](https://sqlc.dev)（コード生成する場合）
@@ -249,9 +251,28 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
   -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
 ```
 
-スキーマは MySQL のボリュームを最初に作ったときに適用される。`sql/schema.sql` は全テーブルを DROP してから作り直すので、以降のスキーマ変更はこのファイルを流し直すのではなく、稼働中の DB に手で当てる。
+スキーマは MySQL のボリュームを最初に作ったときに適用される。`sql/schema.sql` は全テーブルを DROP してから作り直すので、データの入った DB には流し直さない。スキーマの変更を既存の DB に当てる方法は「[既存環境の更新](#既存環境の更新)」を参照。
 
 永続データは `mysql_data` と `minio_data` の 2 つのボリュームに入っている。バックアップは必ず両方を揃えて取る——添付ファイルは片方の行がもう片方のオブジェクトを指す形で成立している。
+
+### 既存環境の更新
+
+先に上記のとおり 2 つのボリュームをバックアップする。そのうえで、今のリリースから移行先までの各リリースについて `sql/upgrades/from-<そのリリース>.sql` を古い順に当て、それから再ビルドする。
+
+```sh
+docker compose -f compose.prod.yml exec -T mysql \
+  mysql -u root -p"$TC_DB_ROOT_PASSWORD" nodate_time < sql/upgrades/from-v0.1.0.sql
+docker compose -f compose.prod.yml up -d --build
+```
+
+更新用の SQL はデータを残し、稼働中の旧版もその結果の上でそのまま動く。だから新しい API を起動する前に当てる。すでに当てたファイルをもう一度流しても、最初の文で止まって何も変わらない。
+
+v0.1.0 から上げる場合は、配備の形も変わっている。
+
+- web サービスが TLS を終端し、`127.0.0.1:8081` の代わりに 80 と 443 を公開する。起動前に上記の手順で証明書を取得するか、ホスト側のプロキシを使い続けるなら「TLS を別の場所で終端したい場合」の段落に従う。
+- 証明書を発行するホスト名 `TC_PUBLIC_HOST` が必須になった。
+- Compose は `TC_SMTP_HOST` を必須にしなくなった。ただし API は、`TC_ALLOW_CONSOLE_MAILER=true` が無い限り、これが無いと起動しない。
+- `TC_TRUSTED_PROXIES` の既定値が、Docker が compose のネットワークに割り当てる範囲 `172.16.0.0/12` になった。
 
 ### オブジェクトストレージ
 

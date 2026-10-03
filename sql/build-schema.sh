@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # build-schema.sh
 # Concatenate the layered schema into a single stream.
-# Pre-release: no migrations. Intended usage is drop & recreate.
+# Creates from nothing: every table is dropped first. An existing database is
+# brought forward by sql/upgrades/ instead; see sql/README.md.
 #
 #   bash sql/build-schema.sh | mysql -h 127.0.0.1 -u root -p nodate_time
 #   bash sql/build-schema.sh core | mysql ...   # core layer only

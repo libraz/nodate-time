@@ -58,6 +58,26 @@ make sqlc        # schema + queries -> apps/api/internal/db/generated/
 `make verify-codegen` checks the pairing without writing anything, and
 is what the pre-commit hook and CI both run.
 
+## A schema change also ships its upgrade
+
+`schema.sql` creates a database from nothing, dropping every table first, so
+it is never run against one that holds data. A deployment created by an
+earlier release reaches the current schema through `upgrades/`:
+`from-<release>.sql` takes a database created by that release to the next one,
+keeping its data. The README's Upgrading section is the operator's side of it.
+
+So a change under `core/` or `time/` that has not been released yet also goes
+into the upgrade file from the latest tag, written as the statements an
+existing database needs rather than the definition a new one gets. When a
+change alters what an existing row means, the file says how to tell the old
+rows apart and sets them accordingly, the way `from-v0.1.0.sql` marks the rows
+v0.1.0 had already deleted.
+
+To check one, apply the previous release's `schema.sql` and then the upgrade
+to one scratch database, the current `schema.sql` to another, and compare
+`information_schema` between them: columns, indexes, foreign keys, views and
+triggers should match exactly.
+
 ## Queries
 
 `queries/*.sql` is the input to sqlc alongside the composed schema. The
