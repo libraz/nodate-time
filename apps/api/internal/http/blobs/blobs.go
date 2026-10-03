@@ -138,6 +138,12 @@ func write(deps Deps) http.HandlerFunc {
 		// if the header carried extra parameters.
 		body := http.MaxBytesReader(w, r.Body, grant.ByteSize)
 		if err := deps.Storage.Put(r.Context(), key, body, grant.ByteSize, grant.ContentType); err != nil {
+			// The signature says who may write a key, not that they may replace
+			// what is there: a URL outlives the confirm of its own upload.
+			if errors.Is(err, storage.ErrObjectExists) {
+				http.Error(w, "an object is already stored at this key", http.StatusConflict)
+				return
+			}
 			slog.ErrorContext(r.Context(), "failed to store blob", "key", key, "error", err)
 			http.Error(w, "object storage is unavailable", http.StatusBadGateway)
 			return

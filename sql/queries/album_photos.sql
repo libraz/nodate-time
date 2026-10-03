@@ -7,8 +7,19 @@ INSERT INTO album_photos (
   width, height, storage_key, taken_at, enabled
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
 
+-- ConfirmAlbumPhoto enables a reservation only while its calendar is live, and
+-- never a deleted photo: that is disabled too, and retired_at is what tells it
+-- from an upload still waiting to be confirmed.
+-- Deleting a calendar retires its live photos only, so a reservation confirmed
+-- after that would come alive in a calendar nobody can reach and never be
+-- swept. Reading the calendar in the same statement takes a shared lock on it,
+-- which orders this against a delete running at the same time.
 -- name: ConfirmAlbumPhoto :execresult
-UPDATE album_photos SET enabled = TRUE WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE;
+UPDATE album_photos ap
+INNER JOIN calendars c ON c.id = ap.calendar_id
+SET ap.enabled = TRUE
+WHERE ap.id = ? AND ap.uploaded_by_user_id = ? AND ap.enabled = FALSE AND ap.retired_at IS NULL
+  AND c.enabled = TRUE;
 
 -- name: GetAlbumPhotoByPublicID :one
 SELECT * FROM album_photos WHERE public_id = ?;
@@ -26,6 +37,9 @@ SELECT * FROM album_photos WHERE public_id = ?;
 -- same reason: it is the key the tiles are actually drawn from, so resolving it
 -- per row would put the page's whole saving back. It is NULL when the photo has
 -- no thumbnail, which is normal -- the reader falls back to the picture itself.
+--
+-- event_public_id names only a live event, the same rule the single-photo
+-- responses follow: deleting an event leaves calendar_event_id in place.
 -- name: ListAlbumPhotosFirstPage :many
 SELECT ap.*,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
@@ -40,7 +54,7 @@ INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?;
@@ -59,7 +73,7 @@ INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id
+LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE
   AND (
@@ -73,16 +87,18 @@ LIMIT ?;
 UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ?;
 
 -- name: SoftDeleteAlbumPhoto :exec
-UPDATE album_photos SET enabled = FALSE WHERE id = ?;
+UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND enabled = TRUE;
 
 -- name: DeletePendingAlbumPhoto :exec
 -- Removes an unconfirmed (enabled = FALSE) row whose uploaded object failed the
 -- Confirm-time size/type check, so it is not left as an orphan pointing at a
 -- deleted object.
-DELETE FROM album_photos WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE;
+DELETE FROM album_photos
+WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE AND retired_at IS NULL;
 
 -- name: SoftDeleteAlbumPhotosByCalendar :exec
-UPDATE album_photos SET enabled = FALSE WHERE calendar_id = ? AND enabled = TRUE;
+UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
+WHERE calendar_id = ? AND enabled = TRUE;
 
 -- ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
 -- covers both a reservation whose upload never landed and a photo the user

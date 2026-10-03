@@ -502,10 +502,9 @@ func validateThumbnailDeclaration(b PresignPhotoBody) error {
 
 // PresignUpload issues a presigned PUT URL for adding a photo to the album,
 // and a second one for its thumbnail when the request declares one.
-// The metadata row is created with the storage key in the same call; if the
-// client never PUTs the object, the row will simply have no underlying object
-// in MinIO and the photo will render as broken — a future janitor can clean
-// these up by checking StatObject.
+// The row is created disabled and stays out of every listing until
+// ConfirmPhoto finds the upload; a presign that is never followed by a PUT is
+// removed by the abandoned-upload sweep.
 func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*PresignPhotoOutput, error) {
 	return func(ctx context.Context, in *PresignPhotoInput) (*PresignPhotoOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -618,7 +617,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		if err != nil || p.CalendarID != cal.ID {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
-		if p.Enabled || p.UploadedByUserID != userID {
+		if p.Enabled || p.RetiredAt.Valid || p.UploadedByUserID != userID {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoNotFound)
 		}
 

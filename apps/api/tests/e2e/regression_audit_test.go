@@ -560,23 +560,26 @@ func TestAttachmentPresignedPutRejectsMismatchedContentLength(t *testing.T) {
 			"endAt":   "2026-05-12T10:00:00+09:00",
 		}, &evt)
 
-	body := []byte("%PDF-1.4 fake contract body")
+	body := uniqueAttachmentBody("length mismatch")
 	var pres struct {
 		AttachmentID string `json:"attachmentId"`
 		UploadURL    string `json:"uploadUrl"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
 		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1, "sha256": helpers.SHA256Hex(body)}, &pres)
+	require.NotEmpty(t, pres.UploadURL, "nothing is stored at this key yet")
 
 	status, _ := helpers.UploadToSignedURLStatus(t, pres.UploadURL, "application/pdf", body)
 	require.True(t, status >= 400, "expected the signed Content-Length mismatch to be rejected, got %d", status)
 }
 
-// TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt verifies the
-// Confirm-time defense-in-depth: an object at the presigned key that
-// disagrees with the declared size is rejected and removed rather than left
-// as an orphan, and the pending row itself is deleted (not just left disabled).
-func TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
+// TestAttachmentConfirmRecordsTheVerifiedSize verifies that the size a
+// reservation declared is not what a confirm is held to. The declaration on an
+// unverified object is whoever reserved the digest first, and holding every
+// later upload to it would let one wrong declaration lock a file out of the
+// workspace. The digest check decides; the object records the size of the
+// bytes that passed it.
+func TestAttachmentConfirmRecordsTheVerifiedSize(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
 	t.Parallel()
@@ -595,7 +598,7 @@ func TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
 			"endAt":   "2026-05-12T10:00:00+09:00",
 		}, &evt)
 
-	body := []byte("%PDF-1.4 fake contract body")
+	body := uniqueAttachmentBody("declared size is wrong")
 	var pres struct {
 		AttachmentID string `json:"attachmentId"`
 		UploadURL    string `json:"uploadUrl"`
@@ -603,35 +606,22 @@ func TestAttachmentConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
 		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": len(body) - 1, "sha256": helpers.SHA256Hex(body)}, &pres)
 
-	storageClient := getTestStorage()
-	require.NotNil(t, storageClient)
-	// Reconstruct the key PresignUpload built, bypassing the (now
-	// size-enforcing) presigned URL to place a mismatched object directly.
+	// The bytes the digest names, placed past the size-enforcing relay.
 	storageKey := helpers.AttachmentStorageKey(testWorkspacePublicID, helpers.SHA256Hex(body))
 	helpers.PutRawObject(t, getTestBucket(), storageKey, "application/pdf", body)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, http.StatusOK, status, "confirm: %s", string(raw))
 
-	// The blob is deliberately left alone. It is content-addressed, so the
-	// same bytes may already back a correctly confirmed attachment
-	// elsewhere in the workspace, and deleting it here would break that
-	// one. Nothing points at it from this reservation any more, so the
-	// unreferenced-object sweep is what collects it.
-	_, exists, err := storageClient.StatObject(testCtx(), storageKey)
-	require.NoError(t, err)
-	require.True(t, exists, "a shared blob must survive one reservation failing")
-
-	var objectRefs int
+	var byteSize, refs int
+	var uploaded bool
 	require.NoError(t, testDB.QueryRow(
-		"SELECT ref_count FROM storage_objects WHERE storage_key = ?", storageKey,
-	).Scan(&objectRefs))
-	require.Zero(t, objectRefs, "a failed confirm must not take a reference on the blob")
-
-	status, _ = helpers.DoJSONStatus(t, http.MethodPost,
-		calURL+"/events/"+evt.ID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusNotFound, status, "the pending row should have been deleted, not just disabled")
+		"SELECT byte_size, ref_count, uploaded_at IS NOT NULL FROM storage_objects WHERE storage_key = ?", storageKey,
+	).Scan(&byteSize, &refs, &uploaded))
+	require.Equal(t, len(body), byteSize, "the object records the size of the verified bytes")
+	require.True(t, uploaded, "and is marked verified")
+	require.Equal(t, 1, refs)
 }
 
 func TestViewerListMembersHidesOtherEmails(t *testing.T) {
@@ -733,39 +723,28 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 }
 
 // TestAttachmentDownloadIsTenantScoped verifies the cross-tenant attachment IDOR
-// is closed: a foreign attachment id cannot be downloaded through another
-// calendar/event path. Requires object storage.
+// is closed: a confirmed attachment is downloadable through its own event and
+// through no other path -- not another tenant's calendar, and not another
+// event of its own calendar. The positive control is what makes the 404s mean
+// something: an unconfirmed attachment is a 404 everywhere.
 func TestAttachmentDownloadIsTenantScoped(t *testing.T) {
 	bootstrap(t)
-	if testStorage == nil {
-		t.Skip("object storage not configured; skipping attachment IDOR test")
-	}
+	requireStorage(t)
 	t.Parallel()
 
 	victim := helpers.NewTenant(t, testServerURL)
 	attacker := helpers.NewTenant(t, testServerURL)
 
-	// Victim creates an event and an attachment on it.
 	victimCal := testServerURL + "/calendars/" + victim.CalendarID
-	var vEvt struct {
-		ID string `json:"id"`
+	vEvtID, attID := attachEventWithAttachment(t, victim, "Private", uniqueAttachmentBody("tenant scoped"))
+	downloadPath := func(calURL, eventID string) string {
+		return calURL + "/events/" + eventID + "/attachments/" + attID + "/download"
 	}
-	helpers.DoJSON(t, http.MethodPost, victimCal+"/events", victim.AccessToken,
-		map[string]any{
-			"title":   "Private",
-			"allDay":  false,
-			"startAt": "2026-05-12T09:00:00+09:00",
-			"endAt":   "2026-05-12T10:00:00+09:00",
-		}, &vEvt)
-	var att struct {
-		AttachmentID string `json:"attachmentId"`
-	}
-	helpers.DoJSON(t, http.MethodPost, victimCal+"/events/"+vEvt.ID+"/attachments/presign", victim.AccessToken,
-		map[string]any{"filename": "contract.pdf", "contentType": "application/pdf", "byteSize": 1024, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, &att)
-	require.NotEmpty(t, att.AttachmentID)
 
-	// Attacker creates their own event and tries to download the victim's
-	// attachment id through their own calendar/event path.
+	status, raw := helpers.DoJSONStatus(t, http.MethodGet, downloadPath(victimCal, vEvtID), victim.AccessToken, nil)
+	require.Equal(t, http.StatusOK, status, "the attachment must download through its own event: %s", string(raw))
+
+	// Another tenant, through an event of their own calendar.
 	attackerCal := testServerURL + "/calendars/" + attacker.CalendarID
 	var aEvt struct {
 		ID string `json:"id"`
@@ -777,8 +756,32 @@ func TestAttachmentDownloadIsTenantScoped(t *testing.T) {
 			"startAt": "2026-05-12T09:00:00+09:00",
 			"endAt":   "2026-05-12T10:00:00+09:00",
 		}, &aEvt)
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, downloadPath(attackerCal, aEvt.ID), attacker.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "cross-tenant attachment download must be rejected")
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodGet,
-		attackerCal+"/events/"+aEvt.ID+"/attachments/"+att.AttachmentID+"/download", attacker.AccessToken, nil)
-	require.Equal(t, 404, status, "cross-tenant attachment download must be rejected")
+	// The same calendar, through an event the attachment does not belong to.
+	var otherEvt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, victimCal+"/events", victim.AccessToken,
+		map[string]any{
+			"title":   "Sibling",
+			"allDay":  false,
+			"startAt": "2026-05-13T09:00:00+09:00",
+			"endAt":   "2026-05-13T10:00:00+09:00",
+		}, &otherEvt)
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, downloadPath(victimCal, otherEvt.ID), victim.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "an attachment must not download through another event")
+
+	// Deleting goes through the same scoping: not from another tenant's event,
+	// not from a sibling event, and the attachment is still there afterwards.
+	attachmentPath := func(calURL, eventID string) string {
+		return calURL + "/events/" + eventID + "/attachments/" + attID
+	}
+	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, attachmentPath(attackerCal, aEvt.ID), attacker.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "cross-tenant attachment delete must be rejected")
+	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, attachmentPath(victimCal, otherEvt.ID), victim.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "an attachment must not be deleted through another event")
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, downloadPath(victimCal, vEvtID), victim.AccessToken, nil)
+	require.Equal(t, http.StatusOK, status, "and it survives both attempts")
 }

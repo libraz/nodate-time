@@ -922,7 +922,9 @@ type AlbumPhoto struct {
 	// Admin notes
 	Notes sql.NullString `json:"notes"`
 	// Soft-delete flag
-	Enabled   bool         `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// When a confirmed photo was deleted. NULL on a live photo and on an upload that was never confirmed, which is what keeps a deleted photo from confirming back.
+	RetiredAt sql.NullTime `json:"retiredAt"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
 	// Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.
@@ -1125,6 +1127,8 @@ type CalendarEventAttachment struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+	// When a confirmed attachment was deleted. NULL on a live row and on a reservation that was never confirmed.
+	RetiredAt sql.NullTime `json:"retiredAt"`
 }
 
 // Calendar event attendees with RSVP and edit permission
@@ -1853,6 +1857,10 @@ type StorageObject struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+}
+
+type StorageObjectsUnreferenced struct {
+	ID uint32 `json:"id"`
 }
 
 // Global user accounts

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -330,16 +331,15 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			// are not deleted here -- dropping the reference is what lets the
 			// sweep collect the ones nothing else points at.
 			//
-			// The rows are retired in the same transaction so the release
-			// happens once: only live rows are counted, so deleting the
-			// calendar twice cannot drive a shared object's count below what
-			// other calendars still hold.
+			// The listing locks the live rows and they are retired in the same
+			// transaction, so the release happens once: a concurrent delete of
+			// the calendar waits on those locks and then finds them retired.
 			objectIDs, err := q.ListAttachmentObjectIDsByCalendar(ctx, cal.ID)
 			if err != nil {
 				return err
 			}
 			for _, objectID := range objectIDs {
-				if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
+				if err := blobref.Release(ctx, q, objectID); err != nil {
 					return err
 				}
 			}

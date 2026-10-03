@@ -287,8 +287,9 @@ func NewTestServerForMain(db *sql.DB) *TestServer {
 	signer := newTestSigner()
 	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
-		// We deliberately do not abort the process — when MinIO is not running
-		// but TC_TEST_MINIO is set, tests will still skip individually.
+		// We deliberately do not abort the process, so the tests that need no
+		// storage still run. Storage tests gate on TC_TEST_MINIO alone, so with
+		// it set and MinIO unreachable they run and fail rather than skip.
 		fmt.Fprintf(os.Stderr, "warn: test storage unavailable: %v\n", err)
 	}
 	deps := buildHandler(db, mc, sc, signer)

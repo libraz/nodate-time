@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -1237,18 +1238,17 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			// objects themselves are swept once nothing refers to them, so
 			// the only thing to do here is drop the references.
 			//
-			// Retiring the rows in the same transaction is what makes the
-			// release exactly once: the listing counts only live rows, so a
-			// second delete of the same event finds none and cannot decrement
-			// a shared, content-addressed object a live attachment elsewhere
-			// still depends on.
+			// The listing locks the live rows and they are retired in the same
+			// transaction, which is what makes the release exactly once: a
+			// concurrent delete of the same event, or of one attachment on it,
+			// waits on those locks and then finds the rows already retired.
 			eventRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
 			objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, eventRef)
 			if err != nil {
 				return err
 			}
 			for _, objectID := range objectIDs {
-				if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
+				if err := blobref.Release(ctx, q, objectID); err != nil {
 					return err
 				}
 			}

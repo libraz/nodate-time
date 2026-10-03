@@ -13,7 +13,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
@@ -102,50 +102,38 @@ func AttachThumbnail(ctx context.Context, q *generated.Queries, thumbnail Photo)
 	return referenceIfAttached(ctx, q, res, object.ID)
 }
 
-// referenceIfAttached increments the object's count only when this call is the
-// one that wrote the column.
+// referenceIfAttached takes a reference only when this call is the one that
+// wrote the column.
 //
 // The updates re-check the column IS NULL, so a confirm and a backfill pass
 // racing over one photo produce one attachment and one reference. Incrementing
 // without that check is how a blob acquires a count nothing will ever return.
 func referenceIfAttached(ctx context.Context, q *generated.Queries, res sql.Result, objectID uint32) error {
-	attached, err := res.RowsAffected()
-	if err != nil {
+	attached, err := blobref.ChangedOne(res)
+	if err != nil || !attached {
 		return err
 	}
-	if attached != 1 {
-		return nil
-	}
-	return q.IncrementStorageObjectRefs(ctx, objectID)
+	return blobref.Acquire(ctx, q, objectID)
 }
 
-// ensureObject finds or creates the storage object for a blob's bytes.
+// ensureObject finds or creates the storage object for a blob's bytes, which
+// the caller has already read back and digested.
+//
+// Content-addressed within the workspace, never the uploader: the user-scoped
+// foreign key is ON DELETE CASCADE, so an object owned by the person who
+// uploaded it would be deleted along with their account -- out from under a
+// photo the calendar still shows, before the RESTRICT on the photo's own
+// reference could refuse it.
+//
+// An attachment reservation for the same digest may already hold the row with
+// nothing verified behind it. blobref.Store takes that row over onto this
+// photo's bytes rather than pointing the photo at an upload nobody checked.
 func ensureObject(ctx context.Context, q *generated.Queries, photo Photo) (generated.StorageObject, error) {
-	objectPubID, err := uuid.NewV7()
-	if err != nil {
-		return generated.StorageObject{}, err
-	}
-	// Content-addressed within the workspace, never the uploader: the
-	// user-scoped foreign key is ON DELETE CASCADE, so an object owned by the
-	// person who uploaded it would be deleted along with their account -- out
-	// from under a photo the calendar still shows, before the RESTRICT on the
-	// photo's own reference could refuse it.
-	if _, err := q.CreateStorageObject(ctx, generated.CreateStorageObjectParams{
-		PublicID:    objectPubID[:],
-		WorkspaceID: nullInt32(photo.WorkspaceID),
-		Sha256:      photo.SHA256,
+	return blobref.Store(ctx, q, blobref.Blob{
+		WorkspaceID: photo.WorkspaceID,
+		SHA256:      photo.SHA256,
 		ByteSize:    photo.ByteSize,
 		ContentType: photo.ContentType,
 		StorageKey:  photo.StorageKey,
-	}); err != nil {
-		return generated.StorageObject{}, err
-	}
-	// Read the row back by digest rather than by key or by LastInsertId. On
-	// the dedup path the upsert inserted nothing, and the row that was already
-	// there carries the key of whichever photo stored these bytes first --
-	// looking it up by this photo's own key would find nothing at all.
-	return q.GetStorageObjectByWorkspaceDigest(ctx, generated.GetStorageObjectByWorkspaceDigestParams{
-		WorkspaceID: nullInt32(photo.WorkspaceID),
-		Sha256:      photo.SHA256,
 	})
 }

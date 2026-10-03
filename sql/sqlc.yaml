@@ -12,6 +12,8 @@ sql:
       # Product-layer widenings of core columns. Listed last so the ALTERs
       # apply to the tables above, matching the order build-schema.sh emits.
       - "time/alters/"
+      # Views read the tables in their final shape, so they come after.
+      - "time/views/"
     gen:
       go:
         package: "generated"

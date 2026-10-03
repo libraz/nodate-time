@@ -32,7 +32,7 @@ type CreateMemoInput struct {
 	Body       struct {
 		Title     string `json:"title" minLength:"1" maxLength:"500"`
 		Body      string `json:"body" maxLength:"16000" required:"false"`
-		SortOrder int32  `json:"sortOrder,omitempty" required:"false" doc:"omitted means first"`
+		SortOrder int32  `json:"sortOrder,omitempty" required:"false" doc:"Position in the list, ascending; equal values keep creation order. Omitted stores 0, so the memo follows existing memos of weight 0."`
 	}
 }
 type CreateMemoOutput struct {
@@ -53,7 +53,7 @@ type UpdateMemoInput struct {
 		Title     *string `json:"title,omitempty" minLength:"1" maxLength:"500" required:"false"`
 		Body      *string `json:"body,omitempty" maxLength:"16000" required:"false"`
 		Done      *bool   `json:"done,omitempty" required:"false"`
-		SortOrder *int32  `json:"sortOrder,omitempty" required:"false"`
+		SortOrder *int32  `json:"sortOrder,omitempty" required:"false" doc:"Position in the list, ascending; equal values keep creation order. Omitted keeps the stored value."`
 	}
 }
 type UpdateMemoOutput struct {

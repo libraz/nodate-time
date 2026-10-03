@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/albumblob"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -321,7 +322,7 @@ func deleteUnclaimedAlbumKey(ctx context.Context, q *generated.Queries, storageC
 // in that state, and DeleteUnreferencedStorageObject re-checks every column
 // that can point at an object before removing anything.
 func releaseStorageObject(ctx context.Context, q *generated.Queries, storageClient *storage.Client, objectID uint32) {
-	if err := q.DecrementStorageObjectRefs(ctx, objectID); err != nil {
+	if err := blobref.Release(ctx, q, objectID); err != nil {
 		slog.Warn("cleanup: release storage object reference failed", "id", objectID, "error", err)
 		return
 	}

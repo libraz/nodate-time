@@ -284,14 +284,18 @@ type CreateChecklistItemOutput struct {
 	Body ChecklistItemResponse
 }
 
+// UpdateChecklistItemInput carries only what the caller wants to change, the
+// way UpdateMemoInput does. Ticking an item is a body of {"done": true}: a
+// caller resending a title and position it read earlier would revert another
+// member's rename or reorder made since.
 type UpdateChecklistItemInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
 	ItemID     string `path:"itemId"`
 	Body       struct {
-		Title     string `json:"title" minLength:"1" maxLength:"500"`
-		Done      bool   `json:"done"`
-		SortOrder *int   `json:"sortOrder,omitempty" required:"false" doc:"omit to keep the current position"`
+		Title     *string `json:"title,omitempty" minLength:"1" maxLength:"500" required:"false" doc:"omit to keep the current title"`
+		Done      *bool   `json:"done,omitempty" required:"false" doc:"omit to keep the current state"`
+		SortOrder *int    `json:"sortOrder,omitempty" required:"false" doc:"omit to keep the current position"`
 	}
 }
 type UpdateChecklistItemOutput struct {
@@ -335,7 +339,7 @@ type PresignUploadInput struct {
 type PresignUploadOutput struct {
 	Body struct {
 		AttachmentID string `json:"attachmentId"`
-		UploadURL    string `json:"uploadUrl"`
+		UploadURL    string `json:"uploadUrl" doc:"Signed PUT URL, valid for 15 minutes. Empty when these bytes are already stored: skip the upload and confirm."`
 	}
 }
 

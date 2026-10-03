@@ -481,6 +481,36 @@ describe('EventModal failures', () => {
 
     expect(await screen.findByText('checklist offline')).toBeInTheDocument();
   });
+
+  it('ticks a checklist item by sending only done', async () => {
+    mockApi.get.mockImplementation((path: string) =>
+      path.endsWith('/checklist')
+        ? Promise.resolve([
+            {
+              id: 'item-1',
+              title: 'Tent',
+              done: false,
+              sortOrder: 3,
+              createdAt: '2026-04-20T10:00:00Z',
+            },
+          ])
+        : Promise.resolve([]),
+    );
+    mockApi.put.mockResolvedValue(undefined);
+
+    render(<EventModal />);
+
+    const title = await screen.findByText('Tent');
+    const toggle = title.closest('.group')?.querySelector('button');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle as HTMLButtonElement);
+
+    await waitFor(() =>
+      expect(mockApi.put).toHaveBeenCalledWith(expect.stringMatching(/\/checklist\/item-1$/), {
+        done: true,
+      }),
+    );
+  });
 });
 
 /**

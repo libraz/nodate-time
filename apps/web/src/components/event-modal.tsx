@@ -543,10 +543,10 @@ function ChecklistSection({
 
   const handleToggle = async (item: ChecklistItem) => {
     try {
+      // Only done: a title or position read earlier would revert another
+      // member's rename or reorder made since.
       await api.put(`/calendars/${calendarId}/events/${eventId}/checklist/${item.id}`, {
-        title: item.title,
         done: !item.done,
-        sortOrder: item.sortOrder,
       });
       await fetchItems();
     } catch (err) {
