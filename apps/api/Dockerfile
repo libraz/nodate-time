@@ -2,7 +2,7 @@
 # Multi-stage build for the nodate-time Go API.
 # The build context is the repository root.
 
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Manifests first so a source-only change reuses the download layer.
