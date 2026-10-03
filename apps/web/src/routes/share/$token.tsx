@@ -83,6 +83,7 @@ export function SharedCalendarView() {
 
   const {
     events,
+    truncated,
     failure: eventsFailure,
     retry: retryEvents,
   } = usePublicEvents(token, !!calendar && publishesEvents(calendar), currentMonth, timezone);
@@ -226,6 +227,12 @@ export function SharedCalendarView() {
                 </svg>
               </button>
             </div>
+
+            {truncated && (
+              <output className="block bg-[var(--color-surface-inset)] px-4 py-2 text-footnote text-[var(--color-text-secondary)] sm:px-6">
+                {t('calendar.eventsTruncated')}
+              </output>
+            )}
 
             {/* Calendar grid */}
             <div className="flex-1 bg-[var(--color-surface)]">

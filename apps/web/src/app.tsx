@@ -416,6 +416,8 @@ export function App() {
   const calendars = useCalendarStore((s) => s.calendars);
   const loadError = useCalendarStore((s) => s.loadError);
   const memberErrors = useCalendarStore((s) => s.memberErrors);
+  const truncatedCalendarIds = useCalendarStore((s) => s.truncatedCalendarIds);
+  const shownCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const retryFailedLoads = useCalendarStore((s) => s.retryFailedLoads);
   const initDone = useRef(false);
   const rangeLoaded = useRef(false);
@@ -468,6 +470,7 @@ export function App() {
   }, [calendars, currentMonth, calendarView, fetchEvents, fetchMemos]);
 
   const membersFailed = Object.keys(memberErrors).length > 0;
+  const eventsTruncated = truncatedCalendarIds.some((id) => shownCalendarIds.includes(id));
 
   const calendarContent = loadError ? (
     <LoadFailure
@@ -523,6 +526,12 @@ export function App() {
         <div className="relative z-[1]">
           <LoadFailureBanner title={t('error.membersUnavailable')} onRetry={retryFailedLoads} />
         </div>
+      )}
+
+      {eventsTruncated && (
+        <output className="relative z-[1] block bg-[var(--color-surface-inset)] px-4 py-2 text-footnote text-[var(--color-text-secondary)]">
+          {t('calendar.eventsTruncated')}
+        </output>
       )}
 
       {/* PC layout: sidebar + calendar */}

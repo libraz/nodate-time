@@ -42,12 +42,11 @@ export function EmbeddedCalendarView() {
   // calendar lookup too, but it is an invitation, and an embed has nobody to
   // accept it: drawn as a grid it is a calendar with nothing in it.
   const publishes = calendar !== null && publishesEvents(calendar);
-  const { events, failure: eventsFailure } = usePublicEvents(
-    token,
-    publishes,
-    currentMonth,
-    timezone,
-  );
+  const {
+    events,
+    truncated,
+    failure: eventsFailure,
+  } = usePublicEvents(token, publishes, currentMonth, timezone);
   const shownFailure = failure ?? (calendar && !publishes ? 'gone' : eventsFailure);
 
   if (shownFailure) {
@@ -131,6 +130,12 @@ export function EmbeddedCalendarView() {
           </svg>
         </button>
       </div>
+
+      {truncated && (
+        <output className="block px-4 py-1.5 text-micro text-[var(--color-text-secondary)]">
+          {t('calendar.eventsTruncated')}
+        </output>
+      )}
 
       {/* Grid */}
       <div className="flex-1">

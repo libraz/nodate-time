@@ -1,16 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Calendar, CalendarEvent, Memo } from '@/types/calendar';
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
-  isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
-}));
+vi.mock('@/lib/api', () => {
+  const get = vi.fn();
+  return {
+    api: {
+      get,
+      // A listing answers like a plain GET unless a test says it was cut short.
+      getListing: vi.fn(async (...args: unknown[]) => ({
+        data: await get(...args),
+        truncated: false,
+      })),
+      post: vi.fn(),
+      put: vi.fn(),
+      delete: vi.fn(),
+    },
+    errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+    isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
+  };
+});
 
 vi.mock('@/lib/toast', () => ({
   toast: {
@@ -94,6 +102,32 @@ beforeEach(() => {
     labels: [],
     activeCalendarIds: [],
     isLoading: false,
+  });
+});
+
+describe('fetchEvents truncation', () => {
+  // A listing cut at the server's cap looks like a complete one, and the
+  // missing tail of the window reads as free time.
+  it('records which calendars came back cut short, and clears it when they no longer are', async () => {
+    useCalendarStore.setState({
+      calendars: [cal('cal-1'), cal('cal-2')],
+      events: [],
+      truncatedCalendarIds: [],
+    });
+    const cutFor = (cutId: string | null) => async (path: string) => ({
+      data: [] as never,
+      truncated: cutId !== null && path.includes(`/calendars/${cutId}/`),
+    });
+    mockApi.getListing
+      .mockImplementationOnce(cutFor('cal-1'))
+      .mockImplementationOnce(cutFor('cal-1'));
+
+    await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
+    expect(useCalendarStore.getState().truncatedCalendarIds).toEqual(['cal-1']);
+
+    mockApi.getListing.mockImplementationOnce(cutFor(null)).mockImplementationOnce(cutFor(null));
+    await useCalendarStore.getState().fetchEvents('2026-05-01', '2026-05-31');
+    expect(useCalendarStore.getState().truncatedCalendarIds).toEqual([]);
   });
 });
 

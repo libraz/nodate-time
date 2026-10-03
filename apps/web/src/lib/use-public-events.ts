@@ -7,6 +7,8 @@ import { type PublicEvent, type ShareFailure, shareFailureOf } from '@/lib/publi
 export interface PublicEvents {
   /** The events read for the month and zone on screen; never another month's. */
   events: PublicEvent[];
+  /** The server stopped the month's listing at its cap; the latest events are missing. */
+  truncated: boolean;
   failure: ShareFailure | null;
   retry: () => void;
 }
@@ -29,10 +31,11 @@ export function usePublicEvents(
   // empty and an event near a month boundary lands in the wrong one.
   const { start, end } = gridRange(month, timezone);
   const path = `/share/${token}/events?start=${start}&end=${end}&tz=${encodeURIComponent(timezone)}`;
-  const [loaded, setLoaded] = useState<{ path: string; events: PublicEvent[] }>({
-    path: '',
-    events: [],
-  });
+  const [loaded, setLoaded] = useState<{
+    path: string;
+    events: PublicEvent[];
+    truncated: boolean;
+  }>({ path: '', events: [], truncated: false });
   const [failure, setFailure] = useState<ShareFailure | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -42,9 +45,9 @@ export function usePublicEvents(
     const controller = new AbortController();
     setFailure(null);
     api
-      .get<PublicEvent[]>(path, true, controller.signal)
-      .then((events) => {
-        if (!controller.signal.aborted) setLoaded({ path, events });
+      .getListing<PublicEvent[]>(path, true, controller.signal)
+      .then(({ data: events, truncated }) => {
+        if (!controller.signal.aborted) setLoaded({ path, events, truncated });
       })
       .catch((e: unknown) => {
         if (!controller.signal.aborted && !isAbortError(e)) setFailure(shareFailureOf(e));
@@ -53,5 +56,11 @@ export function usePublicEvents(
   }, [enabled, path, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
-  return { events: loaded.path === path ? loaded.events : [], failure, retry };
+  const current = loaded.path === path;
+  return {
+    events: current ? loaded.events : [],
+    truncated: current && loaded.truncated,
+    failure,
+    retry,
+  };
 }

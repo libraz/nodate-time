@@ -15,7 +15,7 @@ vi.mock('@/i18n', () => ({
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
-  return { ...actual, api: { get: vi.fn() } };
+  return { ...actual, api: { get: vi.fn(), getListing: vi.fn() } };
 });
 
 vi.mock('@/stores/ui-store', () => ({
@@ -27,6 +27,15 @@ import { ApiError, api } from '@/lib/api';
 import { EmbeddedCalendarView } from './$token';
 
 const apiGet = vi.mocked(api.get);
+const apiGetListing = vi.mocked(api.getListing);
+
+/** A listing answers through the same stub as a plain GET, uncut. */
+function listingFromGet() {
+  apiGetListing.mockImplementation(async (path, skip, signal) => ({
+    data: (await apiGet(path, skip, signal)) as never,
+    truncated: false,
+  }));
+}
 
 function calendar(overrides: Record<string, unknown> = {}) {
   return {
@@ -45,6 +54,8 @@ function eventsAsked(): number {
 
 beforeEach(() => {
   apiGet.mockReset();
+  apiGetListing.mockReset();
+  listingFromGet();
 });
 
 afterEach(cleanup);
@@ -105,5 +116,27 @@ describe('embedded calendar', () => {
     render(<EmbeddedCalendarView />);
 
     expect(await screen.findByText('share.linkExpired')).toBeTruthy();
+  });
+
+  // A month cut at the server's cap looked complete; its last days read as free.
+  it('says when the month was cut short', async () => {
+    apiGet.mockResolvedValue(calendar());
+    apiGetListing.mockResolvedValue({ data: [] as never, truncated: true });
+
+    render(<EmbeddedCalendarView />);
+
+    expect(await screen.findByText('calendar.eventsTruncated')).toBeTruthy();
+  });
+
+  it('says nothing about a month that arrived whole', async () => {
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(String(path).includes('/events') ? [] : calendar()),
+    );
+
+    render(<EmbeddedCalendarView />);
+
+    expect(await screen.findByText('share.readOnly')).toBeTruthy();
+    await waitFor(() => expect(apiGetListing).toHaveBeenCalled());
+    expect(screen.queryByText('calendar.eventsTruncated')).toBeNull();
   });
 });

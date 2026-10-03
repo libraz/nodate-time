@@ -380,6 +380,20 @@ export const api = {
     const revision = res.headers.get('ETag');
     return { data: (await res.json()) as T, revision };
   },
+  /**
+   * A GET of a capped listing, reporting whether the server cut it short.
+   * A listing that stops at its cap looks complete unless the header is read,
+   * and the reader takes the missing entries for an empty stretch of calendar.
+   */
+  getListing: async <T>(
+    path: string,
+    skipAuthRedirect = false,
+    signal?: AbortSignal,
+  ): Promise<{ data: T; truncated: boolean }> => {
+    const res = await requestRaw(path, { ...(signal ? { signal } : {}) }, skipAuthRedirect);
+    const truncated = res.headers.get('X-Result-Truncated') === 'true';
+    return { data: (await res.json()) as T, truncated };
+  },
   post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
     request<T>(path, {
       method: 'POST',
