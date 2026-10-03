@@ -47,6 +47,14 @@ UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id =
 -- name: RevokeCalendarMember :exec
 UPDATE calendar_members SET enabled = FALSE WHERE calendar_id = ? AND user_id = ?;
 
+-- GetLongestStandingOwner names who inherits the events of a member leaving
+-- the calendar: the owner who has been one longest, so the answer is stable.
+-- name: GetLongestStandingOwner :one
+SELECT user_id FROM calendar_members
+WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
+ORDER BY created_at, id
+LIMIT 1;
+
 -- CountCalendarOwners guards the last-owner case. Roles above editor can
 -- change membership, so losing the final owner would leave a calendar
 -- nobody can administer.

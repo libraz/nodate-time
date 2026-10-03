@@ -197,6 +197,29 @@ UPDATE calendar_events
 SET updated_at = NOW(3)
 WHERE id = ?;
 
+-- ListSeriesTouchingMember names the series rows whose revision a member's
+-- departure changes: every event they own or attend on the calendar, an
+-- override answering through the series it hangs off.
+-- name: ListSeriesTouchingMember :many
+SELECT DISTINCT COALESCE(e.recurrence_parent_id, e.id) AS series_id
+FROM calendar_events e
+LEFT JOIN calendar_event_attendees a
+  ON a.event_id = e.id AND a.user_id = sqlc.arg(user_id) AND a.enabled = TRUE
+WHERE e.calendar_id = sqlc.arg(calendar_id)
+  AND (e.owner_user_id = sqlc.arg(user_id) OR a.id IS NOT NULL);
+
+-- name: TouchCalendarEvents :exec
+UPDATE calendar_events
+SET updated_at = NOW(3)
+WHERE id IN (sqlc.slice('ids'));
+
+-- ReassignCalendarEventOwner hands every event a departing member owns on the
+-- calendar, overrides and deleted rows included, to the member inheriting it.
+-- name: ReassignCalendarEventOwner :exec
+UPDATE calendar_events
+SET owner_user_id = sqlc.arg(new_owner_id)
+WHERE calendar_id = sqlc.arg(calendar_id) AND owner_user_id = sqlc.arg(old_owner_id);
+
 -- source_uid is what the importing file called the event, and is NULL for an
 -- event created here. It is the only column on this insert that does not come
 -- from the caller's own intent, which is why it sits at the end rather than

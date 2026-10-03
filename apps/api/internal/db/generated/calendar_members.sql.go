@@ -135,6 +135,22 @@ func (q *Queries) GetCalendarMemberForUpdate(ctx context.Context, arg GetCalenda
 	return i, err
 }
 
+const getLongestStandingOwner = `-- name: GetLongestStandingOwner :one
+SELECT user_id FROM calendar_members
+WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
+ORDER BY created_at, id
+LIMIT 1
+`
+
+// GetLongestStandingOwner names who inherits the events of a member leaving
+// the calendar: the owner who has been one longest, so the answer is stable.
+func (q *Queries) GetLongestStandingOwner(ctx context.Context, calendarID uint32) (uint32, error) {
+	row := q.db.QueryRowContext(ctx, getLongestStandingOwner, calendarID)
+	var user_id uint32
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const listCalendarMembers = `-- name: ListCalendarMembers :many
 SELECT cm.id, cm.public_id, cm.workspace_id, cm.calendar_id, cm.user_id, cm.role, cm.member_color, cm.invited_by_user_id, cm.sort_weight, cm.notes, cm.enabled, cm.updated_at, cm.created_at, u.public_id AS user_public_id, u.display_name AS user_display_name,
        u.email AS user_email, u.avatar_url AS user_avatar_url,

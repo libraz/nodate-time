@@ -983,6 +983,65 @@ func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Cont
 	return items, nil
 }
 
+const listSeriesTouchingMember = `-- name: ListSeriesTouchingMember :many
+SELECT DISTINCT COALESCE(e.recurrence_parent_id, e.id) AS series_id
+FROM calendar_events e
+LEFT JOIN calendar_event_attendees a
+  ON a.event_id = e.id AND a.user_id = ? AND a.enabled = TRUE
+WHERE e.calendar_id = ?
+  AND (e.owner_user_id = ? OR a.id IS NOT NULL)
+`
+
+type ListSeriesTouchingMemberParams struct {
+	UserID     uint32 `json:"userId"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+// ListSeriesTouchingMember names the series rows whose revision a member's
+// departure changes: every event they own or attend on the calendar, an
+// override answering through the series it hangs off.
+func (q *Queries) ListSeriesTouchingMember(ctx context.Context, arg ListSeriesTouchingMemberParams) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listSeriesTouchingMember, arg.UserID, arg.CalendarID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var series_id uint32
+		if err := rows.Scan(&series_id); err != nil {
+			return nil, err
+		}
+		items = append(items, series_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reassignCalendarEventOwner = `-- name: ReassignCalendarEventOwner :exec
+UPDATE calendar_events
+SET owner_user_id = ?
+WHERE calendar_id = ? AND owner_user_id = ?
+`
+
+type ReassignCalendarEventOwnerParams struct {
+	NewOwnerID uint32 `json:"newOwnerId"`
+	CalendarID uint32 `json:"calendarId"`
+	OldOwnerID uint32 `json:"oldOwnerId"`
+}
+
+// ReassignCalendarEventOwner hands every event a departing member owns on the
+// calendar, overrides and deleted rows included, to the member inheriting it.
+func (q *Queries) ReassignCalendarEventOwner(ctx context.Context, arg ReassignCalendarEventOwnerParams) error {
+	_, err := q.db.ExecContext(ctx, reassignCalendarEventOwner, arg.NewOwnerID, arg.CalendarID, arg.OldOwnerID)
+	return err
+}
+
 const retimeRecurrenceOverride = `-- name: RetimeRecurrenceOverride :exec
 UPDATE calendar_events
 SET recurrence_original_start = ?, start_at = ?, end_at = ?
@@ -1057,6 +1116,27 @@ WHERE id = ?
 // moves, or a second writer replaces the first one's work unnoticed.
 func (q *Queries) TouchCalendarEvent(ctx context.Context, id uint32) error {
 	_, err := q.db.ExecContext(ctx, touchCalendarEvent, id)
+	return err
+}
+
+const touchCalendarEvents = `-- name: TouchCalendarEvents :exec
+UPDATE calendar_events
+SET updated_at = NOW(3)
+WHERE id IN (/*SLICE:ids*/?)
+`
+
+func (q *Queries) TouchCalendarEvents(ctx context.Context, ids []uint32) error {
+	query := touchCalendarEvents
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 
