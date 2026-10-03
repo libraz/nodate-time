@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -89,7 +90,7 @@ func attachmentStorageKey(deps Deps, digest []byte) string {
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		_, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -130,6 +131,9 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 
 		var object generated.StorageObject
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			var err error
 			object, err = blobref.Reserve(ctx, q, blobref.Blob{
 				WorkspaceID: deps.WorkspaceID,
@@ -152,6 +156,10 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return err
 		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			slog.ErrorContext(ctx, "failed to reserve attachment", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -305,6 +313,12 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		// Only the delete that actually retired the row releases: a second one
 		// racing it read the same live row, but its update finds it retired.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				if errors.Is(err, apierrors.EventNotFound) {
+					return apierrors.AttachmentNotFound
+				}
+				return err
+			}
 			res, err := q.SoftDeleteAttachment(ctx, att.ID)
 			if err != nil {
 				return err
@@ -390,6 +404,12 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 
 		var object generated.StorageObject
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				if errors.Is(err, apierrors.EventNotFound) {
+					return apierrors.AttachmentNotFound
+				}
+				return err
+			}
 			res, err := q.ConfirmEventAttachment(ctx, generated.ConfirmEventAttachmentParams{
 				ID:         att.ID,
 				UploaderID: userID,

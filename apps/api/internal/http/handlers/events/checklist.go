@@ -72,6 +72,9 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if _, err := q.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
 				PublicID:        pubID[:],
 				WorkspaceID:     deps.WorkspaceID,
@@ -86,7 +89,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeChecklistAdded, in.Body.Title, pubID[:])
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		item, err := deps.Queries.GetChecklistItemByPublicID(ctx, pubID[:])
@@ -135,6 +138,9 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			sortOrder = int32(*in.Body.SortOrder)
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if err := q.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
 				Title:      title,
 				Done:       done,
@@ -146,7 +152,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeChecklistSet, title, item.PublicID)
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		updated, err := deps.Queries.GetChecklistItemByPublicID(ctx, item.PublicID)
@@ -182,13 +188,16 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if err := q.SoftDeleteChecklistItem(ctx, item.ID); err != nil {
 				return err
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeChecklistGone, item.Title, item.PublicID)
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &DeleteChecklistItemOutput{}, nil

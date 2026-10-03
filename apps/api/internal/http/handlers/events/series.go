@@ -14,6 +14,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
@@ -75,22 +76,21 @@ func mergeFields(e eventEdit, base generated.CalendarEvent) editedFields {
 	return f
 }
 
-// lockSeries is the first statement of every write to a series: its own
-// columns, its exclusion list, or an override hanging off it. It reads the row
-// under its exclusive lock and checks the caller's If-Match against that copy,
-// so the revision compared is the one the write replaces, and two writers
-// holding the same tag cannot both pass.
+// lockEvent is the first step of every write to an event: its own columns, its
+// exclusion list, or a row hanging off it (an override, an attachment, a
+// comment, a checklist item). It takes the calendar's shared lock, then reads
+// the event under its exclusive lock and checks the caller's If-Match against
+// that copy, so the revision compared is the one the write replaces and two
+// writers holding the same tag cannot both pass.
 //
-// Taking the exclusive lock before anything else is also what keeps
-// per-occurrence edits from deadlocking: inserting an override takes a shared
-// lock on the parent to check its foreign key, and two writers each holding
-// that shared lock while waiting to upgrade it is the deadlock.
-// TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock is what notices.
-func lockSeries(ctx context.Context, q *generated.Queries, seriesID uint32, ifMatch string) (generated.CalendarEvent, error) {
-	current, err := q.GetCalendarEventByIDForUpdate(ctx, seriesID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return generated.CalendarEvent{}, apierrors.EventNotFound
-	}
+// The order is the point. A row inserted under the event takes a shared lock
+// on it for the foreign key, and two writers each holding that while waiting to
+// upgrade it deadlock; a delete taking the rows under an event before the event
+// deadlocks with a confirm going the other way. Calendar, then event, then
+// what hangs off it, avoids both. TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock
+// and TestDeletingAnEventWhileAnUploadOnItConfirms are what notice.
+func lockEvent(ctx context.Context, q *generated.Queries, calendarID, eventID uint32, ifMatch string) (generated.CalendarEvent, error) {
+	current, err := calresolve.LockEvent(ctx, q, calendarID, eventID)
 	if err != nil {
 		return generated.CalendarEvent{}, err
 	}
@@ -137,7 +137,7 @@ func editOccurrence(ctx context.Context, deps Deps, e eventEdit, seriesID uint32
 		original time.Time
 	)
 	err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-		current, err := lockSeries(ctx, q, seriesID, e.body.IfMatch)
+		current, err := lockEvent(ctx, q, e.cal.ID, seriesID, e.body.IfMatch)
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 func editSeries(ctx context.Context, deps Deps, e eventEdit, seriesID uint32, occurrenceDate string) (EventResponse, string, error) {
 	var updated generated.CalendarEvent
 	err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-		current, err := lockSeries(ctx, q, seriesID, e.body.IfMatch)
+		current, err := lockEvent(ctx, q, e.cal.ID, seriesID, e.body.IfMatch)
 		if err != nil {
 			return err
 		}

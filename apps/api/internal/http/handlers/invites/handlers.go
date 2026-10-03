@@ -330,6 +330,9 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			// Claim a use atomically; zero rows means the link is exhausted.
 			// Checking the limit inside the UPDATE is what makes two
 			// concurrent acceptances of a single-use link race safely.
@@ -420,6 +423,9 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			res, err := q.RevokeInviteByPublicIDAndCalendar(ctx, generated.RevokeInviteByPublicIDAndCalendarParams{
 				PublicID:   invitePub,
 				CalendarID: cal.ID,

@@ -7,6 +7,9 @@
 // call sites drift apart and one of them ends up doing only the lookup.
 // Every handler resolves through these functions, so there is no path that
 // reaches a calendar id without having proved access to it.
+//
+// It also owns the order a write locks a calendar's rows in: LockShared,
+// LockExclusive and LockEvent are the first statement of every such transaction.
 package calresolve
 
 import (
@@ -167,4 +170,46 @@ func SplitCompositeID(id string) (parentUUID string, dateStr string) {
 		return id[:36], id[37:]
 	}
 	return "", ""
+}
+
+// LockShared is the first statement of every transaction that writes under a
+// calendar: its events, the rows hanging off them, its photos, memos and
+// members. It fails with CalendarNotFound once the calendar is gone, so a write
+// that lost the race with a delete adds nothing under it.
+//
+// Locks are taken top down -- calendar, event, the rows under the event,
+// stored objects. The activity log's foreign key takes this same shared lock at
+// the end of the transaction anyway; taking it first is what puts it in order.
+func LockShared(ctx context.Context, q *generated.Queries, calendarID uint32) error {
+	if _, err := q.LockCalendarForShare(ctx, calendarID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apierrors.CalendarNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// LockExclusive is the first statement of a transaction that writes the
+// calendar row itself, such as deleting it.
+func LockExclusive(ctx context.Context, q *generated.Queries, calendarID uint32) error {
+	cal, err := q.GetCalendarByIDForUpdate(ctx, calendarID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !cal.Enabled) {
+		return apierrors.CalendarNotFound
+	}
+	return err
+}
+
+// LockEvent takes the calendar's shared lock and then the event's exclusive
+// one: the first step of every write to an event or a row hanging off it. It
+// fails with EventNotFound once the event is gone.
+func LockEvent(ctx context.Context, q *generated.Queries, calendarID, eventID uint32) (generated.CalendarEvent, error) {
+	if err := LockShared(ctx, q, calendarID); err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	evt, err := q.GetCalendarEventByIDForUpdate(ctx, eventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarEvent{}, apierrors.EventNotFound
+	}
+	return evt, err
 }

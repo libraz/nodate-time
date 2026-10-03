@@ -651,6 +651,9 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		// upload is abandoned never becomes a real photo, so it must not
 		// appear in the feed.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			res, err := q.ConfirmAlbumPhoto(ctx, generated.ConfirmAlbumPhotoParams{
 				ID:               p.ID,
 				UploadedByUserID: userID,
@@ -746,6 +749,9 @@ func attachThumbnail(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
 		return
 	}
 	if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		if err := calresolve.LockShared(ctx, q, p.CalendarID); err != nil {
+			return err
+		}
 		return albumblob.AttachThumbnail(ctx, q, albumblob.Photo{
 			ID:          p.ID,
 			WorkspaceID: deps.WorkspaceID,
@@ -830,6 +836,9 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 
 		var refreshed generated.AlbumPhoto
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if err := q.UpdateAlbumPhotoMeta(ctx, generated.UpdateAlbumPhotoMetaParams{
 				Caption:         caption,
 				CalendarEventID: eventID,
@@ -852,7 +861,7 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		return &UpdatePhotoOutput{Body: mapPhoto(ctx, deps, cal, refreshed)}, nil
 	}
@@ -873,6 +882,9 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if err := q.SoftDeleteAlbumPhoto(ctx, photo.ID); err != nil {
 				return err
 			}
@@ -886,7 +898,7 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		// The bytes are not deleted here, and that is not tidiness deferred:
 		// photos with identical content share one storage object, so the key

@@ -1083,6 +1083,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		var created generated.CalendarEvent
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			result, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
 				PublicID:           pubID[:],
 				WorkspaceID:        deps.WorkspaceID,
@@ -1137,6 +1140,10 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			})
 		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			slog.ErrorContext(ctx, "failed to create event", "calendarID", cal.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -1179,7 +1186,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		cal, evt := w.cal, w.evt
 		// A stale copy is reported as stale before its contents are judged:
 		// what it names may have changed since, a member who has left included.
-		// lockSeries checks again under the lock.
+		// lockEvent checks again under the lock.
 		if !matchesETag(in.IfMatch, evt) {
 			return nil, apierrors.ToHuma(apierrors.EventStale)
 		}
@@ -1290,7 +1297,7 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 				// The exclusion list is a whole-column replace, so it is read
 				// under the series' row lock: two cancellations reading the
 				// same old list would each write one missing the other's.
-				current, err := lockSeries(ctx, q, evt.ID, "")
+				current, err := lockEvent(ctx, q, cal.ID, evt.ID, "")
 				if err != nil {
 					return err
 				}
@@ -1341,6 +1348,10 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// A concurrent delete that won the lock leaves nothing to do here.
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			// Release the blobs this event's attachments were holding. The
 			// objects themselves are swept once nothing refers to them, so
 			// the only thing to do here is drop the references.
@@ -1377,6 +1388,10 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			})
 		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			slog.ErrorContext(ctx, "failed to delete event", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -1564,6 +1579,9 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if _, err := q.CreateEventComment(ctx, generated.CreateEventCommentParams{
 				PublicID:    pubID[:],
 				WorkspaceID: deps.WorkspaceID,
@@ -1576,7 +1594,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeCommentAdded, in.Body.Content, pubID[:])
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		// Read the row back so createdAt is the stored value rather than a
@@ -1636,6 +1654,9 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
 				Body: in.Body.Content,
 				ID:   comment.ID,
@@ -1645,7 +1666,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeCommentEdited, in.Body.Content, comment.PublicID)
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		out := &UpdateCommentOutput{}
@@ -1697,13 +1718,16 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+				return err
+			}
 			if err := q.SoftDeleteEventComment(ctx, comment.ID); err != nil {
 				return err
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
 				eventlog.TypeCommentRemoved, comment.Body, comment.PublicID)
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		return &DeleteCommentOutput{}, nil
 	}

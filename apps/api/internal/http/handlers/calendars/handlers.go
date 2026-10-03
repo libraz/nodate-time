@@ -326,6 +326,9 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			// Release the blobs this calendar's attachments were holding.
 			// The objects are content-addressed and may be shared, so they
 			// are not deleted here -- dropping the reference is what lets the
@@ -366,7 +369,7 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 		return &DeleteCalendarOutput{}, nil
 	}
@@ -451,6 +454,9 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			// Lock the owner count and apply the role change atomically so
 			// concurrent demotions cannot leave the calendar with nobody who
 			// can administer it.
@@ -603,6 +609,9 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			// Lock the owner count and revoke atomically so concurrent
 			// removals cannot leave the calendar without an owner.
 			if current.Role == generated.CalendarMembersRoleOwner {
