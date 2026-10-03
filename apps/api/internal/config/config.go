@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 // defaultJWTSecret is the development fallback secret. It must never be used in
-// production: Validate rejects it when the environment is not development.
+// production: Validate rejects it in every environment.
 const defaultJWTSecret = "dev-secret-change-me-in-production"
 
 type Config struct {
@@ -68,8 +69,8 @@ type Config struct {
 	// available whenever IsDev() is true, so dev verification is never blocked.
 	PasswordLoginEnabled bool `env:"TC_PASSWORD_LOGIN_ENABLED" envDefault:"true"`
 	// SMTP delivery. When SMTPHost is set, password-reset and invite mails are
-	// sent via SMTP; otherwise mails are logged to stdout (development only —
-	// Validate rejects an unset host in production).
+	// sent via SMTP; otherwise they go to the console mailer, which Validate
+	// accepts only with AllowConsoleMailer.
 	SMTPHost           string `env:"TC_SMTP_HOST" envDefault:""`
 	SMTPPort           int    `env:"TC_SMTP_PORT" envDefault:"587"`
 	SMTPUsername       string `env:"TC_SMTP_USERNAME" envDefault:""`
@@ -139,10 +140,11 @@ type Config struct {
 	GoogleClientID     string `env:"TC_GOOGLE_CLIENT_ID" envDefault:""`
 	GoogleClientSecret string `env:"TC_GOOGLE_CLIENT_SECRET" envDefault:""`
 
-	// Comma-separated list of email domains allowed to sign in via Google OIDC
-	// (e.g. "example.com,agency.co.jp"). Empty means no restriction: any Google
-	// account may sign in. When set, addresses outside these domains are rejected
-	// unless individually allow-listed in the admin panel.
+	// Comma-separated list of email domains allowed to sign up or sign in
+	// (e.g. "example.com,agency.co.jp"). It applies to every path that creates
+	// or admits an account: Google and LINE sign-in and password registration.
+	// Empty means no restriction. When set, addresses outside these domains are
+	// rejected unless individually allow-listed in the admin panel.
 	GoogleAllowedDomains string `env:"TC_GOOGLE_ALLOWED_DOMAINS" envDefault:""`
 
 	LINEClientID     string `env:"TC_LINE_CLIENT_ID" envDefault:""`
@@ -159,9 +161,10 @@ type Config struct {
 	// need rather than a relaxed rule; anywhere else they are a username and
 	// password anyone can look up.
 	AllowDefaultObjectStorageCredentials bool `env:"TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS" envDefault:"false"`
-	// AllowConsoleMailer permits running with no SMTP relay. Mail is then
-	// written to the log rather than delivered, which both prints
-	// password-reset links and leaves the reset flow quietly broken.
+	// AllowConsoleMailer permits running with no SMTP relay. Mail is then not
+	// delivered, which leaves the reset flow quietly broken. Only in
+	// development does the log carry the message body (reset links included);
+	// elsewhere it carries the subject alone.
 	AllowConsoleMailer bool `env:"TC_ALLOW_CONSOLE_MAILER" envDefault:"false"`
 }
 
@@ -172,12 +175,29 @@ func parse() (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
 	}
+	keepExplicitEmpty(cfg)
 	dsn, err := NormalizeDSN(cfg.DbDsn)
 	if err != nil {
 		return nil, err
 	}
 	cfg.DbDsn = dsn
 	return cfg, nil
+}
+
+// keepExplicitEmpty restores an empty value for the variables whose empty
+// value means something of its own. The env library reads set-but-empty as
+// unset and substitutes the default, which would turn "disable the metrics
+// listener" into "bind it" and "allow no one" into the private ranges.
+func keepExplicitEmpty(cfg *Config) {
+	for name, field := range map[string]*string{
+		"TC_METRICS_ADDR":          &cfg.MetricsAddr,
+		"TC_METRICS_ALLOWED_CIDRS": &cfg.MetricsAllowedCIDRs,
+		"TC_CORS_ALLOWED_ORIGINS":  &cfg.CORSAllowedOrigins,
+	} {
+		if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) == "" {
+			*field = ""
+		}
+	}
 }
 
 // Load reads the configuration for a process that serves the API, and enforces
@@ -214,20 +234,18 @@ func LoadForTooling() (*Config, error) {
 // Validate enforces the guards a process serving the API owes, whatever
 // environment it runs in.
 //
-// Every check runs in every environment. TC_ENV used to switch all four off at
-// once, which meant a deployment setting it for one reason silently got the
-// other three -- including signing every session with a secret published in
-// this repository.
+// Every check runs in every environment, so a deployment that sets TC_ENV for
+// one reason does not also lose the others -- including signing every session
+// with a secret published in this repository.
 //
-// Two of the four are answered by a variable of their own, because local
-// development has a real need for them: the object store ships with known
-// credentials and there is no mail relay. The other two had no such need. A
-// development CORS list is already a pair of explicit localhost origins, and a
-// development signing secret is as cheap to generate as it is to copy, so
-// both are simply required and the exemptions are gone.
+// Two guards have an allowance of their own, because local development has a
+// real need for them: the object store ships with known credentials and there
+// is no mail relay. The JWT secret and CORS list have none: a development
+// secret is as cheap to generate as to copy, and the default CORS list is
+// already explicit localhost origins.
 //
-// TC_ENV still selects the environment, but it now only adds the development
-// affordances (/auth/dev-login); it takes no protection away.
+// TC_ENV only adds the development affordances (/auth/dev-login); it takes no
+// protection away.
 func (c *Config) Validate() error {
 	// The signing secret is the session system. Its default is committed here,
 	// so accepting it anywhere reachable lets anyone mint a token for any
@@ -391,7 +409,7 @@ func (c *Config) IsDev() bool {
 }
 
 // GoogleAllowedDomainList parses GoogleAllowedDomains into a normalized slice of
-// lowercased domains. An empty result means sign-in is unrestricted.
+// lowercased domains. An empty result means sign-up and sign-in are unrestricted.
 func (c *Config) GoogleAllowedDomainList() []string {
 	var out []string
 	for _, raw := range strings.Split(c.GoogleAllowedDomains, ",") {

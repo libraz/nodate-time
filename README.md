@@ -43,7 +43,7 @@ Responsive mobile layout (vertical month scroll):
   development-only password-less login
 - **Admin** — OAuth provider configuration and an allowlist of permitted sign-in
   emails/domains
-- **Export / import** — iCal and CSV
+- **Export / import** — export as iCal or CSV; import iCal
 - **i18n & themes** — English / Japanese locales and theme switching
 
 ## Tech stack
@@ -150,26 +150,33 @@ for the full list and defaults.
 | `TC_APP_NAME` | what the deployment calls itself (OpenAPI title, outgoing mail, iCalendar `PRODID`); the SPA takes the same name from the `VITE_APP_NAME` build argument | `Nodate Time` |
 | `TC_PORT` | API port | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
-| `TC_JWT_SECRET` | JWT signing key (≥32 bytes required in prod) | dev fallback |
+| `TC_JWT_SECRET` | JWT signing key, ≥32 bytes. Required in every environment: the built-in value is published in this repository and is refused | none (`make dev` generates one under `secrets/`) |
 | `TC_PASSWORD_LOGIN_ENABLED` | enable email+password auth | `true` |
 | `TC_WORKSPACE_TIMEZONE` | IANA zone a new account starts in — neither signing up nor a first provider sign-in asks, and the column is NOT NULL. Rejected at startup if the tz database does not know it | `Asia/Tokyo` |
 | `TC_DEFAULT_LOCALE` | BCP 47 tag a new account starts with, for the same reason | `ja` |
-| `TC_CORS_ALLOWED_ORIGINS` | allowed CORS origins (no wildcard in prod) | localhost:5173 |
+| `TC_CORS_ALLOWED_ORIGINS` | allowed CORS origins, comma-separated. An empty list or `*` is refused in every environment | localhost:5173 |
 | `TC_TRUSTED_PROXIES` | reverse-proxy hops allowed to set `X-Forwarded-For` (CIDR or bare IP, comma-separated). Unset behind a proxy collapses every client onto one rate-limit bucket | none trusted |
 | `TC_AUTH_RATE_LIMIT` | per-IP requests/min for sign-in, registration, password reset and OAuth | `60` |
 | `TC_SHARE_RATE_LIMIT` | per-IP requests/min for public share links, counted separately from sign-in | `600` |
 | `TC_WEB_URL` / `TC_API_PUBLIC_URL` | public URLs for web / API. `TC_API_PUBLIC_URL` is also the address blob URLs point back at, so it must include any path the API is served under | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage, reached by the API only — never by the browser | MinIO defaults |
-| `TC_SMTP_HOST` and other `TC_SMTP_*` | mail delivery (stdout when unset; required in prod) | console output |
+| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage, reached by the API only — never by the browser. The `minioadmin` credentials are refused unless `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` is set | MinIO defaults |
+| `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | permit the published MinIO credentials, for a local object store | `false` (`make dev` sets `true`) |
+| `TC_SMTP_HOST` and other `TC_SMTP_*` | mail delivery. With no host the API refuses to start unless `TC_ALLOW_CONSOLE_MAILER` is set | unset |
+| `TC_ALLOW_CONSOLE_MAILER` | run with no SMTP relay: mail is written to the log instead of delivered. Outside development the log carries the subject only, never the recipient or body | `false` (`make dev` sets `true`) |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | empty |
-| `TC_GOOGLE_ALLOWED_DOMAINS` | allowed Google sign-in domains (comma-separated) | unrestricted |
+| `TC_GOOGLE_ALLOWED_DOMAINS` | email domains allowed to sign up or sign in (comma-separated). Google, LINE and password registration all check it; an address outside the list still gets in if an admin allow-listed it individually | unrestricted |
 | `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | empty |
 | `TC_SECRETS_KEY` | key encrypting secrets stored in the DB (hex/base64, 32 bytes) | empty |
 | `TC_METRICS_ADDR` | address of the administrative listener; empty disables it | `127.0.0.1:9464` |
 | `TC_METRICS_ALLOWED_CIDRS` | networks allowed to reach that listener, matched against the direct TCP peer. Empty denies everything | loopback + private ranges |
 
-> In production, `Config.Validate()` refuses to start with the default JWT secret,
-> default MinIO credentials, wildcard CORS, or an unset SMTP host.
+> `Config.Validate()` applies in every environment, `TC_ENV=development` included. It
+> refuses to start with the built-in or a short (<32 bytes) JWT secret, the default
+> MinIO credentials, an empty or wildcard CORS list, or an unset SMTP host, and
+> rejects an unknown `TC_WORKSPACE_TIMEZONE`. Two guards have an allowance
+> variable — `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` for the MinIO
+> credentials and `TC_ALLOW_CONSOLE_MAILER` for the SMTP host; the others have
+> none. `TC_ENV` adds `/auth/dev-login` and nothing else.
 
 DB / storage (`compose.yml`): `TC_DB_PORT` (default 33306), `TC_DB_ROOT_PASSWORD`,
 `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_MINIO_API_PORT`,
@@ -182,11 +189,18 @@ authentication at `/openapi.json` and `/openapi.yaml`, with a rendered
 reference at `/docs`. Routes live in
 `apps/api/internal/http/router/router.go`.
 
-- **Public** — `/health`, `/auth/*` (register/login/dev-login/password-reset/oauth),
-  `/share/{token}` (public calendar)
-- **Authenticated** — `/user`, `/calendars`, and
-  `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`
-- **Admin** — `/admin/oauth-providers`, `/admin/allowed-emails`
+The groups below are not exhaustive; the router is the full list.
+
+- **Public** — `/health`, `/openapi.json`, `/openapi.yaml`, `/docs`; `/auth/*` except
+  `/auth/logout` (register, login, refresh, password-reset, verify-email/confirm,
+  oauth; `dev-login` only in development); `/share/{token}` and
+  `/share/{token}/events`; `/blobs/*`, which carries no session and is authorized
+  by the signature on the URL
+- **Authenticated** — `/auth/logout`, `/user/*`, `/calendars`,
+  `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`,
+  and `/invites/{token}/accept`
+- **Admin** — `/admin/oauth-providers`, `/admin/allowed-emails`,
+  `/admin/instance-admins`
 
 Unauthenticated endpoints are rate-limited per client IP.
 
@@ -234,14 +248,15 @@ caller is adopted only from a hop listed in `TC_TRUSTED_PROXIES`.
 ## Testing
 
 E2E tests create an independent user + calendar per test (tenant isolation) and run
-in parallel against a real MySQL. There are 332 of them, 310 declaring
-`t.Parallel()`, and the package finishes in about 64 s in CI — on `ubuntu-latest`
-(4 vCPU) Go's default parallelism runs four at a time.
+in parallel against a real MySQL.
 
 ```sh
-TC_DB_PORT=3307 make db-up      # start MySQL on the same port CI uses
+make db-up                      # MySQL on TC_DB_PORT (default 33306)
 make test-e2e                   # runs with TC_TEST_INTEGRATION=1
 ```
+
+The tests connect to `127.0.0.1:${TC_DB_PORT:-33306}`, and so does CI, so a
+non-default `TC_DB_PORT` has to be exported for both commands.
 
 CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
 (build / vet / E2E).
@@ -292,9 +307,10 @@ certbot renew --webroot -w /path/to/acme \
 `TC_API_PUBLIC_URL` has to carry the `/api` prefix
 (`https://app.example.com/api`): it is the address the OAuth callback returns
 to, the address every blob URL points back at, and the path the `$schema` links
-in responses are built from. Set `TC_TRUSTED_PROXIES` to the
-compose network's range (`172.16.0.0/12` covers the default) or every client
-collapses onto one rate-limit bucket, since all of them arrive through nginx.
+in responses are built from. `TC_TRUSTED_PROXIES` defaults to `172.16.0.0/12`,
+the range Docker gives a compose network; if this one was given an address
+outside it, set the range yourself, or every client collapses onto one
+rate-limit bucket, since all of them arrive through nginx.
 
 To terminate TLS somewhere else instead — a reverse proxy on the host, or a
 tunnel — drop the TLS template mount and the two certificate volumes from the
@@ -304,9 +320,12 @@ unchanged from the browser's side; point the host's proxy at that one port.
 
 Configuration goes in a `.env` beside `compose.prod.yml`. `TC_DB_ROOT_PASSWORD`,
 `TC_DB_PASSWORD`, `TC_JWT_SECRET` (`openssl rand -hex 32`), `TC_WEB_URL`,
-`TC_API_PUBLIC_URL`, `TC_PUBLIC_HOST`, `TC_S3_ACCESS_KEY`, `TC_S3_SECRET_KEY`,
-`TC_SMTP_HOST` and `TC_SMTP_FROM` have no safe default: Compose stops and names
-whichever is missing. `TC_SECRETS_KEY` is optional — without it the admin panel
+`TC_API_PUBLIC_URL`, `TC_PUBLIC_HOST`, `TC_S3_ACCESS_KEY`, `TC_S3_SECRET_KEY`
+and `TC_SMTP_FROM` have no safe default: Compose stops and names whichever is
+missing. Without `TC_SMTP_HOST` the API refuses to start unless
+`TC_ALLOW_CONSOLE_MAILER=true` lets it write mail to the log instead. Every
+other variable in the table above is passed through too, with the same default.
+`TC_SECRETS_KEY` is optional — without it the admin panel
 refuses to save OAuth client secrets rather than storing them unencrypted.
 
 ```sh

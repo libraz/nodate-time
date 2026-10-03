@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +21,7 @@ func TestDefaultTimeoutsBoundEveryPhase(t *testing.T) {
 		{"read", d.Read},
 		{"write", d.Write},
 		{"idle", d.Idle},
+		{"transfer", d.Transfer},
 	} {
 		if tc.value <= 0 {
 			t.Errorf("%s timeout is %v, which lets a connection be held indefinitely", tc.phase, tc.value)
@@ -85,5 +87,98 @@ func TestServerDropsARequestThatNeverFinishesArriving(t *testing.T) {
 	}
 	if _, err := io.ReadAll(conn); err != nil {
 		t.Fatalf("the connection was held past the read timeout: %v", err)
+	}
+}
+
+// slowServer runs handler under read and write limits a slow transfer
+// outlives, with a transfer budget it does not.
+func slowServer(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := NewServer(ln.Addr().String(), handler, Timeouts{
+		Read:     200 * time.Millisecond,
+		Write:    200 * time.Millisecond,
+		Idle:     time.Second,
+		Transfer: 5 * time.Second,
+	})
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return "http://" + ln.Addr().String()
+}
+
+// trickle yields chunks spaced out well past the read limit.
+type trickle struct{ left int }
+
+func (r *trickle) Read(p []byte) (int, error) {
+	if r.left == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(150 * time.Millisecond)
+	r.left--
+	return copy(p, "chunk"), nil
+}
+
+func uploadSlowly(t *testing.T, url string) (int, error) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, url, &trickle{left: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func countingBody(w http.ResponseWriter, r *http.Request) {
+	n, err := io.Copy(io.Discard, r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Fprint(w, n)
+}
+
+// A blob upload that takes longer than the read limit still arrives whole:
+// the relay carries bodies up to the size it granted, not ones that fit in
+// the budget for a JSON request.
+func TestBlobRelayOutlivesTheReadLimit(t *testing.T) {
+	base := slowServer(t, http.HandlerFunc(countingBody))
+	status, err := uploadSlowly(t, base+"/blobs/some/key")
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("slow blob upload: status %d, err %v", status, err)
+	}
+}
+
+// Every other route keeps the read limit.
+func TestOtherRoutesKeepTheReadLimit(t *testing.T) {
+	base := slowServer(t, http.HandlerFunc(countingBody))
+	if status, err := uploadSlowly(t, base+"/calendars"); err == nil && status == http.StatusOK {
+		t.Fatal("a slow body on an ordinary route should be cut off by the read limit")
+	}
+}
+
+// A download is held to the same transfer budget rather than the write limit.
+func TestBlobRelayOutlivesTheWriteLimit(t *testing.T) {
+	base := slowServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		for range 5 {
+			time.Sleep(150 * time.Millisecond)
+			fmt.Fprint(w, "chunk")
+			http.NewResponseController(w).Flush()
+		}
+	}))
+	resp, err := http.Get(base + "/blobs/some/key")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != strings.Repeat("chunk", 5) {
+		t.Fatalf("slow blob download cut short: %q, %v", body, err)
 	}
 }

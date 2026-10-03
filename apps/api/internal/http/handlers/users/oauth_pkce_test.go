@@ -38,7 +38,7 @@ func TestIDTokenNonce(t *testing.T) {
 func TestOAuthStateCookie(t *testing.T) {
 	// Setting the cookie binds the flow: HttpOnly, scoped, and SameSite=Lax so it
 	// still rides the top-level redirect back from the provider.
-	set := oauthStateCookie("statevalue", true, 600)
+	set := oauthStateCookie("statevalue", "/auth/oauth", true, 600)
 	for _, want := range []string{
 		"oauth_state=statevalue",
 		"Path=/auth/oauth",
@@ -53,11 +53,26 @@ func TestOAuthStateCookie(t *testing.T) {
 	}
 
 	// Clearing uses a non-positive Max-Age and drops Secure when not HTTPS.
-	clear := oauthStateCookie("", false, -1)
+	clear := oauthStateCookie("", "/auth/oauth", false, -1)
 	if !strings.Contains(clear, "Max-Age=0") {
 		t.Errorf("clearing cookie should expire immediately: %q", clear)
 	}
 	if strings.Contains(clear, "Secure") {
 		t.Errorf("non-secure context must not set Secure: %q", clear)
+	}
+}
+
+// The state cookie has to reach the callback the browser is sent to, which
+// carries whatever prefix the API is published under.
+func TestOAuthCookiePathFollowsThePublicPrefix(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://app.example.com/api":  "/api/auth/oauth",
+		"https://app.example.com/api/": "/api/auth/oauth",
+		"https://api.example.com":      "/auth/oauth",
+		"":                             "/auth/oauth",
+	} {
+		if got := oauthCookiePath(OAuthDeps{Config: OAuthConfig{RedirectBase: base}}); got != want {
+			t.Errorf("RedirectBase %q: cookie path %q, want %q", base, got, want)
+		}
 	}
 }

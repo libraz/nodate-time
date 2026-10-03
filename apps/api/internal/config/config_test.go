@@ -187,3 +187,25 @@ func TestTrustedProxyListEmptyMeansNoProxyTrusted(t *testing.T) {
 		t.Fatalf("expected no trusted proxies for empty config, got %v", got)
 	}
 }
+
+// A variable whose empty value is documented as a setting of its own has to
+// reach the config empty, not as the default for an unset one.
+func TestExplicitEmptyKeepsItsMeaning(t *testing.T) {
+	t.Setenv("TC_METRICS_ADDR", "")
+	t.Setenv("TC_METRICS_ALLOWED_CIDRS", "")
+	t.Setenv("TC_CORS_ALLOWED_ORIGINS", "")
+
+	c, err := LoadForTooling()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MetricsEnabled() {
+		t.Errorf("empty TC_METRICS_ADDR should disable the listener, got %q", c.MetricsAddr)
+	}
+	if got := c.MetricsAllowedPeerList(); len(got) != 0 {
+		t.Errorf("empty TC_METRICS_ALLOWED_CIDRS should allow no one, got %v", got)
+	}
+	if got := c.CORSAllowedOriginList(); len(got) != 0 {
+		t.Errorf("empty TC_CORS_ALLOWED_ORIGINS should stay empty so Validate refuses it, got %v", got)
+	}
+}

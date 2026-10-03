@@ -32,7 +32,7 @@
 - **アクティビティ / 監査履歴** — イベント・メモの変更履歴とカレンダー単位のアクティビティフィード
 - **認証** — メール+パスワード、Google / LINE の OAuth/OIDC ログイン、パスワードリセット、開発用パスワードレスログイン
 - **管理者機能** — OAuth プロバイダ設定、サインイン許可メール/ドメインのアロウリスト
-- **エクスポート / インポート** — iCal・CSV
+- **エクスポート / インポート** — エクスポートは iCal・CSV、インポートは iCal
 - **多言語 / テーマ** — 日本語・英語の i18n、テーマ切り替え
 
 ## 技術スタック
@@ -137,25 +137,27 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_APP_NAME` | デプロイの名乗り（OpenAPI のタイトル、送信メール、iCalendar の `PRODID`）。SPA へはビルド引数 `VITE_APP_NAME` で同じ名前を渡す | `Nodate Time` |
 | `TC_PORT` | API ポート | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
-| `TC_JWT_SECRET` | JWT 署名鍵（本番は 32 バイト以上必須） | dev フォールバック |
+| `TC_JWT_SECRET` | JWT 署名鍵（32 バイト以上）。全環境で必須。組み込みの値はこのリポジトリで公開されているため拒否される | なし（`make dev` が `secrets/` 配下に生成） |
 | `TC_PASSWORD_LOGIN_ENABLED` | メール+パスワード認証の有効化 | `true` |
 | `TC_WORKSPACE_TIMEZONE` | 新規アカウントの初期タイムゾーン（IANA 名）。サインアップもプロバイダ初回サインインもゾーンを聞かず、列は NOT NULL。tz データベースにない名前は起動時に弾く | `Asia/Tokyo` |
 | `TC_DEFAULT_LOCALE` | 新規アカウントの初期ロケール（BCP 47 タグ）。理由は上と同じ | `ja` |
-| `TC_CORS_ALLOWED_ORIGINS` | CORS 許可オリジン（本番はワイルドカード不可） | localhost:5173 |
+| `TC_CORS_ALLOWED_ORIGINS` | CORS 許可オリジン（カンマ区切り）。空と `*` は全環境で拒否される | localhost:5173 |
 | `TC_TRUSTED_PROXIES` | `X-Forwarded-For` の設定を信頼するリバースプロキシ（CIDR または IP、カンマ区切り）。プロキシ配下で未設定だと全クライアントが 1 つのレート制限バケットに集約される | 信頼しない |
 | `TC_AUTH_RATE_LIMIT` | サインイン・登録・パスワード再設定・OAuth の IP あたり req/min | `60` |
 | `TC_SHARE_RATE_LIMIT` | 公開共有リンクの IP あたり req/min（サインインとは別枠） | `600` |
 | `TC_WEB_URL` / `TC_API_PUBLIC_URL` | フロント / API の公開 URL。`TC_API_PUBLIC_URL` は blob URL が指し戻す先でもあるため、API を置いたパスまで含める必要がある | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない | MinIO デフォルト |
-| `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信（未設定時は stdout、本番は必須） | コンソール出力 |
+| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない。`minioadmin` の認証情報は `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` がない限り拒否される | MinIO デフォルト |
+| `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | 公開済みの MinIO 認証情報を許可する（ローカルのオブジェクトストア用） | `false`（`make dev` は `true`） |
+| `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信。ホスト未設定だと `TC_ALLOW_CONSOLE_MAILER` がない限り API は起動を拒否する | 未設定 |
+| `TC_ALLOW_CONSOLE_MAILER` | SMTP リレーなしで動かす。メールは配送されずログに書かれる。開発環境以外ではログに残るのは件名だけで、宛先も本文も出ない | `false`（`make dev` は `true`） |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | 空 |
-| `TC_GOOGLE_ALLOWED_DOMAINS` | Google サインイン許可ドメイン（カンマ区切り） | 制限なし |
+| `TC_GOOGLE_ALLOWED_DOMAINS` | サインアップ / サインインを許可するメールドメイン（カンマ区切り）。Google・LINE・パスワード登録のすべてが検査する。リスト外のアドレスでも、管理者が個別にアロウリストへ登録していれば通る | 制限なし |
 | `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | 空 |
 | `TC_SECRETS_KEY` | DB に保存する秘密情報の暗号鍵（hex/base64 32 バイト） | 空 |
 | `TC_METRICS_ADDR` | 管理用リスナーの待ち受けアドレス。空で無効化 | `127.0.0.1:9464` |
 | `TC_METRICS_ALLOWED_CIDRS` | 管理用リスナーに到達できるネットワーク。直接の TCP ピアと照合する。空はすべて拒否 | loopback + プライベート帯 |
 
-> 本番では `Config.Validate()` がデフォルトの JWT 秘密鍵・MinIO 認証情報・ワイルドカード CORS・未設定 SMTP を起動時に拒否する。
+> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・デフォルトの MinIO 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、MinIO 認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV` が足すのは `/auth/dev-login` だけ。
 
 DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_MINIO_API_PORT`, `TC_MINIO_CONSOLE_PORT`。
 
@@ -163,9 +165,11 @@ DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_
 
 Huma v2 で OpenAPI 記述が自動生成される。認証なしで `/openapi.json` と `/openapi.yaml` を配信し、`/docs` にリファレンスを描画する。ルートは `apps/api/internal/http/router/router.go` 参照。
 
-- **公開** — `/health`, `/auth/*`（register/login/dev-login/password-reset/oauth）, `/share/{token}`（公開カレンダー）
-- **要認証** — `/user`, `/calendars`, `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}` ほか
-- **管理者** — `/admin/oauth-providers`, `/admin/allowed-emails`
+以下のグループは網羅ではない。全件はルーターを参照。
+
+- **公開** — `/health`, `/openapi.json`, `/openapi.yaml`, `/docs`、`/auth/*`（`/auth/logout` を除く。register/login/refresh/password-reset/verify-email/confirm/oauth、`dev-login` は開発時のみ）、`/share/{token}` と `/share/{token}/events`、`/blobs/*`（セッションは持たず、URL の署名で認可される）
+- **要認証** — `/auth/logout`, `/user/*`, `/calendars`, `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`, `/invites/{token}/accept`
+- **管理者** — `/admin/oauth-providers`, `/admin/allowed-emails`, `/admin/instance-admins`
 
 認証なしのエンドポイントは IP 単位でレート制限される。
 
@@ -195,12 +199,14 @@ go tool pprof http://127.0.0.1:9464/debug/pprof/profile?seconds=30
 
 ## テスト
 
-E2E はテストごとに独立ユーザー＋カレンダーを生成（テナント分離）し、実 MySQL に対して並列実行する。本数は 332 本、うち 310 本が `t.Parallel()` を宣言しており、CI ではパッケージ全体が約 64 秒で終わる（`ubuntu-latest` は 4 vCPU なので、Go の既定の並列度で 4 本同時に走る）。
+E2E はテストごとに独立ユーザー＋カレンダーを生成（テナント分離）し、実 MySQL に対して並列実行する。
 
 ```bash
-TC_DB_PORT=3307 make db-up      # CI と同じポートで MySQL 起動
+make db-up                      # TC_DB_PORT（既定 33306）で MySQL 起動
 make test-e2e                   # TC_TEST_INTEGRATION=1 で実行
 ```
+
+テストは `127.0.0.1:${TC_DB_PORT:-33306}` に接続する。CI も同じなので、既定以外の `TC_DB_PORT` を使うなら両方のコマンドで export しておく。
 
 CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と API（build / vet / E2E）を実行する。
 
@@ -231,11 +237,11 @@ certbot renew --webroot -w /path/to/acme \
   --deploy-hook 'docker compose -f /path/to/compose.prod.yml exec web nginx -s reload'
 ```
 
-`TC_API_PUBLIC_URL` には `/api` の prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先であり、レスポンスの `$schema` リンクを組み立てる元でもあるため。`TC_TRUSTED_PROXIES` には compose ネットワークのレンジを入れること（既定なら `172.16.0.0/12` で足りる）。全クライアントが nginx を通って届くので、入れないとレート制限が 1 バケットに潰れる。
+`TC_API_PUBLIC_URL` には `/api` の prefix が要る（`https://app.example.com/api`）。OAuth のコールバックが戻ってくる先であり、blob URL が指し戻す先であり、レスポンスの `$schema` リンクを組み立てる元でもあるため。`TC_TRUSTED_PROXIES` の既定は Docker が compose ネットワークに割り当てるレンジ `172.16.0.0/12`。ネットワークがその外に置かれた場合は自分でレンジを入れること。全クライアントが nginx を通って届くので、合っていないとレート制限が 1 バケットに潰れる。
 
 TLS を別の場所で終端したい場合——ホスト上のリバースプロキシ、あるいはトンネル——は、`web` サービスから TLS テンプレートのマウントと証明書の 2 つのボリュームを外し、`127.0.0.1:8081:80` を publish する。イメージは平文 HTTP で応答し、`/api` は同じように自分で API へ流すので、ブラウザから見た構成は上と変わらない。ホスト側のプロキシはその 1 ポートだけを向けばよい。
 
-設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_HOST`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
+設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SMTP_HOST` がなければ API が起動を拒否する（`TC_ALLOW_CONSOLE_MAILER=true` ならメールを配送せずログに書いて起動する）。上の表のその他の変数も同じ既定値のまま渡る。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
 
 ```sh
 docker compose -f compose.prod.yml up -d --build

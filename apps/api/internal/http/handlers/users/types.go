@@ -239,7 +239,11 @@ type ResendVerificationOutput struct {
 }
 
 type ConfirmVerificationInput struct {
-	Body struct {
+	// The confirming browser's own session, when it has one. A link redeemed
+	// from the account's session only verifies; redeemed from anywhere else
+	// it also ends every credential the account held before.
+	Authorization string `header:"Authorization" required:"false"`
+	Body          struct {
 		Token string `json:"token" minLength:"16" maxLength:"128"`
 	}
 }

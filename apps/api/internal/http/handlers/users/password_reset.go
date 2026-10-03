@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,15 +47,9 @@ const (
 	mailPurposeVerify mailPurpose = "verify"
 )
 
-type resetEmailBucket struct {
-	count       int
-	windowStart time.Time
-}
-
-var resetEmailLimiter = struct {
-	sync.Mutex
-	buckets map[string]*resetEmailBucket
-}{buckets: map[string]*resetEmailBucket{}}
+// resetEmailLimiter holds every mail budget. Each send draws on two keys, so
+// the cap is twice the client limiter's.
+var resetEmailLimiter = middleware.NewWindowCounter(passwordResetEmailWindow, 20000)
 
 // allowEmailSend takes one unit from the (address, client) budget and one from
 // the address's own total, both scoped to a single purpose. A request the
@@ -80,23 +73,8 @@ func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
 }
 
 func takeEmailBudget(key string, limit int, now time.Time) bool {
-	resetEmailLimiter.Lock()
-	defer resetEmailLimiter.Unlock()
-
-	b, exists := resetEmailLimiter.buckets[key]
-	if !exists || now.Sub(b.windowStart) >= passwordResetEmailWindow {
-		b = &resetEmailBucket{windowStart: now}
-		resetEmailLimiter.buckets[key] = b
-		if len(resetEmailLimiter.buckets) > 10000 {
-			for k, bb := range resetEmailLimiter.buckets {
-				if now.Sub(bb.windowStart) >= passwordResetEmailWindow {
-					delete(resetEmailLimiter.buckets, k)
-				}
-			}
-		}
-	}
-	b.count++
-	return b.count <= limit
+	count, _ := resetEmailLimiter.Take(key, now)
+	return count <= limit
 }
 
 func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInput) (*RequestResetOutput, error) {
@@ -116,6 +94,15 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 
 		user, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return out, nil
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// An account that signs in only through a provider has no password to
+		// reset, and a link that appears to set one would sign it out
+		// everywhere and leave nothing to sign in with.
+		if _, err := deps.Queries.GetLocalIdentityByUser(ctx, user.ID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, nil
 			}
@@ -181,6 +168,15 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 
 		row, err := q.GetPasswordResetByTokenHash(ctx, hash)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// Checked before anything is written: with no local identity the
+		// update below matches nothing, and the sessions and the token must
+		// survive a reset that set no password.
+		if _, err := q.GetLocalIdentityByUser(ctx, row.UserID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
 			}

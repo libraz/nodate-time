@@ -118,17 +118,28 @@ const oauthStateCookieName = "oauth_state"
 // oauthStateCookie builds the Set-Cookie value that binds an OAuth flow to the
 // browser that started it. SameSite=Lax keeps it on the top-level redirect back
 // from the provider; HttpOnly hides it from script. A negative maxAge clears it.
-func oauthStateCookie(state string, secure bool, maxAge int) string {
+func oauthStateCookie(state, path string, secure bool, maxAge int) string {
 	c := &http.Cookie{
 		Name:     oauthStateCookieName,
 		Value:    state,
-		Path:     "/auth/oauth",
+		Path:     path,
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	}
 	return c.String()
+}
+
+// oauthCookiePath scopes the state cookie to the callback as the browser sees
+// it. A reverse proxy that publishes the API under a prefix strips it before
+// the API, so the path comes from the public redirect base, not the request.
+func oauthCookiePath(deps OAuthDeps) string {
+	prefix := ""
+	if u, err := url.Parse(deps.Config.RedirectBase); err == nil {
+		prefix = strings.TrimRight(u.Path, "/")
+	}
+	return prefix + "/auth/oauth"
 }
 
 // secureCookies reports whether OAuth cookies should carry the Secure attribute,
@@ -319,7 +330,7 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 		out := &OAuthStartOutput{
 			Status:    http.StatusFound,
 			URL:       pc.AuthURL + "?" + params.Encode(),
-			SetCookie: oauthStateCookie(state, secureCookies(deps), int(oauthStateTTL.Seconds())),
+			SetCookie: oauthStateCookie(state, oauthCookiePath(deps), secureCookies(deps), int(oauthStateTTL.Seconds())),
 		}
 		out.Body.AuthorizeURL = out.URL
 		out.Body.State = state
@@ -441,7 +452,7 @@ func oauthRedirect(deps OAuthDeps, code string) *OAuthCallbackOutput {
 	return &OAuthCallbackOutput{
 		Status:    http.StatusFound,
 		URL:       dest,
-		SetCookie: oauthStateCookie("", secureCookies(deps), -1),
+		SetCookie: oauthStateCookie("", oauthCookiePath(deps), secureCookies(deps), -1),
 	}
 }
 
@@ -559,9 +570,6 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		// page like every other failure above. Returning a Huma error instead
 		// would render a raw JSON body in the address bar the user is watching.
 		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified, deps.Defaults.resolved())
-		if errors.Is(err, errUnverifiedAccountExists) {
-			return oauthRedirect(deps, "oauth_email_unverified"), nil
-		}
 		if err != nil {
 			slog.ErrorContext(ctx, "oauth user upsert failed", "provider", in.Provider, "error", err)
 			return oauthRedirect(deps, "oauth_failed"), nil
@@ -581,16 +589,10 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		return &OAuthCallbackOutput{
 			Status:    http.StatusFound,
 			URL:       dest,
-			SetCookie: oauthStateCookie("", secureCookies(deps), -1),
+			SetCookie: oauthStateCookie("", oauthCookiePath(deps), secureCookies(deps), -1),
 		}, nil
 	}
 }
-
-// errUnverifiedAccountExists reports that provider sign-in stopped because an
-// account already holds this address without having proven it owns it. It is
-// not an internal failure: the user is told to confirm the address from the
-// email they were sent, after which the same sign-in links cleanly.
-var errUnverifiedAccountExists = errors.New("an unverified account already holds this address")
 
 // upsertOAuthUser links an OAuth identity to a user, creating one if needed.
 // Wrapped in a transaction so concurrent callbacks for the same subject cannot
@@ -622,13 +624,18 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	// over the victim's account.
 	if emailVerified && email != "" {
 		if u, err := q.GetUserByEmail(ctx, email); err == nil {
-			// Both sides must be proven, not just the provider's. An account
-			// whose own address was never confirmed may have been registered by
-			// someone who does not read that mailbox: linking to it hands them
-			// everything the real owner signs in to. They keep their password,
-			// so the takeover is silent and permanent.
+			// An account whose own address was never confirmed may have been
+			// registered by someone who does not read that mailbox. The
+			// provider has just proven who does, so the account is theirs:
+			// it is confirmed, and the registrant's password and sessions
+			// end, in this transaction, before the link is made.
 			if !u.EmailVerifiedAt.Valid {
-				return 0, errUnverifiedAccountExists
+				if _, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{ID: u.ID, Email: u.Email}); err != nil {
+					return 0, err
+				}
+				if err := revokePriorCredentials(ctx, q, u.ID); err != nil {
+					return 0, err
+				}
 			}
 			identityPubID, err := uuid.NewV7()
 			if err != nil {

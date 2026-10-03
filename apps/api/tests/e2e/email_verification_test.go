@@ -44,7 +44,10 @@ func TestRegistrationSendsAConfirmationAndLeavesTheAddressUnverified(t *testing.
 		map[string]any{"name": "New User", "email": email, "password": "password123"}, &reg)
 	require.False(t, reg.User.EmailVerified, "registering does not prove the registrant reads the mailbox")
 
-	confirmEmail(t, testServerURL, email)
+	// From the registrant's own session, as the SPA sends it: confirmed from
+	// anywhere else, the registration's credentials would end.
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/auth/verify-email/confirm", reg.Token,
+		map[string]any{"token": verificationToken(t, email)}, nil)
 
 	var me struct {
 		EmailVerified bool `json:"emailVerified"`

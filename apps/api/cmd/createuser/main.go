@@ -101,6 +101,14 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 	if timezone == "" {
 		timezone = cfg.WorkspaceTimezone
 	}
+	// The rule the API applies on every path that stores a zone. Tooling
+	// configuration skips Validate, so it is checked here, before any row.
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return fmt.Errorf("-timezone must be an IANA timezone name (e.g. Asia/Tokyo): %w", err)
+	}
+	if _, err := time.LoadLocation(cfg.WorkspaceTimezone); err != nil {
+		return fmt.Errorf("TC_WORKSPACE_TIMEZONE must be an IANA timezone name (e.g. Asia/Tokyo): %w", err)
+	}
 
 	db, err := sql.Open("mysql", cfg.DbDsn)
 	if err != nil {
@@ -141,7 +149,7 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 	// workspace can reach no calendar, and an admin grant without a user is
 	// an orphan. One transaction is what keeps a half-created account from
 	// existing.
-	ws, err := workspace.Ensure(ctx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, "")
+	ws, err := workspace.Ensure(ctx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, cfg.WorkspaceCountry)
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}

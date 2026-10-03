@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 )
 
 type ctxKey int
@@ -46,19 +47,19 @@ func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
 			if header == "" {
-				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_MISSING", "Authorization header is required")
+				apierrors.WriteSpec(w, apierrors.AuthTokenMissing)
 				return
 			}
 
 			tok, ok := strings.CutPrefix(header, "Bearer ")
 			if !ok {
-				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid")
+				apierrors.WriteSpec(w, apierrors.AuthTokenInvalid)
 				return
 			}
 
 			claims, err := auth.ValidateToken(tok, jwtSecret)
 			if err != nil {
-				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
+				apierrors.WriteSpec(w, apierrors.AuthTokenInvalid)
 				return
 			}
 			// The signature alone proves only that this token was issued at
@@ -67,12 +68,12 @@ func RequireAuth(jwtSecret string, queries *generated.Queries) func(http.Handler
 			// eventually expires.
 			sessionPub, err := uuid.Parse(claims.SessionID)
 			if err != nil {
-				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
+				apierrors.WriteSpec(w, apierrors.AuthTokenInvalid)
 				return
 			}
 			session, err := queries.GetLiveSession(r.Context(), sessionPub[:])
 			if err != nil {
-				writeJSONError(w, http.StatusUnauthorized, "AUTH.TOKEN_INVALID", "Bearer token is invalid or expired")
+				apierrors.WriteSpec(w, apierrors.AuthTokenInvalid)
 				return
 			}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -99,19 +100,38 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		reason := strings.TrimSpace(in.Body.Reason)
-		if _, err := deps.Queries.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
-			PublicID:        pubID[:],
-			Email:           email,
-			Reason:          reason,
-			CreatedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
-		}); err != nil {
+		// A withdrawn address is re-enabled in place and keeps its public id,
+		// so the answer is read back rather than built from what was sent.
+		var stored generated.OauthAllowedEmail
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
+				PublicID:        pubID[:],
+				Email:           email,
+				Reason:          reason,
+				CreatedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
+			}); err != nil {
+				return err
+			}
+			rows, err := q.ListAllowedEmails(ctx)
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				if r.Email == email {
+					stored = r
+					return nil
+				}
+			}
+			return sql.ErrNoRows
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &CreateAllowedEmailOutput{Body: AllowedEmail{
-			ID:        pubID.String(),
-			Email:     email,
-			Reason:    reason,
-			CreatedAt: time.Now(),
+			ID:        calresolve.PublicIDString(stored.PublicID),
+			Email:     stored.Email,
+			Reason:    stored.Reason,
+			CreatedAt: stored.CreatedAt,
 		}}, nil
 	}
 }

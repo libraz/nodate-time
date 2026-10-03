@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/observability"
 )
 
 // Recoverer turns a panic in a handler into the ordinary error envelope.
@@ -16,6 +17,9 @@ import (
 // and the stack goes to stderr while every other log line goes to stdout as
 // JSON. Neither chi's router nor Huma recovers around a handler, so this is
 // the only place it can happen.
+//
+// The log line names the matched route pattern, never the URL: paths and
+// queries carry credentials (see Observe).
 //
 // http.ErrAbortHandler is the standard way to abandon a response deliberately
 // and is re-panicked so net/http still sees it.
@@ -32,7 +36,7 @@ func Recoverer() func(http.Handler) http.Handler {
 				}
 				slog.ErrorContext(r.Context(), "panic recovered",
 					"method", r.Method,
-					"path", r.URL.Path,
+					"route", observability.NormalizeRoute(routePattern(r)),
 					"panic", rec,
 					"stack", string(debug.Stack()),
 				)

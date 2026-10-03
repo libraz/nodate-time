@@ -34,17 +34,25 @@ import (
 // without a mail relay are both supported configurations, and a report that
 // called either one fatal would take a deployment out of rotation over a
 // feature it was never given.
-func healthReporter(db *sql.DB, storageClient *storage.Client, cfg *config.Config) *observability.Reporter {
+//
+// Object storage is reported whenever it is configured. A client that could not
+// be built is reported as down rather than left out, which would read as a
+// deployment that never asked for storage.
+func healthReporter(db *sql.DB, storageClient *storage.Client, storageErr error, cfg *config.Config) *observability.Reporter {
 	checks := []observability.Check{{
 		Name:     "database",
 		Required: true,
 		Probe:    db.PingContext,
 	}}
 
-	if storageClient != nil {
+	if cfg.S3Endpoint != "" {
+		probe := func(context.Context) error { return storageErr }
+		if storageClient != nil {
+			probe = storageClient.Ping
+		}
 		checks = append(checks, observability.Check{
 			Name:  "object_storage",
-			Probe: storageClient.Ping,
+			Probe: probe,
 		})
 	}
 
@@ -127,25 +135,27 @@ func main() {
 	// at -- and the same signer has to both mint and check them.
 	blobSigner := storage.NewSigner(cfg.APIPublic, []byte(cfg.JWTSecret))
 
+	// Lives as long as the process; the background work below stops with it.
+	backgroundCtx, cancelBackground := context.WithCancel(context.Background())
+	defer cancelBackground()
+
+	// Only a configuration the client library rejects disables storage. An
+	// object store that is not answering yet -- it routinely starts alongside
+	// this process -- is retried in the background, and the routes and the
+	// sweeps keep the client so they work as soon as it does.
 	var storageClient *storage.Client
+	var storageErr error
 	if cfg.S3Endpoint != "" {
-		sc, err := storage.NewClient(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL, blobSigner)
-		if err != nil {
-			slog.Warn("failed to create storage client, file uploads disabled", "error", err)
+		storageClient, storageErr = storage.NewClient(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket, cfg.S3UseSSL, blobSigner)
+		if storageErr != nil {
+			slog.Error("invalid object storage configuration, file uploads disabled", "error", storageErr)
 		} else {
-			if err := sc.EnsureBucket(context.Background()); err != nil {
-				slog.Warn("failed to ensure storage bucket, file uploads disabled", "error", err)
-			} else {
-				storageClient = sc
-				slog.Info("storage connected", "bucket", cfg.S3Bucket)
-			}
+			go ensureBucket(backgroundCtx, storageClient.EnsureBucket, cfg.S3Bucket, 5*time.Second, time.Minute)
 		}
 	}
 
 	// Background cleanup of expired tokens and abandoned upload rows/objects.
-	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
-	defer cancelCleanup()
-	cleanup.Run(cleanupCtx, queries, storageClient, 15*time.Minute)
+	cleanup.Run(backgroundCtx, queries, storageClient, 15*time.Minute)
 
 	// Build app router. Mail goes out through a dispatcher so a slow relay
 	// costs a background goroutine instead of the request that triggered it.
@@ -246,7 +256,7 @@ func main() {
 	if cfg.MetricsEnabled() {
 		adminSrv = observability.NewAdminServer(cfg.MetricsAddr, observability.NewAdminHandler(observability.AdminOptions{
 			AllowedPeers: cfg.MetricsAllowedPeerList(),
-			Health:       healthReporter(db, storageClient, cfg),
+			Health:       healthReporter(db, storageClient, storageErr, cfg),
 		}))
 		go func() {
 			slog.Info("metrics listener starting", "addr", cfg.MetricsAddr, "allowed", cfg.MetricsAllowedCIDRs)
@@ -268,33 +278,79 @@ func main() {
 		os.Exit(1)
 	case sig := <-stop:
 		slog.Info("shutting down", "signal", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		// The administrative listener goes first and is not waited on beyond
-		// the shared deadline: an in-progress CPU profile would otherwise hold
-		// the process open for as long as the profile was asked to run.
+		var servers []shutdowner
 		if adminSrv != nil {
-			if err := adminSrv.Shutdown(ctx); err != nil {
-				slog.Warn("metrics listener shutdown error", "error", err)
-			}
+			servers = append(servers, adminSrv)
 		}
-		if err := srv.Shutdown(ctx); err != nil {
-			slog.Error("shutdown error", "error", err)
+		if err := shutdown(append(servers, srv), mailerClient.Wait); err != nil {
 			os.Exit(1)
 		}
-		// Give mail already handed to the dispatcher a chance to leave, but do
-		// not let it hold shutdown open: an undelivered link is recoverable by
-		// asking for another one, a process that will not exit is not.
-		drained := make(chan struct{})
-		go func() {
-			mailerClient.Wait()
-			close(drained)
-		}()
-		select {
-		case <-drained:
-		case <-time.After(5 * time.Second):
-			slog.Warn("shutting down with mail still in flight")
-		}
 		slog.Info("server stopped")
+	}
+}
+
+// The shutdown budgets. compose.prod.yml's stop_grace_period has to cover
+// their sum, or the orchestrator kills the process mid-drain.
+const (
+	httpDrainBudget = 10 * time.Second
+	mailDrainBudget = 5 * time.Second
+)
+
+type shutdowner interface {
+	Shutdown(context.Context) error
+}
+
+// shutdown drains the servers in order under one shared deadline, then gives
+// mail already handed to the dispatcher its own budget whatever the servers
+// did. It reports whether any server failed to drain.
+//
+// The administrative listener goes first and is not waited on beyond the
+// shared deadline: an in-progress CPU profile would otherwise hold the process
+// open for as long as the profile was asked to run. Mail is bounded too: an
+// undelivered link is recoverable by asking for another one, a process that
+// will not exit is not.
+func shutdown(servers []shutdowner, waitMail func()) error {
+	ctx, cancel := context.WithTimeout(context.Background(), httpDrainBudget)
+	defer cancel()
+	var failed error
+	for _, s := range servers {
+		if err := s.Shutdown(ctx); err != nil {
+			slog.Error("shutdown error", "error", err)
+			failed = err
+		}
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		waitMail()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(mailDrainBudget):
+		slog.Warn("shutting down with mail still in flight")
+	}
+	return failed
+}
+
+// ensureBucket creates the bucket once the object store answers, retrying with
+// a backoff from first up to ceiling until it succeeds or ctx ends.
+func ensureBucket(ctx context.Context, ensure func(context.Context) error, bucket string, first, ceiling time.Duration) {
+	wait := first
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := ensure(attemptCtx)
+		cancel()
+		if err == nil {
+			slog.Info("storage connected", "bucket", bucket)
+			return
+		}
+		slog.Warn("object storage not ready, retrying", "bucket", bucket, "retry_in", wait.String(), "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = min(wait*2, ceiling)
 	}
 }
