@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -69,6 +70,94 @@ func TestConcurrentDeletesReleaseEachAttachmentOnce(t *testing.T) {
 	statuses = concurrently(t, 8, http.MethodDelete, testServerURL+"/calendars/"+d.CalendarID, d.AccessToken)
 	require.Contains(t, statuses, http.StatusNoContent)
 	require.Equal(t, 1, objectRefCount(t, storageKey), "one calendar deleted eight times is one release: %v", statuses)
+}
+
+// Deleting an event and confirming an upload on it touch the same rows. Both
+// lock the event before anything under it, so they queue rather than deadlock,
+// and whichever lands first, the event's references all come back.
+func TestDeletingAnEventWhileAnUploadOnItConfirms(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	for round := range 20 {
+		tt := helpers.NewTenant(t, testServerURL)
+		body := uniqueAttachmentBody(fmt.Sprintf("delete races confirm %d", round))
+		storageKey := helpers.AttachmentStorageKey(testWorkspacePublicID, helpers.SHA256Hex(body))
+		eventID, _ := attachEventWithAttachment(t, tt, "Raced", body)
+		eventURL := testServerURL + "/calendars/" + tt.CalendarID + "/events/" + eventID
+
+		var pres presignResp
+		helpers.DoJSON(t, http.MethodPost, eventURL+"/attachments/presign", tt.AccessToken,
+			map[string]any{
+				"filename": "copy.pdf", "contentType": "application/pdf",
+				"byteSize": len(body), "sha256": helpers.SHA256Hex(body),
+			}, &pres)
+
+		var deleted, confirmed int
+		var start, done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			deleted, _ = helpers.DoJSONStatus(t, http.MethodDelete, eventURL, tt.AccessToken, nil)
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			confirmed, _ = helpers.DoJSONStatus(t, http.MethodPost,
+				eventURL+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
+		}()
+		start.Done()
+		done.Wait()
+
+		require.Equal(t, http.StatusNoContent, deleted, "round %d", round)
+		require.Contains(t, []int{http.StatusOK, http.StatusNotFound}, confirmed, "round %d", round)
+		require.Equal(t, 0, objectRefCount(t, storageKey), "round %d: the deleted event holds nothing", round)
+	}
+}
+
+// The same race one level up: a calendar deleted while a photo in it confirms.
+func TestDeletingACalendarWhileAPhotoInItConfirms(t *testing.T) {
+	bootstrap(t)
+	requireStorage(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	for round := range 20 {
+		calendarID := newCalendar(t, tt, fmt.Sprintf("Raced %d", round))
+		calURL := testServerURL + "/calendars/" + calendarID
+		stamp := fmt.Sprintf("%d-%d", round, time.Now().UnixNano())
+		uploadPhotoBytes(t, tt, calendarID, distinctPNG("kept-"+stamp), "kept")
+
+		body := distinctPNG("raced-" + stamp)
+		var pres albumPresignResp
+		helpers.DoJSON(t, http.MethodPost, calURL+"/albums/presign", tt.AccessToken,
+			map[string]any{"caption": "raced", "contentType": "image/png", "byteSize": len(body)}, &pres)
+		helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
+
+		var deleted, confirmed int
+		var start, done sync.WaitGroup
+		start.Add(1)
+		done.Add(2)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			deleted, _ = helpers.DoJSONStatus(t, http.MethodDelete, calURL, tt.AccessToken, nil)
+		}()
+		go func() {
+			defer done.Done()
+			start.Wait()
+			confirmed, _ = helpers.DoJSONStatus(t, http.MethodPost,
+				calURL+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
+		}()
+		start.Done()
+		done.Wait()
+
+		require.Equal(t, http.StatusNoContent, deleted, "round %d", round)
+		require.Contains(t, []int{http.StatusOK, http.StatusNotFound}, confirmed, "round %d", round)
+	}
 }
 
 // A deleted attachment is disabled the way an unconfirmed reservation is, but
