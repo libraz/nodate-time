@@ -107,9 +107,9 @@ type CommentResponse struct {
 
 type ListEventsInput struct {
 	CalendarID string `path:"calendarId"`
-	StartDate  string `query:"start" doc:"ISO date YYYY-MM-DD"`
-	EndDate    string `query:"end" doc:"ISO date YYYY-MM-DD"`
-	Days       int    `query:"days" default:"30" minimum:"1" maximum:"366" doc:"Number of days ahead (used if start/end not set)"`
+	StartDate  string `query:"start" doc:"ISO date YYYY-MM-DD; requires end"`
+	EndDate    string `query:"end" doc:"ISO date YYYY-MM-DD, inclusive; requires start"`
+	Days       int    `query:"days" default:"30" minimum:"1" maximum:"366" doc:"Number of days ahead (used if neither start nor end is set)"`
 	// TZ names the zone the requested dates are days in. A calendar day is a
 	// different span of instants in each zone, so without it a listing has to
 	// guess which day the caller meant. Defaults to the caller's own setting.

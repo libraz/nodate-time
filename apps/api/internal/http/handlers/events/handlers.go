@@ -1,7 +1,6 @@
 package events
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -176,28 +174,6 @@ func flexibilityOrDefault(s string) generated.CalendarEventsFlexibility {
 	}
 }
 
-// colorForOwner resolves the colour an event renders in. The colour lives
-// on the membership, not the event: an event sits on its owner's layer, and
-// the layer is what carries a colour the whole calendar has agreed on.
-func colorForOwner(ctx context.Context, deps Deps, calID, ownerID uint32, cache map[uint32]string) string {
-	if cache != nil {
-		if c, ok := cache[ownerID]; ok {
-			return c
-		}
-	}
-	color := defaultEventColor
-	if m, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-		CalendarID: calID,
-		UserID:     ownerID,
-	}); err == nil && m.MemberColor != "" {
-		color = m.MemberColor
-	}
-	if cache != nil {
-		cache[ownerID] = color
-	}
-	return color
-}
-
 func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 	return EventResponse{
 		ID:                 pubIDToHex(e.PublicID),
@@ -305,21 +281,6 @@ func eventETag(e generated.CalendarEvent) string {
 		stamp = e.UpdatedAt.Time
 	}
 	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
-}
-
-// occurrenceSeriesETag re-reads a series after one of its occurrences was
-// written, so the response hands back the revision that write produced rather
-// than the one the request started from. Without the re-read the caller would
-// store a tag that is already stale and be refused on its own next save.
-func occurrenceSeriesETag(ctx context.Context, deps Deps, seriesID uint32) string {
-	master, err := deps.Queries.GetCalendarEventByID(ctx, seriesID)
-	if err != nil {
-		// Leaving the tag off says "no opinion", which lets the next save
-		// through unconditionally -- the behaviour before preconditions
-		// existed, and better than handing out one known to be wrong.
-		return ""
-	}
-	return eventETag(master)
 }
 
 // matchesETag reports whether a caller's If-Match names the revision on hand.
@@ -529,72 +490,6 @@ func validateNotificationOffset(offset *int) *apierrors.Spec {
 	return nil
 }
 
-func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz string) (*json.RawMessage, sql.NullTime) {
-	if ruleData == nil || string(*ruleData) == "null" {
-		return nil, sql.NullTime{}
-	}
-	rule := recurrence.ParseRule(*ruleData)
-	if rule == nil {
-		return nil, sql.NullTime{}
-	}
-	// Anchor the recurrence end in the event's timezone so DST does not shift
-	// the boundary used by SQL range queries.
-	end := recurrence.ComputeEndInZone(rule, startAt, endAt, tz)
-	return ruleData, sql.NullTime{Time: end, Valid: true}
-}
-
-var validWeekdays = map[string]bool{
-	"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true,
-}
-
-// validateRecurrenceRule rejects malformed recurrence rules so a typo cannot
-// silently produce an event that never appears (unknown freq) or recurs forever
-// (unparseable until). Returns nil when there is no rule.
-func validateRecurrenceRule(data *json.RawMessage) *apierrors.Spec {
-	if data == nil || len(*data) == 0 || string(*data) == "null" {
-		return nil
-	}
-	rule := recurrence.ParseRule(*data)
-	if rule == nil {
-		return apierrors.BadRequest
-	}
-	switch rule.Freq {
-	case "daily", "weekly", "monthly", "yearly":
-	default:
-		return apierrors.BadRequest
-	}
-	if rule.Interval < 1 || rule.Interval > 999 {
-		return apierrors.BadRequest
-	}
-	if rule.Count < 0 || rule.Count > 1000 {
-		return apierrors.BadRequest
-	}
-	if rule.ByMonthDay < 0 || rule.ByMonthDay > 31 {
-		return apierrors.BadRequest
-	}
-	if rule.BySetPos < 0 || rule.BySetPos > 5 {
-		return apierrors.BadRequest
-	}
-	for _, d := range rule.ByDay {
-		if !validWeekdays[d] {
-			return apierrors.BadRequest
-		}
-	}
-	if rule.Until != nil {
-		if _, e1 := time.Parse(time.RFC3339, *rule.Until); e1 != nil {
-			if _, e2 := time.Parse("2006-01-02", *rule.Until); e2 != nil {
-				return apierrors.BadRequest
-			}
-		}
-	}
-	// A monthly rule with byDay but no bySetPos is ambiguous and would be
-	// silently ignored by the expander, so reject it rather than mislead.
-	if rule.Freq == "monthly" && len(rule.ByDay) > 0 && rule.BySetPos == 0 {
-		return apierrors.BadRequest
-	}
-	return nil
-}
-
 // resolveOwner maps a public user ID onto the member's internal ID,
 // requiring that the user actually belongs to the calendar so an event
 // cannot be filed under somebody outside it. A nil owner falls back to
@@ -628,26 +523,53 @@ type userBrief struct {
 	avatarURL string
 }
 
-// lookupUser resolves a user's public identity, memoizing in cache when provided
-// so a list request does not re-query the same creator repeatedly.
-func lookupUser(ctx context.Context, deps Deps, id uint32, cache map[uint32]userBrief) userBrief {
-	if cache != nil {
-		if b, ok := cache[id]; ok {
-			return b
+// people is the identity and calendar colour of everyone a response names.
+type people struct {
+	briefs map[uint32]userBrief
+	colors map[uint32]string
+}
+
+// loadPeople reads owners and creators in one query however many there are.
+// A listing that asked per person cost a round trip per member of a shared
+// calendar, on every month change and for every calendar shown at once.
+func loadPeople(ctx context.Context, deps Deps, calID uint32, userIDs []uint32) (people, error) {
+	p := people{briefs: map[uint32]userBrief{}, colors: map[uint32]string{}}
+	if len(userIDs) == 0 {
+		return p, nil
+	}
+	rows, err := deps.Queries.ListEventPeople(ctx, generated.ListEventPeopleParams{
+		CalendarID: calID,
+		UserIds:    userIDs,
+	})
+	if err != nil {
+		return p, err
+	}
+	av := avatars.New(deps.Queries, deps.Storage)
+	for _, r := range rows {
+		if r.Enabled {
+			p.briefs[r.ID] = userBrief{
+				publicID:  pubIDToHex(r.PublicID),
+				name:      r.DisplayName,
+				avatarURL: av.FromKey(ctx, r.AvatarStorageKey, r.AvatarURL),
+			}
+		}
+		if r.MemberColor.Valid && r.MemberColor.String != "" {
+			p.colors[r.ID] = r.MemberColor.String
 		}
 	}
-	var b userBrief
-	if u, err := deps.Queries.GetUserByID(ctx, id); err == nil {
-		b = userBrief{
-			publicID:  pubIDToHex(u.PublicID),
-			name:      u.DisplayName,
-			avatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u),
-		}
+	return p, nil
+}
+
+// apply fills in the fields that are not columns on the event row: the
+// owner's public id, the colour their membership carries, and the creator's
+// identity.
+func (p people) apply(resp *EventResponse, e generated.CalendarEvent) {
+	resp.OwnerID = p.briefs[e.OwnerUserID].publicID
+	resp.Color = defaultEventColor
+	if c, ok := p.colors[e.OwnerUserID]; ok {
+		resp.Color = c
 	}
-	if cache != nil {
-		cache[id] = b
-	}
-	return b
+	applyCreator(resp, p.briefs[e.CreatedByUserID])
 }
 
 // actorTimezone is the zone the caller reads their calendar in, used when a
@@ -667,38 +589,35 @@ func applyCreator(resp *EventResponse, b userBrief) {
 	resp.CreatorAvatarURL = b.avatarURL
 }
 
-// setCreator fills the creator identity fields on resp.
-func setCreator(ctx context.Context, deps Deps, resp *EventResponse, createdBy uint32, cache map[uint32]userBrief) {
-	applyCreator(resp, lookupUser(ctx, deps, createdBy, cache))
+// decorate is people.apply for a response carrying one event. A failed read
+// renders the event without identities and in the default colour rather than
+// failing a write that has already happened.
+func decorate(ctx context.Context, deps Deps, resp *EventResponse, e generated.CalendarEvent, calID uint32) {
+	p, err := loadPeople(ctx, deps, calID, []uint32{e.OwnerUserID, e.CreatedByUserID})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to read event people", "eventID", e.ID, "error", err)
+	}
+	p.apply(resp, e)
 }
 
-// decorate fills in the fields that are not columns on the event row: the
-// owner's public id, the colour their membership carries, and the creator's
-// identity.
-func decorate(ctx context.Context, deps Deps, resp *EventResponse, e generated.CalendarEvent, calID uint32, users map[uint32]userBrief, colors map[uint32]string) {
-	resp.OwnerID = lookupUser(ctx, deps, e.OwnerUserID, users).publicID
-	resp.Color = colorForOwner(ctx, deps, calID, e.OwnerUserID, colors)
-	setCreator(ctx, deps, resp, e.CreatedByUserID, users)
-}
-
-// occurrenceStartForDate resolves the exact UTC start instant of the occurrence
-// falling on dateStr (YYYYMMDD), confirming it is a genuine occurrence of the
-// rule rather than an arbitrary date crafted into a composite ID.
-func occurrenceStartForDate(rule *recurrence.Rule, evt generated.CalendarEvent, dateStr string) (time.Time, error) {
+// occurrenceForDate resolves the occurrence falling on dateStr (YYYYMMDD),
+// confirming it is a genuine occurrence of the rule rather than an arbitrary
+// date crafted into a composite ID. The instants are UTC.
+func occurrenceForDate(rule *recurrence.Rule, evt generated.CalendarEvent, dateStr string) (recurrence.Occurrence, error) {
 	if !evt.StartAt.Valid || !evt.EndAt.Valid {
-		return time.Time{}, fmt.Errorf("event has no dates to expand")
+		return recurrence.Occurrence{}, fmt.Errorf("event has no dates to expand")
 	}
 	dayStart, err := occurrenceDayStart(dateStr, evt.Timezone)
 	if err != nil {
-		return time.Time{}, err
+		return recurrence.Occurrence{}, err
 	}
 	dayEnd := dayStart.AddDate(0, 0, 1)
 	for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt.Time, evt.EndAt.Time, dayStart, dayEnd, evt.Timezone) {
 		if occurrenceDateKey(occ.StartAt, evt.Timezone) == dateStr {
-			return occ.StartAt.UTC(), nil
+			return occ, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("date %s is not an occurrence", dateStr)
+	return recurrence.Occurrence{}, fmt.Errorf("date %s is not an occurrence", dateStr)
 }
 
 // occurrenceDayStart turns the date half of a composite id back into the
@@ -741,9 +660,11 @@ func loadEventInCalendar(ctx context.Context, deps Deps, calID uint32, eventPubl
 // the event's owner, the people running the calendar, and attendees the owner
 // explicitly trusted decide the rest.
 //
-// eventPublicID must already be the series id -- a composite occurrence id is
-// split by the caller, because the grant belongs to the series either way.
-func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
+// eventPublicID must already be the series id. occurrenceDate names the
+// occurrence a write is confined to, or is empty for a write to the series;
+// an edited occurrence's own attendees decide who may change it, because they
+// are the attendees that occurrence shows.
+func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID, occurrenceDate string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
 	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
 	if err != nil {
 		return generated.Calendar{}, generated.CalendarEvent{}, err
@@ -755,7 +676,11 @@ func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID s
 	if err != nil {
 		return generated.Calendar{}, generated.CalendarEvent{}, err
 	}
-	if err := requireEventEdit(ctx, deps, member, evt, userID); err != nil {
+	attendeeRow, err := occurrenceRow(ctx, deps.Queries, evt, occurrenceDate)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	if err := requireEventEdit(ctx, deps, member, evt, attendeeRow.ID, userID); err != nil {
 		return generated.Calendar{}, generated.CalendarEvent{}, err
 	}
 	return cal, evt, nil
@@ -768,22 +693,51 @@ func resolveEventForEdit(ctx context.Context, deps Deps, calPubID, eventID strin
 	if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
 		eventID = parentUUID
 	}
-	return resolveEventWrite(ctx, deps, calPubID, eventID, userID)
+	return resolveEventWrite(ctx, deps, calPubID, eventID, "", userID)
 }
 
-// requireEventEdit is the event-level half of resolveEventWrite, split out for
-// the paths that have already loaded the event for other reasons.
-func requireEventEdit(ctx context.Context, deps Deps, member generated.CalendarMember, evt generated.CalendarEvent, userID uint32) error {
+// occurrenceRow returns the row whose attendees answer for one occurrence of
+// evt: the override standing in for it once it has been edited, otherwise evt
+// itself. An empty occurrenceDate, or an event without a rule, names evt.
+//
+// Get and list render an edited occurrence's attendees from its override, so
+// every read or write of an occurrence's attendees goes through here to reach
+// the same rows.
+func occurrenceRow(ctx context.Context, q *generated.Queries, evt generated.CalendarEvent, occurrenceDate string) (generated.CalendarEvent, error) {
+	if occurrenceDate == "" || evt.RecurrenceRule == nil {
+		return evt, nil
+	}
+	rule := recurrence.ParseRule(*evt.RecurrenceRule)
+	if rule == nil {
+		return generated.CalendarEvent{}, apierrors.EventNotFound
+	}
+	occ, err := occurrenceForDate(rule, evt, occurrenceDate)
+	if err != nil {
+		return generated.CalendarEvent{}, apierrors.EventNotFound
+	}
+	child, err := q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
+		RecurrenceParentID:      sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+		RecurrenceOriginalStart: sql.NullTime{Time: occ.StartAt, Valid: true},
+	})
+	switch {
+	case err == nil:
+		return child, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return evt, nil
+	default:
+		return generated.CalendarEvent{}, err
+	}
+}
+
+// requireEventEdit is the event-level half of resolveEventWrite. attendeeRowID
+// is the row whose attendees are asked: the series, or an edited occurrence's
+// override.
+func requireEventEdit(ctx context.Context, deps Deps, member generated.CalendarMember, evt generated.CalendarEvent, attendeeRowID, userID uint32) error {
 	if calresolve.CanManage(member.Role) || evt.OwnerUserID == userID {
 		return nil
 	}
-	// A changed occurrence carries its own row; the grant is the series'.
-	ownerRef := evt.ID
-	if evt.RecurrenceParentID.Valid {
-		ownerRef = uint32(evt.RecurrenceParentID.Int32)
-	}
 	att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
-		EventID: sql.NullInt32{Int32: int32(ownerRef), Valid: true},
+		EventID: sql.NullInt32{Int32: int32(attendeeRowID), Valid: true},
 		UserID:  userID,
 	})
 	if err != nil {
@@ -807,12 +761,9 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 
 		loc := daterange.Location(in.TZ, actorTimezone(ctx, deps, userID))
-		window := daterange.Default(in.Days, loc)
-		if in.StartDate != "" && in.EndDate != "" {
-			window, err = daterange.Parse(in.StartDate, in.EndDate, loc)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.BadRequest)
-			}
+		window, err := daterange.Resolve(in.StartDate, in.EndDate, in.Days, loc)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 		startTime, endTime := window.Start, window.End
 
@@ -835,76 +786,89 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 
 		// Everything the listing needs beyond the two range queries is read
-		// here, once. Doing it per event made a month view cost a round trip
-		// per event on it, times however many calendars are shown at once.
+		// once per listing. Doing it per event made a month view cost a round
+		// trip per event on it, times however many calendars are shown at once.
 		seriesIDs := make([]uint32, 0, len(recurringRows))
 		for _, e := range recurringRows {
 			seriesIDs = append(seriesIDs, e.ID)
 		}
 		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
 
-		attendeeIDs := make([]uint32, 0, len(rows)+len(seriesIDs))
-		for _, e := range rows {
-			attendeeIDs = append(attendeeIDs, e.ID)
+		// One cap over everything the window holds, cut by date: a listing
+		// past it loses the tail of the window, never a whole series or the
+		// one-off events read before the series.
+		type listed struct {
+			series   bool
+			row      generated.CalendarEvent
+			expanded eventexpand.Instance
 		}
-		attendeeIDs = append(attendeeIDs, seriesIDs...)
-		for _, children := range overrides {
-			for _, child := range children {
-				attendeeIDs = append(attendeeIDs, child.ID)
+		kept := daterange.NewEarliest[listed](daterange.MaxInstances)
+		for _, e := range rows {
+			kept.Offer(nullTimeValue(e.StartAt), listed{row: e})
+		}
+		for _, e := range recurringRows {
+			for _, expanded := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
+				start := expanded.Occurrence.StartAt
+				if expanded.IsOverride {
+					start = nullTimeValue(expanded.Event.StartAt)
+				}
+				kept.Offer(start, listed{series: true, row: e, expanded: expanded})
 			}
 		}
-		attendees, err := loadAttendees(ctx, deps, attendeeIDs)
+		items := kept.Items()
+
+		// Attendees and people are read for what is kept, each in one query.
+		var eventIDs, userIDs []uint32
+		seenEvent, seenUser := map[uint32]bool{}, map[uint32]bool{}
+		for _, it := range items {
+			e := it.row
+			if it.series {
+				e = it.expanded.Event
+			}
+			if !seenEvent[e.ID] {
+				seenEvent[e.ID] = true
+				eventIDs = append(eventIDs, e.ID)
+			}
+			for _, id := range []uint32{e.OwnerUserID, e.CreatedByUserID} {
+				if !seenUser[id] {
+					seenUser[id] = true
+					userIDs = append(userIDs, id)
+				}
+			}
+		}
+		attendees, err := loadAttendees(ctx, deps, eventIDs)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		who, err := loadPeople(ctx, deps, cal.ID, userIDs)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		userCache := map[uint32]userBrief{}
-		colorCache := map[uint32]string{}
-		var results []EventResponse
-		for _, e := range rows {
-			ev := mapEvent(e, cal.PublicID)
-			attendees.apply(&ev, e.ID)
-			decorate(ctx, deps, &ev, e, cal.ID, userCache, colorCache)
-			results = append(results, ev)
-		}
-
-		truncated := false
-		for _, e := range recurringRows {
-			if len(results) >= daterange.MaxInstances {
-				truncated = true
-				break
-			}
-			for _, expanded := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
-				// The window bounds one series; the number of series does not
-				// bound itself, and every one of them expands per occurrence.
-				if len(results) >= daterange.MaxInstances {
-					truncated = true
-					break
-				}
-				if expanded.IsOverride {
-					inst := mapOverrideInstance(e, expanded.Event, cal.PublicID, expanded.OriginalStart)
-					attendees.apply(&inst, expanded.Event.ID)
-					decorate(ctx, deps, &inst, expanded.Event, cal.ID, userCache, colorCache)
-					results = append(results, inst)
-					continue
-				}
-				inst := mapRecurringInstance(e, cal.PublicID, expanded.Occurrence)
-				attendees.apply(&inst, e.ID)
-				decorate(ctx, deps, &inst, e, cal.ID, userCache, colorCache)
+		results := make([]EventResponse, 0, len(items))
+		for _, it := range items {
+			switch {
+			case !it.series:
+				ev := mapEvent(it.row, cal.PublicID)
+				attendees.apply(&ev, it.row.ID)
+				who.apply(&ev, it.row)
+				results = append(results, ev)
+			case it.expanded.IsOverride:
+				inst := mapOverrideInstance(it.row, it.expanded.Event, cal.PublicID, it.expanded.OriginalStart)
+				attendees.apply(&inst, it.expanded.Event.ID)
+				who.apply(&inst, it.expanded.Event)
+				results = append(results, inst)
+			default:
+				inst := mapRecurringInstance(it.row, cal.PublicID, it.expanded.Occurrence)
+				attendees.apply(&inst, it.row.ID)
+				who.apply(&inst, it.row)
 				results = append(results, inst)
 			}
 		}
 
-		sort.Slice(results, func(i, j int) bool {
-			return results[i].StartAt.Before(results[j].StartAt)
-		})
-
 		out := &ListEventsOutput{Body: results}
-		if truncated {
+		if kept.Truncated() {
 			out.Truncated = "true"
-		}
-		if out.Body == nil {
-			out.Body = []EventResponse{}
 		}
 		return out, nil
 	}
@@ -926,34 +890,42 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				return nil, toAPIError(err)
 			}
 
-			dayStart, perr := occurrenceDayStart(dateStr, evt.Timezone)
-			if perr != nil {
+			// Resolved by the occurrence it names, not by where it now sits:
+			// an edited occurrence keeps its id wherever it was moved.
+			if evt.RecurrenceRule == nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
-
-			dayEnd := dayStart.AddDate(0, 0, 1)
-			for _, expanded := range eventexpand.ExpandRecurringEvent(ctx, deps.Queries, evt, dayStart, dayEnd) {
-				if occurrenceDateKey(expanded.OriginalStart, evt.Timezone) != dateStr {
-					continue
-				}
-				var resp EventResponse
-				source := evt
-				if expanded.IsOverride {
-					resp = mapOverrideInstance(evt, expanded.Event, cal.PublicID, expanded.OriginalStart)
-					source = expanded.Event
-				} else {
-					resp = mapRecurringInstance(evt, cal.PublicID, expanded.Occurrence)
-				}
-				if err := setAttendees(ctx, deps, &resp, source.ID); err != nil {
-					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-				}
-				decorate(ctx, deps, &resp, source, cal.ID, nil, nil)
-				// The tag names the series row: an occurrence has no address of
-				// its own until it is changed, so one tag has to cover the whole
-				// series or a caller would have nothing to hold.
-				return &GetEventOutput{ETag: eventETag(evt), Body: resp}, nil
+			rule := recurrence.ParseRule(*evt.RecurrenceRule)
+			if rule == nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			occ, oerr := occurrenceForDate(rule, evt, dateStr)
+			if oerr != nil {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			expanded, xerr := eventexpand.ResolveOccurrence(ctx, deps.Queries, evt, occ)
+			if errors.Is(xerr, eventexpand.ErrCancelled) {
+				return nil, apierrors.ToHuma(apierrors.EventNotFound)
+			}
+			if xerr != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			var resp EventResponse
+			source := evt
+			if expanded.IsOverride {
+				resp = mapOverrideInstance(evt, expanded.Event, cal.PublicID, expanded.OriginalStart)
+				source = expanded.Event
+			} else {
+				resp = mapRecurringInstance(evt, cal.PublicID, expanded.Occurrence)
+			}
+			if err := setAttendees(ctx, deps, &resp, source.ID); err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			decorate(ctx, deps, &resp, source, cal.ID)
+			// The tag names the series row: an occurrence has no address of
+			// its own until it is changed, so one tag has to cover the whole
+			// series or a caller would have nothing to hold.
+			return &GetEventOutput{ETag: eventETag(evt), Body: resp}, nil
 		}
 
 		evt, err := loadEventInCalendar(ctx, deps, cal.ID, in.EventID)
@@ -965,7 +937,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		if err := setAttendees(ctx, deps, &resp, evt.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		decorate(ctx, deps, &resp, evt, cal.ID, nil, nil)
+		decorate(ctx, deps, &resp, evt, cal.ID)
 		return &GetEventOutput{ETag: eventETag(evt), Body: resp}, nil
 	}
 }
@@ -989,9 +961,6 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if endAt.Before(startAt) {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
-		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
 		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
@@ -1006,6 +975,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			tz = "UTC"
 		}
 		if spec := validateTimezone(tz); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
+		if spec := checkRecurrenceRule(in.Body.RecurrenceRule, startAt, tz); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
 
@@ -1084,7 +1056,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if err := setAttendees(ctx, deps, &resp, created.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		decorate(ctx, deps, &resp, created, cal.ID, nil, nil)
+		decorate(ctx, deps, &resp, created, cal.ID)
 
 		return &CreateEventOutput{ETag: eventETag(created), Body: resp}, nil
 	}
@@ -1102,16 +1074,15 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			eventID = parentUUID
 		}
 
-		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, userID)
+		// A write confined to one occurrence is granted by that occurrence's
+		// attendees; anything else by the series'.
+		grantDate := ""
+		if isOccurrence && in.Scope == "this" {
+			grantDate = occurrenceDate
+		}
+		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, grantDate, userID)
 		if err != nil {
 			return nil, toAPIError(err)
-		}
-
-		// The precondition is checked against the row the series is stored in.
-		// A per-occurrence edit writes an override that hangs off that row, so
-		// both scopes are answering about the same thing changing underneath.
-		if !matchesETag(in.IfMatch, evt) {
-			return nil, apierrors.ToHuma(apierrors.EventStale)
 		}
 
 		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
@@ -1125,47 +1096,15 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		if endAt.Before(startAt) {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
-		if spec := validateRecurrenceRule(in.Body.RecurrenceRule); spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
 		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
-
-		tz := in.Body.Timezone
-		if tz == "" {
-			tz = evt.Timezone
-			if tz == "" {
-				tz = "UTC"
+		if in.Body.Timezone != "" {
+			if spec := validateTimezone(in.Body.Timezone); spec != nil {
+				return nil, apierrors.ToHuma(spec)
 			}
 		}
-		if spec := validateTimezone(tz); spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-
-		// Omitting visibility keeps what the event already has, the same way
-		// timezone works. Treating the omission as "default" would quietly
-		// republish an event somebody had marked private, and every edit made
-		// by a client that does not know the field would do it.
-		visibility := evt.Visibility
-		if in.Body.Visibility != "" {
-			visibility = visibilityOrDefault(in.Body.Visibility)
-		}
-
-		// Same for the two availability axes. A client that does not send them
-		// -- a drag, which only means to move the event -- would otherwise
-		// reset an out-of-office block to busy and a negotiable meeting to
-		// fixed on every move.
-		showAs := evt.ShowAs
-		if in.Body.ShowAs != "" {
-			showAs = showAsOrDefault(in.Body.ShowAs)
-		}
-		flexibility := evt.Flexibility
-		if in.Body.Flexibility != "" {
-			flexibility = flexibilityOrDefault(in.Body.Flexibility)
-		}
-
-		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, evt.OwnerUserID)
+		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, 0)
 		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
@@ -1174,384 +1113,40 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			return nil, apierrors.ToHuma(spec)
 		}
 
-		// Whole-series edit from a composite occurrence ID receives dates for the
-		// dragged/edited occurrence. Re-anchor those as a delta against the master
-		// so earlier instances do not disappear.
-		if isOccurrence && in.Scope == "all" && evt.RecurrenceRule != nil {
-			rule := recurrence.ParseRule(*evt.RecurrenceRule)
-			if rule == nil || !evt.StartAt.Valid {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
-			if oerr != nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			duration := endAt.Sub(startAt)
-			startAt = evt.StartAt.Time.Add(startAt.Sub(originalStart))
-			endAt = startAt.Add(duration)
+		edit := eventEdit{
+			body:         in,
+			actorID:      userID,
+			cal:          cal,
+			startAt:      startAt,
+			endAt:        endAt,
+			ownerID:      ownerID,
+			participants: participants,
 		}
-
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
-
-		// Single-occurrence edit: write an override row instead of mutating the
-		// whole series, so editing one instance no longer rewrites every instance.
-		if isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil {
-			rule := recurrence.ParseRule(*evt.RecurrenceRule)
-			if rule == nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
-			if oerr != nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			overridePubID, err := uuid.NewV7()
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			parentRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
-			originalRef := sql.NullTime{Time: originalStart, Valid: true}
-
-			var child generated.CalendarEvent
-			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-				// If this transaction writes the parent series row at all, the
-				// first such write has to come before the override is inserted.
-				//
-				// Inserting the override takes a shared lock on the parent to
-				// check its foreign key. A write to the parent afterwards has
-				// to raise that to an exclusive lock, and two people editing
-				// different occurrences of one series then hold a shared lock
-				// each while both wait for the other to let go -- a deadlock,
-				// reaching whoever dragged an occurrence as a 500. Writing the
-				// parent first means they queue instead.
-				//
-				// What matters is only that ordering. Skipping these when they
-				// have nothing to do is safe, because a write that does not
-				// happen takes no lock to upgrade; so is writing the parent
-				// again lower down, because the exclusive lock is already held
-				// by then. Moving the first parent write below the insert is
-				// what brings the deadlock back, and
-				// TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock is what
-				// notices.
-				//
-				// Neither statement depends on the override existing, so the
-				// order is free to be the safe one.
-
-				// An occurrence dragged past the end of its own series has to
-				// carry that end with it, or the master stops being selected
-				// for the window it now falls in and the occurrence vanishes
-				// from every view without being deleted.
-				if err := q.ExtendRecurrenceEnd(ctx, generated.ExtendRecurrenceEndParams{
-					RecurrenceEnd: sql.NullTime{Time: endAt, Valid: true},
-					ID:            evt.ID,
-					Boundary:      sql.NullTime{Time: endAt, Valid: true},
-				}); err != nil {
-					return err
-				}
-				// The occurrence lives in its own row, so without this the
-				// series would report the same revision as before the edit and
-				// a second writer holding the older copy would be let through.
-				if err := q.TouchCalendarEvent(ctx, evt.ID); err != nil {
-					return err
-				}
-
-				if _, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
-					PublicID:                overridePubID[:],
-					WorkspaceID:             deps.WorkspaceID,
-					CalendarID:              cal.ID,
-					Kind:                    evt.Kind,
-					Visibility:              visibility,
-					ShowAs:                  showAs,
-					Flexibility:             flexibility,
-					Title:                   in.Body.Title,
-					AllDay:                  in.Body.AllDay,
-					StartAt:                 sql.NullTime{Time: startAt, Valid: true},
-					EndAt:                   sql.NullTime{Time: endAt, Valid: true},
-					Timezone:                tz,
-					Location:                nullString(in.Body.Location),
-					Memo:                    nullString(in.Body.Memo),
-					URL:                     nullString(in.Body.URL),
-					OwnerUserID:             ownerID,
-					CreatedByUserID:         userID,
-					NotificationOffset:      ptrIntToNullInt32(in.Body.NotificationOffset),
-					RecurrenceParentID:      parentRef,
-					RecurrenceOriginalStart: originalRef,
-				}); err != nil {
-					return err
-				}
-				var err error
-				child, err = q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
-					RecurrenceParentID:      parentRef,
-					RecurrenceOriginalStart: originalRef,
-				})
-				if err != nil {
-					return err
-				}
-				// Whether this request created the override or found one that
-				// was already there.
-				//
-				// The upsert does not rewrite public_id on conflict -- it is
-				// deliberately absent from that statement's update list -- so a
-				// row carrying the id generated for this request is one this
-				// request inserted. That row was written a statement ago and
-				// has no attendees, and asking to remove the ones it does not
-				// have is not free: it holds a gap lock to the end of the
-				// attendee index, which the participant insert behind it then
-				// has to write into. Two first edits on different series do
-				// that at the same moment and deadlock, and whoever dragged an
-				// occurrence sees a 500.
-				//
-				// Edits of one series cannot reach this: they queue on the
-				// parent row first. That is why it needs its own test, and why
-				// that test puts every series on its own calendar.
-				if bytes.Equal(child.PublicID, overridePubID[:]) {
-					err = addEventParticipants(ctx, q, deps.WorkspaceID, child.ID, participants)
-				} else {
-					err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, participants)
-				}
-				if err != nil {
-					return err
-				}
-				return eventlog.Append(ctx, q, eventlog.Entry{
-					WorkspaceID: deps.WorkspaceID,
-					CalendarID:  cal.ID,
-					ActorUserID: userID,
-					Type:        eventlog.TypeEventUpdated,
-					Summary:     in.Body.Title,
-					Subject:     evt.PublicID,
-					Extra: map[string]any{
-						"scope":         "occurrence",
-						"originalStart": originalStart.Format(time.RFC3339),
-					},
-				})
-			})
-			if err != nil {
-				slog.ErrorContext(ctx, "failed to write recurrence override", "eventID", evt.ID, "error", err)
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-
-			resp := mapOverrideInstance(evt, child, cal.PublicID, originalStart)
-			if err := setAttendees(ctx, deps, &resp, child.ID); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			decorate(ctx, deps, &resp, child, cal.ID, nil, nil)
-			return &UpdateEventOutput{ETag: occurrenceSeriesETag(ctx, deps, evt.ID), Body: resp}, nil
+		// Both scopes re-read the series under its lock and check If-Match
+		// against that copy; the row resolved above only answered whether the
+		// caller may edit it.
+		var (
+			resp EventResponse
+			etag string
+		)
+		switch {
+		case isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil:
+			resp, etag, err = editOccurrence(ctx, deps, edit, evt.ID, occurrenceDate)
+		case isOccurrence && in.Scope == "all":
+			resp, etag, err = editSeries(ctx, deps, edit, evt.ID, occurrenceDate)
+		default:
+			resp, etag, err = editSeries(ctx, deps, edit, evt.ID, "")
 		}
-
-		var updated generated.CalendarEvent
-		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			// Series-wide edits must keep override rows resolvable: their
-			// recurrence_original_start values are keyed to the old occurrence
-			// grid, so moving the anchor (e.g. weekly Wed -> Thu) would
-			// resurrect cancelled occurrences and duplicate edited ones.
-			if evt.RecurrenceRule != nil {
-				parentRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
-				switch {
-				case ruleData == nil:
-					// Recurrence removed: the series collapses to a single event
-					// and override rows can never resolve to an occurrence again.
-					// The exclusion list goes with them, for the same reason.
-					if err := q.DeleteRecurrenceOverridesByParent(ctx, parentRef); err != nil {
-						return err
-					}
-					if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
-						RecurrenceExceptions: nil,
-						ID:                   evt.ID,
-					}); err != nil {
-						return err
-					}
-				default:
-					shift := newWallShift(evt.StartAt.Time, startAt, evt.Timezone, tz)
-					if evt.StartAt.Valid && !shift.identity() {
-						if err := shiftOverrides(ctx, q, parentRef, shift); err != nil {
-							return err
-						}
-						// Cancellations are keyed to the same grid, so they have
-						// to move with it. Leaving them behind would cancel
-						// whichever occurrences now happen to land on the old
-						// instants -- usually none, silently resurrecting every
-						// occurrence the user had deleted.
-						if shifted := shiftExceptions(evt.RecurrenceExceptions, shift); shifted != nil {
-							column, err := shifted.MarshalColumn()
-							if err != nil {
-								return err
-							}
-							if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
-								RecurrenceExceptions: column,
-								ID:                   evt.ID,
-							}); err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
-
-			if err := q.UpdateCalendarEvent(ctx, generated.UpdateCalendarEventParams{
-				Kind:               evt.Kind,
-				Visibility:         visibility,
-				ShowAs:             showAs,
-				Flexibility:        flexibility,
-				Title:              in.Body.Title,
-				AllDay:             in.Body.AllDay,
-				StartAt:            sql.NullTime{Time: startAt, Valid: true},
-				EndAt:              sql.NullTime{Time: endAt, Valid: true},
-				Timezone:           tz,
-				Location:           nullString(in.Body.Location),
-				Memo:               nullString(in.Body.Memo),
-				URL:                nullString(in.Body.URL),
-				OwnerUserID:        ownerID,
-				BlockLabel:         evt.BlockLabel,
-				NotificationOffset: ptrIntToNullInt32(in.Body.NotificationOffset),
-				RecurrenceRule:     ruleData,
-				RecurrenceEnd:      recEnd,
-				ID:                 evt.ID,
-			}); err != nil {
-				return err
-			}
-			if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, evt.ID, participants); err != nil {
-				return err
-			}
-			var err error
-			updated, err = q.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{
-				WorkspaceID: deps.WorkspaceID,
-				PublicID:    evt.PublicID,
-			})
-			if err != nil {
-				return err
-			}
-			return eventlog.Append(ctx, q, eventlog.Entry{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  cal.ID,
-				ActorUserID: userID,
-				Type:        eventlog.TypeEventUpdated,
-				Summary:     in.Body.Title,
-				Subject:     evt.PublicID,
-			})
-		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			slog.ErrorContext(ctx, "failed to update event", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
-		resp := mapEvent(updated, cal.PublicID)
-		if err := setAttendees(ctx, deps, &resp, updated.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		decorate(ctx, deps, &resp, updated, cal.ID, nil, nil)
-		return &UpdateEventOutput{ETag: eventETag(updated), Body: resp}, nil
+		return &UpdateEventOutput{ETag: etag, Body: resp}, nil
 	}
-}
-
-// shiftExceptions moves every cancellation by delta, returning nil when
-// there is nothing to move.
-// shiftOverrides moves every override row of a series by the same wall-clock
-// shift as the series itself, so each keeps naming the occurrence it replaces
-// and keeps the time of day the user gave it.
-func shiftOverrides(ctx context.Context, q *generated.Queries, parentRef sql.NullInt32, shift wallShift) error {
-	rows, err := q.ListRecurrenceOverridesByParent(ctx, parentRef)
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
-		params := generated.RetimeRecurrenceOverrideParams{
-			RecurrenceOriginalStart: row.RecurrenceOriginalStart,
-			StartAt:                 row.StartAt,
-			EndAt:                   row.EndAt,
-			ID:                      row.ID,
-		}
-		if params.RecurrenceOriginalStart.Valid {
-			params.RecurrenceOriginalStart.Time = shift.apply(params.RecurrenceOriginalStart.Time)
-		}
-		if params.StartAt.Valid {
-			params.StartAt.Time = shift.apply(params.StartAt.Time)
-		}
-		if params.EndAt.Valid {
-			params.EndAt.Time = shift.apply(params.EndAt.Time)
-		}
-		if err := q.RetimeRecurrenceOverride(ctx, params); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func shiftExceptions(stored *json.RawMessage, shift wallShift) recurrence.Exceptions {
-	existing := recurrence.ParseExceptions(stored)
-	if len(existing) == 0 {
-		return nil
-	}
-	shifted := make(recurrence.Exceptions, 0, len(existing))
-	for _, ex := range existing {
-		shifted = append(shifted, shift.apply(ex))
-	}
-	return shifted
-}
-
-// wallShift describes how a series-wide edit moved the grid: a number of
-// calendar days, a change in the time of day, and the zones the two are read
-// and written in.
-//
-// The unit matters. Occurrences step in calendar units in the event's own
-// timezone, so a series whose anchor crosses a DST boundary moves by a
-// different number of hours than of days. Shifting a cancellation or an
-// override by the absolute difference between the two anchors therefore lands
-// it an hour off the grid it is supposed to name: the cancelled occurrence
-// comes back and the edited one is orphaned, showing up twice.
-type wallShift struct {
-	from *time.Location
-	to   *time.Location
-	days int
-	// ofDay is the change in time of day, and may be negative or exceed a day.
-	ofDay time.Duration
-}
-
-// newWallShift measures the move from oldStart in oldTZ to newStart in newTZ.
-func newWallShift(oldStart, newStart time.Time, oldTZ, newTZ string) wallShift {
-	from := recurrence.LoadLocation(oldTZ)
-	to := recurrence.LoadLocation(newTZ)
-	oldLocal := oldStart.In(from)
-	newLocal := newStart.In(to)
-	oldDay := time.Date(oldLocal.Year(), oldLocal.Month(), oldLocal.Day(), 0, 0, 0, 0, time.UTC)
-	newDay := time.Date(newLocal.Year(), newLocal.Month(), newLocal.Day(), 0, 0, 0, 0, time.UTC)
-	return wallShift{
-		from:  from,
-		to:    to,
-		days:  int(newDay.Sub(oldDay) / (24 * time.Hour)),
-		ofDay: timeOfDay(newLocal) - timeOfDay(oldLocal),
-	}
-}
-
-// identity reports whether the shift leaves every instant where it is.
-func (w wallShift) identity() bool {
-	return w.days == 0 && w.ofDay == 0 && w.from == w.to
-}
-
-// apply moves one instant by the shift, staying in wall-clock terms
-// throughout so a DST boundary crossed on the way does not add an hour.
-func (w wallShift) apply(t time.Time) time.Time {
-	local := t.In(w.from)
-	const day = 24 * time.Hour
-	wall := timeOfDay(local) + w.ofDay
-	extraDays := int(wall / day)
-	wall -= time.Duration(extraDays) * day
-	if wall < 0 {
-		wall += day
-		extraDays--
-	}
-	target := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).
-		AddDate(0, 0, w.days+extraDays)
-	return time.Date(
-		target.Year(), target.Month(), target.Day(),
-		int(wall/time.Hour), int(wall/time.Minute)%60, int(wall/time.Second)%60,
-		int(wall%time.Second), w.to,
-	).UTC()
-}
-
-func timeOfDay(t time.Time) time.Duration {
-	return time.Duration(t.Hour())*time.Hour +
-		time.Duration(t.Minute())*time.Minute +
-		time.Duration(t.Second())*time.Second +
-		time.Duration(t.Nanosecond())
 }
 
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
@@ -1566,7 +1161,13 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			eventID = parentUUID
 		}
 
-		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, userID)
+		// A write confined to one occurrence is granted by that occurrence's
+		// attendees; anything else by the series'.
+		grantDate := ""
+		if isOccurrence && in.Scope == "this" {
+			grantDate = occurrenceDate
+		}
+		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, grantDate, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -1576,31 +1177,34 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 		// cancelled occurrence, and this is it -- a tombstone row would give a
 		// reader a second place to look and a way to disagree with the first.
 		if isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil {
-			rule := recurrence.ParseRule(*evt.RecurrenceRule)
-			if rule == nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-			originalStart, oerr := occurrenceStartForDate(rule, evt, occurrenceDate)
-			if oerr != nil {
-				return nil, apierrors.ToHuma(apierrors.EventNotFound)
-			}
-
+			var originalStart time.Time
 			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-				// Re-read inside the transaction: the exclusion list is a
-				// whole-column replace, so two concurrent cancellations that
-				// both read the old value would each write a list missing the
-				// other's occurrence.
-				current, err := q.GetCalendarEventByID(ctx, evt.ID)
+				// The exclusion list is a whole-column replace, so it is read
+				// under the series' row lock: two cancellations reading the
+				// same old list would each write one missing the other's.
+				current, err := lockSeries(ctx, q, evt.ID, "")
 				if err != nil {
 					return err
 				}
+				if current.RecurrenceRule == nil {
+					return apierrors.EventNotFound
+				}
+				rule := recurrence.ParseRule(*current.RecurrenceRule)
+				if rule == nil {
+					return apierrors.EventNotFound
+				}
+				occ, err := occurrenceForDate(rule, current, occurrenceDate)
+				if err != nil {
+					return apierrors.EventNotFound
+				}
+				originalStart = occ.StartAt
 				column, err := recurrence.ParseExceptions(current.RecurrenceExceptions).With(originalStart).MarshalColumn()
 				if err != nil {
 					return err
 				}
 				if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
 					RecurrenceExceptions: column,
-					ID:                   evt.ID,
+					ID:                   current.ID,
 				}); err != nil {
 					return err
 				}
@@ -1609,8 +1213,8 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 					CalendarID:  cal.ID,
 					ActorUserID: userID,
 					Type:        eventlog.TypeEventDeleted,
-					Summary:     evt.Title,
-					Subject:     evt.PublicID,
+					Summary:     current.Title,
+					Subject:     current.PublicID,
 					Extra: map[string]any{
 						"scope":         "occurrence",
 						"originalStart": originalStart.Format(time.RFC3339),
@@ -1618,6 +1222,10 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 				})
 			})
 			if err != nil {
+				var spec *apierrors.Spec
+				if errors.As(err, &spec) {
+					return nil, apierrors.ToHuma(spec)
+				}
 				slog.ErrorContext(ctx, "failed to cancel occurrence", "eventID", evt.ID, "error", err)
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 			}

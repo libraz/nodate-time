@@ -16,6 +16,13 @@ WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE;
 -- name: GetCalendarEventByID :one
 SELECT * FROM calendar_events WHERE id = ? AND enabled = TRUE;
 
+-- GetCalendarEventByIDForUpdate reads a series row under its row lock. Every
+-- write to a series -- its own columns, its exclusion list, or an override
+-- hanging off it -- starts here, so the revision a writer compares against
+-- and the exclusion list it rewrites cannot change before it commits.
+-- name: GetCalendarEventByIDForUpdate :one
+SELECT * FROM calendar_events WHERE id = ? AND enabled = TRUE FOR UPDATE;
+
 -- ListCalendarEventsByCalendarAndRange returns the non-recurring events a
 -- window covers.
 --
@@ -45,6 +52,11 @@ WHERE calendar_id = ?
   AND (end_at > sqlc.arg(range_start) OR (end_at = start_at AND end_at >= sqlc.arg(range_start)))
 ORDER BY start_at;
 
+-- ListRecurringCalendarEventsByCalendarAndRange selects the series that may
+-- have an occurrence in a window; the expander does the exact overlap test.
+-- recurrence_end is compared inclusively because a zero-length series ends
+-- exactly where its last occurrence starts, and that marker belongs to the
+-- window opening on it.
 -- name: ListRecurringCalendarEventsByCalendarAndRange :many
 SELECT * FROM calendar_events
 WHERE calendar_id = ?
@@ -52,7 +64,7 @@ WHERE calendar_id = ?
   AND recurrence_rule IS NOT NULL
   AND recurrence_parent_id IS NULL
   AND start_at < sqlc.arg(range_end)
-  AND (recurrence_end IS NULL OR recurrence_end > sqlc.arg(range_start))
+  AND (recurrence_end IS NULL OR recurrence_end >= sqlc.arg(range_start))
 ORDER BY start_at;
 
 -- ListCalendarEventsForExport returns every series head in a calendar, dated or
@@ -126,8 +138,22 @@ ON DUPLICATE KEY UPDATE
   notification_offset = VALUES(notification_offset),
   enabled = TRUE;
 
--- name: DeleteRecurrenceOverridesByParent :exec
-DELETE FROM calendar_events WHERE recurrence_parent_id = ?;
+-- ListRecurrenceOverrideIDsByParent names every override row of a series,
+-- disabled ones included, for deleting them along with the series' rule.
+-- name: ListRecurrenceOverrideIDsByParent :many
+SELECT id FROM calendar_events WHERE recurrence_parent_id = ?;
+
+-- DeleteAttendeesOfEvents hard-deletes the attendee rows of events about to
+-- be hard-deleted. Left to the foreign key, each would become an
+-- (event_id NULL, user) row, and the unique key over IFNULL(event_id, 0)
+-- refuses the second such row for one person -- so deleting two overrides
+-- sharing a participant failed outright.
+-- name: DeleteAttendeesOfEvents :exec
+DELETE FROM calendar_event_attendees WHERE event_id IN (sqlc.slice('event_ids'));
+
+-- name: DeleteRecurrenceOverrides :exec
+DELETE FROM calendar_events
+WHERE recurrence_parent_id = sqlc.arg(parent_id) AND id IN (sqlc.slice('ids'));
 
 -- RetimeRecurrenceOverride moves one override row with the series it belongs
 -- to. The original start moves with it: it identifies which occurrence is
@@ -221,3 +247,26 @@ UPDATE calendar_events SET enabled = FALSE WHERE id = ?;
 -- notification_offset is stored per event; a per-occurrence sent/not-sent
 -- record is what a dispatcher would have to add first, since a series has one
 -- row and many occurrences to remind about.
+
+-- ListEventPeople reads everyone a listing names -- owners and creators --
+-- in one round trip: identity, avatar key and colour on this calendar.
+-- Asking per person made a listing's cost follow how many people a shared
+-- calendar has. The colour is NULL for someone no longer a member.
+-- name: ListEventPeople :many
+SELECT u.id, u.public_id, u.display_name, u.avatar_url, u.enabled,
+       so.storage_key AS avatar_storage_key,
+       cm.member_color
+FROM users u
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+LEFT JOIN calendar_members cm
+  ON cm.calendar_id = sqlc.arg(calendar_id) AND cm.user_id = u.id AND cm.enabled = TRUE
+WHERE u.id IN (sqlc.slice('user_ids'));
+
+-- AddOverrideAttendee adds a participant to an override row created in the
+-- same transaction, carrying the answer and edit grant they had on the series.
+-- It is an insert rather than an add followed by an update: an update scanning
+-- a brand-new event's attendees takes a gap lock to the end of the index, and
+-- two first edits on different series then deadlock on each other's inserts.
+-- name: AddOverrideAttendee :exec
+INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id, rsvp, can_edit)
+VALUES (?, ?, ?, ?, ?, ?);

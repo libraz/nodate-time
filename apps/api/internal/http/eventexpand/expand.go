@@ -18,6 +18,7 @@ package eventexpand
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -104,9 +105,53 @@ func indexOverrides(rows []generated.CalendarEvent) overrideSet {
 	return set
 }
 
-// inWindow reports whether a start lands in [windowStart, windowEnd).
-func inWindow(start, windowStart, windowEnd time.Time) bool {
-	return !start.Before(windowStart) && start.Before(windowEnd)
+// overlapsWindow is the window test every row a listing returns goes through:
+// it starts before the window ends and ends after it starts, and an event
+// with no duration is a marker belonging to the window that opens on it. It is
+// the test ListCalendarEventsByCalendarAndRange applies to one-off rows and
+// recurrence.Expand applies to unedited occurrences.
+func overlapsWindow(start, end, windowStart, windowEnd time.Time) bool {
+	if !start.Before(windowEnd) {
+		return false
+	}
+	return end.After(windowStart) || (end.Equal(start) && !start.Before(windowStart))
+}
+
+// overrideInWindow applies overlapsWindow to an override's own dates.
+func overrideInWindow(child generated.CalendarEvent, windowStart, windowEnd time.Time) bool {
+	return child.StartAt.Valid && child.EndAt.Valid &&
+		overlapsWindow(child.StartAt.Time, child.EndAt.Time, windowStart, windowEnd)
+}
+
+// OccurrenceLoader reads the override standing in for one occurrence.
+type OccurrenceLoader interface {
+	GetRecurrenceOverride(ctx context.Context, arg generated.GetRecurrenceOverrideParams) (generated.CalendarEvent, error)
+}
+
+// ErrCancelled is an occurrence the series' exclusion list removes.
+var ErrCancelled = errors.New("eventexpand: occurrence cancelled")
+
+// ResolveOccurrence returns the instance standing at one occurrence of event:
+// its override wherever that was moved to, or the occurrence as the rule
+// produces it. occ must be a genuine occurrence of the rule; this answers
+// only what became of it.
+func ResolveOccurrence(ctx context.Context, loader OccurrenceLoader, event generated.CalendarEvent, occ recurrence.Occurrence) (Instance, error) {
+	original := occ.StartAt.UTC()
+	if recurrence.ParseExceptions(event.RecurrenceExceptions).Contains(original) {
+		return Instance{}, ErrCancelled
+	}
+	child, err := loader.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
+		RecurrenceParentID:      sql.NullInt32{Int32: int32(event.ID), Valid: true},
+		RecurrenceOriginalStart: sql.NullTime{Time: original, Valid: true},
+	})
+	switch {
+	case err == nil:
+		return Instance{Event: child, Occurrence: occ, OriginalStart: original, IsOverride: true}, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return Instance{Event: event, Occurrence: occ, OriginalStart: original}, nil
+	default:
+		return Instance{}, err
+	}
 }
 
 // ExpandRecurringEvent returns the occurrences of event between windowStart
@@ -174,7 +219,7 @@ func expand(
 			// the override's own dates. Emitting it here because the
 			// occurrence it replaces falls in the window would show it on the
 			// day it was moved off as well as the day it was moved to.
-			if child.StartAt.Valid && !inWindow(child.StartAt.Time, windowStart, windowEnd) {
+			if !overrideInWindow(child, windowStart, windowEnd) {
 				continue
 			}
 			instances = append(instances, Instance{
@@ -194,16 +239,18 @@ func expand(
 
 	// An override moved outside the window its original occurrence falls in
 	// would otherwise vanish: the rule no longer produces a start inside the
-	// window, but the row itself is here and dated.
+	// window, but the row itself is here and dated. It stands for an
+	// occurrence only while the rule still produces that occurrence; a row
+	// left on an old grid by a rule change is not one.
 	for key, child := range overrides.byInstant {
-		if consumed[key] || !child.StartAt.Valid {
+		if consumed[key] || !overrideInWindow(child, windowStart, windowEnd) {
 			continue
 		}
 		original := time.UnixMilli(key).UTC()
 		if cancelled.Contains(original) {
 			continue
 		}
-		if !inWindow(child.StartAt.Time, windowStart, windowEnd) {
+		if !recurrence.OccursAt(rule, event.StartAt.Time, event.EndAt.Time, event.Timezone, original) {
 			continue
 		}
 		instances = append(instances, Instance{

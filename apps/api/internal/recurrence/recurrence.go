@@ -2,18 +2,95 @@ package recurrence
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
-// Rule represents a recurrence pattern for calendar events.
+// Rule represents a recurrence pattern for calendar events. The bounds and
+// field combinations stated here are the ones Validate enforces; every field
+// of a rule that passes it changes what Expand produces.
 type Rule struct {
 	Freq       string   `json:"freq"`                 // daily, weekly, monthly, yearly
-	Interval   int      `json:"interval"`             // repeat every N freq units (1-99)
-	ByDay      []string `json:"byDay,omitempty"`      // MO,TU,WE,TH,FR,SA,SU (weeks start on Sunday: WKST=SU)
-	ByMonthDay int      `json:"byMonthDay,omitempty"` // 1-31
-	BySetPos   int      `json:"bySetPos,omitempty"`   // Nth weekday of month (1-5)
-	Until      *string  `json:"until,omitempty"`      // ISO 8601 date string
-	Count      int      `json:"count,omitempty"`      // max occurrences (1-365)
+	Interval   int      `json:"interval"`             // repeat every N freq units (1-999; below 1 reads as 1)
+	ByDay      []string `json:"byDay,omitempty"`      // weekly: any of MO..SU (weeks start on Sunday: WKST=SU); monthly: exactly one, with bySetPos
+	ByMonthDay int      `json:"byMonthDay,omitempty"` // monthly only: 1-31, clamped to the month's last day
+	BySetPos   int      `json:"bySetPos,omitempty"`   // monthly only: Nth weekday of month (1-5), with one byDay
+	Until      *string  `json:"until,omitempty"`      // RFC 3339 instant, or a date meaning the end of that day in the event's zone
+	Count      int      `json:"count,omitempty"`      // max occurrences (1-1000; 0 means unbounded)
+}
+
+// ErrInvalidRule is a rule the expander would not honour as written.
+var ErrInvalidRule = errors.New("recurrence: invalid rule")
+
+// Validate reports whether every field of the rule is one Expand honours, and
+// whether the series it describes has at least one occurrence. eventStart is
+// the series' first occurrence, in the event's own location.
+func (r *Rule) Validate(eventStart time.Time) error {
+	switch r.Freq {
+	case "daily", "weekly", "monthly", "yearly":
+	default:
+		return ErrInvalidRule
+	}
+	if r.Interval < 1 || r.Interval > 999 || r.Count < 0 || r.Count > 1000 {
+		return ErrInvalidRule
+	}
+	if r.ByMonthDay < 0 || r.ByMonthDay > 31 || r.BySetPos < 0 || r.BySetPos > 5 {
+		return ErrInvalidRule
+	}
+	for _, d := range r.ByDay {
+		if _, ok := weekdayByCode[d]; !ok {
+			return ErrInvalidRule
+		}
+	}
+	switch r.Freq {
+	case "daily", "yearly":
+		if len(r.ByDay) > 0 || r.ByMonthDay != 0 || r.BySetPos != 0 {
+			return ErrInvalidRule
+		}
+	case "weekly":
+		if r.ByMonthDay != 0 || r.BySetPos != 0 {
+			return ErrInvalidRule
+		}
+	case "monthly":
+		// Either the Nth weekday (one byDay with bySetPos) or a day of the
+		// month; the iterator reads only the first byDay and ignores
+		// byMonthDay once bySetPos is set.
+		nth := r.BySetPos > 0 || len(r.ByDay) > 0
+		if nth && (r.BySetPos == 0 || len(r.ByDay) != 1 || r.ByMonthDay != 0) {
+			return ErrInvalidRule
+		}
+	}
+	if r.Until != nil {
+		until, ok := untilInstant(*r.Until, eventStart.Location())
+		if !ok || until.Before(eventStart) {
+			return ErrInvalidRule
+		}
+	}
+	return nil
+}
+
+// untilInstant reads an until as the last instant the series may start at.
+func untilInstant(until string, loc *time.Location) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339, until); err == nil {
+		return t, true
+	}
+	if t, err := time.ParseInLocation("2006-01-02", until, loc); err == nil {
+		// Date-only until means "through the end of that day" in the
+		// event's own location, not a UTC instant.
+		return t.AddDate(0, 0, 1).Add(-time.Second), true
+	}
+	return time.Time{}, false
+}
+
+// OccursAt reports whether the series produces an occurrence starting exactly
+// at the given instant, anchored in tz the way ExpandInZone is.
+func OccursAt(rule *Rule, eventStart, eventEnd time.Time, tz string, at time.Time) bool {
+	for _, occ := range ExpandInZone(rule, eventStart, eventEnd, at, at.Add(time.Millisecond), tz) {
+		if occ.StartAt.Equal(at) {
+			return true
+		}
+	}
+	return false
 }
 
 // Occurrence represents a single expanded instance of a recurring event.
@@ -105,9 +182,9 @@ func ComputeEndInZone(rule *Rule, eventStart, eventEnd time.Time, tz string) tim
 	return ComputeEnd(rule, eventStart.In(loc), eventEnd.In(loc)).UTC()
 }
 
-// maxExpansionIterations bounds how many candidates Expand will ever step
-// through, protecting against pathological rules (e.g. daily forever queried
-// over a decade-wide window) regardless of the requested window size.
+// maxExpansionIterations bounds how many occurrences one Expand call produces,
+// protecting against pathological rules (e.g. daily forever queried over a
+// decade-wide window) regardless of the requested window size.
 const maxExpansionIterations = 10000
 
 // LoadLocation resolves an IANA timezone name, falling back to UTC for empty or
@@ -166,22 +243,16 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 
 	var untilTime time.Time
 	if rule.Until != nil {
-		if t, err := time.Parse(time.RFC3339, *rule.Until); err == nil {
-			untilTime = t
-		} else if t, err := time.ParseInLocation("2006-01-02", *rule.Until, eventStart.Location()); err == nil {
-			// Date-only until means "through the end of that day" in the
-			// event's own location, not a UTC instant.
-			untilTime = t.AddDate(0, 0, 1).Add(-time.Second)
-		}
+		untilTime, _ = untilInstant(*rule.Until, eventStart.Location())
 	}
 
 	iterator := newIterator(rule, eventStart)
-	occurrenceOrdinal := fastForwardInitialStep(rule, eventStart, duration, windowStart)
-	iterator.step = occurrenceOrdinal
-	emittedCandidates := 0
-	scannedCandidates := 0
-	for scannedCandidates < maxExpansionIterations && emittedCandidates < maxExpansionIterations {
-		scannedCandidates++
+	occurrenceOrdinal := fastForward(rule, iterator, eventStart, duration, windowStart)
+	// The cap bounds the occurrences one window can produce. Candidates before
+	// the window are bounded separately: fast-forward leaves only a handful,
+	// except under a count limit, which bounds them by itself.
+	inWindow, beforeWindow := 0, 0
+	for inWindow < maxExpansionIterations && beforeWindow < maxExpansionIterations {
 		candidate := iterator.next()
 		if candidate.IsZero() {
 			break
@@ -193,6 +264,7 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		// invents an instance the user never scheduled and, worse, counts
 		// against a `count` limit so the real last occurrence is dropped.
 		if candidate.Before(eventStart) {
+			beforeWindow++
 			continue
 		}
 		occurrenceOrdinal++
@@ -210,7 +282,6 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		if rule.Count > 0 && occurrenceOrdinal > rule.Count {
 			break
 		}
-		emittedCandidates++
 
 		candidateEnd := candidate.Add(duration)
 		if allDaySpan > 0 {
@@ -226,6 +297,9 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		zeroLength := candidateEnd.Equal(candidate)
 		if candidateEnd.After(windowStart) || (zeroLength && !candidate.Before(windowStart)) {
 			results = append(results, Occurrence{StartAt: candidate, EndAt: candidateEnd})
+			inWindow++
+		} else {
+			beforeWindow++
 		}
 	}
 
@@ -246,6 +320,74 @@ func calendarDaySpan(start, end time.Time) int {
 		days = 1
 	}
 	return days
+}
+
+// fastForward positions the iterator just before the window, so the work
+// Expand does follows the window rather than the age of the series. It
+// returns how many occurrences it skipped. Only daily steps map one-to-one
+// onto occurrences, so other frequencies skip only when no count limit needs
+// that number -- and a count limit bounds the walk on its own.
+func fastForward(rule *Rule, it *iterator, eventStart time.Time, duration time.Duration, windowStart time.Time) int {
+	if rule.Freq == "daily" {
+		it.step = fastForwardInitialStep(rule, eventStart, duration, windowStart)
+		return it.step
+	}
+	if rule.Count > 0 || !windowStart.After(eventStart) {
+		return 0
+	}
+	// Nothing starting before this can reach the window, whatever a DST
+	// transition or an all-day span does to the duration.
+	horizon := windowStart.Add(-duration - 48*time.Hour)
+	if rule.Freq == "weekly" && len(rule.ByDay) > 0 {
+		fastForwardWeeklyByDay(it, horizon)
+	} else {
+		fastForwardSteps(it, horizon)
+	}
+	return 0
+}
+
+// maxPeriodDays is the longest a step of each frequency can be, so a step
+// count estimated from it never overshoots.
+var maxPeriodDays = map[string]int{"weekly": 7, "monthly": 31, "yearly": 366}
+
+// fastForwardSteps skips the steps of a step-indexed iterator whose
+// candidates all start before horizon.
+func fastForwardSteps(it *iterator, horizon time.Time) {
+	period := maxPeriodDays[it.rule.Freq] * it.rule.Interval
+	if period <= 0 {
+		return
+	}
+	before := func(step int) bool {
+		probe := *it
+		probe.step = step
+		c := probe.next()
+		return !c.IsZero() && c.Before(horizon)
+	}
+	step := int(horizon.Sub(it.start).Hours()/24) / period
+	for step > 0 && !before(step) {
+		step--
+	}
+	for before(step + 1) {
+		step++
+	}
+	it.step = step
+}
+
+// fastForwardWeeklyByDay moves a weekly byDay iterator to the end of the last
+// active week that lies wholly before horizon, so its next step lands on the
+// following active week exactly as walking there would.
+func fastForwardWeeklyByDay(it *iterator, horizon time.Time) {
+	weekStart := it.start.AddDate(0, 0, -int(it.start.Weekday()))
+	stride := 7 * it.rule.Interval
+	k := int(horizon.Sub(weekStart).Hours()/24) / stride
+	for k > 0 && weekStart.AddDate(0, 0, k*stride).After(horizon) {
+		k--
+	}
+	if k < 1 {
+		return
+	}
+	it.started = true
+	it.current = weekStart.AddDate(0, 0, (k-1)*stride+6)
 }
 
 func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Duration, windowStart time.Time) int {
