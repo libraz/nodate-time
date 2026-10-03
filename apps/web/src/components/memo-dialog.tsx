@@ -5,6 +5,7 @@ import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
+import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
 
@@ -29,6 +30,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   const heading = !editable ? t('panel.memo') : editing ? t('memo.edit') : t('memo.add');
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalA11y<HTMLDivElement>(true, onClose);
+  const isDesktop = useIsDesktop();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ title: '', body: '', done: false });
 
@@ -247,38 +249,34 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   // element a containing block for fixed descendants, which would resolve
   // this dialog's inset-0 against the pane instead of the viewport and leave
   // it boxed inside a 260px or 420px column, backdrop and all.
+  const backdrop = (
+    <button
+      type="button"
+      aria-label={t('common.close')}
+      className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
+      onClick={onClose}
+    />
+  );
+
+  // One form, framed per layout: rendering it once per breakpoint loaded the
+  // history twice and left titleRef on whichever copy rendered last.
   return createPortal(
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={heading}>
-      {/* Mobile: bottom sheet */}
-      <div className="sm:hidden">
-        <button
-          type="button"
-          aria-label={t('common.close')}
-          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
-          onClick={onClose}
-        />
-        <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
-          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
-          <div className="flex-1 overflow-y-auto">{formContent}</div>
-          {actionBar}
-        </div>
-      </div>
-
-      {/* Desktop: centered modal */}
-      <div className="hidden sm:contents">
-        <button
-          type="button"
-          aria-label={t('common.close')}
-          className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
-          onClick={onClose}
-        />
+      {backdrop}
+      {isDesktop ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
           <div className="glass-surface-heavy modal-panel pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">
             <div className="flex-1 overflow-y-auto">{formContent}</div>
             {actionBar}
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
+          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+          <div className="flex-1 overflow-y-auto">{formContent}</div>
+          {actionBar}
+        </div>
+      )}
     </div>,
     document.body,
   );
