@@ -76,13 +76,15 @@ export function shiftStartKeepingDuration(
   const newStart = DateTime.fromISO(`${newStartDate.toFormat('yyyy-MM-dd')}T${time}`, { zone });
   const oldStart = DateTime.fromISO(form.startAt, { zone });
   const oldEnd = DateTime.fromISO(form.endAt, { zone });
-  // Measured on a fixed-offset clock so the transition between the old start
-  // and the old end is not charged to the event, then re-applied as calendar
-  // units so the new position's own transitions are.
+  // Measure the span on a fixed-offset clock so neither source nor destination
+  // transitions change its wall-clock length. Set its fields on newStart to
+  // retain the chosen offset if the resulting local time is ambiguous.
   const span = oldEnd
     .setZone('UTC', { keepLocalTime: true })
     .diff(oldStart.setZone('UTC', { keepLocalTime: true }), ['days', 'hours', 'minutes']);
-  const newEnd = span.toMillis() > 0 ? newStart.plus(span) : newStart;
+  const wallClockStart = newStart.setZone('UTC', { keepLocalTime: true });
+  const wallClockEnd = wallClockStart.plus(span);
+  const newEnd = span.toMillis() > 0 ? newStart.set(wallClockEnd.toObject()) : newStart;
   return {
     startAt: newStart.toFormat(WALL_CLOCK),
     endAt: newEnd.toFormat(WALL_CLOCK),
