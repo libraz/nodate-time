@@ -15,7 +15,7 @@ function dayInZone(year: number, month: number, day: number, zone?: string): Dat
 
 export function getMonthDays(year: number, month: number, zone?: string): DateTime[] {
   const first = dayInZone(year, month + 1, 1, zone);
-  const last = first.endOf('month');
+  const last = first.endOf('month').startOf('day');
   const startDay = first.weekday % 7;
   const days: DateTime[] = [];
 
