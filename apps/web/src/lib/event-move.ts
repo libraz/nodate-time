@@ -13,7 +13,10 @@ export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventIn
   const duration = end
     .setZone('UTC', { keepLocalTime: true })
     .diff(start.setZone('UTC', { keepLocalTime: true }), ['days', 'hours', 'minutes']);
-  const newEnd = newStart.plus(duration);
+  const wallClockStart = newStart.setZone('UTC', { keepLocalTime: true });
+  const wallClockEnd = wallClockStart.plus(duration);
+  // Setting fields on newStart retains its chosen offset when the end is ambiguous.
+  const newEnd = newStart.set(wallClockEnd.toObject());
   return {
     title: evt.title,
     allDay: evt.allDay,
