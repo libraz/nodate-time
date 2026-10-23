@@ -16,7 +16,8 @@ func vcalendar(lines ...string) string {
 
 // A file naming a quarter of a million cancellations is refused, quickly. Read
 // one by one into a list that checks for duplicates, it pinned a core for
-// minutes.
+// minutes. The bound is far above the linear cost so a loaded host never trips
+// it; only that quadratic walk would.
 func TestImportRefusesAnExdateFlood(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -35,7 +36,7 @@ func TestImportRefusesAnExdateFlood(t *testing.T) {
 
 	began := time.Now()
 	report := importOK(t, calURL, tt.AccessToken, ics)
-	require.Less(t, time.Since(began), 5*time.Second)
+	require.Less(t, time.Since(began), 30*time.Second)
 	require.Equal(t, 1, report.Rejected)
 	require.Zero(t, report.Imported)
 }

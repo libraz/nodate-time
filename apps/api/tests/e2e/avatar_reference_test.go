@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
-	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +62,7 @@ func TestTheSweepLeavesAnObjectAnAvatarPointsAt(t *testing.T) {
 		time.Now().Add(-30*24*time.Hour), key)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	require.Equal(t, key, avatarObjectKey(t, tt.Email), "the avatar must survive a drifted count")
 }

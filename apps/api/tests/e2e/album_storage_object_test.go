@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
-	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -154,7 +153,7 @@ func TestADeletedPhotoGivesItsBytesBackInOneSweep(t *testing.T) {
 		time.Now().Add(-30*24*time.Hour), photoID)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(context.Background(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(context.Background(), testDB, getTestStorage())
 
 	var objectRows int
 	require.NoError(t, testDB.QueryRow(
@@ -221,13 +220,10 @@ func TestTheBackfillMovesAnOlderPhotoOntoAnObject(t *testing.T) {
 	photoID := uploadPhotoBytes(t, tt, tt.CalendarID, png, "waiting for the sweep")
 	detachPhoto(t, photoID)
 
-	var objectID int64
-	require.Error(t, testDB.QueryRow(
-		`SELECT so.id FROM album_photos ap JOIN storage_objects so ON so.id = ap.storage_object_id
-		  WHERE ap.public_id = UUID_TO_BIN(?)`, photoID).Scan(&objectID),
-		"the photo starts with no object, which is what the sweep is for")
-
-	cleanup.RunOnce(context.Background(), generated.New(testDB), getTestStorage())
+	// Any parallel test's sweep may reach this photo before this one does, so
+	// only the outcome is asserted: it was detached here, and it is on an
+	// object afterwards whichever pass moved it.
+	cleanup.RunOnce(context.Background(), testDB, getTestStorage())
 
 	_, refCount, objectKey := photoObjectRef(t, photoID)
 	require.Equal(t, 1, refCount, "the backfill takes the reference the photo should have had")

@@ -11,6 +11,48 @@ import (
 	"time"
 )
 
+const canReadObject = `-- name: CanReadObject :one
+SELECT EXISTS (
+  SELECT 1 FROM calendar_event_attachments a
+  INNER JOIN calendar_events e ON e.id = a.event_id AND e.enabled = TRUE
+  INNER JOIN calendars c ON c.id = e.calendar_id AND c.enabled = TRUE
+  INNER JOIN calendar_members cm
+    ON cm.calendar_id = c.id AND cm.user_id = ? AND cm.enabled = TRUE
+  WHERE a.storage_object_id = ? AND a.enabled = TRUE
+) OR EXISTS (
+  SELECT 1 FROM album_photos p
+  INNER JOIN calendars c ON c.id = p.calendar_id AND c.enabled = TRUE
+  INNER JOIN calendar_members cm
+    ON cm.calendar_id = c.id AND cm.user_id = ? AND cm.enabled = TRUE
+  WHERE (p.storage_object_id = ? OR p.thumbnail_object_id = ?)
+    AND p.enabled = TRUE
+) AS readable
+`
+
+type CanReadObjectParams struct {
+	UserID        uint32        `json:"userId"`
+	ObjectID      uint32        `json:"objectId"`
+	PhotoObjectID sql.NullInt32 `json:"photoObjectId"`
+}
+
+// CanReadObject says whether a user can already read the bytes of an object:
+// a live attachment on a live event, or a live album photo, holding it in a
+// calendar the user is a member of. A digest alone is not possession, so an
+// upload that would reuse stored bytes without sending them is allowed only
+// when this holds.
+func (q *Queries) CanReadObject(ctx context.Context, arg CanReadObjectParams) (sql.NullBool, error) {
+	row := q.db.QueryRowContext(ctx, canReadObject,
+		arg.UserID,
+		arg.ObjectID,
+		arg.UserID,
+		arg.PhotoObjectID,
+		arg.PhotoObjectID,
+	)
+	var readable sql.NullBool
+	err := row.Scan(&readable)
+	return readable, err
+}
+
 const confirmEventAttachment = `-- name: ConfirmEventAttachment :execresult
 UPDATE calendar_event_attachments a
 INNER JOIN calendar_events e ON e.id = a.event_id
@@ -211,8 +253,9 @@ func (q *Queries) GetPendingAttachmentByPublicID(ctx context.Context, publicID [
 }
 
 const listAbandonedAttachments = `-- name: ListAbandonedAttachments :many
-SELECT a.id, a.storage_object_id
+SELECT a.id, a.storage_object_id, a.public_id, w.public_id AS workspace_public_id
 FROM calendar_event_attachments a
+INNER JOIN workspaces w ON w.id = a.workspace_id
 WHERE a.enabled = FALSE AND a.retired_at IS NULL AND a.created_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?
@@ -225,14 +268,19 @@ type ListAbandonedAttachmentsParams struct {
 }
 
 type ListAbandonedAttachmentsRow struct {
-	ID              uint32 `json:"id"`
-	StorageObjectID uint32 `json:"storageObjectId"`
+	ID                uint32 `json:"id"`
+	StorageObjectID   uint32 `json:"storageObjectId"`
+	PublicID          []byte `json:"publicId"`
+	WorkspacePublicID []byte `json:"workspacePublicId"`
 }
 
 // ListAbandonedAttachments walks by id rather than re-reading the head of the
 // table: a row the delete below cannot remove would otherwise be listed again
 // on the next pass, and the sweep would spend its whole batch budget failing
 // on the same page.
+//
+// The public ids name the key a reservation may have uploaded its own copy to
+// (workspace/<workspace>/uploads/<attachment>), which nothing else tracks.
 func (q *Queries) ListAbandonedAttachments(ctx context.Context, arg ListAbandonedAttachmentsParams) ([]ListAbandonedAttachmentsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAbandonedAttachments, arg.CreatedAt, arg.ID, arg.Limit)
 	if err != nil {
@@ -242,7 +290,12 @@ func (q *Queries) ListAbandonedAttachments(ctx context.Context, arg ListAbandone
 	var items []ListAbandonedAttachmentsRow
 	for rows.Next() {
 		var i ListAbandonedAttachmentsRow
-		if err := rows.Scan(&i.ID, &i.StorageObjectID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.StorageObjectID,
+			&i.PublicID,
+			&i.WorkspacePublicID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -144,7 +144,7 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		}
 	}
 
-	// The account is spread across four tables and only makes sense as a
+	// The account is spread across five tables and only makes sense as a
 	// whole: a user with no identity cannot sign in, one outside the
 	// workspace can reach no calendar, and an admin grant without a user is
 	// an orphan. One transaction is what keeps a half-created account from
@@ -197,6 +197,21 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 			Role:        generated.WorkspaceMembersRoleMember,
 		}); err != nil {
 			return fmt.Errorf("add workspace member: %w", err)
+		}
+
+		// An account the operator created by hand is a deliberate exception to
+		// any domain restriction, so it is admitted on the same terms as an
+		// address an administrator allow-lists: every sign-in checks the list.
+		allowPubID, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		if _, err := q.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
+			PublicID: allowPubID[:],
+			Email:    strings.ToLower(strings.TrimSpace(email)),
+			Reason:   "created with createuser",
+		}); err != nil {
+			return fmt.Errorf("allow-list address: %w", err)
 		}
 
 		if admin {

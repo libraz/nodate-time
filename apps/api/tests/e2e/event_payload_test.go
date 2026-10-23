@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -73,4 +74,32 @@ func TestEventRejectsUnknownBodyField(t *testing.T) {
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, body)
 	require.Equal(t, http.StatusUnprocessableEntity, status,
 		"unknown body fields must fail loudly rather than be ignored; body: %s", string(raw))
+}
+
+// A recurring event repeats its memo in every occurrence of a listing and
+// every row of an export, so the memo is bounded on create and update alike:
+// the instance cap only bounds a response if each instance is bounded too.
+func TestEventMemoIsBoundedOnCreateAndUpdate(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+	atLimit := strings.Repeat("メ", 16000)
+	overLimit := atLimit + "モ"
+
+	body := spaCreateBody()
+	body["memo"] = overLimit
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, body)
+	require.Equal(t, http.StatusUnprocessableEntity, status, "create: %s", raw)
+
+	body["memo"] = atLimit
+	var created struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken, body, &created)
+
+	body["memo"] = overLimit
+	status, raw = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+created.ID, tt.AccessToken, body)
+	require.Equal(t, http.StatusUnprocessableEntity, status, "update: %s", raw)
 }

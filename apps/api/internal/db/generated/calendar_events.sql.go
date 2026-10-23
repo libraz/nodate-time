@@ -187,7 +187,7 @@ func (q *Queries) ExtendRecurrenceEnd(ctx context.Context, arg ExtendRecurrenceE
 
 const findCalendarEventBySourceUID = `-- name: FindCalendarEventBySourceUID :one
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
-WHERE calendar_id = ? AND source_uid = ? AND enabled = TRUE
+WHERE calendar_id = ? AND source_uid_key = ?
 `
 
 type FindCalendarEventBySourceUIDParams struct {
@@ -199,8 +199,9 @@ type FindCalendarEventBySourceUIDParams struct {
 // event a file is offering, so a second import of the same file can leave it
 // alone instead of writing a second copy of everything in it.
 //
-// Scoped to enabled rows to match uniq_calendar_events_source_uid, which is
-// itself scoped to live rows through source_uid_key. An event deleted here is
+// Matched on source_uid_key, which is source_uid on an enabled row and NULL
+// otherwise, so the lookup is one probe of uniq_calendar_events_source_uid
+// and sees live rows only. An event deleted here is
 // meant to be importable again, so a soft-deleted row must not answer this
 // question -- reading it would make the deletion permanent in a way the user
 // never asked for and cannot undo from the app.
@@ -583,8 +584,8 @@ ORDER BY start_at, id
 // There is deliberately no window. An export is a backup, and a backup that
 // quietly stops at a boundary is worse than no backup -- the caller cannot
 // tell the difference between "the calendar had nothing there" and "the
-// server decided not to look". Callers that want a window apply it to the
-// result themselves and say so.
+// server decided not to look". A windowed export reads through the range
+// queries above instead, and says which window it covered.
 func (q *Queries) ListCalendarEventsForExport(ctx context.Context, calendarID uint32) ([]CalendarEvent, error) {
 	rows, err := q.db.QueryContext(ctx, listCalendarEventsForExport, calendarID)
 	if err != nil {
@@ -902,14 +903,24 @@ func (q *Queries) ListRecurrenceOverridesByParents(ctx context.Context, parentId
 }
 
 const listRecurringCalendarEventsByCalendarAndRange = `-- name: ListRecurringCalendarEventsByCalendarAndRange :many
-SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events
-WHERE calendar_id = ?
-  AND enabled = TRUE
-  AND recurrence_rule IS NOT NULL
-  AND recurrence_parent_id IS NULL
-  AND start_at < ?
-  AND (recurrence_end IS NULL OR recurrence_end >= ?)
-ORDER BY start_at
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at, source_uid, source_uid_key, url FROM calendar_events s
+WHERE s.calendar_id = ?
+  AND s.enabled = TRUE
+  AND s.recurrence_rule IS NOT NULL
+  AND s.recurrence_parent_id IS NULL
+  AND (
+    (s.start_at < ?
+      AND (s.recurrence_end IS NULL OR s.recurrence_end >= ?))
+    OR EXISTS (
+      SELECT 1 FROM calendar_events o
+      WHERE o.recurrence_parent_id = s.id
+        AND o.enabled = TRUE
+        AND o.start_at < ?
+        AND (o.end_at > ?
+          OR (o.end_at = o.start_at AND o.end_at >= ?))
+    )
+  )
+ORDER BY s.start_at
 `
 
 type ListRecurringCalendarEventsByCalendarAndRangeParams struct {
@@ -923,8 +934,21 @@ type ListRecurringCalendarEventsByCalendarAndRangeParams struct {
 // recurrence_end is compared inclusively because a zero-length series ends
 // exactly where its last occurrence starts, and that marker belongs to the
 // window opening on it.
+//
+// A series is also selected when one of its changed occurrences overlaps the
+// window on its own dates, with the same test the non-recurring query applies.
+// An occurrence can be moved to before the series' start, which no bound on
+// the series row covers. Every windowed reader -- listing, share and export --
+// goes through this one query.
 func (q *Queries) ListRecurringCalendarEventsByCalendarAndRange(ctx context.Context, arg ListRecurringCalendarEventsByCalendarAndRangeParams) ([]CalendarEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listRecurringCalendarEventsByCalendarAndRange, arg.CalendarID, arg.RangeEnd, arg.RangeStart)
+	rows, err := q.db.QueryContext(ctx, listRecurringCalendarEventsByCalendarAndRange,
+		arg.CalendarID,
+		arg.RangeEnd,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.RangeStart,
+		arg.RangeStart,
+	)
 	if err != nil {
 		return nil, err
 	}

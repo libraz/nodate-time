@@ -166,6 +166,37 @@ func (q *Queries) GetInviteByTokenHashWithCalendar(ctx context.Context, tokenHas
 	return i, err
 }
 
+const getInviteForUpdate = `-- name: GetInviteForUpdate :one
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites WHERE id = ? FOR UPDATE
+`
+
+// GetInviteForUpdate re-reads a link under its row lock, so a decision about
+// who it has already admitted and how many uses are left is made against the
+// row that decision then writes.
+func (q *Queries) GetInviteForUpdate(ctx context.Context, id uint32) (CalendarInvite, error) {
+	row := q.db.QueryRowContext(ctx, getInviteForUpdate, id)
+	var i CalendarInvite
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CreatedByUserID,
+		&i.TokenHash,
+		&i.Role,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.IsPublic,
+		&i.ExpiresAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLiveInviteByTokenHash = `-- name: GetLiveInviteByTokenHash :one
 SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, use_count, is_public, expires_at, sort_weight, notes, enabled, updated_at, created_at FROM calendar_invites
 WHERE token_hash = ? AND enabled = TRUE

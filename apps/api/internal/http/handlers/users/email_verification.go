@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
@@ -22,37 +23,37 @@ import (
 // short window would strand anyone who registers and reads their mail later.
 const emailVerificationTTL = 7 * 24 * time.Hour
 
-// sendEmailVerification issues a confirmation link for a user's current
-// address. Failures are logged and swallowed: the caller is in the middle of a
-// registration that has already succeeded, and an undelivered confirmation is
-// recoverable by asking for another one.
-func sendEmailVerification(ctx context.Context, deps Deps, user generated.User) {
+// errNoMailer reports a deployment with nothing to send a confirmation with.
+var errNoMailer = errors.New("no mailer configured")
+
+// errMailNotAccepted wraps a mailer's refusal, which a caller can answer as a
+// busy service rather than a fault.
+var errMailNotAccepted = errors.New("mail not accepted")
+
+// sendEmailVerification stores a confirmation link for user's current address
+// through q and hands it to the mailer. q decides the transaction the link is
+// stored in, so a caller can undo the store when the mailer refuses.
+func sendEmailVerification(ctx context.Context, deps Deps, q *generated.Queries, user generated.User) error {
 	if deps.Mailer == nil {
-		return
-	}
-	if user.EmailVerifiedAt.Valid {
-		return
+		return errNoMailer
 	}
 
 	token, hash, err := auth.GenerateResetToken()
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to mint email verification token", "userID", user.ID, "error", err)
-		return
+		return fmt.Errorf("mint email verification token: %w", err)
 	}
 	pubID, err := uuid.NewV7()
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to mint email verification id", "userID", user.ID, "error", err)
-		return
+		return fmt.Errorf("mint email verification id: %w", err)
 	}
-	if _, err := deps.Queries.CreateEmailVerification(ctx, generated.CreateEmailVerificationParams{
+	if _, err := q.CreateEmailVerification(ctx, generated.CreateEmailVerificationParams{
 		PublicID:  pubID[:],
 		UserID:    user.ID,
 		Email:     user.Email,
 		TokenHash: hash,
 		ExpiresAt: time.Now().Add(emailVerificationTTL),
 	}); err != nil {
-		slog.ErrorContext(ctx, "failed to store email verification", "userID", user.ID, "error", err)
-		return
+		return fmt.Errorf("store email verification: %w", err)
 	}
 
 	link := fmt.Sprintf("%s/verify-email?token=%s", deps.WebURL, token)
@@ -66,12 +67,15 @@ func sendEmailVerification(ctx context.Context, deps Deps, user generated.User) 
 		Subject: fmt.Sprintf("Confirm your %s email address", deps.AppName),
 		Text:    body,
 	}); err != nil {
-		slog.ErrorContext(ctx, "failed to send email verification", "userID", user.ID, "error", err)
+		return fmt.Errorf("%w: %w", errMailNotAccepted, err)
 	}
+	return nil
 }
 
 // ResendEmailVerification issues a fresh confirmation link for the signed-in
-// user. Outstanding links are invalidated first so only the newest one works.
+// user. Outstanding links are invalidated in the same transaction that stores
+// the new one, and only once the mailer has accepted it: a failure leaves the
+// previous link working and is reported rather than answered with ok.
 func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificationInput) (*ResendVerificationOutput, error) {
 	return func(ctx context.Context, _ *ResendVerificationInput) (*ResendVerificationOutput, error) {
 		actorUserID, ok := middleware.ActorFromContext(ctx)
@@ -99,10 +103,19 @@ func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificatio
 			slog.WarnContext(ctx, "email verification resend suppressed by rate limiter", "userID", user.ID)
 			return nil, apierrors.ToHuma(apierrors.RateLimited)
 		}
-		if err := deps.Queries.InvalidateUserEmailVerifications(ctx, user.ID); err != nil {
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.InvalidateUserEmailVerifications(ctx, user.ID); err != nil {
+				return err
+			}
+			return sendEmailVerification(ctx, deps, q, user)
+		})
+		if err != nil {
+			slog.ErrorContext(ctx, "email verification resend failed", "userID", user.ID, "error", err)
+			if errors.Is(err, errMailNotAccepted) {
+				return nil, apierrors.ToHuma(apierrors.RateLimited)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		sendEmailVerification(ctx, deps, user)
 		return out, nil
 	}
 }

@@ -12,19 +12,25 @@ VALUES (?, ?, ?, ?, ?, ?);
 --
 -- The token names the session by its public id. The internal ids are one
 -- deployment-wide sequence, and an access token is a value a client holds.
+--
+-- A session is live only while its user is enabled: a disabled user is
+-- treated as nonexistent everywhere else, so a session opened before the
+-- user was disabled must stop with it.
 -- name: GetLiveSession :one
 SELECT * FROM sessions
-WHERE public_id = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3);
+WHERE sessions.public_id = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE);
 
 -- name: GetSessionByRefreshHash :one
 SELECT * FROM sessions
-WHERE refresh_hash = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3);
+WHERE sessions.refresh_hash = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE);
 
 -- RotateSessionByHash exchanges one refresh token for the next in a single
 -- statement, so two requests arriving with the same token cannot both come
@@ -34,26 +40,30 @@ WHERE refresh_hash = ?
 -- working with no record of why.
 --
 -- The assignments are order-dependent: MySQL evaluates SET left to right, so
--- prev_refresh_hash takes the old value only because it is assigned before
+-- rotated_from_hash takes the old value only because it is assigned before
 -- refresh_hash is overwritten.
+--
+-- A disabled user's session matches nothing, as in GetLiveSession, so it
+-- cannot be kept alive by refreshing.
 -- name: RotateSessionByHash :execresult
 UPDATE sessions
-SET prev_refresh_hash = refresh_hash,
+SET rotated_from_hash = refresh_hash,
     refresh_hash = ?,
     expires_at = ?,
     rotated_at = NOW(3),
     last_used_at = NOW(3)
-WHERE refresh_hash = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3);
+WHERE sessions.refresh_hash = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE);
 
--- GetSessionByPrevRefreshHash finds the session a spent refresh token used to
+-- GetSessionByRotatedFromHash finds the session a spent refresh token used to
 -- belong to. Matching here is the only evidence that a token which opens no
 -- session was ever real, which is what separates a replay from a guess.
--- name: GetSessionByPrevRefreshHash :one
+-- name: GetSessionByRotatedFromHash :one
 SELECT * FROM sessions
-WHERE prev_refresh_hash = ?
+WHERE rotated_from_hash = ?
   AND revoked_at IS NULL
   AND enabled = TRUE;
 

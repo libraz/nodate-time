@@ -210,9 +210,17 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			if isPublic {
 				// Lock the calendar row so two concurrent requests cannot both
 				// find no public link and both create one.
-				if _, err := q.GetCalendarByIDForUpdate(ctx, cal.ID); err != nil {
+				if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
 					return err
 				}
+			}
+			// The caller's role is decided here, under lock, not from the read
+			// that found the calendar: a manager removed in between creates
+			// nothing, and a calendar deleted in between takes no link.
+			if _, err := calresolve.LockManage(ctx, q, cal.ID, userID); err != nil {
+				return err
+			}
+			if isPublic {
 				count, err := q.CountActivePublicInvites(ctx, cal.ID)
 				if err != nil {
 					return err
@@ -286,40 +294,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		out := &AcceptInviteOutput{}
 		out.Body.CalendarID = pubIDToHex(cal.PublicID)
 
-		// Idempotent re-accept: an existing member must not burn a use. This
-		// comes before the link's own limits are read, because none of them
-		// describe this caller -- they are already on the calendar, and a
-		// second click on a link they have used cannot be turned away as
-		// expired when the access it offered is access they hold.
-		existing, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
-			CalendarID: invite.CalendarID,
-			UserID:     userID,
-		})
-		if err == nil {
-			out.Body.Role = string(existing.Role)
-			return out, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		// A link that has run out is a different answer from one that never
-		// existed, and the holder is entitled to it: they have the token, so
-		// nothing is disclosed, and "expired" is what prompts asking for
-		// another rather than concluding the calendar is gone.
-		if invite.ExpiresAt.Valid && !invite.ExpiresAt.Time.After(time.Now()) {
-			return nil, apierrors.ToHuma(apierrors.InviteExpired)
-		}
-		if invite.MaxUses.Valid && invite.UseCount >= uint32(invite.MaxUses.Int32) {
-			return nil, apierrors.ToHuma(apierrors.InviteExpired)
-		}
-
-		// A public link publishes the calendar for reading; it must never
-		// grant membership.
-		if invite.IsPublic {
-			return nil, apierrors.ToHuma(apierrors.InvitePublicViewOnly)
-		}
-
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -331,12 +305,58 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				if errors.Is(err, apierrors.CalendarNotFound) {
+					return apierrors.InviteCalendarGone
+				}
 				return err
 			}
+			// The link is locked before the membership is read, so two accepts
+			// of one link by one person queue here and the second finds the
+			// membership the first just created.
+			locked, err := q.GetInviteForUpdate(ctx, invite.ID)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && !locked.Enabled) {
+				return apierrors.InviteNotFound
+			}
+			if err != nil {
+				return err
+			}
+
+			// Idempotent re-accept: an existing member must not burn a use. This
+			// comes before the link's own limits are read, because none of them
+			// describe this caller -- they are already on the calendar, and a
+			// second click on a link they have used cannot be turned away as
+			// expired when the access it offered is access they hold.
+			existing, err := q.GetCalendarMemberForUpdate(ctx, generated.GetCalendarMemberForUpdateParams{
+				CalendarID: cal.ID,
+				UserID:     userID,
+			})
+			if err == nil {
+				out.Body.Role = string(existing.Role)
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+
+			// A link that has run out is a different answer from one that never
+			// existed, and the holder is entitled to it: they have the token, so
+			// nothing is disclosed, and "expired" is what prompts asking for
+			// another rather than concluding the calendar is gone.
+			if locked.ExpiresAt.Valid && !locked.ExpiresAt.Time.After(time.Now()) {
+				return apierrors.InviteExpired
+			}
+			if locked.MaxUses.Valid && locked.UseCount >= uint32(locked.MaxUses.Int32) {
+				return apierrors.InviteExpired
+			}
+
+			// A public link publishes the calendar for reading; it must never
+			// grant membership.
+			if locked.IsPublic {
+				return apierrors.InvitePublicViewOnly
+			}
+
 			// Claim a use atomically; zero rows means the link is exhausted.
-			// Checking the limit inside the UPDATE is what makes two
-			// concurrent acceptances of a single-use link race safely.
-			res, err := q.ConsumeInviteUse(ctx, invite.ID)
+			res, err := q.ConsumeInviteUse(ctx, locked.ID)
 			if err != nil {
 				return err
 			}
@@ -355,22 +375,23 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
 				PublicID:        memberPubID[:],
 				WorkspaceID:     deps.WorkspaceID,
-				CalendarID:      invite.CalendarID,
+				CalendarID:      cal.ID,
 				UserID:          userID,
-				Role:            generated.CalendarMembersRole(invite.Role),
+				Role:            generated.CalendarMembersRole(locked.Role),
 				MemberColor:     defaultMemberColor,
-				InvitedByUserID: sql.NullInt32{Int32: int32(invite.CreatedByUserID), Valid: true},
+				InvitedByUserID: sql.NullInt32{Int32: int32(locked.CreatedByUserID), Valid: true},
 			}); err != nil {
 				return err
 			}
+			out.Body.Role = string(locked.Role)
 
-			summary := string(invite.Role)
+			summary := string(locked.Role)
 			if user.DisplayName != "" {
-				summary = user.DisplayName + " -> " + string(invite.Role)
+				summary = user.DisplayName + " -> " + string(locked.Role)
 			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  invite.CalendarID,
+				CalendarID:  cal.ID,
 				ActorUserID: userID,
 				Type:        eventlog.TypeMemberJoined,
 				Summary:     summary,
@@ -381,7 +402,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, toAPIError(err)
 		}
 
-		out.Body.Role = string(invite.Role)
 		return out, nil
 	}
 }
@@ -423,7 +443,7 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockManage(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
 			res, err := q.RevokeInviteByPublicIDAndCalendar(ctx, generated.RevokeInviteByPublicIDAndCalendarParams{
@@ -586,7 +606,10 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		for _, e := range recurringRows {
 			seriesIDs = append(seriesIDs, e.ID)
 		}
-		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+		overrides, err := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
 		for _, e := range recurringRows {
 			if !publishedToLink(e) {

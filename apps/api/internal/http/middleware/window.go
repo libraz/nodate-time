@@ -39,6 +39,18 @@ func NewWindowCounter(window time.Duration, maxKeys int) *WindowCounter {
 // Take counts one event for key and returns the count in key's current
 // window, this one included, and when that window ends.
 func (c *WindowCounter) Take(key string, now time.Time) (count int, reset time.Time) {
+	count, reset, _ = c.take(key, now, true)
+	return count, reset
+}
+
+// TakeWithoutEviction is Take for a budget that must never be forgotten
+// early: when every slot holds an unexpired window, a new key is refused
+// (held is false and nothing is counted) rather than evicting another.
+func (c *WindowCounter) TakeWithoutEviction(key string, now time.Time) (count int, reset time.Time, held bool) {
+	return c.take(key, now, false)
+}
+
+func (c *WindowCounter) take(key string, now time.Time, evict bool) (int, time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -51,6 +63,9 @@ func (c *WindowCounter) Take(key string, now time.Time) (count int, reset time.T
 	e, ok := c.keys[key]
 	if !ok {
 		if len(c.keys) >= c.maxKeys {
+			if !evict {
+				return 0, time.Time{}, false
+			}
 			c.drop(c.order.Front())
 		}
 		e = c.order.PushBack(&windowBucket{key: key, start: now})
@@ -58,7 +73,7 @@ func (c *WindowCounter) Take(key string, now time.Time) (count int, reset time.T
 	}
 	b := e.Value.(*windowBucket)
 	b.count++
-	return b.count, b.start.Add(c.window)
+	return b.count, b.start.Add(c.window), true
 }
 
 // Len reports how many keys are held.

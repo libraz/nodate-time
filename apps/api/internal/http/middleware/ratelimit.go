@@ -52,9 +52,9 @@ func (rl *RateLimiter) allow(key string, now time.Time) (ok bool, remaining int,
 	return true, rl.limit - count, reset
 }
 
-// rateKey is the budget a client address draws on. An IPv6 client is
+// RateKey is the budget a client address draws on. An IPv6 client is
 // normally handed a whole /64, so each of its addresses is the same client.
-func rateKey(ip string) string {
+func RateKey(ip string) string {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
 		return ip
@@ -74,7 +74,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now()
-			ok, remaining, reset := rl.allow(rateKey(ClientIP(r, rl.trustedProxies)), now)
+			ok, remaining, reset := rl.allow(RateKey(ClientIP(r, rl.trustedProxies)), now)
 			h := w.Header()
 			h.Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
 			h.Set("X-RateLimit-Remaining", strconv.Itoa(remaining))

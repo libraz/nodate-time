@@ -39,10 +39,10 @@ ON DUPLICATE KEY UPDATE
   enabled = TRUE;
 
 -- name: UpdateCalendarMemberRole :exec
-UPDATE calendar_members SET role = ? WHERE calendar_id = ? AND user_id = ?;
+UPDATE calendar_members SET role = ? WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE;
 
 -- name: UpdateCalendarMemberColor :exec
-UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id = ?;
+UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE;
 
 -- name: RevokeCalendarMember :exec
 UPDATE calendar_members SET enabled = FALSE WHERE calendar_id = ? AND user_id = ?;

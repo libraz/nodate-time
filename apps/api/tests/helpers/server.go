@@ -235,7 +235,9 @@ func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	}
 }
 
-// OpenTestDB opens a connection to the test MySQL.
+// OpenTestDB opens a connection to the test MySQL. With a nil t (TestMain) a
+// failure is reported on stderr and nil is returned, so the caller's non-zero
+// exit always comes with its cause.
 func OpenTestDB(t *testing.T) *sql.DB {
 	if t != nil {
 		t.Helper()
@@ -257,6 +259,7 @@ func OpenTestDB(t *testing.T) *sql.DB {
 		if t != nil {
 			t.Fatalf("test db dsn: %v", err)
 		}
+		fmt.Fprintf(os.Stderr, "test db dsn: %v\n", err)
 		return nil
 	}
 	db, err := sql.Open("mysql", dsn)
@@ -264,6 +267,7 @@ func OpenTestDB(t *testing.T) *sql.DB {
 		if t != nil {
 			t.Fatalf("open test db: %v", err)
 		}
+		fmt.Fprintf(os.Stderr, "open test db: %v\n", err)
 		return nil
 	}
 	db.SetMaxOpenConns(8)
@@ -273,6 +277,8 @@ func OpenTestDB(t *testing.T) *sql.DB {
 		if t != nil {
 			t.Skipf("test database not available: %v (run: docker compose up -d mysql)", err)
 		}
+		fmt.Fprintf(os.Stderr, "test database not available: %v (run: docker compose up -d mysql)\n", err)
+		db.Close()
 		return nil
 	}
 	if t != nil {

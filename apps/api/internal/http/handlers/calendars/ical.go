@@ -2,6 +2,7 @@ package calendars
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -23,6 +24,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
@@ -45,7 +47,8 @@ type ExportOutput struct {
 	ContentDisposition string `header:"Content-Disposition"`
 	// ExportWindow states the range the body actually covers, so a caller can
 	// tell a calendar with nothing in a period from an export that stopped
-	// short of it. Empty means the whole calendar.
+	// short of it: "full" for the whole calendar, else "from/to" with an open
+	// end left empty.
 	ExportWindow string `header:"X-Export-Window"`
 	// Truncated says the body stopped at exportMaxEntries, so the window is
 	// not fully covered.
@@ -141,22 +144,20 @@ func parseExportWindow(from, to string, loc *time.Location) (exportWindow, error
 	return w, nil
 }
 
-// seriesReachesWindow reports whether a head row could put anything inside the
-// export window. A recurring head is judged by the end of its series, not of
-// its first occurrence, and a zero-length row at the window start is inside
-// it, as in the range queries.
-func seriesReachesWindow(e generated.CalendarEvent, w exportWindow) bool {
-	if !w.end.IsZero() && !e.StartAt.Time.Before(w.end) {
-		return false
+// queryBounds is the window as the range queries take it, an open end
+// standing at the first or last instant the DATETIME columns hold. The floor
+// is a second past year 1's first instant because the driver writes that
+// instant itself as a zero date.
+func (w exportWindow) queryBounds() (start, end sql.NullTime) {
+	start = sql.NullTime{Time: time.Date(1, 1, 1, 0, 0, 1, 0, time.UTC), Valid: true}
+	end = sql.NullTime{Time: time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC), Valid: true}
+	if !w.start.IsZero() {
+		start.Time = w.start
 	}
-	if w.start.IsZero() {
-		return true
+	if !w.end.IsZero() {
+		end.Time = w.end
 	}
-	if e.RecurrenceRule != nil {
-		return !e.RecurrenceEnd.Valid || !e.RecurrenceEnd.Time.Before(w.start)
-	}
-	return e.EndAt.Time.After(w.start) ||
-		(e.EndAt.Time.Equal(e.StartAt.Time) && !e.StartAt.Time.Before(w.start))
+	return start, end
 }
 
 // actorTimezone is the zone the caller reads their calendar in, used when a
@@ -201,19 +202,22 @@ func loadExportEvents(
 	ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow, expand bool,
 ) (entries []exportEvent, truncated bool, err error) {
 	var heads []generated.CalendarEvent
-	if expand {
+	if expand || !window.start.IsZero() || !window.end.IsZero() {
+		// The same selection the listing makes, so a series whose changed
+		// occurrence sits in the window is exported with it.
+		rangeStart, rangeEnd := window.queryBounds()
 		plain, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
-			RangeEnd:   sql.NullTime{Time: window.end, Valid: true},
-			RangeStart: sql.NullTime{Time: window.start, Valid: true},
+			RangeEnd:   rangeEnd,
+			RangeStart: rangeStart,
 		})
 		if err != nil {
 			return nil, false, err
 		}
 		series, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
-			RangeEnd:   sql.NullTime{Time: window.end, Valid: true},
-			RangeStart: sql.NullTime{Time: window.start, Valid: true},
+			RangeEnd:   rangeEnd,
+			RangeStart: rangeStart,
 		})
 		if err != nil {
 			return nil, false, err
@@ -228,7 +232,7 @@ func loadExportEvents(
 			// An undated row has nothing to render as DTSTART. The shared
 			// schema allows one; this product does not create them, but the
 			// export must not invent a zero time if another writer has.
-			if e.StartAt.Valid && e.EndAt.Valid && seriesReachesWindow(e, window) {
+			if e.StartAt.Valid && e.EndAt.Valid {
 				heads = append(heads, e)
 			}
 		}
@@ -530,70 +534,16 @@ func foldPoint(s string, limit int) int {
 	return n
 }
 
-// icsRRule renders an internal recurrence rule as an RFC 5545 RRULE value.
-//
-// WKST is always written out: the expander is fixed to a Sunday week start,
-// which differs from the RFC default, and a weekly rule with an interval
-// would land on different days in a client that assumed Monday.
-func icsRRule(r *recurrence.Rule, allDay bool, tz string) string {
-	if r == nil || r.Freq == "" {
-		return ""
-	}
-	parts := []string{"FREQ=" + strings.ToUpper(r.Freq)}
-	if r.Interval > 1 {
-		parts = append(parts, "INTERVAL="+strconv.Itoa(r.Interval))
-	}
-	if len(r.ByDay) > 0 {
-		parts = append(parts, "BYDAY="+strings.Join(r.ByDay, ","))
-	}
-	if r.ByMonthDay > 0 {
-		parts = append(parts, "BYMONTHDAY="+strconv.Itoa(r.ByMonthDay))
-	}
-	if r.BySetPos > 0 {
-		parts = append(parts, "BYSETPOS="+strconv.Itoa(r.BySetPos))
-	}
-	if r.Count > 0 {
-		parts = append(parts, "COUNT="+strconv.Itoa(r.Count))
-	}
-	if until := icsUntil(r.Until, allDay, tz); until != "" {
-		parts = append(parts, "UNTIL="+until)
-	}
-	parts = append(parts, "WKST=SU")
-	return strings.Join(parts, ";")
-}
-
-// icsUntil renders the rule's end boundary in the value type DTSTART uses: a
-// date for an all-day series, a UTC instant for a timed one. Mixing the two
-// is what makes some clients drop the boundary and repeat forever.
-func icsUntil(until *string, allDay bool, tz string) string {
-	if until == nil || *until == "" {
-		return ""
-	}
-	loc := loadLocationOrUTC(tz)
-	if t, err := time.Parse(time.RFC3339, *until); err == nil {
-		if allDay {
-			return t.In(loc).Format("20060102")
-		}
-		return icsTime(t)
-	}
-	if t, err := time.ParseInLocation("2006-01-02", *until, loc); err == nil {
-		if allDay {
-			return t.Format("20060102")
-		}
-		return icsTime(t.AddDate(0, 0, 1).Add(-time.Second))
-	}
-	return ""
-}
-
-// icsSeriesZone is the TZID a timed series is written in, or "" when its zone
-// is UTC -- or unknown, which the expander also reads as UTC -- and the Z form
+// icsZone is the TZID a timed value is written in, or "" when its zone is
+// UTC -- or unknown, which the expander also reads as UTC -- and the Z form
 // already says so.
 //
 // A rule expands in the zone of its DTSTART. Written as a UTC instant, a
 // Monday 08:00 Tokyo series starts on a Sunday, and BYDAY=MO lands a day late
 // in every client; a New York one keeps its UTC time across DST and moves an
-// hour on the wall clock.
-func icsSeriesZone(tz string) string {
+// hour on the wall clock. A single event carries its zone the same way, so a
+// re-import keeps it rather than reading the event as UTC.
+func icsZone(tz string) string {
 	loc := loadLocationOrUTC(tz)
 	if loc == time.UTC {
 		return ""
@@ -617,7 +567,7 @@ func icsExdate(ex recurrence.Exceptions, allDay bool, tz string) string {
 	if len(ex) == 0 {
 		return ""
 	}
-	zone := icsSeriesZone(tz)
+	zone := icsZone(tz)
 	values := make([]string, 0, len(ex))
 	for _, t := range ex {
 		switch {
@@ -645,7 +595,7 @@ func icsRecurrenceID(x exportEvent) string {
 	if x.parentAllDay {
 		return "RECURRENCE-ID;VALUE=DATE:" + icsDate(x.originalStart, x.parentTimezone)
 	}
-	return icsTimeProp("RECURRENCE-ID", x.originalStart, icsSeriesZone(x.parentTimezone))
+	return icsTimeProp("RECURRENCE-ID", x.originalStart, icsZone(x.parentTimezone))
 }
 
 // icsZonesUsed returns each TZID the rows reference with the earliest instant
@@ -661,11 +611,11 @@ func icsZonesUsed(rows []exportEvent) map[string]time.Time {
 		}
 	}
 	for _, x := range rows {
-		if x.rule != nil && !x.event.AllDay {
-			note(icsSeriesZone(x.event.Timezone), x.startAt)
+		if !x.event.AllDay {
+			note(icsZone(x.event.Timezone), x.startAt)
 		}
 		if x.isOverride && !x.parentAllDay {
-			note(icsSeriesZone(x.parentTimezone), x.originalStart)
+			note(icsZone(x.parentTimezone), x.originalStart)
 		}
 	}
 	return zones
@@ -705,20 +655,16 @@ func buildICS(appName, calName string, rows []exportEvent) string {
 			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt, e.Timezone))
 			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt, e.Timezone))
 		} else {
-			// A series is written in its own zone, which the VTIMEZONE above
-			// defines, so the rule expands where the server expands it. Any
-			// other timed value is a UTC instant.
-			zone := ""
-			if x.rule != nil {
-				zone = icsSeriesZone(e.Timezone)
-			}
+			// Written in the event's own zone, which the VTIMEZONE above
+			// defines, so a rule expands where the server expands it.
+			zone := icsZone(e.Timezone)
 			writeFolded(&b, icsTimeProp("DTSTART", x.startAt, zone))
 			writeFolded(&b, icsTimeProp("DTEND", x.endAt, zone))
 		}
 		if x.isOverride {
 			writeFolded(&b, icsRecurrenceID(x))
 		}
-		if rrule := icsRRule(x.rule, e.AllDay, e.Timezone); rrule != "" {
+		if rrule := recurrence.FormatRRule(x.rule, x.startAt.In(loadLocationOrUTC(e.Timezone)), e.AllDay); rrule != "" {
 			writeFolded(&b, "RRULE:"+rrule)
 			if exdate := icsExdate(x.exceptions, e.AllDay, e.Timezone); exdate != "" {
 				writeFolded(&b, exdate)
@@ -766,18 +712,6 @@ func icsTrigger(minutes int32) string {
 		return "PT0S"
 	}
 	return "-PT" + strconv.Itoa(int(minutes)) + "M"
-}
-
-// supportedAlarmOffsets is the set of reminders this product can show.
-//
-// An imported alarm outside it is dropped rather than kept: the picker is the
-// only place a reminder is visible or changeable, so a value it cannot
-// represent would be invisible, and the next edit through that picker would
-// clear it without anyone choosing to. Dropping it on the way in at least
-// happens where the import result can report it.
-var supportedAlarmOffsets = map[int32]bool{
-	0: true, 5: true, 10: true, 15: true, 30: true,
-	60: true, 120: true, 1440: true, 2880: true,
 }
 
 // parseTriggerMinutes reads a TRIGGER value as minutes before the start.
@@ -901,10 +835,13 @@ func parseICSDuration(s string) (time.Duration, bool) {
 	return total, true
 }
 
-// importAlarm maps a parsed alarm onto the stored offset. An alarm this
-// product cannot show is left off rather than snapped to a neighbouring value.
+// importAlarm maps a parsed alarm onto the stored offset, accepting exactly
+// the reminders the events API does. An alarm outside them would be invisible
+// in the picker, and the next edit through it would clear it without anyone
+// choosing to, so it is left off rather than snapped to a neighbouring value;
+// dropping it here at least happens where the import result can report it.
 func importAlarm(minutes *int32) sql.NullInt32 {
-	if minutes == nil || !supportedAlarmOffsets[*minutes] {
+	if minutes == nil || !events.SupportedNotificationOffset(int(*minutes)) {
 		return sql.NullInt32{}
 	}
 	return sql.NullInt32{Int32: *minutes, Valid: true}
@@ -1286,7 +1223,7 @@ func parseICS(text string) []rawEvent {
 			case "LOCATION":
 				cur.location = unescapeICS(val)
 			case "DESCRIPTION":
-				cur.desc = unescapeICS(val)
+				cur.desc = truncateRunes(unescapeICS(val), importMaxMemoRunes)
 			case "URL":
 				cur.url = val
 			case "CLASS":
@@ -1351,120 +1288,13 @@ func parseICS(text string) []rawEvent {
 	return events
 }
 
-var icalWeekdays = map[string]bool{
-	"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true,
-}
-
-// convertRRuleUntil maps an RRULE UNTIL value onto the internal rule's until
-// string: dates stay date-only, instants become RFC 3339. A local-time UNTIL
-// (no Z) is anchored in the event's zone.
-func convertRRuleUntil(val string, loc *time.Location) (string, bool) {
-	if t, err := time.Parse("20060102T150405Z", val); err == nil {
-		return t.UTC().Format(time.RFC3339), true
-	}
-	if t, err := time.ParseInLocation("20060102T150405", val, loc); err == nil {
-		return t.Format(time.RFC3339), true
-	}
-	if _, err := time.Parse("20060102", val); err == nil {
-		return val[:4] + "-" + val[4:6] + "-" + val[6:8], true
-	}
-	return "", false
-}
-
-// convertRRule maps an RFC 5545 RRULE value onto the app's internal recurrence
-// rule JSON. It supports the subset the expander implements (FREQ, INTERVAL,
-// COUNT, UNTIL, BYDAY, BYMONTHDAY, BYSETPOS); anything else returns false so
-// the caller can skip the event instead of silently importing a single
-// occurrence.
-//
-// start is DTSTART in the event's zone; UNTIL without Z is read in its zone,
-// and its weekday takes part in the week-start check.
+// convertRRule maps an RFC 5545 RRULE value onto the stored rule JSON, or
+// reports false for a rule the expander would expand to other dates, so the
+// caller skips the event instead of importing a different series. start is
+// DTSTART in the event's zone.
 func convertRRule(value string, start time.Time) (*json.RawMessage, bool) {
-	loc := start.Location()
-	rule := recurrence.Rule{Interval: 1}
-	wkst := ""
-	for _, part := range strings.Split(value, ";") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		eq := strings.Index(part, "=")
-		if eq < 0 {
-			return nil, false
-		}
-		key := strings.ToUpper(part[:eq])
-		val := part[eq+1:]
-		switch key {
-		case "FREQ":
-			switch strings.ToUpper(val) {
-			case "DAILY":
-				rule.Freq = "daily"
-			case "WEEKLY":
-				rule.Freq = "weekly"
-			case "MONTHLY":
-				rule.Freq = "monthly"
-			case "YEARLY":
-				rule.Freq = "yearly"
-			default:
-				return nil, false
-			}
-		case "INTERVAL":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 || n > 999 {
-				return nil, false
-			}
-			rule.Interval = n
-		case "COUNT":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 || n > 1000 {
-				return nil, false
-			}
-			rule.Count = n
-		case "UNTIL":
-			until, ok := convertRRuleUntil(val, loc)
-			if !ok {
-				return nil, false
-			}
-			rule.Until = &until
-		case "BYDAY":
-			for _, d := range strings.Split(val, ",") {
-				d = strings.ToUpper(strings.TrimSpace(d))
-				// Ordinal prefixes such as 2MO or -1FR are not supported.
-				if !icalWeekdays[d] {
-					return nil, false
-				}
-				rule.ByDay = append(rule.ByDay, d)
-			}
-		case "BYMONTHDAY":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 || n > 31 {
-				return nil, false
-			}
-			rule.ByMonthDay = n
-		case "BYSETPOS":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 || n > 5 {
-				return nil, false
-			}
-			rule.BySetPos = n
-		case "WKST":
-			wkst = strings.ToUpper(val)
-		default:
-			return nil, false
-		}
-	}
-	if rule.Freq == "" {
-		return nil, false
-	}
-	// The expander is fixed to WKST=SU, and an absent WKST means MO.
-	if wkst == "" {
-		wkst = "MO"
-	}
-	if !weekStartAgrees(rule, wkst, start.Weekday()) {
-		return nil, false
-	}
-	// The same contract a rule written through the API is held to.
-	if rule.Validate(start) != nil {
+	rule, ok := recurrence.ParseRRule(value, start)
+	if !ok {
 		return nil, false
 	}
 	data, err := json.Marshal(rule)
@@ -1475,43 +1305,22 @@ func convertRRule(value string, start time.Time) (*json.RawMessage, bool) {
 	return &raw, true
 }
 
-// weekStartAgrees reports whether a rule expands the same under week start
-// wkst as under the expander's Sunday. Only a weekly rule with an interval
-// and BYDAY groups days into weeks; the grouping differs exactly when the
-// days in play -- BYDAY and DTSTART's own -- fall on both sides of the
-// stretch from Sunday up to wkst.
-func weekStartAgrees(rule recurrence.Rule, wkst string, startDay time.Weekday) bool {
-	if wkst == "SU" || rule.Freq != "weekly" || rule.Interval <= 1 || len(rule.ByDay) == 0 {
-		return true
-	}
-	w, ok := weekdayFromCode(wkst)
-	if !ok {
-		return false
-	}
-	inside, outside := false, false
-	mark := func(d time.Weekday) {
-		if d < w {
-			inside = true
-		} else {
-			outside = true
-		}
-	}
-	mark(startDay)
-	for _, code := range rule.ByDay {
-		if d, ok := weekdayFromCode(code); ok {
-			mark(d)
-		}
-	}
-	return !(inside && outside)
-}
+// importMaxMemoRunes is the memo length the events API accepts. A longer
+// description is cut to it rather than stored as a memo no edit could save.
+const importMaxMemoRunes = 16000
 
-func weekdayFromCode(code string) (time.Weekday, bool) {
-	for i, c := range icsWeekdayCodes {
-		if c == code {
-			return time.Weekday(i), true
-		}
+// truncateRunes cuts s to at most n characters, never inside one.
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return 0, false
+	for i := range s {
+		if n == 0 {
+			return s[:i]
+		}
+		n--
+	}
+	return s
 }
 
 func unescapeICS(s string) string {
@@ -1627,12 +1436,17 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 }
 
 // importedSeries is what a changed occurrence needs to attach itself to the
-// series it belongs to.
+// series it belongs to, and to check that it names an occurrence the series
+// has.
 type importedSeries struct {
-	id       uint32
-	publicID []byte
-	timezone string
-	rule     *json.RawMessage
+	id         uint32
+	publicID   []byte
+	title      string
+	start      time.Time
+	end        time.Time
+	timezone   string
+	rule       *json.RawMessage
+	exceptions recurrence.Exceptions
 	// recognised marks a series the calendar already held, which this import
 	// left alone. Its changed occurrences have to be left alone with it: the
 	// override write applies itself in place, so taking those while the series
@@ -1777,6 +1591,22 @@ func importEndAt(e rawEvent) (time.Time, bool) {
 	return e.start.Add(time.Hour), true
 }
 
+// validateImported decides whether one VEVENT, series head or changed
+// occurrence, is something the calendar can hold, and returns its end. A
+// file's event without a title or a start has nothing to import; one whose
+// values the calendar cannot store is rejected.
+func validateImported(e rawEvent) (time.Time, importOutcome, bool) {
+	if e.summary == "" || e.start.IsZero() {
+		return time.Time{}, importSkipped, false
+	}
+	endAt, ok := importEndAt(e)
+	if !ok || e.tooManyExdates || !storableInstant(e.start) || !storableInstant(endAt) ||
+		(e.hasRecurrenceID && !storableInstant(e.recurrenceID)) {
+		return time.Time{}, importRejected, false
+	}
+	return endAt, importCreated, true
+}
+
 // importSeriesHead writes one VEVENT that is not a changed occurrence.
 //
 // Each event is its own transaction so one bad row does not discard the whole
@@ -1796,12 +1626,9 @@ func importSeriesHead(
 	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32, e rawEvent,
 	identity sql.NullString,
 ) (importedSeries, importOutcome) {
-	if e.summary == "" || e.start.IsZero() {
-		return importedSeries{}, importSkipped
-	}
-	endAt, ok := importEndAt(e)
-	if !ok || e.tooManyExdates {
-		return importedSeries{}, importRejected
+	endAt, outcome, ok := validateImported(e)
+	if !ok {
+		return importedSeries{}, outcome
 	}
 	tz := importZone(e.tzid)
 
@@ -1829,8 +1656,7 @@ func importSeriesHead(
 		}
 		exceptions = column
 	}
-	if !storableInstant(e.start) || !storableInstant(endAt) ||
-		(recEnd.Valid && !storableInstant(recEnd.Time)) {
+	if recEnd.Valid && !storableInstant(recEnd.Time) {
 		return importedSeries{}, importRejected
 	}
 
@@ -1845,8 +1671,12 @@ func importSeriesHead(
 			return importedSeries{
 				id:         existing.ID,
 				publicID:   existing.PublicID,
+				title:      existing.Title,
+				start:      existing.StartAt.Time,
+				end:        existing.EndAt.Time,
 				timezone:   existing.Timezone,
 				rule:       existing.RecurrenceRule,
+				exceptions: recurrence.ParseExceptions(existing.RecurrenceExceptions),
 				recognised: true,
 			}, importDuplicate
 		case !errors.Is(err, sql.ErrNoRows):
@@ -1916,26 +1746,35 @@ func importSeriesHead(
 	if err != nil {
 		return importedSeries{}, storeOutcome(err)
 	}
-	return importedSeries{id: newID, publicID: pubID[:], timezone: tz, rule: ruleData}, importCreated
+	return importedSeries{
+		id: newID, publicID: pubID[:], title: e.summary, start: e.start, end: endAt,
+		timezone: tz, rule: ruleData, exceptions: e.exdates,
+	}, importCreated
 }
 
 // importChangedOccurrence writes a VEVENT carrying a RECURRENCE-ID as an
 // override of the series it names, which is how the app stores a changed
 // occurrence. Written as a free-standing event it would show up beside the
 // occurrence it was meant to replace.
+//
+// It is held to the checks a series head is, and to one more: the occurrence
+// it names has to be one the series has. A row standing in for an occurrence
+// the rule does not produce, or one the file cancels, is never listed, so it
+// is skipped rather than stored and counted.
 func importChangedOccurrence(
 	ctx context.Context, deps Deps, cal generated.Calendar, userID uint32,
 	e rawEvent, parent importedSeries,
 ) importOutcome {
-	if e.start.IsZero() {
-		// The file named an occurrence to replace and then did not date the
-		// replacement, which no retry of the same bytes fixes.
-		return importRejected
+	// An override inherits what it does not set, the title included.
+	e.summary = cmp.Or(e.summary, parent.title)
+	endAt, outcome, ok := validateImported(e)
+	if !ok {
+		return outcome
 	}
-	endAt, ok := importEndAt(e)
-	if !ok || !storableInstant(e.start) || !storableInstant(endAt) ||
-		!storableInstant(e.recurrenceID) {
-		return importRejected
+	if parent.exceptions.Contains(e.recurrenceID) ||
+		!recurrence.OccursAt(recurrence.ParseRule(*parent.rule), parent.start, parent.end,
+			parent.timezone, e.recurrenceID) {
+		return importSkipped
 	}
 	overridePubID, err := uuid.NewV7()
 	if err != nil {

@@ -1,9 +1,11 @@
 package users
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
@@ -59,5 +61,24 @@ func TestAccountDefaultsFallBackOnlyWhereUnset(t *testing.T) {
 				t.Fatalf("resolved() = %+v, want locale %q timezone %q", got, tt.locale, tt.timezone)
 			}
 		})
+	}
+}
+
+// An identity with no password must cost the same hash as one with a wrong
+// password; answering it without one would say the account exists.
+func TestPasswordMatchesHashesEvenWithoutAStoredHash(t *testing.T) {
+	if passwordMatches(sql.NullString{}, "anything") {
+		t.Fatal("an identity with no password accepted one")
+	}
+	start := time.Now()
+	auth.CheckPassword("anything", dummyPasswordHash)
+	hashed := time.Since(start)
+
+	start = time.Now()
+	passwordMatches(sql.NullString{}, "anything")
+	null := time.Since(start)
+
+	if null*4 < hashed {
+		t.Fatalf("no-hash path took %v against %v for one hash: it skipped the comparison", null, hashed)
 	}
 }

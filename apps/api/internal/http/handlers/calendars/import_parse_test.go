@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func icsBody(lines ...string) string {
@@ -136,5 +137,23 @@ func TestConvertRRuleHonorsTheDefaultWeekStart(t *testing.T) {
 		if ok != c.ok {
 			t.Errorf("convertRRule(%q, %s) ok = %v, want %v", c.rule, c.start.Weekday(), ok, c.ok)
 		}
+	}
+}
+
+// A description past the memo limit is cut to it on a character boundary.
+func TestParseICSCutsTheDescriptionToTheMemoLimit(t *testing.T) {
+	long := "B" + strings.Repeat("あ", importMaxMemoRunes+50)
+	e := parseICS(icsBody("BEGIN:VEVENT", "SUMMARY:x", "DTSTART:20260101T000000Z",
+		"DESCRIPTION:"+long, "END:VEVENT"))[0]
+	if !utf8.ValidString(e.desc) || utf8.RuneCountInString(e.desc) != importMaxMemoRunes ||
+		!strings.HasPrefix(long, e.desc) {
+		t.Errorf("description kept %d runes (valid %v), want the first %d",
+			utf8.RuneCountInString(e.desc), utf8.ValidString(e.desc), importMaxMemoRunes)
+	}
+	short := strings.Repeat("あ", importMaxMemoRunes)
+	e = parseICS(icsBody("BEGIN:VEVENT", "SUMMARY:x", "DTSTART:20260101T000000Z",
+		"DESCRIPTION:"+short, "END:VEVENT"))[0]
+	if e.desc != short {
+		t.Error("a description within the limit must arrive whole")
 	}
 }

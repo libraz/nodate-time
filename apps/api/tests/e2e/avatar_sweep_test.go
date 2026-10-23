@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
-	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +51,7 @@ func TestAbandonedRepeatAvatarUploadKeepsTheLivePicture(t *testing.T) {
 		time.Now().Add(-30*24*time.Hour), second.AvatarID)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	_, exists, err := getTestStorage().StatObject(testCtx(), storageKey)
 	require.NoError(t, err)
@@ -88,7 +87,7 @@ func TestAbandonedAvatarUploadReclaimsItsOwnBytes(t *testing.T) {
 		time.Now().Add(-30*24*time.Hour), pres.AvatarID)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	_, exists, err := getTestStorage().StatObject(testCtx(), storageKey)
 	require.NoError(t, err)

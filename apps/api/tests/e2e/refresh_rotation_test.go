@@ -107,7 +107,7 @@ func refreshHash(token string) string {
 func ageOutTheExchange(t *testing.T, spent string) {
 	t.Helper()
 	res, err := testDB.Exec(
-		`UPDATE sessions SET rotated_at = NOW(3) - INTERVAL 1 HOUR WHERE prev_refresh_hash = ?`,
+		`UPDATE sessions SET rotated_at = NOW(3) - INTERVAL 1 HOUR WHERE rotated_from_hash = ?`,
 		refreshHash(spent))
 	require.NoError(t, err)
 	rows, err := res.RowsAffected()

@@ -259,28 +259,44 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 	return func(ctx context.Context, in *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, member, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		// All fields are optional: when omitted, keep the current values so a
-		// partial update does not blank out other fields.
-		name := cal.Name
-		if in.Body.Name != nil {
-			name = *in.Body.Name
-		}
-		color := cal.Color
-		if in.Body.Color != nil {
-			color = *in.Body.Color
-		}
-		coverURL := cal.CoverURL
-		if in.Body.CoverURL != nil {
-			coverURL = nullString(*in.Body.CoverURL)
-		}
-
 		var updated generated.Calendar
+		var member generated.CalendarMember
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
+				return err
+			}
+			// The caller's role and the row being merged over are both read
+			// here, under the lock, so a manager removed or a field changed
+			// since the first read is seen rather than written back over.
+			var err error
+			if member, err = calresolve.LockManage(ctx, q, cal.ID, userID); err != nil {
+				return err
+			}
+			current, err := q.GetCalendarByIDForUpdate(ctx, cal.ID)
+			if err != nil {
+				return err
+			}
+
+			// All fields are optional: when omitted, keep the current values so a
+			// partial update does not blank out other fields.
+			name := current.Name
+			if in.Body.Name != nil {
+				name = *in.Body.Name
+			}
+			color := current.Color
+			if in.Body.Color != nil {
+				color = *in.Body.Color
+			}
+			coverURL := current.CoverURL
+			if in.Body.CoverURL != nil {
+				coverURL = nullString(*in.Body.CoverURL)
+			}
+
 			if err := q.UpdateCalendar(ctx, generated.UpdateCalendarParams{
 				Name:     name,
 				Color:    color,
@@ -289,7 +305,6 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			}); err != nil {
 				return err
 			}
-			var err error
 			updated, err = q.GetCalendarByID(ctx, cal.ID)
 			if err != nil {
 				return err
@@ -304,7 +319,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		// A rename says nothing about who the calendar is shared with, so the
@@ -328,6 +343,15 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
 				return err
+			}
+			// Ownership is re-read under the lock: an owner demoted since the
+			// first read no longer destroys the calendar for everyone.
+			owner, err := calresolve.LockMember(ctx, q, cal.ID, userID)
+			if err != nil {
+				return err
+			}
+			if !calresolve.CanOwn(owner.Role) {
+				return apierrors.CalendarRoleRequired
 			}
 			// Release the blobs this calendar's attachments were holding.
 			// The objects are content-addressed and may be shared, so they
@@ -416,12 +440,9 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 	return func(ctx context.Context, in *UpdateMemberRoleInput) (*UpdateMemberRoleOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
+		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
 			return nil, toAPIError(err)
-		}
-		if !calresolve.CanManage(actorMember.Role) {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -437,26 +458,40 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		if target.ID == actorID {
 			return nil, apierrors.ToHuma(apierrors.MemberSelfModify)
 		}
-		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-		}
 
 		newRole := generated.CalendarMembersRole(in.Body.Role)
 
-		// Ownership only moves by the owner's hand. A manager that could hand
-		// it to a second account it controls, or strip it from the person who
-		// created the calendar, would hold every power the owner has plus
-		// deniability -- so both directions are gated, not just the promotion.
-		if (newRole == generated.CalendarMembersRoleOwner || current.Role == generated.CalendarMembersRoleOwner) &&
-			!calresolve.CanOwn(actorMember.Role) {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
-
+		var memberColor string
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			// Both memberships are read under their row locks: the gates below
+			// are decided on the roles the write then replaces, not on the
+			// ones an earlier read saw.
+			members, err := calresolve.LockMembers(ctx, q, cal.ID, actorID, target.ID)
+			if err != nil {
 				return err
 			}
+			actorMember, ok := members[actorID]
+			if !ok {
+				return apierrors.CalendarAccessDenied
+			}
+			if !calresolve.CanManage(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+			current, ok := members[target.ID]
+			if !ok {
+				return apierrors.MemberNotFound
+			}
+			memberColor = current.MemberColor
+
+			// Ownership only moves by the owner's hand. A manager that could hand
+			// it to a second account it controls, or strip it from the person who
+			// created the calendar, would hold every power the owner has plus
+			// deniability -- so both directions are gated, not just the promotion.
+			if (newRole == generated.CalendarMembersRoleOwner || current.Role == generated.CalendarMembersRoleOwner) &&
+				!calresolve.CanOwn(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+
 			// Lock the owner count and apply the role change atomically so
 			// concurrent demotions cannot leave the calendar with nobody who
 			// can administer it.
@@ -495,7 +530,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			Email:  target.Email,
 			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:   in.Body.Role,
-			Color:  current.MemberColor,
+			Color:  memberColor,
 		}}, nil
 	}
 }
@@ -509,7 +544,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput) (*UpdateMemberColorOutput, error) {
 	return func(ctx context.Context, in *UpdateMemberColorInput) (*UpdateMemberColorOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
+		cal, _, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -522,23 +557,44 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
-		// Your own colour is yours to pick; anyone else's is the calendar's
-		// administration, because two members claiming the same colour is a
-		// problem only somebody looking at the whole list can resolve.
-		if target.ID != actorID && !calresolve.CanManage(actorMember.Role) {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
-		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-		}
 
-		if err := deps.Queries.UpdateCalendarMemberColor(ctx, generated.UpdateCalendarMemberColorParams{
-			MemberColor: in.Body.Color,
-			CalendarID:  cal.ID,
-			UserID:      target.ID,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		var actorMember, current generated.CalendarMember
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			members, err := calresolve.LockMembers(ctx, q, cal.ID, actorID, target.ID)
+			if err != nil {
+				return err
+			}
+			var ok bool
+			if actorMember, ok = members[actorID]; !ok {
+				return apierrors.CalendarAccessDenied
+			}
+			// Your own colour is yours to pick; anyone else's is the calendar's
+			// administration, because two members claiming the same colour is a
+			// problem only somebody looking at the whole list can resolve.
+			if target.ID != actorID && !calresolve.CanManage(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+			if current, ok = members[target.ID]; !ok {
+				return apierrors.MemberNotFound
+			}
+			if err := q.UpdateCalendarMemberColor(ctx, generated.UpdateCalendarMemberColorParams{
+				MemberColor: in.Body.Color,
+				CalendarID:  cal.ID,
+				UserID:      target.ID,
+			}); err != nil {
+				return err
+			}
+			return eventlog.Append(ctx, q, eventlog.Entry{
+				WorkspaceID: deps.WorkspaceID,
+				CalendarID:  cal.ID,
+				ActorUserID: actorID,
+				Type:        eventlog.TypeMemberColorSet,
+				Summary:     target.DisplayName,
+				Subject:     target.PublicID,
+			})
+		})
+		if err != nil {
+			return nil, toAPIError(err)
 		}
 
 		email := ""
@@ -576,28 +632,14 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		// Compare parsed UUID bytes so a self-leave is recognized regardless of the
 		// hex casing the client used in the path.
 		isSelfLeave := bytes.Equal(targetPub, actor.PublicID)
+		// A caller who may not remove anyone is refused before the target's
+		// existence is revealed; the role is checked again under lock below.
 		if !isSelfLeave && !calresolve.CanManage(actorMember.Role) {
 			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-		}
-		current, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: cal.ID, UserID: target.ID})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-		}
-
-		if isSelfLeave && target.ID != actorID {
-			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
-		}
-
-		// Removing an owner is the same power as demoting one, reached by a
-		// different verb. Gating only the role change would leave the shorter
-		// path open. Leaving of your own accord stays available to anyone.
-		if !isSelfLeave && current.Role == generated.CalendarMembersRoleOwner &&
-			!calresolve.CanOwn(actorMember.Role) {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
 		}
 
 		// Leaving and being removed are different events, not one event with
@@ -609,9 +651,32 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			// The roles every gate below decides on are read here, under their
+			// row locks, so a concurrent promotion or demotion is seen.
+			members, err := calresolve.LockMembers(ctx, q, cal.ID, actorID, target.ID)
+			if err != nil {
 				return err
 			}
+			actorMember, ok := members[actorID]
+			if !ok {
+				return apierrors.CalendarAccessDenied
+			}
+			if !isSelfLeave && !calresolve.CanManage(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+			current, ok := members[target.ID]
+			if !ok {
+				return apierrors.MemberNotFound
+			}
+
+			// Removing an owner is the same power as demoting one, reached by a
+			// different verb. Gating only the role change would leave the shorter
+			// path open. Leaving of your own accord stays available to anyone.
+			if !isSelfLeave && current.Role == generated.CalendarMembersRoleOwner &&
+				!calresolve.CanOwn(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+
 			// Lock the owner count and revoke atomically so concurrent
 			// removals cannot leave the calendar without an owner.
 			if current.Role == generated.CalendarMembersRoleOwner {

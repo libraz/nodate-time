@@ -227,3 +227,176 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 		}
 	})
 }
+
+// seriesOverrideCount is how many override rows hang off a series.
+func seriesOverrideCount(t *testing.T, seriesPublicID string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, testDB.QueryRow(`
+		SELECT COUNT(*) FROM calendar_events
+		 WHERE recurrence_parent_id = (
+		   SELECT id FROM calendar_events WHERE public_id = UNHEX(REPLACE(?, '-', '')))`,
+		seriesPublicID).Scan(&n))
+	return n
+}
+
+// An occurrence moved on its own is shown at its override's dates. Saving it
+// to the whole series with those same dates changes nothing about when
+// anything happens: the move is measured from what the caller was shown, not
+// from the slot the rule gives the occurrence.
+func TestSavingAMovedOccurrenceUnchangedToTheWholeSeriesMovesNothing(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	occ := createWeeklyFriday(t, calURL, owner.AccessToken)
+	moved := calURL + "/events/" + occ[1].ID
+
+	helpers.DoJSON(t, http.MethodPut, moved+"?scope=this", owner.AccessToken,
+		eventBody("Weekly meeting", "2026-04-10T19:00:00+09:00", "2026-04-10T20:30:00+09:00"), nil)
+
+	var shown struct {
+		StartAt string `json:"startAt"`
+		EndAt   string `json:"endAt"`
+	}
+	helpers.DoJSON(t, http.MethodGet, moved, owner.AccessToken, nil, &shown)
+	require.Equal(t, "2026-04-10T10:00:00Z", shown.StartAt)
+
+	body := eventBody("Renamed", shown.StartAt, shown.EndAt)
+	body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}}
+	helpers.DoJSON(t, http.MethodPut, moved+"?scope=all", owner.AccessToken, body, nil)
+
+	var after []struct {
+		StartAt string `json:"startAt"`
+		EndAt   string `json:"endAt"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
+		owner.AccessToken, nil, &after)
+	got := make([]string, 0, len(after))
+	for _, e := range after {
+		got = append(got, e.StartAt+"/"+e.EndAt)
+	}
+	require.ElementsMatch(t, []string{
+		"2026-04-03T06:00:00Z/2026-04-03T07:00:00Z",
+		"2026-04-10T10:00:00Z/2026-04-10T11:30:00Z",
+		"2026-04-17T06:00:00Z/2026-04-17T07:00:00Z",
+		"2026-04-24T06:00:00Z/2026-04-24T07:00:00Z",
+	}, got, "neither the series nor the moved occurrence moves")
+}
+
+// An occurrence somebody else cancelled is gone: GET answers 404 for it, and
+// so does an edit confined to it, which leaves no override behind and does not
+// give the series a new revision.
+func TestEditingACancelledOccurrenceIsNotFound(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	occ := createWeeklyFriday(t, calURL, owner.AccessToken)
+	seriesID := strings.Split(occ[0].ID, "_")[0]
+
+	helpers.DoJSON(t, http.MethodDelete, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken, nil, nil)
+	_, _, headers := helpers.DoJSONFull(t, http.MethodGet, calURL+"/events/"+seriesID, owner.AccessToken, nil, nil)
+	etag := headers.Get("ETag")
+	require.NotEmpty(t, etag)
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken,
+		eventBody("Moved after all", "2026-04-17T18:00:00+09:00", "2026-04-17T19:00:00+09:00"))
+	require.Equal(t, http.StatusNotFound, status, "%s", raw)
+
+	_, _, headers = helpers.DoJSONFull(t, http.MethodGet, calURL+"/events/"+seriesID, owner.AccessToken, nil, nil)
+	require.Equal(t, etag, headers.Get("ETag"), "a refused edit gives the series no new revision")
+	require.Zero(t, seriesOverrideCount(t, seriesID), "and leaves no override for the cancelled date")
+}
+
+// scope=this reaches one occurrence of a live series or nothing. An occurrence
+// id whose series has stopped recurring names no occurrence, and a plain id
+// names none to begin with; neither falls through to the event itself.
+func TestScopeThisNeverRewritesOrDeletesTheWholeEvent(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+
+	t.Run("occurrence of a series no longer recurring", func(t *testing.T) {
+		calURL := testServerURL + "/calendars/" + newCalendar(t, owner, "stale occurrence")
+		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
+		seriesURL := calURL + "/events/" + strings.Split(occ[0].ID, "_")[0]
+
+		helpers.DoJSON(t, http.MethodPut, seriesURL, owner.AccessToken,
+			eventBody("Just once", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00"), nil)
+
+		status, raw := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+occ[1].ID+"?scope=this",
+			owner.AccessToken, nil)
+		require.Equal(t, http.StatusNotFound, status, "%s", raw)
+		status, raw = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this",
+			owner.AccessToken, eventBody("Stale", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00"))
+		require.Equal(t, http.StatusNotFound, status, "%s", raw)
+
+		var evt struct {
+			Title   string `json:"title"`
+			StartAt string `json:"startAt"`
+		}
+		helpers.DoJSON(t, http.MethodGet, seriesURL, owner.AccessToken, nil, &evt)
+		require.Equal(t, "Just once", evt.Title)
+		require.Equal(t, "2026-04-03T06:00:00Z", evt.StartAt)
+	})
+
+	t.Run("plain id", func(t *testing.T) {
+		calURL := testServerURL + "/calendars/" + newCalendar(t, owner, "plain id")
+		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
+		seriesURL := calURL + "/events/" + strings.Split(occ[0].ID, "_")[0]
+
+		status, raw := helpers.DoJSONStatus(t, http.MethodPut, seriesURL+"?scope=this", owner.AccessToken,
+			eventBody("Rewritten", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00"))
+		require.Equal(t, http.StatusBadRequest, status, "%s", raw)
+		status, raw = helpers.DoJSONStatus(t, http.MethodDelete, seriesURL+"?scope=this", owner.AccessToken, nil)
+		require.Equal(t, http.StatusBadRequest, status, "%s", raw)
+
+		var after []recInstance
+		helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &after)
+		require.Len(t, after, 4)
+		for _, e := range after {
+			require.Equal(t, "Weekly meeting", e.Title)
+		}
+	})
+}
+
+// An edited occurrence can be handed to another member, and GET then reports
+// them as its owner. Being its owner lets them change that occurrence -- and
+// nothing else of the series.
+func TestTheOwnerOfAnEditedOccurrenceMayEditItAndNoSibling(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	member := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	joinAs(t, calURL, owner.AccessToken, member, "editor")
+	occ := createWeeklyFriday(t, calURL, owner.AccessToken)
+
+	handed := eventBody("Your turn", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00")
+	handed["ownerId"] = member.UserID
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this", owner.AccessToken, handed, nil)
+
+	var got struct {
+		OwnerID string `json:"ownerId"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+occ[1].ID, owner.AccessToken, nil, &got)
+	require.Equal(t, member.UserID, got.OwnerID)
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this", member.AccessToken,
+		eventBody("Moved by its owner", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00"))
+	require.Equal(t, http.StatusOK, status, "the owner GET reports may edit the occurrence: %s", raw)
+
+	status, _ = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[2].ID+"?scope=this", member.AccessToken,
+		eventBody("Not mine", "2026-04-17T17:00:00+09:00", "2026-04-17T18:00:00+09:00"))
+	require.Equal(t, http.StatusForbidden, status, "a sibling occurrence is not theirs")
+
+	all := eventBody("Not mine either", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00")
+	all["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}}
+	status, _ = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=all", member.AccessToken, all)
+	require.Equal(t, http.StatusForbidden, status, "nor is the series")
+}

@@ -15,12 +15,18 @@
 -- A stored generated column gives the same value a name the optimiser can
 -- reach. It lives here rather than in core/ because the payload key it reads
 -- is this product's convention: the contract promises a JSON document, not
--- that `$.id` identifies a subject.
+-- that `$.id` identifies a subject. For the same reason the expression yields
+-- NULL for anything that is not a 36-character UUID, so a payload another
+-- writer shapes differently still inserts instead of failing the column.
 -- ====================================
 ALTER TABLE events
   ADD COLUMN subject_public_id VARCHAR(36)
     CHARACTER SET latin1 COLLATE latin1_swedish_ci
-    GENERATED ALWAYS AS (payload_json->>'$.id') STORED
+    GENERATED ALWAYS AS (
+      IF(CHAR_LENGTH(payload_json->>'$.id') = 36
+           AND payload_json->>'$.id' REGEXP '^[0-9a-fA-F-]{36}$',
+         payload_json->>'$.id', NULL)
+    ) STORED
     COMMENT 'Public id of the entity this event is about, lifted out of the payload so one entity history can be indexed. Generated: never written directly.',
   ADD KEY idx_events_workspace_calendar_subject
     (workspace_id, calendar_id, subject_public_id, id);

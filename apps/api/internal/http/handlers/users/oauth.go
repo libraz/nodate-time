@@ -52,8 +52,9 @@ type OAuthDeps struct {
 	WebURL      string
 	Config      OAuthConfig
 	Cipher      *secrets.Cipher
-	// AllowedDomains restricts which email domains may sign in via any provider
-	// (Google, LINE); an individually allow-listed address is the exception.
+	// AllowedDomains restricts which verified email domains may sign in via a
+	// provider; an individually allow-listed address is the exception. LINE
+	// verifies no address, so it is refused while any restriction is set.
 	// Empty means unrestricted. See config.GoogleAllowedDomainList.
 	AllowedDomains []string
 	// PasswordLoginEnabled reflects whether email+password auth is available,
@@ -170,28 +171,6 @@ func idTokenNonce(idToken string) string {
 	return claims.Nonce
 }
 
-// idTokenEmail extracts the email claim from a JWT id_token without verifying
-// its signature, for the same reason as idTokenNonce: the token was just
-// received over TLS directly from the provider's token endpoint. LINE's
-// userinfo endpoint never returns email, so this is the only source for it.
-func idTokenEmail(idToken string) string {
-	parts := strings.Split(idToken, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-	return claims.Email
-}
-
 // redirectMaxRunes is what signin_states.redirect_to holds: VARCHAR(512) on a
 // utf8mb4 table, so 512 characters rather than 512 bytes.
 const redirectMaxRunes = 512
@@ -225,34 +204,6 @@ func safeRedirect(raw string) string {
 		return "/"
 	}
 	return raw
-}
-
-// storableEmail reports whether an address fits the columns that hold it.
-//
-// users.email and oauth_allowed_emails.email are latin1 and documented as
-// ASCII only, so an address outside ASCII cannot be stored, cannot be
-// allow-listed, and cannot be matched against either. Passing one to the
-// database produces a charset error the caller reads as a server fault.
-//
-// The check is ASCII rather than latin1-encodable on purpose. latin1 could
-// hold some of these, but the collation folds accented letters onto their
-// plain forms, so two addresses that differ would compare equal -- and which
-// two accounts collide is an authentication question, not a storage one.
-//
-// This is a staging post, not an answer. An internationalised address is a
-// real address and refusing it tells its owner to get another one; the end
-// state is those columns holding what people actually have. Moving them is
-// authentication work rather than a schema change -- all three participate in
-// unique keys and cross-table matching, so it needs a normalisation decision
-// first (case folding, and whether to keep a normalised form beside the
-// display form). This function is the single place that changes when they do.
-func storableEmail(email string) bool {
-	for i := 0; i < len(email); i++ {
-		if email[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
 }
 
 // ListEnabledProviders reports which OAuth providers are usable (have a client
@@ -353,9 +304,8 @@ type googleUserinfo struct {
 }
 
 type lineUserinfo struct {
-	Sub   string `json:"sub"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Sub  string `json:"sub"`
+	Name string `json:"name"`
 }
 
 func exchangeCode(ctx context.Context, pc OAuthProviderConfig, code, redirect, codeVerifier string) (accessToken, idToken string, err error) {
@@ -517,12 +467,13 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			// itself what the column cannot do. Reported as its own reason: an
 			// administrator cannot fix this by allow-listing the address, since
 			// that column has the same charset.
-			if !storableEmail(u.Email) {
+			if !auth.StorableEmail(u.Email) {
 				return oauthRedirect(deps, "oauth_email_unsupported"), nil
 			}
 			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				slog.ErrorContext(ctx, "oauth allow-list lookup failed", "provider", in.Provider, "error", err)
+				return oauthRedirect(deps, "oauth_failed"), nil
 			}
 			if !allowed {
 				return oauthRedirect(deps, "oauth_not_allowed"), nil
@@ -534,29 +485,18 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			if err := fetchUserinfo(ctx, pc, accessToken, &u); err != nil {
 				return oauthRedirect(deps, "oauth_failed"), nil
 			}
-			// LINE's userinfo endpoint never returns an email; the only source is
-			// the id_token issued alongside the access token.
-			if u.Email == "" {
-				u.Email = idTokenEmail(idToken)
-			}
-			// An empty address is left to the allow-list below, which is what
-			// decides whether a LINE account with no email may sign in at all.
-			if u.Email != "" && !storableEmail(u.Email) {
-				return oauthRedirect(deps, "oauth_email_unsupported"), nil
-			}
-			// The allow-list applies to every provider. LINE does not return a
-			// verified-email proof, so when a domain/email restriction is active
-			// and LINE gives no allow-listed address, sign-in is denied.
-			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, u.Email)
+			// LINE proves no address: its email claim is not an ownership proof,
+			// so it neither satisfies a restriction nor links to an account. A
+			// restricted deployment therefore refuses LINE sign-in.
+			allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, "")
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				slog.ErrorContext(ctx, "oauth allow-list lookup failed", "provider", in.Provider, "error", err)
+				return oauthRedirect(deps, "oauth_failed"), nil
 			}
 			if !allowed {
 				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
-			// LINE's email claim is not a verified ownership proof: never use it
-			// to auto-link to a pre-existing account.
-			subject, email, name = u.Sub, u.Email, u.Name
+			subject, name = u.Sub, u.Name
 			emailVerified = false
 		}
 		if subject == "" {

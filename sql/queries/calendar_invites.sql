@@ -43,6 +43,12 @@ WHERE ci.token_hash = ?
   AND ci.enabled = TRUE
   AND (ci.expires_at IS NULL OR ci.expires_at > NOW(3));
 
+-- GetInviteForUpdate re-reads a link under its row lock, so a decision about
+-- who it has already admitted and how many uses are left is made against the
+-- row that decision then writes.
+-- name: GetInviteForUpdate :one
+SELECT * FROM calendar_invites WHERE id = ? FOR UPDATE;
+
 -- name: CreateInvite :execresult
 INSERT INTO calendar_invites (public_id, workspace_id, calendar_id, created_by_user_id, token_hash, role, max_uses, expires_at, is_public)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);

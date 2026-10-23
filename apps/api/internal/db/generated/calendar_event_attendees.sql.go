@@ -102,6 +102,40 @@ func (q *Queries) GetEventAttendee(ctx context.Context, arg GetEventAttendeePara
 	return i, err
 }
 
+const getEventAttendeeForUpdate = `-- name: GetEventAttendeeForUpdate :one
+SELECT id, public_id, workspace_id, event_id, user_id, event_id_key, rsvp, can_edit, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_attendees
+WHERE event_id = ? AND user_id = ? AND enabled = TRUE
+FOR UPDATE
+`
+
+type GetEventAttendeeForUpdateParams struct {
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+}
+
+// GetEventAttendeeForUpdate reads a live attendee row under its row lock,
+// inside the transaction that changes its answer or edit grant.
+func (q *Queries) GetEventAttendeeForUpdate(ctx context.Context, arg GetEventAttendeeForUpdateParams) (CalendarEventAttendee, error) {
+	row := q.db.QueryRowContext(ctx, getEventAttendeeForUpdate, arg.EventID, arg.UserID)
+	var i CalendarEventAttendee
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.EventID,
+		&i.UserID,
+		&i.EventIDKey,
+		&i.Rsvp,
+		&i.CanEdit,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listEnabledEventAttendeeIDs = `-- name: ListEnabledEventAttendeeIDs :many
 SELECT user_id FROM calendar_event_attendees
 WHERE event_id = ? AND enabled = TRUE

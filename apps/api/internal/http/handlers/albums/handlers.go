@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/albumblob"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -492,7 +493,7 @@ func validateThumbnailDeclaration(b PresignPhotoBody) error {
 		return apierrors.AlbumThumbnailIncomplete
 	}
 	if !isImageContentType(b.ThumbnailContentType) {
-		return apierrors.InvalidImageContentType
+		return apierrors.AlbumInvalidContentType
 	}
 	if b.ThumbnailByteSize > maxThumbnailSize {
 		return apierrors.AlbumThumbnailTooLarge
@@ -513,7 +514,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			return nil, toAPIError(err)
 		}
 		if !isImageContentType(in.Body.ContentType) {
-			return nil, apierrors.ToHuma(apierrors.InvalidImageContentType)
+			return nil, apierrors.ToHuma(apierrors.AlbumInvalidContentType)
 		}
 		if in.Body.ByteSize > maxPhotoSize {
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
@@ -802,6 +803,24 @@ func loadPhotoForCalendar(ctx context.Context, deps Deps, calID uint32, photoPub
 	return p, nil
 }
 
+// lockPhoto reads a photo for a write, under its row lock, inside the
+// transaction that commits the write. A photo deleted in the meantime, or in
+// another calendar, is not found.
+func lockPhoto(ctx context.Context, q *generated.Queries, calID uint32, photoPubID string) (generated.AlbumPhoto, error) {
+	pub, err := parseUUID(photoPubID)
+	if err != nil {
+		return generated.AlbumPhoto{}, apierrors.AlbumPhotoNotFound
+	}
+	p, err := q.GetAlbumPhotoForUpdate(ctx, generated.GetAlbumPhotoForUpdateParams{
+		PublicID:   pub,
+		CalendarID: calID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.AlbumPhoto{}, apierrors.AlbumPhotoNotFound
+	}
+	return p, err
+}
+
 // UpdatePhoto edits the caption and/or event link of a photo.
 func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePhotoOutput, error) {
 	return func(ctx context.Context, in *UpdatePhotoInput) (*UpdatePhotoOutput, error) {
@@ -811,34 +830,35 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 			return nil, toAPIError(err)
 		}
 
-		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		caption := photo.Caption
-		if in.Body.Caption != nil {
-			caption = *in.Body.Caption
-		}
-
-		eventID := photo.CalendarEventID
-		if in.Body.EventID != nil {
-			if *in.Body.EventID == "" {
-				eventID = sql.NullInt32{}
-			} else {
-				resolved, rerr := resolveEventForCalendar(ctx, deps, cal.ID, *in.Body.EventID)
-				if rerr != nil {
-					return nil, toAPIError(rerr)
-				}
-				eventID = resolved
+		var linkedEvent sql.NullInt32
+		if in.Body.EventID != nil && *in.Body.EventID != "" {
+			linkedEvent, err = resolveEventForCalendar(ctx, deps, cal.ID, *in.Body.EventID)
+			if err != nil {
+				return nil, toAPIError(err)
 			}
 		}
 
 		var refreshed generated.AlbumPhoto
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
+			photo, err := lockPhoto(ctx, q, cal.ID, in.PhotoID)
+			if err != nil {
+				return err
+			}
+
+			// Omitted fields keep the values read under the lock, so a
+			// concurrent edit of the other field is kept.
+			caption := photo.Caption
+			if in.Body.Caption != nil {
+				caption = *in.Body.Caption
+			}
+			eventID := photo.CalendarEventID
+			if in.Body.EventID != nil {
+				eventID = linkedEvent
+			}
+
 			if err := q.UpdateAlbumPhotoMeta(ctx, generated.UpdateAlbumPhotoMetaParams{
 				Caption:         caption,
 				CalendarEventID: eventID,
@@ -846,7 +866,6 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 			}); err != nil {
 				return err
 			}
-			var err error
 			refreshed, err = q.GetAlbumPhotoByPublicID(ctx, photo.PublicID)
 			if err != nil {
 				return err
@@ -876,17 +895,23 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 			return nil, toAPIError(err)
 		}
 
-		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
-			if err := q.SoftDeleteAlbumPhoto(ctx, photo.ID); err != nil {
+			photo, err := lockPhoto(ctx, q, cal.ID, in.PhotoID)
+			if err != nil {
 				return err
+			}
+			// The log row is appended only for a delete this transaction made.
+			res, err := q.SoftDeleteAlbumPhoto(ctx, photo.ID)
+			if err != nil {
+				return err
+			}
+			if changed, err := blobref.ChangedOne(res); err != nil {
+				return err
+			} else if !changed {
+				return apierrors.AlbumPhotoNotFound
 			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,

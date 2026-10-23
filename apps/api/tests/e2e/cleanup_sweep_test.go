@@ -90,7 +90,7 @@ func TestObjectSweepReachesCollectableRowsBehindAFullBatchItCannotDelete(t *test
 		return nil, errors.New("delete refused"), true
 	}
 
-	cleanup.RunOnce(testCtx(), generated.New(db), getTestStorage())
+	cleanup.RunOnce(testCtx(), db, getTestStorage())
 
 	var left int
 	require.NoError(t, testDB.QueryRow(
@@ -128,7 +128,7 @@ func TestSweepLeavesAnObjectARetiredAttachmentStillNames(t *testing.T) {
 		time.Now().Add(-30*24*time.Hour), storageKey)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	var rows int
 	require.NoError(t, testDB.QueryRow(
@@ -170,7 +170,7 @@ func TestSweepReclaimsAnObjectOnceItsRetiredAttachmentAges(t *testing.T) {
 		WHERE so.storage_key = ?`, old, storageKey)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	var rows int
 	require.NoError(t, testDB.QueryRow(

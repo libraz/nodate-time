@@ -89,7 +89,7 @@ func TestExpirySweepDrainsPastOneBatch(t *testing.T) {
 	db := &execInterceptDB{DB: testDB}
 	db.rewrite = scopeSweep("sessions", "DELETE FROM sessions WHERE expires_at < ?", userID, &statements)
 
-	cleanup.RunOnce(testCtx(), generated.New(db), getTestStorage())
+	cleanup.RunOnce(testCtx(), db, getTestStorage())
 
 	require.GreaterOrEqual(t, statements.Load(), int64(2),
 		"one call must keep deleting until a batch comes back short")
@@ -121,7 +121,7 @@ func TestSpentPasswordResetSurvivesUntilItsOwnExpiry(t *testing.T) {
 		pub[:], userID, hash[:64], time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	var rows int
 	require.NoError(t, testDB.QueryRow(

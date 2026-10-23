@@ -54,3 +54,18 @@ func TestAllowedEmailReasonSurvivesTheRoundTrip(t *testing.T) {
 	}
 	require.True(t, found, "the address that was just allowed should be in the list")
 }
+
+// An address the account columns cannot store is refused as a bad request; it
+// used to reach the insert and come back as a server error.
+func TestAllowedEmailRefusesAnAddressItCannotStore(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	admin := helpers.NewTenant(t, testServerURL)
+	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/admin/allowed-emails", admin.AccessToken,
+		map[string]any{"email": fmt.Sprintf("山田-%d@example.com", time.Now().UnixNano()), "reason": "non-ASCII"})
+	require.Equal(t, http.StatusBadRequest, status, string(raw))
+	require.Contains(t, string(raw), "AUTH.EMAIL_UNSUPPORTED")
+}

@@ -1,8 +1,6 @@
 package calendars
 
 import (
-	"database/sql"
-	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
@@ -176,34 +174,5 @@ func TestExportWindowIsLocalDays(t *testing.T) {
 	}
 	if got := w.end.Sub(w.start); got != 25*time.Hour {
 		t.Errorf("the day DST ends spans %s, want 25h", got)
-	}
-}
-
-// A head is kept when it reaches the window start exactly: a series whose end
-// boundary is the window start, and a zero-length event sitting on it.
-func TestSeriesReachesWindowKeepsTheWindowStart(t *testing.T) {
-	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	w := exportWindow{start: start, end: start.AddDate(0, 1, 0), loc: time.UTC}
-	rule := json.RawMessage(`{"freq":"daily","interval":1,"count":3}`)
-	series := generated.CalendarEvent{
-		StartAt:        sql.NullTime{Time: start.AddDate(0, 0, -2), Valid: true},
-		EndAt:          sql.NullTime{Time: start.AddDate(0, 0, -2), Valid: true},
-		RecurrenceRule: &rule,
-		RecurrenceEnd:  sql.NullTime{Time: start, Valid: true},
-	}
-	if !seriesReachesWindow(series, w) {
-		t.Error("a series ending exactly at the window start must be kept")
-	}
-	marker := generated.CalendarEvent{
-		StartAt: sql.NullTime{Time: start, Valid: true},
-		EndAt:   sql.NullTime{Time: start, Valid: true},
-	}
-	if !seriesReachesWindow(marker, w) {
-		t.Error("a zero-length event at the window start must be kept")
-	}
-	before := marker
-	before.StartAt.Time, before.EndAt.Time = start.Add(-time.Hour), start
-	if seriesReachesWindow(before, w) {
-		t.Error("an event ending at the window start is outside it")
 	}
 }

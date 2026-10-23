@@ -38,3 +38,10 @@ FROM instance_admins ia
 INNER JOIN users u ON u.id = ia.user_id
 WHERE ia.revoked_at IS NULL AND ia.enabled = TRUE
 ORDER BY ia.granted_at;
+
+-- AppendInstanceAuditLog records one instance-wide change in the transaction
+-- that makes it, the way events does for a change inside a calendar. The
+-- payload is already redacted by the caller.
+-- name: AppendInstanceAuditLog :execresult
+INSERT INTO instance_audit_logs (public_id, actor_user_id, action, target_resource_type, target_resource_public_id, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);

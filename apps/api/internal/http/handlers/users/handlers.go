@@ -144,7 +144,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		// error, which reached the caller as a server fault. The OIDC callback
 		// answers the same question with the same helper, so both doors give
 		// the same reason.
-		if !storableEmail(in.Body.Email) {
+		if !auth.StorableEmail(in.Body.Email) {
 			return nil, apierrors.ToHuma(apierrors.AuthEmailUnsupported)
 		}
 
@@ -240,8 +240,14 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		// Registration does not prove the registrant reads this mailbox, so the
 		// account starts unconfirmed and gets a link that proves it. Sign-in is
 		// not held up by this: what an unconfirmed address blocks is provider
-		// sign-in linking to the account, not the account itself.
-		sendEmailVerification(ctx, deps, created)
+		// sign-in linking to the account, not the account itself. A failure is
+		// logged rather than returned, since the account already exists and the
+		// link can be asked for again.
+		if deps.Mailer != nil {
+			if err := sendEmailVerification(ctx, deps, deps.Queries, created); err != nil {
+				slog.ErrorContext(ctx, "registration confirmation not sent", "userID", created.ID, "error", err)
+			}
+		}
 
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, created.ID, userAgent, ipAddress)
@@ -259,6 +265,13 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 
 func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 	return func(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
+		// No account can hold an address the column cannot store, and looking
+		// one up is a charset error. Answered like any unknown address.
+		if !auth.StorableEmail(in.Body.Email) {
+			auth.CheckPassword(in.Body.Password, dummyPasswordHash)
+			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
+		}
+
 		identity, err := deps.Queries.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
 			Provider: generated.IdentitiesProviderLocal,
 			Subject:  in.Body.Email,
@@ -283,7 +296,7 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
-		if !identity.PasswordHash.Valid || !auth.CheckPassword(in.Body.Password, identity.PasswordHash.String) {
+		if !passwordMatches(identity.PasswordHash, in.Body.Password) {
 			recordFailedAttempt(ctx, deps, identity)
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
@@ -291,6 +304,17 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 		user, err := deps.Queries.GetUserByID(ctx, identity.UserID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// Admission is decided at every sign-in, not only at registration, so a
+		// withdrawn allow-list entry or a narrowed domain list takes effect.
+		// Refused as bad credentials so the answer says nothing about the account.
+		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, user.Email)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		if !allowed {
+			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
 		if err := deps.Queries.RecordSuccessfulLogin(ctx, identity.ID); err != nil {
@@ -318,6 +342,18 @@ const (
 	lockoutThreshold = 10
 	lockoutWindow    = 15 * time.Minute
 )
+
+// passwordMatches compares password against a local identity's hash. An
+// identity with no hash still costs one comparison, against the dummy, so
+// that path answers no faster than a wrong password and does not reveal the
+// account.
+func passwordMatches(hash sql.NullString, password string) bool {
+	if !hash.Valid {
+		auth.CheckPassword(password, dummyPasswordHash)
+		return false
+	}
+	return auth.CheckPassword(password, hash.String)
+}
 
 // lockStands reports whether a recorded lock has yet to run out.
 func lockStands(identity generated.Identity, now time.Time) bool {
@@ -419,7 +455,7 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 		if lockStands(identity, time.Now()) {
 			return nil, apierrors.ToHuma(apierrors.RateLimited)
 		}
-		if !identity.PasswordHash.Valid || !auth.CheckPassword(in.Body.CurrentPassword, identity.PasswordHash.String) {
+		if !passwordMatches(identity.PasswordHash, in.Body.CurrentPassword) {
 			recordFailedAttempt(ctx, deps, identity)
 			return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
 		}

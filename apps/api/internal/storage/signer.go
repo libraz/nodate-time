@@ -130,9 +130,25 @@ type params struct {
 	Grant
 }
 
-// GetURL returns a URL that reads the object as itself, for as long as expires.
+// readBuckets is how many expiry buckets a read URL's lifetime is divided
+// into. Expiries are rounded up to a bucket boundary, so a URL is valid for
+// between the requested lifetime and that lifetime plus one bucket.
+const readBuckets = 4
+
+// GetURL returns a URL that reads the object as itself, for at least expires.
+//
+// The expiry is rounded up to a bucket boundary rather than taken from the
+// clock, so every URL minted for a key within one bucket is byte-identical and
+// a browser can answer the repeat from its cache instead of treating each
+// response as a new address. Rounding up keeps the promised lifetime whole.
 func (s *Signer) GetURL(key string, expires time.Duration) (string, error) {
-	return s.mint("GET", key, params{exp: time.Now().Add(expires).Unix()})
+	bucket := int64(expires / readBuckets / time.Second)
+	if bucket < 1 {
+		bucket = 1
+	}
+	exp := time.Now().Add(expires).Unix()
+	exp += (bucket - exp%bucket) % bucket
+	return s.mint("GET", key, params{exp: exp})
 }
 
 // DownloadURL returns a URL that reads the object as an attachment named

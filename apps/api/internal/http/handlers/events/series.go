@@ -11,10 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
-	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
-	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
+	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
@@ -76,28 +75,98 @@ func mergeFields(e eventEdit, base generated.CalendarEvent) editedFields {
 	return f
 }
 
-// lockEvent is the first step of every write to an event: its own columns, its
-// exclusion list, or a row hanging off it (an override, an attachment, a
-// comment, a checklist item). It takes the calendar's shared lock, then reads
-// the event under its exclusive lock and checks the caller's If-Match against
-// that copy, so the revision compared is the one the write replaces and two
-// writers holding the same tag cannot both pass.
+// Scope values a write to an event may carry.
+const (
+	scopeThis = "this"
+	scopeAll  = "all"
+)
+
+// writeScope is what an event id and a scope address on a series, as read
+// under the series' row lock.
+type writeScope struct {
+	// occurrence is the occurrence a composite id named; nil for a plain id.
+	occurrence *recurrence.Occurrence
+	// override stands in for that occurrence once it has been edited.
+	override *generated.CalendarEvent
+	// confined says the write reaches that occurrence alone.
+	confined bool
+}
+
+// shown returns the dates a reader was given for the occurrence: its override's
+// once edited, else the ones the rule produces.
+func (s writeScope) shown() (time.Time, time.Time) {
+	if s.override != nil && s.override.StartAt.Valid && s.override.EndAt.Valid {
+		return s.override.StartAt.Time, s.override.EndAt.Time
+	}
+	return s.occurrence.StartAt, s.occurrence.EndAt
+}
+
+// resolveScope is the one place a write's scope is mapped onto the rows it may
+// touch, from the series row its transaction has locked.
 //
-// The order is the point. A row inserted under the event takes a shared lock
-// on it for the foreign key, and two writers each holding that while waiting to
-// upgrade it deadlock; a delete taking the rows under an event before the event
-// deadlocks with a confirm going the other way. Calendar, then event, then
-// what hangs off it, avoids both. TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock
-// and TestDeletingAnEventWhileAnUploadOnItConfirms are what notice.
-func lockEvent(ctx context.Context, q *generated.Queries, calendarID, eventID uint32, ifMatch string) (generated.CalendarEvent, error) {
-	current, err := calresolve.LockEvent(ctx, q, calendarID, eventID)
+// A composite id names an occurrence the way GET does: through
+// eventexpand.ResolveOccurrence, so an id GET answers 404 for -- a series no
+// longer recurring, a date the rule does not produce, a cancelled occurrence --
+// is 404 here too, under either scope. scope=this is confined to that
+// occurrence and never falls through to the series row; on a plain id it names
+// nothing and is refused. Anything else is a write to the whole row.
+func resolveScope(ctx context.Context, q *generated.Queries, series generated.CalendarEvent, occurrenceDate, scope string) (writeScope, error) {
+	if occurrenceDate == "" {
+		if scope == scopeThis {
+			return writeScope{}, apierrors.BadRequest
+		}
+		return writeScope{}, nil
+	}
+	if series.RecurrenceRule == nil {
+		return writeScope{}, apierrors.EventNotFound
+	}
+	rule := recurrence.ParseRule(*series.RecurrenceRule)
+	if rule == nil {
+		return writeScope{}, apierrors.EventNotFound
+	}
+	occ, err := occurrenceForDate(rule, series, occurrenceDate)
 	if err != nil {
-		return generated.CalendarEvent{}, err
+		return writeScope{}, apierrors.EventNotFound
 	}
-	if !matchesETag(ifMatch, current) {
-		return generated.CalendarEvent{}, apierrors.EventStale
+	inst, err := eventexpand.ResolveOccurrence(ctx, q, series, occ)
+	if errors.Is(err, eventexpand.ErrCancelled) {
+		return writeScope{}, apierrors.EventNotFound
 	}
-	return current, nil
+	if err != nil {
+		return writeScope{}, err
+	}
+	target := writeScope{occurrence: &occ, confined: scope == scopeThis}
+	if inst.IsOverride {
+		target.override = &inst.Event
+	}
+	return target, nil
+}
+
+// editedRows is what a committed edit is rendered from.
+type editedRows struct {
+	series generated.CalendarEvent
+	// override is the occurrence's row after an edit confined to it.
+	override *generated.CalendarEvent
+	original time.Time
+}
+
+// render builds the response for a committed edit. It reads outside the edit's
+// transaction, so it must only be called after that transaction committed.
+func (r editedRows) render(ctx context.Context, deps Deps, cal generated.Calendar) (EventResponse, error) {
+	if r.override != nil {
+		resp := mapOverrideInstance(r.series, *r.override, cal.PublicID, r.original)
+		if err := setAttendees(ctx, deps, &resp, r.override.ID); err != nil {
+			return EventResponse{}, err
+		}
+		decorate(ctx, deps, &resp, *r.override, cal.ID)
+		return resp, nil
+	}
+	resp := mapEvent(r.series, cal.PublicID)
+	if err := setAttendees(ctx, deps, &resp, r.series.ID); err != nil {
+		return EventResponse{}, err
+	}
+	decorate(ctx, deps, &resp, r.series, cal.ID)
+	return resp, nil
 }
 
 // checkRecurrenceRule rejects a rule the expander would not honour as written,
@@ -129,145 +198,108 @@ func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz s
 }
 
 // editOccurrence writes an override row for one occurrence instead of
-// mutating the whole series, inside one transaction.
-func editOccurrence(ctx context.Context, deps Deps, e eventEdit, seriesID uint32, occurrenceDate string) (EventResponse, string, error) {
-	var (
-		child    generated.CalendarEvent
-		master   generated.CalendarEvent
-		original time.Time
-	)
-	err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-		current, err := lockEvent(ctx, q, e.cal.ID, seriesID, e.body.IfMatch)
-		if err != nil {
-			return err
-		}
-		if current.RecurrenceRule == nil {
-			return apierrors.EventNotFound
-		}
-		rule := recurrence.ParseRule(*current.RecurrenceRule)
-		if rule == nil {
-			return apierrors.EventNotFound
-		}
-		occ, err := occurrenceForDate(rule, current, occurrenceDate)
-		if err != nil {
-			return apierrors.EventNotFound
-		}
-		original = occ.StartAt
-		// The body's rule does not apply to one occurrence, but a rule the
-		// series could not carry is still a malformed request.
-		if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, current.StartAt.Time, current.Timezone); spec != nil {
-			return spec
-		}
+// mutating the whole series. w must come from lockEventAccess in q's
+// transaction, with a scope confined to that occurrence.
+func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e eventEdit, w eventAccess) (editedRows, error) {
+	current := w.evt
+	original := w.scope.occurrence.StartAt
+	// The body's rule does not apply to one occurrence, but a rule the
+	// series could not carry is still a malformed request.
+	if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, current.StartAt.Time, current.Timezone); spec != nil {
+		return editedRows{}, spec
+	}
 
-		parentRef := sql.NullInt32{Int32: int32(current.ID), Valid: true}
-		originalRef := sql.NullTime{Time: original, Valid: true}
-		base := current
-		existing, err := q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
-			RecurrenceParentID:      parentRef,
-			RecurrenceOriginalStart: originalRef,
-		})
-		switch {
-		case err == nil:
-			base = existing
-		case !errors.Is(err, sql.ErrNoRows):
-			return err
-		}
-		f := mergeFields(e, base)
+	parentRef := sql.NullInt32{Int32: int32(current.ID), Valid: true}
+	originalRef := sql.NullTime{Time: original, Valid: true}
+	f := mergeFields(e, w.row)
 
-		// The occurrence lives in its own row, so without this the series
-		// would report the same revision as before the edit and a second
-		// writer holding the older copy would be let through.
-		if err := q.TouchCalendarEvent(ctx, current.ID); err != nil {
-			return err
-		}
-		overridePubID, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-		if _, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
-			PublicID:                overridePubID[:],
-			WorkspaceID:             deps.WorkspaceID,
-			CalendarID:              e.cal.ID,
-			Kind:                    current.Kind,
-			Visibility:              f.visibility,
-			ShowAs:                  f.showAs,
-			Flexibility:             f.flexibility,
-			Title:                   e.body.Body.Title,
-			AllDay:                  e.body.Body.AllDay,
-			StartAt:                 sql.NullTime{Time: e.startAt, Valid: true},
-			EndAt:                   sql.NullTime{Time: e.endAt, Valid: true},
-			Timezone:                f.timezone,
-			Location:                nullString(e.body.Body.Location),
-			Memo:                    nullString(e.body.Body.Memo),
-			URL:                     nullString(e.body.Body.URL),
-			OwnerUserID:             f.ownerID,
-			CreatedByUserID:         e.actorID,
-			NotificationOffset:      ptrIntToNullInt32(e.body.Body.NotificationOffset),
-			RecurrenceParentID:      parentRef,
-			RecurrenceOriginalStart: originalRef,
-		}); err != nil {
-			return err
-		}
-		child, err = q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
-			RecurrenceParentID:      parentRef,
-			RecurrenceOriginalStart: originalRef,
-		})
-		if err != nil {
-			return err
-		}
-		// Whether this request created the override or found one that was
-		// already there.
-		//
-		// The upsert does not rewrite public_id on conflict -- it is
-		// deliberately absent from that statement's update list -- so a row
-		// carrying the id generated for this request is one this request
-		// inserted. That row was written a statement ago and has no
-		// attendees, and asking to remove the ones it does not have is not
-		// free: it holds a gap lock to the end of the attendee index, which
-		// the participant insert behind it then has to write into. Two first
-		// edits on different series do that at the same moment and deadlock,
-		// and whoever dragged an occurrence sees a 500.
-		//
-		// Edits of one series cannot reach this: they queue on the parent row
-		// first. That is why it needs its own test, and why that test puts
-		// every series on its own calendar.
-		if bytes.Equal(child.PublicID, overridePubID[:]) {
-			err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants)
-		} else {
-			err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, e.participants)
-		}
-		if err != nil {
-			return err
-		}
-		if err := reconcileOverrides(ctx, q, current, current); err != nil {
-			return err
-		}
-		if master, err = q.GetCalendarEventByID(ctx, current.ID); err != nil {
-			return err
-		}
-		return eventlog.Append(ctx, q, eventlog.Entry{
-			WorkspaceID: deps.WorkspaceID,
-			CalendarID:  e.cal.ID,
-			ActorUserID: e.actorID,
-			Type:        eventlog.TypeEventUpdated,
-			Summary:     e.body.Body.Title,
-			Subject:     current.PublicID,
-			Extra: map[string]any{
-				"scope":         "occurrence",
-				"originalStart": original.Format(time.RFC3339),
-			},
-		})
+	// The occurrence lives in its own row, so without this the series
+	// would report the same revision as before the edit and a second
+	// writer holding the older copy would be let through.
+	if err := q.TouchCalendarEvent(ctx, current.ID); err != nil {
+		return editedRows{}, err
+	}
+	overridePubID, err := uuid.NewV7()
+	if err != nil {
+		return editedRows{}, err
+	}
+	if _, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
+		PublicID:                overridePubID[:],
+		WorkspaceID:             deps.WorkspaceID,
+		CalendarID:              e.cal.ID,
+		Kind:                    current.Kind,
+		Visibility:              f.visibility,
+		ShowAs:                  f.showAs,
+		Flexibility:             f.flexibility,
+		Title:                   e.body.Body.Title,
+		AllDay:                  e.body.Body.AllDay,
+		StartAt:                 sql.NullTime{Time: e.startAt, Valid: true},
+		EndAt:                   sql.NullTime{Time: e.endAt, Valid: true},
+		Timezone:                f.timezone,
+		Location:                nullString(e.body.Body.Location),
+		Memo:                    nullString(e.body.Body.Memo),
+		URL:                     nullString(e.body.Body.URL),
+		OwnerUserID:             f.ownerID,
+		CreatedByUserID:         e.actorID,
+		NotificationOffset:      ptrIntToNullInt32(e.body.Body.NotificationOffset),
+		RecurrenceParentID:      parentRef,
+		RecurrenceOriginalStart: originalRef,
+	}); err != nil {
+		return editedRows{}, err
+	}
+	child, err := q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
+		RecurrenceParentID:      parentRef,
+		RecurrenceOriginalStart: originalRef,
 	})
 	if err != nil {
-		return EventResponse{}, "", err
+		return editedRows{}, err
 	}
-	resp := mapOverrideInstance(master, child, e.cal.PublicID, original)
-	if err := setAttendees(ctx, deps, &resp, child.ID); err != nil {
-		return EventResponse{}, "", err
+	// Whether this request created the override or found one that was
+	// already there.
+	//
+	// The upsert does not rewrite public_id on conflict -- it is
+	// deliberately absent from that statement's update list -- so a row
+	// carrying the id generated for this request is one this request
+	// inserted. That row was written a statement ago and has no
+	// attendees, and asking to remove the ones it does not have is not
+	// free: it holds a gap lock to the end of the attendee index, which
+	// the participant insert behind it then has to write into. Two first
+	// edits on different series do that at the same moment and deadlock,
+	// and whoever dragged an occurrence sees a 500.
+	//
+	// Edits of one series cannot reach this: they queue on the parent row
+	// first. That is why it needs its own test, and why that test puts
+	// every series on its own calendar.
+	if bytes.Equal(child.PublicID, overridePubID[:]) {
+		err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants)
+	} else {
+		err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, e.participants)
 	}
-	decorate(ctx, deps, &resp, child, e.cal.ID)
-	// The tag names the series row, which the edit touched.
-	return resp, eventETag(master), nil
+	if err != nil {
+		return editedRows{}, err
+	}
+	if err := reconcileOverrides(ctx, q, current, current); err != nil {
+		return editedRows{}, err
+	}
+	master, err := q.GetCalendarEventByID(ctx, current.ID)
+	if err != nil {
+		return editedRows{}, err
+	}
+	if err := eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  e.cal.ID,
+		ActorUserID: e.actorID,
+		Type:        eventlog.TypeEventUpdated,
+		Summary:     e.body.Body.Title,
+		Subject:     current.PublicID,
+		Extra: map[string]any{
+			"scope":         "occurrence",
+			"originalStart": original.Format(time.RFC3339),
+		},
+	}); err != nil {
+		return editedRows{}, err
+	}
+	return editedRows{series: master, override: &child, original: original}, nil
 }
 
 // addOverrideParticipants adds the participants of an override created by
@@ -311,87 +343,86 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 	return nil
 }
 
-// editSeries rewrites the series row itself, inside one transaction. A
-// non-empty occurrenceDate says the dates in the request are those of that
-// occurrence, edited with "apply to all".
-func editSeries(ctx context.Context, deps Deps, e eventEdit, seriesID uint32, occurrenceDate string) (EventResponse, string, error) {
-	var updated generated.CalendarEvent
-	err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-		current, err := lockEvent(ctx, q, e.cal.ID, seriesID, e.body.IfMatch)
-		if err != nil {
-			return err
-		}
-		f := mergeFields(e, current)
-		startAt, endAt := e.startAt, e.endAt
-		if occurrenceDate != "" && current.RecurrenceRule != nil {
-			rule := recurrence.ParseRule(*current.RecurrenceRule)
-			if rule == nil || !current.StartAt.Valid {
-				return apierrors.EventNotFound
-			}
-			occ, err := occurrenceForDate(rule, current, occurrenceDate)
-			if err != nil {
-				return apierrors.EventNotFound
-			}
-			startAt, endAt = reanchor(current, occ, startAt, endAt, f.timezone)
-		}
-		if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, startAt, f.timezone); spec != nil {
-			return spec
-		}
-		ruleData, recEnd := prepareRecurrence(e.body.Body.RecurrenceRule, startAt, endAt, f.timezone)
+// editSeries rewrites the series row itself. w must come from
+// lockEventAccess in q's transaction; when its scope names an occurrence, the
+// dates in the request are those of that occurrence, edited with "apply to
+// all".
+func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdit, w eventAccess) (editedRows, error) {
+	current := w.evt
+	f := mergeFields(e, current)
+	startAt, endAt := e.startAt, e.endAt
+	if w.scope.occurrence != nil {
+		occ := *w.scope.occurrence
+		shownStart, shownEnd := w.scope.shown()
+		startAt, endAt = ontoSlot(occ, shownStart, shownEnd, startAt, endAt, f.timezone)
+		startAt, endAt = reanchor(current, occ, startAt, endAt, f.timezone)
+	}
+	if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, startAt, f.timezone); spec != nil {
+		return editedRows{}, spec
+	}
+	ruleData, recEnd := prepareRecurrence(e.body.Body.RecurrenceRule, startAt, endAt, f.timezone)
 
-		if err := q.UpdateCalendarEvent(ctx, generated.UpdateCalendarEventParams{
-			Kind:               current.Kind,
-			Visibility:         f.visibility,
-			ShowAs:             f.showAs,
-			Flexibility:        f.flexibility,
-			Title:              e.body.Body.Title,
-			AllDay:             e.body.Body.AllDay,
-			StartAt:            sql.NullTime{Time: startAt, Valid: true},
-			EndAt:              sql.NullTime{Time: endAt, Valid: true},
-			Timezone:           f.timezone,
-			Location:           nullString(e.body.Body.Location),
-			Memo:               nullString(e.body.Body.Memo),
-			URL:                nullString(e.body.Body.URL),
-			OwnerUserID:        f.ownerID,
-			BlockLabel:         current.BlockLabel,
-			NotificationOffset: ptrIntToNullInt32(e.body.Body.NotificationOffset),
-			RecurrenceRule:     ruleData,
-			RecurrenceEnd:      recEnd,
-			ID:                 current.ID,
-		}); err != nil {
-			return err
-		}
-		if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants); err != nil {
-			return err
-		}
-		after, err := q.GetCalendarEventByID(ctx, current.ID)
-		if err != nil {
-			return err
-		}
-		if err := reconcileOverrides(ctx, q, current, after); err != nil {
-			return err
-		}
-		if updated, err = q.GetCalendarEventByID(ctx, current.ID); err != nil {
-			return err
-		}
-		return eventlog.Append(ctx, q, eventlog.Entry{
-			WorkspaceID: deps.WorkspaceID,
-			CalendarID:  e.cal.ID,
-			ActorUserID: e.actorID,
-			Type:        eventlog.TypeEventUpdated,
-			Summary:     e.body.Body.Title,
-			Subject:     current.PublicID,
-		})
-	})
+	if err := q.UpdateCalendarEvent(ctx, generated.UpdateCalendarEventParams{
+		Kind:               current.Kind,
+		Visibility:         f.visibility,
+		ShowAs:             f.showAs,
+		Flexibility:        f.flexibility,
+		Title:              e.body.Body.Title,
+		AllDay:             e.body.Body.AllDay,
+		StartAt:            sql.NullTime{Time: startAt, Valid: true},
+		EndAt:              sql.NullTime{Time: endAt, Valid: true},
+		Timezone:           f.timezone,
+		Location:           nullString(e.body.Body.Location),
+		Memo:               nullString(e.body.Body.Memo),
+		URL:                nullString(e.body.Body.URL),
+		OwnerUserID:        f.ownerID,
+		BlockLabel:         current.BlockLabel,
+		NotificationOffset: ptrIntToNullInt32(e.body.Body.NotificationOffset),
+		RecurrenceRule:     ruleData,
+		RecurrenceEnd:      recEnd,
+		ID:                 current.ID,
+	}); err != nil {
+		return editedRows{}, err
+	}
+	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants); err != nil {
+		return editedRows{}, err
+	}
+	after, err := q.GetCalendarEventByID(ctx, current.ID)
 	if err != nil {
-		return EventResponse{}, "", err
+		return editedRows{}, err
 	}
-	resp := mapEvent(updated, e.cal.PublicID)
-	if err := setAttendees(ctx, deps, &resp, updated.ID); err != nil {
-		return EventResponse{}, "", err
+	if err := reconcileOverrides(ctx, q, current, after); err != nil {
+		return editedRows{}, err
 	}
-	decorate(ctx, deps, &resp, updated, e.cal.ID)
-	return resp, eventETag(updated), nil
+	updated, err := q.GetCalendarEventByID(ctx, current.ID)
+	if err != nil {
+		return editedRows{}, err
+	}
+	if err := eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  e.cal.ID,
+		ActorUserID: e.actorID,
+		Type:        eventlog.TypeEventUpdated,
+		Summary:     e.body.Body.Title,
+		Subject:     current.PublicID,
+	}); err != nil {
+		return editedRows{}, err
+	}
+	return editedRows{series: updated}, nil
+}
+
+// ontoSlot carries the change a caller made to the dates they were shown for an
+// occurrence over onto the slot the rule gives it. An edited occurrence is shown
+// at its override's dates, and reading those as the occurrence's own would turn
+// the override's move into a move of the whole series. The start moves by the
+// same wall-clock shift in tz, the end keeps the change in length.
+func ontoSlot(occ recurrence.Occurrence, shownStart, shownEnd, newStart, newEnd time.Time, tz string) (time.Time, time.Time) {
+	if shownStart.Equal(occ.StartAt) && shownEnd.Equal(occ.EndAt) {
+		return newStart, newEnd
+	}
+	start := newWallShift(shownStart, newStart, tz, tz).apply(occ.StartAt)
+	end := start.Add(occ.EndAt.Sub(occ.StartAt) + newEnd.Sub(newStart) - shownEnd.Sub(shownStart))
+	return start, end
 }
 
 // reanchor turns the dates a caller gave one occurrence into the series start

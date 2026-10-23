@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -189,5 +190,24 @@ func TestUndatedSeriesExpandsToNothing(t *testing.T) {
 	)
 	if len(instances) != 0 {
 		t.Fatalf("got %d instances from an undated series, want none", len(instances))
+	}
+}
+
+type failingBatchLoader struct{}
+
+func (failingBatchLoader) ListRecurrenceOverridesByParents(context.Context, []sql.NullInt32) ([]generated.CalendarEvent, error) {
+	return nil, errors.New("connection lost")
+}
+
+// A failed override read is reported, not rendered as "no overrides": that
+// would show every edited occurrence with the series' contents and drop the
+// moved ones, under a success.
+func TestLoadOverridesReportsAFailedRead(t *testing.T) {
+	overrides, err := LoadOverrides(context.Background(), failingBatchLoader{}, []uint32{1})
+	if err == nil {
+		t.Fatalf("LoadOverrides() = %v, nil; want the read error", overrides)
+	}
+	if _, err := LoadOverrides(context.Background(), failingBatchLoader{}, nil); err != nil {
+		t.Fatalf("LoadOverrides() with no series = %v; nothing to read cannot fail", err)
 	}
 }

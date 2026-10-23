@@ -138,3 +138,27 @@ func medianLoginTime(t *testing.T, email string) time.Duration {
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 	return samples[rounds/2]
 }
+
+// Short of a lock, the counter keeps every failure since the last success:
+// nothing records when each one happened, so failures a day apart count the
+// same as failures a second apart.
+func TestFailedLoginsCountSinceTheLastSuccessHoweverOld(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	email := fmt.Sprintf("lock-lifetime-%d@test.local", time.Now().UnixNano())
+	registerFor(t, email, "correcthorsebattery")
+
+	for range 9 {
+		loginStatus(t, email, "definitely-not-it")
+	}
+	_, err := testDB.Exec(
+		`UPDATE identities SET updated_at = NOW(3) - INTERVAL 1 DAY
+		 WHERE provider='local' AND subject=?`, email)
+	require.NoError(t, err)
+
+	loginStatus(t, email, "definitely-not-it")
+	attempts, locked := identityLockState(t, email)
+	require.Equal(t, 10, attempts)
+	require.True(t, locked.Valid, "the tenth failure locks however long after the ninth it came")
+}

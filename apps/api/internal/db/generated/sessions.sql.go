@@ -62,11 +62,12 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSe
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
-WHERE public_id = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3)
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+WHERE sessions.public_id = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
 `
 
 // GetLiveSession is the per-request check behind an access token. The
@@ -76,6 +77,10 @@ WHERE public_id = ?
 //
 // The token names the session by its public id. The internal ids are one
 // deployment-wide sequence, and an access token is a value a client holds.
+//
+// A session is live only while its user is enabled: a disabled user is
+// treated as nonexistent everywhere else, so a session opened before the
+// user was disabled must stop with it.
 func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session, error) {
 	row := q.db.QueryRowContext(ctx, getLiveSession, publicID)
 	var i Session
@@ -95,53 +100,18 @@ func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session,
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.PrevRefreshHash,
-		&i.RotatedAt,
-	)
-	return i, err
-}
-
-const getSessionByPrevRefreshHash = `-- name: GetSessionByPrevRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
-WHERE prev_refresh_hash = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-`
-
-// GetSessionByPrevRefreshHash finds the session a spent refresh token used to
-// belong to. Matching here is the only evidence that a token which opens no
-// session was ever real, which is what separates a replay from a guess.
-func (q *Queries) GetSessionByPrevRefreshHash(ctx context.Context, prevRefreshHash sql.NullString) (Session, error) {
-	row := q.db.QueryRowContext(ctx, getSessionByPrevRefreshHash, prevRefreshHash)
-	var i Session
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.UserID,
-		&i.RefreshHash,
-		&i.UserAgent,
-		&i.IpAddress,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.RotatedFromHash,
-		&i.LastUsedAt,
-		&i.SortWeight,
-		&i.Notes,
-		&i.Enabled,
-		&i.UpdatedAt,
-		&i.CreatedAt,
-		&i.PrevRefreshHash,
 		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
-WHERE refresh_hash = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3)
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+WHERE sessions.refresh_hash = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
 `
 
 func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash string) (Session, error) {
@@ -163,14 +133,47 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash strin
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.PrevRefreshHash,
+		&i.RotatedAt,
+	)
+	return i, err
+}
+
+const getSessionByRotatedFromHash = `-- name: GetSessionByRotatedFromHash :one
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+WHERE rotated_from_hash = ?
+  AND revoked_at IS NULL
+  AND enabled = TRUE
+`
+
+// GetSessionByRotatedFromHash finds the session a spent refresh token used to
+// belong to. Matching here is the only evidence that a token which opens no
+// session was ever real, which is what separates a replay from a guess.
+func (q *Queries) GetSessionByRotatedFromHash(ctx context.Context, rotatedFromHash sql.NullString) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByRotatedFromHash, rotatedFromHash)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.UserID,
+		&i.RefreshHash,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RotatedFromHash,
+		&i.LastUsedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
 		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, prev_refresh_hash, rotated_at FROM sessions
+SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
 WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC
 `
@@ -200,7 +203,6 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, userID uint32) ([]Ses
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
-			&i.PrevRefreshHash,
 			&i.RotatedAt,
 		); err != nil {
 			return nil, err
@@ -284,15 +286,16 @@ func (q *Queries) RevokeSessionByPublicID(ctx context.Context, arg RevokeSession
 
 const rotateSessionByHash = `-- name: RotateSessionByHash :execresult
 UPDATE sessions
-SET prev_refresh_hash = refresh_hash,
+SET rotated_from_hash = refresh_hash,
     refresh_hash = ?,
     expires_at = ?,
     rotated_at = NOW(3),
     last_used_at = NOW(3)
-WHERE refresh_hash = ?
-  AND revoked_at IS NULL
-  AND enabled = TRUE
-  AND expires_at > NOW(3)
+WHERE sessions.refresh_hash = ?
+  AND sessions.revoked_at IS NULL
+  AND sessions.enabled = TRUE
+  AND sessions.expires_at > NOW(3)
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
 `
 
 type RotateSessionByHashParams struct {
@@ -309,8 +312,11 @@ type RotateSessionByHashParams struct {
 // working with no record of why.
 //
 // The assignments are order-dependent: MySQL evaluates SET left to right, so
-// prev_refresh_hash takes the old value only because it is assigned before
+// rotated_from_hash takes the old value only because it is assigned before
 // refresh_hash is overwritten.
+//
+// A disabled user's session matches nothing, as in GetLiveSession, so it
+// cannot be kept alive by refreshing.
 func (q *Queries) RotateSessionByHash(ctx context.Context, arg RotateSessionByHashParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, rotateSessionByHash, arg.RefreshHash, arg.ExpiresAt, arg.RefreshHash_2)
 }

@@ -26,6 +26,28 @@ FROM calendar_event_attachments a
 INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.public_id = ? AND a.enabled = FALSE AND a.retired_at IS NULL;
 
+-- CanReadObject says whether a user can already read the bytes of an object:
+-- a live attachment on a live event, or a live album photo, holding it in a
+-- calendar the user is a member of. A digest alone is not possession, so an
+-- upload that would reuse stored bytes without sending them is allowed only
+-- when this holds.
+-- name: CanReadObject :one
+SELECT EXISTS (
+  SELECT 1 FROM calendar_event_attachments a
+  INNER JOIN calendar_events e ON e.id = a.event_id AND e.enabled = TRUE
+  INNER JOIN calendars c ON c.id = e.calendar_id AND c.enabled = TRUE
+  INNER JOIN calendar_members cm
+    ON cm.calendar_id = c.id AND cm.user_id = sqlc.arg(user_id) AND cm.enabled = TRUE
+  WHERE a.storage_object_id = sqlc.arg(object_id) AND a.enabled = TRUE
+) OR EXISTS (
+  SELECT 1 FROM album_photos p
+  INNER JOIN calendars c ON c.id = p.calendar_id AND c.enabled = TRUE
+  INNER JOIN calendar_members cm
+    ON cm.calendar_id = c.id AND cm.user_id = sqlc.arg(user_id) AND cm.enabled = TRUE
+  WHERE (p.storage_object_id = sqlc.arg(photo_object_id) OR p.thumbnail_object_id = sqlc.arg(photo_object_id))
+    AND p.enabled = TRUE
+) AS readable;
+
 -- CreateEventAttachment starts disabled. The row only becomes visible once
 -- the upload has actually landed, so a presigned URL that is never used
 -- leaves nothing pointing at an object that does not exist.
@@ -102,9 +124,13 @@ WHERE id = ? AND enabled = FALSE AND retired_at IS NULL;
 -- table: a row the delete below cannot remove would otherwise be listed again
 -- on the next pass, and the sweep would spend its whole batch budget failing
 -- on the same page.
+--
+-- The public ids name the key a reservation may have uploaded its own copy to
+-- (workspace/<workspace>/uploads/<attachment>), which nothing else tracks.
 -- name: ListAbandonedAttachments :many
-SELECT a.id, a.storage_object_id
+SELECT a.id, a.storage_object_id, a.public_id, w.public_id AS workspace_public_id
 FROM calendar_event_attachments a
+INNER JOIN workspaces w ON w.id = a.workspace_id
 WHERE a.enabled = FALSE AND a.retired_at IS NULL AND a.created_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?;

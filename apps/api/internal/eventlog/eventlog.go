@@ -36,6 +36,7 @@ const (
 	TypeMemberLeft     = "calendar.member.left"
 	TypeMemberRemoved  = "calendar.member.removed"
 	TypeMemberRoleSet  = "calendar.member.role_changed"
+	TypeMemberColorSet = "calendar.member.updated"
 	TypeInviteCreated  = "calendar.invite.created"
 	TypeInviteRevoked  = "calendar.invite.revoked"
 	TypePhotoUploaded  = "calendar.photo.uploaded"
@@ -55,6 +56,10 @@ const (
 	TypeChecklistGone   = "calendar.checklist.removed"
 	TypeAttachmentAdded = "calendar.attachment.added"
 	TypeAttachmentGone  = "calendar.attachment.removed"
+	// TypeAttendeeUpdated is an attendee's answer or edit grant changing. A
+	// grant decides who may rewrite the event, so it is an access change and
+	// belongs in the history as much as the edits it permits.
+	TypeAttendeeUpdated = "calendar.attendee.updated"
 )
 
 // summaryMaxRunes bounds the stored summary. It is cut on a rune boundary

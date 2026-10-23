@@ -47,9 +47,17 @@ const (
 	mailPurposeVerify mailPurpose = "verify"
 )
 
-// resetEmailLimiter holds every mail budget. Each send draws on two keys, so
-// the cap is twice the client limiter's.
-var resetEmailLimiter = middleware.NewWindowCounter(passwordResetEmailWindow, 20000)
+// emailBudgetKeys bounds how many budgets of each half are held at once.
+const emailBudgetKeys = 20000
+
+// The two halves of every mail budget are held apart because they answer a
+// full table differently. Forgetting a per-client budget only lets that client
+// spend again from the mailbox total; forgetting a mailbox total would reset
+// the one bound on its flood, so a full mailbox table refuses instead.
+var (
+	emailClientBudgets  = middleware.NewWindowCounter(passwordResetEmailWindow, emailBudgetKeys)
+	emailMailboxBudgets = middleware.NewWindowCounter(passwordResetEmailWindow, emailBudgetKeys)
+)
 
 // allowEmailSend takes one unit from the (address, client) budget and one from
 // the address's own total, both scoped to a single purpose. A request the
@@ -61,20 +69,16 @@ func allowEmailSend(purpose mailPurpose, email, clientIP string, now time.Time) 
 		return false
 	}
 	mailbox := string(purpose) + "|" + email
-	if !takeEmailBudget(mailbox+"|"+clientIP, passwordResetEmailLimit, now) {
+	if count, _ := emailClientBudgets.Take(mailbox+"|"+middleware.RateKey(clientIP), now); count > passwordResetEmailLimit {
 		return false
 	}
-	return takeEmailBudget(mailbox, passwordResetMailboxLimit, now)
+	count, _, held := emailMailboxBudgets.TakeWithoutEviction(mailbox, now)
+	return held && count <= passwordResetMailboxLimit
 }
 
 // allowPasswordResetEmail is the reset half of that budget.
 func allowPasswordResetEmail(email, clientIP string, now time.Time) bool {
 	return allowEmailSend(mailPurposeReset, email, clientIP, now)
-}
-
-func takeEmailBudget(key string, limit int, now time.Time) bool {
-	count, _ := resetEmailLimiter.Take(key, now)
-	return count <= limit
 }
 
 func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInput) (*RequestResetOutput, error) {
@@ -89,6 +93,11 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			// still logged so a mail-bombing attempt against a real mailbox is
 			// visible to operators even though no mail was sent.
 			slog.WarnContext(ctx, "password reset request suppressed by rate limiter", "clientIP", clientIP)
+			return out, nil
+		}
+		// No account can hold an address the column cannot store, and looking
+		// one up is a charset error rather than an answer.
+		if !auth.StorableEmail(in.Body.Email) {
 			return out, nil
 		}
 

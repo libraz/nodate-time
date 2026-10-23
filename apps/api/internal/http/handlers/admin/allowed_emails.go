@@ -3,10 +3,13 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -84,6 +87,11 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 		if email == "" {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
+		// The column cannot hold such an address; refuse it up front rather
+		// than fail the write.
+		if !auth.StorableEmail(email) {
+			return nil, apierrors.ToHuma(apierrors.AuthEmailUnsupported)
+		}
 
 		exists, err := deps.Queries.IsEmailAllowed(ctx, email)
 		if err != nil {
@@ -119,7 +127,13 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			for _, r := range rows {
 				if r.Email == email {
 					stored = r
-					return nil
+					return appendAudit(ctx, q, auditEntry{
+						ActorUserID:      userID,
+						Action:           auditAllowedEmailCreate,
+						ResourceType:     "allowed_email",
+						ResourcePublicID: r.PublicID,
+						Payload:          map[string]any{"email": email},
+					})
 				}
 			}
 			return sql.ErrNoRows
@@ -142,15 +156,33 @@ func DeleteAllowedEmail(deps Deps) func(context.Context, *DeleteAllowedEmailInpu
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.NotFound)
 		}
-		res, err := deps.Queries.WithdrawAllowedEmail(ctx, pub[:])
+		actorID, _ := middleware.ActorFromContext(ctx)
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			res, err := q.WithdrawAllowedEmail(ctx, pub[:])
+			if err != nil {
+				return err
+			}
+			// Report a miss rather than a silent success: an operator who thinks
+			// they withdrew an exception and did not has a live one they believe
+			// is gone.
+			if changed, err := blobref.ChangedOne(res); err != nil {
+				return err
+			} else if !changed {
+				return apierrors.NotFound
+			}
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      actorID,
+				Action:           auditAllowedEmailDelete,
+				ResourceType:     "allowed_email",
+				ResourcePublicID: pub[:],
+			})
+		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Report a miss rather than a silent success: an operator who thinks
-		// they withdrew an exception and did not has a live one they believe
-		// is gone.
-		if affected, err := res.RowsAffected(); err != nil || affected == 0 {
-			return nil, apierrors.ToHuma(apierrors.NotFound)
 		}
 		return &DeleteAllowedEmailOutput{}, nil
 	}

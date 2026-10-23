@@ -172,6 +172,48 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 	return i, err
 }
 
+const getAlbumPhotoForUpdate = `-- name: GetAlbumPhotoForUpdate :one
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos
+WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE
+`
+
+type GetAlbumPhotoForUpdateParams struct {
+	PublicID   []byte `json:"publicId"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+// GetAlbumPhotoForUpdate is the read an edit or delete merges over: it takes
+// the row lock and only matches a live photo of this calendar, so a photo
+// deleted in the meantime is simply not there.
+func (q *Queries) GetAlbumPhotoForUpdate(ctx context.Context, arg GetAlbumPhotoForUpdateParams) (AlbumPhoto, error) {
+	row := q.db.QueryRowContext(ctx, getAlbumPhotoForUpdate, arg.PublicID, arg.CalendarID)
+	var i AlbumPhoto
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CalendarEventID,
+		&i.UploadedByUserID,
+		&i.Caption,
+		&i.ContentType,
+		&i.ByteSize,
+		&i.Width,
+		&i.Height,
+		&i.StorageKey,
+		&i.TakenAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.RetiredAt,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.StorageObjectID,
+		&i.ThumbnailObjectID,
+	)
+	return i, err
+}
+
 const listAbandonedAlbumPhotoStorageKeys = `-- name: ListAbandonedAlbumPhotoStorageKeys :many
 SELECT id, storage_key, storage_object_id, thumbnail_object_id FROM album_photos
 WHERE enabled = FALSE AND updated_at < ? AND id > ?
@@ -535,13 +577,12 @@ func (q *Queries) ListAlbumPhotosWithoutStorageObject(ctx context.Context, arg L
 	return items, nil
 }
 
-const softDeleteAlbumPhoto = `-- name: SoftDeleteAlbumPhoto :exec
+const softDeleteAlbumPhoto = `-- name: SoftDeleteAlbumPhoto :execresult
 UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND enabled = TRUE
 `
 
-func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteAlbumPhoto, id)
-	return err
+func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteAlbumPhoto, id)
 }
 
 const softDeleteAlbumPhotosByCalendar = `-- name: SoftDeleteAlbumPhotosByCalendar :exec
@@ -555,7 +596,7 @@ func (q *Queries) SoftDeleteAlbumPhotosByCalendar(ctx context.Context, calendarI
 }
 
 const updateAlbumPhotoMeta = `-- name: UpdateAlbumPhotoMeta :exec
-UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ?
+UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ? AND enabled = TRUE
 `
 
 type UpdateAlbumPhotoMetaParams struct {

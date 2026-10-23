@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
-	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +72,7 @@ func TestCleanupCollectsExpiredEmailVerificationsInBatches(t *testing.T) {
 	db.rewrite = scopeSweep("email_verifications",
 		"DELETE FROM email_verifications WHERE expires_at < ?", userID, &statements)
 
-	cleanup.RunOnce(testCtx(), generated.New(db), getTestStorage())
+	cleanup.RunOnce(testCtx(), db, getTestStorage())
 
 	require.GreaterOrEqual(t, statements.Load(), int64(2),
 		"one pass must keep deleting until a batch comes back short")

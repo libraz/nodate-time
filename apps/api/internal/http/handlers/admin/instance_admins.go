@@ -127,7 +127,15 @@ func RevokeInstanceAdmin(deps Deps) func(context.Context, *RevokeInstanceAdminIn
 			if remaining <= 1 {
 				return apierrors.AdminLastInstanceAdmin
 			}
-			return q.RevokeInstanceAdmin(ctx, target.ID)
+			if err := q.RevokeInstanceAdmin(ctx, target.ID); err != nil {
+				return err
+			}
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      actorID,
+				Action:           auditInstanceAdminRevoke,
+				ResourceType:     "user",
+				ResourcePublicID: target.PublicID,
+			})
 		})
 		if err != nil {
 			var spec *apierrors.Spec

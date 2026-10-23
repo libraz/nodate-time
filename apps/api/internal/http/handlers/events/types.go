@@ -143,7 +143,7 @@ type CreateEventInput struct {
 		EndAt              string           `json:"endAt" doc:"ISO 8601 datetime"`
 		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to UTC)"`
 		Location           string           `json:"location,omitempty" maxLength:"500" required:"false"`
-		Memo               string           `json:"memo,omitempty" required:"false"`
+		Memo               string           `json:"memo,omitempty" maxLength:"16000" required:"false"`
 		URL                string           `json:"url,omitempty" maxLength:"2000" required:"false"`
 		ShowAs             string           `json:"showAs,omitempty" enum:"busy,free,tentative,oof" required:"false" doc:"defaults to busy"`
 		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"defaults to fixed"`
@@ -159,14 +159,15 @@ type CreateEventOutput struct {
 	Body EventResponse
 }
 
-// UpdateEventInput is a full-replace update: every content field is
-// authoritative and must carry the complete desired state. Omitting a field is
-// a contract violation, not a "keep current value" request — clearing is done
-// with an explicit empty string, empty array, or null.
+// UpdateEventInput is a full-replace update: every required content field is
+// authoritative and must carry the complete desired state -- clearing is done
+// with an explicit empty string, empty array, or null. The optional fields
+// (timezone, showAs, flexibility, visibility) keep their current value when
+// omitted, so a client that does not know one cannot reset it.
 type UpdateEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
-	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"For recurring events: 'this' edits only this occurrence, 'all' edits the whole series"`
+	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"'this' edits only the occurrence a composite id names and is refused on any other id; 'all' edits the whole series, measuring a move from the dates GET returned for that occurrence"`
 	// IfMatch carries the entity tag of the copy being replaced. Because the
 	// update is a full replace, an unconditional save from a stale copy undoes
 	// whatever the other writer stored in between without either of them
@@ -180,11 +181,11 @@ type UpdateEventInput struct {
 		EndAt              string           `json:"endAt"`
 		Timezone           string           `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone (defaults to the event's current zone)"`
 		Location           string           `json:"location" maxLength:"500"`
-		Memo               string           `json:"memo"`
+		Memo               string           `json:"memo" maxLength:"16000"`
 		URL                string           `json:"url" maxLength:"2000"`
-		ShowAs             string           `json:"showAs,omitempty" enum:"busy,free,tentative,oof" required:"false" doc:"defaults to busy"`
-		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"defaults to fixed"`
-		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"defaults to the calendar's setting; omitted on update keeps the current value"`
+		ShowAs             string           `json:"showAs,omitempty" enum:"busy,free,tentative,oof" required:"false" doc:"omitted keeps the current value"`
+		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"omitted keeps the current value"`
+		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"omitted keeps the current value"`
 		NotificationOffset *int             `json:"notificationOffset" doc:"null clears the notification"`
 		Participants       []string         `json:"participants" doc:"full participant list; an empty array removes all participants"`
 		OwnerID            *string          `json:"ownerId" doc:"public user ID of the owning member; null leaves the owner unchanged"`
@@ -199,7 +200,7 @@ type UpdateEventOutput struct {
 type DeleteEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
-	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"For recurring events: 'this' deletes only this occurrence, 'all' deletes the whole series"`
+	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"'this' deletes only the occurrence a composite id names and is refused on any other id; 'all' deletes the whole series"`
 }
 type DeleteEventOutput struct{}
 
@@ -339,7 +340,7 @@ type PresignUploadInput struct {
 type PresignUploadOutput struct {
 	Body struct {
 		AttachmentID string `json:"attachmentId"`
-		UploadURL    string `json:"uploadUrl" doc:"Signed PUT URL, valid for 15 minutes. Empty when these bytes are already stored: skip the upload and confirm."`
+		UploadURL    string `json:"uploadUrl" doc:"Signed PUT URL, valid for 15 minutes. Empty when these bytes are already stored where the caller can read them: skip the upload and confirm."`
 	}
 }
 
