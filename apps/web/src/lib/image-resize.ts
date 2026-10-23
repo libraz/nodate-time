@@ -11,7 +11,7 @@ type EncodableType = 'image/jpeg' | 'image/png' | 'image/webp';
 interface ResizeOptions {
   maxDimension: number;
   quality?: number;
-  preferredType?: EncodableType;
+  preferredType: EncodableType;
 }
 
 async function readAsImage(file: File): Promise<HTMLImageElement> {
@@ -45,12 +45,14 @@ async function canvasToBlob(
   });
 }
 
-async function resize(file: File, opts: ResizeOptions): Promise<ResizedImage> {
-  const img = await readAsImage(file);
+async function resizeDecodedImage(
+  img: HTMLImageElement,
+  opts: ResizeOptions,
+): Promise<ResizedImage> {
   const longest = Math.max(img.naturalWidth, img.naturalHeight);
   const scale = longest > opts.maxDimension ? opts.maxDimension / longest : 1;
-  const width = Math.round(img.naturalWidth * scale);
-  const height = Math.round(img.naturalHeight * scale);
+  const width = Math.max(1, Math.round(img.naturalWidth * scale));
+  const height = Math.max(1, Math.round(img.naturalHeight * scale));
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -59,14 +61,27 @@ async function resize(file: File, opts: ResizeOptions): Promise<ResizedImage> {
   if (!ctx) throw new Error('2d context unavailable');
   ctx.drawImage(img, 0, 0, width, height);
 
-  const type = opts.preferredType ?? 'image/jpeg';
-  const blob = await canvasToBlob(canvas, type, opts.quality ?? 0.9);
+  const blob = await canvasToBlob(canvas, opts.preferredType, opts.quality ?? 0.9);
   const bytes = await blob.arrayBuffer();
-  return { bytes, contentType: type, width, height };
+  return { bytes, contentType: blob.type, width, height };
+}
+
+async function resize(file: File, opts: ResizeOptions): Promise<ResizedImage> {
+  return resizeDecodedImage(await readAsImage(file), opts);
+}
+
+/**
+ * The format a re-encode keeps: PNG and WebP stay themselves because a JPEG
+ * draws their transparency black; anything else becomes JPEG.
+ */
+function reencodeType(sourceType: string): EncodableType {
+  const type = sourceType.toLowerCase();
+  if (type === 'image/png' || type === 'image/webp') return type;
+  return 'image/jpeg';
 }
 
 export function resizeImageForAvatar(file: File): Promise<ResizedImage> {
-  return resize(file, { maxDimension: 512, quality: 0.92, preferredType: 'image/jpeg' });
+  return resize(file, { maxDimension: 512, quality: 0.92, preferredType: reencodeType(file.type) });
 }
 
 /** The longest edge an album photo is stored at. */
@@ -111,9 +126,7 @@ export function planAlbumEncoding(
   // are strictly better than anything a re-encode would produce.
   if (albumTypes.has(type) && longestEdge <= maxDimension) return { passthrough: true };
 
-  if (type === 'image/png') return { passthrough: false, type: 'image/png' };
-  if (type === 'image/webp') return { passthrough: false, type: 'image/webp' };
-  return { passthrough: false, type: 'image/jpeg' };
+  return { passthrough: false, type: reencodeType(type) };
 }
 
 /**
@@ -154,9 +167,7 @@ export function planAlbumThumbnail(
   // upload and save nothing.
   if (longestEdge <= maxDimension) return { thumbnail: false };
 
-  if (type === 'image/png') return { thumbnail: true, type: 'image/png' };
-  if (type === 'image/webp') return { thumbnail: true, type: 'image/webp' };
-  return { thumbnail: true, type: 'image/jpeg' };
+  return { thumbnail: true, type: reencodeType(type) };
 }
 
 /**
@@ -202,7 +213,7 @@ export async function prepareImageForAlbum(file: File): Promise<ResizedImage> {
       height: img.naturalHeight,
     };
   }
-  return resize(file, {
+  return resizeDecodedImage(img, {
     maxDimension: albumMaxDimension,
     quality: 0.88,
     preferredType: plan.type,
