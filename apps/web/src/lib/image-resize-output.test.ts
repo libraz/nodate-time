@@ -108,6 +108,19 @@ describe('image resize output', () => {
     expect(Math.max(result.width, result.height)).toBeLessThanOrEqual(512);
   });
 
+  it.each([
+    { source: 'image/png', encoded: 'image/png' },
+    { source: 'image/webp', encoded: 'image/webp' },
+    { source: 'image/jpeg', encoded: 'image/jpeg' },
+  ])('re-encodes a $source avatar as $encoded', async ({ source, encoded }) => {
+    dimensions = { width: 1024, height: 1024 };
+
+    const result = await resizeImageForAvatar(imageFile(source));
+
+    expect(canvases[0]?.requestedType).toBe(encoded);
+    expect(result.contentType).toBe(encoded);
+  });
+
   it('keeps an already small album image at its original dimensions', async () => {
     dimensions = { width: 320, height: 240 };
 
