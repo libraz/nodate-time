@@ -1,17 +1,15 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage, hasToken } from '@/lib/api';
-import { formatMonthYear, getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import {
   type PublicCalendar,
   publishesEvents,
   type ShareFailure,
   shareFailureOf,
 } from '@/lib/public-calendar';
-import { usePublicEvents } from '@/lib/use-public-events';
-import { eventOccupiesDay } from '@/lib/week-layout';
+import { usePublicEvents, usePublicMonth, usePublicMonthGrid } from '@/lib/use-public-events';
 import { useUiStore } from '@/stores/ui-store';
 
 export const Route = createFileRoute('/share/$token')({
@@ -32,7 +30,7 @@ export function SharedCalendarView() {
   // on every render -- enough to make the load depend on itself.
   const [failed, setFailed] = useState(false);
   const [failure, setFailure] = useState<ShareFailure | null>(null);
-  const [currentMonth, setCurrentMonth] = useState(DateTime.now().startOf('month'));
+  const { month: currentMonth, shiftMonth } = usePublicMonth(timezone);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
@@ -87,6 +85,8 @@ export function SharedCalendarView() {
     failure: eventsFailure,
     retry: retryEvents,
   } = usePublicEvents(token, !!calendar && publishesEvents(calendar), currentMonth, timezone);
+
+  const { weeks, eventsOn } = usePublicMonthGrid(events, currentMonth, timezone);
 
   // A month whose events did not arrive is not an empty month: it is reported
   // the same way a calendar that did not arrive is.
@@ -143,17 +143,7 @@ export function SharedCalendarView() {
   }
 
   const showsGrid = publishesEvents(calendar);
-  const days = getMonthDays(currentMonth.year, currentMonth.month - 1, timezone);
-  const weeks: DateTime[][] = [];
-  for (let i = 0; i < days.length; i += 7) {
-    weeks.push(days.slice(i, i + 7));
-  }
-
-  const getEventsForDay = (day: DateTime) => {
-    return events.filter((e) => eventOccupiesDay(e, day, timezone));
-  };
-
-  const today = DateTime.now();
+  const today = nowInZone(timezone);
 
   return (
     <div className="app-bg flex min-h-screen flex-col">
@@ -191,7 +181,7 @@ export function SharedCalendarView() {
             <div className="flex items-center justify-between bg-[var(--color-surface)] px-4 py-3 shadow-sm sm:px-6">
               <button
                 type="button"
-                onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))}
+                onClick={() => shiftMonth(-1)}
                 aria-label={t('calendar.prevMonth')}
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
               >
@@ -211,7 +201,7 @@ export function SharedCalendarView() {
               </span>
               <button
                 type="button"
-                onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))}
+                onClick={() => shiftMonth(1)}
                 aria-label={t('calendar.nextMonth')}
                 className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
               >
@@ -272,7 +262,7 @@ export function SharedCalendarView() {
                   {week.map((day) => {
                     const isCurrentMonth = day.month === currentMonth.month;
                     const isToday = day.hasSame(today, 'day');
-                    const dayEvents = getEventsForDay(day);
+                    const dayEvents = eventsOn(day);
 
                     return (
                       <div

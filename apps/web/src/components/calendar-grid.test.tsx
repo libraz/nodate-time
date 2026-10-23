@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +9,17 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    // The stored copy's revision, which is what a drop checks its copy against.
+    getWithRevision: async () => ({
+      data: { updatedAt: '2026-08-01T00:00:00+09:00' },
+      revision: '"rev-1"',
+    }),
+  },
   errorMessage: (e: unknown) => String(e),
 }));
 
@@ -284,6 +294,7 @@ describe('CalendarGrid drag to move', () => {
     fireEvent.pointerMove(window, press('mouse', 150));
     fireEvent.pointerUp(window, press('mouse', 150));
 
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
     const payload = calendarState.updateEvent.mock.calls[0]?.[2] as {
       startAt: string;
       endAt: string;
@@ -311,6 +322,9 @@ describe('CalendarGrid drag to move', () => {
     fireEvent.pointerUp(window, press('touch', 250));
     fireEvent.touchEnd(chip, { changedTouches: [{ clientX: 250, clientY: 10 }] });
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
     expect(calendarState.updateEvent).toHaveBeenCalledTimes(1);
     expect(uiState.navigateMonth).not.toHaveBeenCalled();
   });

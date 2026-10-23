@@ -41,10 +41,10 @@ describe('sign-in errors', () => {
 
   it('reads a rejected registration in the reader locale', async () => {
     useUiStore.setState({ locale: 'ja' });
-    fetchMock.mockResolvedValue(rejection(409, 'AUTH.EMAIL_EXISTS', 'Email already registered'));
+    fetchMock.mockResolvedValue(rejection(400, 'AUTH.REGISTER_FAILED', 'Unable to register'));
 
     await expect(useAuthStore.getState().register('A', 'a@b.c', 'pw')).rejects.toBeTruthy();
 
-    expect(useAuthStore.getState().error).toBe(ja['apiError.AUTH.EMAIL_EXISTS']);
+    expect(useAuthStore.getState().error).toBe(ja['apiError.AUTH.REGISTER_FAILED']);
   });
 });

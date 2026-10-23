@@ -43,26 +43,29 @@ export function layoutTimedEventsForDay(
 ): TimedLayout[] {
   const dayStartMs = dayStart.startOf('day').toMillis();
   const dayEndMs = dayStart.startOf('day').plus({ days: 1 }).toMillis();
-  const minExtentMs = MIN_RENDERED_MINUTES * 60_000;
   const segments = events
     .map((event) => ({
       event,
-      start: fromISOInZone(event.startAt, zone).toMillis(),
-      end: fromISOInZone(event.endAt, zone).toMillis(),
+      startDt: fromISOInZone(event.startAt, zone),
+      endDt: fromISOInZone(event.endAt, zone),
     }))
     // Which events this column draws. A span has to reach into the day; a
     // marker has only an instant to place, and the day it opens is the one.
-    .filter(({ start, end }) =>
-      end === start
+    .filter(({ startDt, endDt }) => {
+      const start = startDt.toMillis();
+      const end = endDt.toMillis();
+      return end === start
         ? start >= dayStartMs && start < dayEndMs
-        : start < dayEndMs && end > dayStartMs,
-    )
-    .map(({ event, start, end }) => {
-      const from = Math.max(start, dayStartMs);
+        : start < dayEndMs && end > dayStartMs;
+    })
+    // Lanes are packed on the wall-clock scale the column is drawn on, so two
+    // blocks sharing a repeated hour are as close here as they are on screen.
+    .map(({ event, startDt, endDt }) => {
+      const start = minutesIntoDay(startDt, dayStart);
       return {
         event,
-        start: from,
-        end: Math.max(Math.min(end, dayEndMs), from + minExtentMs),
+        start,
+        end: Math.max(minutesIntoDay(endDt, dayStart), start + MIN_RENDERED_MINUTES),
       };
     })
     .sort((a, b) => a.start - b.start || b.end - a.end);

@@ -4,6 +4,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { type TranslationKey, useT } from '@/i18n';
 import { api } from '@/lib/api';
 import { APP_NAME } from '@/lib/app-name';
+import { safeRedirect } from '@/lib/safe-redirect';
 import { useAuthStore } from '@/stores/auth-store';
 
 type OAuthProvider = 'google' | 'line';
@@ -131,8 +132,7 @@ function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      const dest = redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : '/';
-      navigate({ to: dest });
+      navigate({ to: safeRedirect(redirect) });
     }
   }, [isAuthenticated, navigate, redirect]);
 

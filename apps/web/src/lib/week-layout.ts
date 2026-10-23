@@ -1,4 +1,4 @@
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { fromISOInZone } from '@/lib/date-utils';
 import { eventDayZone, toGridDay } from '@/lib/event-zone';
 import type { CalendarEvent } from '@/types/calendar';
@@ -91,6 +91,44 @@ export function bucketEventsByWeek(
       if (bucket) bucket.push(evt);
       else buckets.set(key, [evt]);
       ws = ws.plus({ weeks: 1 });
+    }
+  }
+  return buckets;
+}
+
+/** Identifies a day cell: the yyyy-MM-dd of the day in the grid's zone. */
+export function dayKey(day: DateTime, zone: string): string {
+  return toGridDay(day, zone).toFormat('yyyy-MM-dd');
+}
+
+/**
+ * Groups events by the day cells of `first`..`last` they occupy, keyed by
+ * {@link dayKey}.
+ *
+ * Holds the same occupancy as {@link eventOccupiesDay} in one pass over the
+ * events instead of a filter of the whole list per cell; days outside the
+ * range are not walked, so a long event costs at most the cells on screen.
+ */
+export function bucketEventsByDay<T extends DayEvent>(
+  events: T[],
+  zone: string,
+  first: DateTime,
+  last: DateTime,
+): Map<string, T[]> {
+  const buckets = new Map<string, T[]>();
+  const gridFirst = toGridDay(first, zone);
+  const gridLast = toGridDay(last, zone);
+  for (const evt of events) {
+    const start = eventStartDay(evt, zone);
+    const end = eventEndDay(evt, zone);
+    let day = start < gridFirst ? gridFirst : start;
+    const stop = end > gridLast ? gridLast : end;
+    while (day <= stop) {
+      const key = day.toFormat('yyyy-MM-dd');
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(evt);
+      else buckets.set(key, [evt]);
+      day = toGridDay(day.plus({ days: 1 }), zone);
     }
   }
   return buckets;
@@ -207,7 +245,14 @@ export function layoutDayCell(
   const used = new Set(reserved);
   const singleSlots: { track: number; evt: CalendarEvent }[] = [];
   let nextTrack = 0;
-  for (const evt of singles) {
+  // All-day first, then by start, so the "+N" hides the latest events whatever
+  // order the store holds them in.
+  const ordered = [...singles].sort(
+    (a, b) =>
+      Number(b.allDay) - Number(a.allDay) ||
+      DateTime.fromISO(a.startAt).toMillis() - DateTime.fromISO(b.startAt).toMillis(),
+  );
+  for (const evt of ordered) {
     while (used.has(nextTrack)) nextTrack++;
     if (nextTrack >= MAX_VISIBLE_TRACKS) break;
     singleSlots.push({ track: nextTrack, evt });

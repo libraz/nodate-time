@@ -1,7 +1,6 @@
-import { DateTime } from 'luxon';
 import { useMemo } from 'react';
 import { useT } from '@/i18n';
-import { getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
+import { dayInZone, getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { eventEndDay, eventStartDay } from '@/lib/week-layout';
@@ -67,7 +66,7 @@ export function YearView() {
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4">
         {months.map((m) => {
           const days = getMonthDays(currentMonth.year, m, timezone);
-          const monthLabel = DateTime.local(currentMonth.year, m + 1, 1).toFormat(
+          const monthLabel = dayInZone(currentMonth.year, m + 1, 1, timezone).toFormat(
             locale === 'ja' ? 'M月' : 'MMM',
           );
           const monthHasToday = days.some((d) => d.month === m + 1 && isToday(d, timezone));
@@ -76,7 +75,7 @@ export function YearView() {
               type="button"
               key={m}
               onClick={() => {
-                setCurrentMonth(DateTime.local(currentMonth.year, m + 1, 1));
+                setCurrentMonth(dayInZone(currentMonth.year, m + 1, 1, timezone));
                 setCalendarView('month');
               }}
               style={{ animationDelay: `${m * 0.03}s` }}

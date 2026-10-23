@@ -451,7 +451,6 @@ export function App() {
     const load = () => {
       rangeLoaded.current = true;
       fetchEvents(start, end, controller.signal).catch(() => {});
-      fetchMemos().catch(() => {});
     };
     // The first load has an empty grid behind it, so it goes now. Only the
     // changes after it are worth waiting out.
@@ -467,7 +466,16 @@ export function App() {
       // leave the server finishing a month nobody is looking at.
       controller.abort();
     };
-  }, [calendars, currentMonth, calendarView, fetchEvents, fetchMemos]);
+  }, [calendars, currentMonth, calendarView, fetchEvents]);
+
+  // Memos belong to the calendar, not to the month on screen, so a month flick
+  // leaves them alone.
+  useEffect(() => {
+    if (calendars.length === 0) return;
+    const controller = new AbortController();
+    fetchMemos(controller.signal).catch(() => {});
+    return () => controller.abort();
+  }, [calendars, fetchMemos]);
 
   const membersFailed = Object.keys(memberErrors).length > 0;
   const eventsTruncated = truncatedCalendarIds.some((id) => shownCalendarIds.includes(id));

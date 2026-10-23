@@ -4,7 +4,7 @@ import type { CalendarEvent } from '@/types/calendar';
 import { useScopedUpdate } from './use-scoped-update';
 
 const recurring = {
-  id: 'evt-1',
+  id: 'evt-1_20260803',
   calendarId: 'cal-1',
   title: 'Standup',
   recurrenceRule: 'FREQ=WEEKLY',

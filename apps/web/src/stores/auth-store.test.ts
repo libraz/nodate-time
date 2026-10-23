@@ -18,6 +18,8 @@ vi.mock('@/lib/api', () => {
     setToken: vi.fn(),
     endSession: vi.fn(),
     hasToken: vi.fn(() => false),
+    isSessionStorageEvent: (e: StorageEvent) =>
+      e.key === null || e.key === 'tt_token' || e.key === 'tt_refresh',
     errorMessage: (e: unknown, fallback?: string) =>
       e instanceof ApiError ? e.detail : (fallback ?? 'error.generic'),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module export

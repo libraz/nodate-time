@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
@@ -16,7 +16,17 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+    // The stored copy's revision, which is what a drop checks its copy against.
+    getWithRevision: async () => ({
+      data: { updatedAt: '2026-03-01T00:00:00-05:00' },
+      revision: '"rev-1"',
+    }),
+  },
   errorMessage: (e: unknown) => String(e),
 }));
 
@@ -222,7 +232,7 @@ describe('WeeklyTimeline resize listeners', () => {
     expect(signals.every((s) => s?.aborted === true)).toBe(true);
   });
 
-  it('leaves a resize that ended on its own alone', () => {
+  it('leaves a resize that ended on its own alone', async () => {
     render(<WeeklyTimeline />);
 
     fireEvent.pointerDown(resizeHandle(), { clientY: 240 });
@@ -230,7 +240,7 @@ describe('WeeklyTimeline resize listeners', () => {
     fireEvent.pointerUp(window, { clientY: 300 });
 
     // The gesture committed, so the event was asked to change.
-    expect(calendarState.updateEvent).toHaveBeenCalled();
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
   });
 });
 
@@ -333,7 +343,8 @@ function blockIn(dayKey: string, title: string): HTMLElement {
   return text;
 }
 
-function movedPayload(): { startAt: string; endAt: string } {
+async function movedPayload(): Promise<{ startAt: string; endAt: string }> {
+  await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
   return calendarState.updateEvent.mock.calls[0]?.[2] as { startAt: string; endAt: string };
 }
 
@@ -347,7 +358,7 @@ describe('WeeklyTimeline move drop', () => {
   // The grab offset was read from whatever element was pressed, so pressing
   // the title instead of the block's padding moved the event by the title's
   // own offset inside it.
-  it('moves by the pointer travel when the title inside the block is pressed', () => {
+  it('moves by the pointer travel when the title inside the block is pressed', async () => {
     render(<WeeklyTimeline />);
     restore = stubColumnsAtX();
     // 2026-03-08 is the Sunday, column 0.
@@ -357,13 +368,14 @@ describe('WeeklyTimeline move drop', () => {
     fireEvent.pointerMove(window, mouse(50, 320));
     fireEvent.pointerUp(window, mouse(50, 300 + HOUR_HEIGHT));
 
-    expect(movedPayload().startAt).toBe('2026-03-08T06:00:00.000-04:00');
-    expect(movedPayload().endAt).toBe('2026-03-08T07:00:00.000-04:00');
+    const payload = await movedPayload();
+    expect(payload.startAt).toBe('2026-03-08T06:00:00.000-04:00');
+    expect(payload.endAt).toBe('2026-03-08T07:00:00.000-04:00');
   });
 
   // A 22:00-02:00 event draws its Tuesday segment from midnight. Placing the
   // start at the drop position moved it a whole day plus an hour.
-  it('moves an overnight event by the travel of whichever segment was grabbed', () => {
+  it('moves an overnight event by the travel of whichever segment was grabbed', async () => {
     calendarState.events = [
       {
         ...probe,
@@ -381,8 +393,9 @@ describe('WeeklyTimeline move drop', () => {
     fireEvent.pointerMove(window, mouse(250, 30));
     fireEvent.pointerUp(window, mouse(250, 10 + HOUR_HEIGHT));
 
-    expect(movedPayload().startAt).toBe('2026-03-09T23:00:00.000-04:00');
-    expect(movedPayload().endAt).toBe('2026-03-10T03:00:00.000-04:00');
+    const payload = await movedPayload();
+    expect(payload.startAt).toBe('2026-03-09T23:00:00.000-04:00');
+    expect(payload.endAt).toBe('2026-03-10T03:00:00.000-04:00');
   });
 });
 

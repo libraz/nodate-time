@@ -1,6 +1,7 @@
-import { DateTime } from 'luxon';
+import type { DateTime } from 'luxon';
 import { create } from 'zustand';
 import type { Locale } from '@/i18n';
+import { nowInZone } from '@/lib/date-utils';
 import { detectHolidayCountry } from '@/lib/holidays';
 import type { AccountPreferences } from '@/lib/preferences';
 import { detectTimezone } from '@/lib/preferences';
@@ -68,10 +69,17 @@ interface UiState {
   resetSessionUi: () => void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
+/** The day and month the calendar opens on: today in `zone`, never the device's date. */
+function openingDates(zone: string): { selectedDate: DateTime; currentMonth: DateTime } {
+  const today = nowInZone(zone);
+  return { selectedDate: today, currentMonth: today.startOf('month') };
+}
+
+const initialTimezone = loadJson<string>('timezone', detectTimezone());
+
+export const useUiStore = create<UiState>((set, get) => ({
   calendarView: 'month',
-  selectedDate: DateTime.now(),
-  currentMonth: DateTime.now().startOf('month'),
+  ...openingDates(initialTimezone),
   showEventModal: false,
   editingEventId: null,
   eventDraftStart: null,
@@ -88,7 +96,7 @@ export const useUiStore = create<UiState>((set) => ({
   theme: loadJson<ThemeStyle>('theme', 'glass'),
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
   locale: loadJson<Locale>('locale', 'ja'),
-  timezone: loadJson<string>('timezone', detectTimezone()),
+  timezone: initialTimezone,
   holidaysCountry: loadJson<string | null>('holidaysCountry', detectHolidayCountry()),
 
   setCalendarView: (view) => set({ calendarView: view }),
@@ -149,11 +157,23 @@ export const useUiStore = create<UiState>((set) => ({
     }
     if (prefs.timezone) {
       saveJson('timezone', prefs.timezone);
-      set({ timezone: prefs.timezone });
+      const { timezone: previous, selectedDate, currentMonth } = get();
+      // Still on the opening day and month of the old zone means the user has not
+      // navigated: reopen on today in the account's zone.
+      const before = openingDates(previous);
+      const untouched =
+        selectedDate.hasSame(before.selectedDate, 'day') &&
+        currentMonth.hasSame(before.currentMonth, 'month');
+      set(
+        untouched && previous !== prefs.timezone
+          ? { timezone: prefs.timezone, ...openingDates(prefs.timezone) }
+          : { timezone: prefs.timezone },
+      );
     }
   },
   resetSessionUi: () =>
-    set({
+    set((s) => ({
+      ...openingDates(s.timezone),
       showEventModal: false,
       editingEventId: null,
       eventDraftStart: null,
@@ -165,5 +185,5 @@ export const useUiStore = create<UiState>((set) => ({
       showSettings: false,
       showMobileMenu: false,
       showActivity: false,
-    }),
+    })),
 }));

@@ -1,10 +1,14 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
 import { api, errorMessage, isAbortError } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
+import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
+import { memberRowRules } from '@/lib/member-row';
 import {
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
@@ -15,6 +19,7 @@ import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
+import { useEnsureCalendars } from '@/lib/use-ensure-calendars';
 import { useHolidayCountries } from '@/lib/use-holidays';
 import { useInvites } from '@/lib/use-invites';
 import { useAuthStore } from '@/stores/auth-store';
@@ -113,6 +118,10 @@ function SettingsPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const search = Route.useSearch();
   const tab = search.tab ?? 'profile';
+
+  // The calendar and export tabs are reachable by URL before anything has
+  // loaded the list they offer.
+  useEnsureCalendars(isAuthenticated);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -548,6 +557,7 @@ interface SessionData {
 function SessionsSection() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -601,7 +611,7 @@ function SessionsSection() {
                   )}
                 </p>
                 <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                  {[s.ipAddress, new Date(s.createdAt).toLocaleString(locale)]
+                  {[s.ipAddress, formatDateTime(s.createdAt, timezone, locale)]
                     .filter(Boolean)
                     .join(' · ')}
                 </p>
@@ -857,6 +867,8 @@ export function CalendarsSection() {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
   const me = useAuthStore((s) => s.user);
+  const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
 
   const [selectedId, setSelectedId] = useState<string>(calendars[0]?.id ?? '');
   const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
@@ -917,10 +929,10 @@ export function CalendarsSection() {
     if (await revokeInvite(id)) toast.success(t('invites.revoke'));
   };
 
-  const copyInvite = (token: string) => {
+  const copyInvite = async (token: string) => {
     const url = `${window.location.origin}/share/${token}`;
-    void navigator.clipboard?.writeText(url);
-    toast.success(t('common.copied'));
+    if (await copyText(url)) toast.success(t('common.copied'));
+    else toast.error(t('common.copyFailed'));
   };
 
   return (
@@ -948,14 +960,12 @@ export function CalendarsSection() {
         ) : (
           <ul className="-my-2 divide-y divide-[var(--color-separator)]">
             {members.map((m) => {
-              const isMe = m.id === me?.id;
-              const cannotChange = m.role === 'owner' && ownerCount <= 1;
-              // An owner's role and membership are the owner's own business;
-              // a manager sees the row without the controls.
-              const mayTouch = isAdmin && (m.role !== 'owner' || amOwner);
-              // You manage other members, not yourself: the server refuses a
-              // self role change, so offering the picker only produced an error.
-              const canChangeRole = mayTouch && !isMe && !cannotChange;
+              const { isMe, canChangeRole, canRemove } = memberRowRules(m, {
+                meId: me?.id,
+                canManageMembers: isAdmin,
+                amOwner,
+                ownerCount,
+              });
               return (
                 <li key={m.id} className="flex items-center gap-3 py-3">
                   <span
@@ -970,7 +980,7 @@ export function CalendarsSection() {
                       {m.name}
                       {isMe && (
                         <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
-                          you
+                          {t('members.you')}
                         </span>
                       )}
                     </p>
@@ -991,7 +1001,7 @@ export function CalendarsSection() {
                       {t(roleLabelKey(m.role))}
                     </span>
                   )}
-                  {(mayTouch || isMe) && !(cannotChange && isMe) && (
+                  {canRemove && (
                     <button
                       type="button"
                       onClick={() => handleRemoveMember(m)}
@@ -1084,7 +1094,12 @@ export function CalendarsSection() {
                   </span>
                   <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
                     {inv.expiresAt
-                      ? `${t('invites.expiresAt')}: ${new Date(inv.expiresAt).toLocaleDateString()}`
+                      ? `${t('invites.expiresAt')}: ${formatDateTime(
+                          inv.expiresAt,
+                          timezone,
+                          locale,
+                          DateTime.DATE_SHORT,
+                        )}`
                       : t('invites.noExpiry')}
                   </span>
                   {inv.token && (
@@ -1128,6 +1143,16 @@ interface ImportResult {
   unreadable: boolean;
 }
 
+/**
+ * The covered range an export reports, as text to show. `full` and an absent
+ * header mean the whole calendar; either side of a window may be open.
+ */
+export function exportWindowLabel(header: string): string {
+  if (!header || header === 'full') return '';
+  const [from = '', to = ''] = header.split('/');
+  return `${from || '…'} – ${to || '…'}`;
+}
+
 /** Exported for testing: an import refreshes the range the app is showing. */
 export function ExportSection() {
   const t = useT();
@@ -1150,7 +1175,12 @@ export function ExportSection() {
   const downloadFile = async (format: 'ics' | 'csv') => {
     setExporting(format);
     try {
-      const { blob, filename } = await api.getBlob(
+      const {
+        blob,
+        filename,
+        truncated,
+        window: coverage,
+      } = await api.getBlob(
         // The same zone the grid reads days in, so the export's window and times match it.
         `/calendars/${selectedId}/export?format=${format}&tz=${encodeURIComponent(timezone)}`,
       );
@@ -1165,6 +1195,11 @@ export function ExportSection() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      // A backup that stops at the server's cap, or covers only a window, looks
+      // whole once downloaded unless it is said.
+      if (truncated) toast.error(t('settings.exportTruncated'));
+      const range = exportWindowLabel(coverage);
+      if (range) toast.info(t('settings.exportWindow', { range }));
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -1181,7 +1216,7 @@ export function ExportSection() {
   };
 
   const handleImport = async () => {
-    if (!icsText.trim()) return;
+    if (!icsText.trim() || !selectedId) return;
     setImporting(true);
     try {
       const res = await api.post<ImportResult>(`/calendars/${selectedId}/import`, {
@@ -1302,7 +1337,7 @@ export function ExportSection() {
         <button
           type="button"
           onClick={handleImport}
-          disabled={!icsText.trim() || importing}
+          disabled={!icsText.trim() || !selectedId || importing}
           className="btn-primary px-5 text-default disabled:opacity-50"
         >
           {importing ? '...' : t('settings.importPasted')}

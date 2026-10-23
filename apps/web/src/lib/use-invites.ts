@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import type { Role } from '@/lib/permissions';
@@ -36,6 +36,42 @@ export interface CalendarInvites {
   revokeInvite: (id: string) => Promise<boolean>;
 }
 
+interface InviteScope {
+  calendarId: string;
+  enabled: boolean;
+}
+
+interface PendingCreate {
+  kind: 'invite' | 'public';
+}
+
+type InviteMutation =
+  | { kind: 'join'; invite: InviteData }
+  | { kind: 'public'; invite: InviteData }
+  | { kind: 'revoke'; id: string };
+
+interface InviteActivation {
+  scope: InviteScope;
+  loading: boolean;
+  listingPending: boolean;
+  pendingCreates: PendingCreate[];
+  journal: InviteMutation[];
+}
+
+function applyInviteMutation(rows: InviteData[], mutation: InviteMutation): InviteData[] {
+  switch (mutation.kind) {
+    case 'join':
+      return [mutation.invite, ...rows.filter((row) => row.id !== mutation.invite.id)];
+    case 'public':
+      return [
+        mutation.invite,
+        ...rows.filter((row) => row.id !== mutation.invite.id && !isPublicLink(row)),
+      ];
+    case 'revoke':
+      return rows.filter((row) => row.id !== mutation.id);
+  }
+}
+
 /**
  * A calendar's share links, and everything that can be done to them.
  *
@@ -49,100 +85,185 @@ export interface CalendarInvites {
  */
 export function useInvites(calendarId: string, enabled = true): CalendarInvites {
   const t = useT();
-  const [invites, setInvites] = useState<InviteData[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<'invite' | 'public' | null>(null);
+  const scope = useMemo<InviteScope>(() => ({ calendarId, enabled }), [calendarId, enabled]);
+  const activationRef = useRef<InviteActivation | null>(null);
+  const [invitesByCalendar, setInvitesByCalendar] = useState<Map<string, InviteData[]>>(
+    () => new Map(),
+  );
+  const [, setRevision] = useState(0);
+  const refresh = useCallback(() => setRevision((revision) => revision + 1), []);
 
-  useEffect(() => {
-    if (!enabled || !calendarId) {
-      setInvites([]);
-      setLoading(false);
-      return;
-    }
-    // A superseded listing must not land: switching calendars faster than the
-    // requests come back otherwise leaves one calendar's links listed under
-    // another calendar's name.
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const list = await api.get<InviteData[]>(`/calendars/${calendarId}/invites`);
-        // A listing carries no tokens; keep the ones this session created so a
-        // freshly made link does not vanish before it has been copied.
-        if (!cancelled) setInvites((cur) => mergeInviteTokens(list, cur));
-      } catch (e) {
-        if (!cancelled) toast.error(errorMessage(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
+  // The activation belongs to the committed calendar/enabled pair. The scope
+  // identity distinguishes A -> B -> A, while the layout cleanup closes the
+  // old scope before callbacks from the new screen can run.
+  useLayoutEffect(() => {
+    if (!scope.enabled || !scope.calendarId) return;
+
+    const activation: InviteActivation = {
+      scope,
+      loading: true,
+      listingPending: true,
+      pendingCreates: [],
+      journal: [],
     };
-  }, [calendarId, enabled]);
+    activationRef.current = activation;
+    refresh();
+
+    void api
+      .get<InviteData[]>(`/calendars/${scope.calendarId}/invites`)
+      .then((listed) => {
+        if (activationRef.current !== activation) return;
+
+        // Preserve the created token from current rows, then apply mutations
+        // that succeeded while this first listing was still in flight.
+        const journal = [...activation.journal];
+        activation.journal = [];
+        activation.listingPending = false;
+        activation.loading = false;
+        setInvitesByCalendar((current) => {
+          let rows = mergeInviteTokens(listed, current.get(scope.calendarId) ?? []);
+          for (const mutation of journal) rows = applyInviteMutation(rows, mutation);
+          const next = new Map(current);
+          next.set(scope.calendarId, rows);
+          return next;
+        });
+        refresh();
+      })
+      .catch((error: unknown) => {
+        if (activationRef.current !== activation) return;
+
+        activation.journal = [];
+        activation.listingPending = false;
+        activation.loading = false;
+        toast.error(errorMessage(error));
+        refresh();
+      });
+
+    return () => {
+      activation.journal = [];
+      activation.listingPending = false;
+      activation.pendingCreates = [];
+      if (activationRef.current === activation) activationRef.current = null;
+    };
+  }, [scope, refresh]);
+
+  const commitMutation = useCallback(
+    (activation: InviteActivation, mutation: InviteMutation) => {
+      if (activationRef.current !== activation) return;
+
+      if (activation.listingPending) activation.journal.push(mutation);
+      setInvitesByCalendar((current) => {
+        const rows = applyInviteMutation(current.get(activation.scope.calendarId) ?? [], mutation);
+        const next = new Map(current);
+        next.set(activation.scope.calendarId, rows);
+        return next;
+      });
+      refresh();
+    },
+    [refresh],
+  );
+
+  const startCreate = useCallback(
+    (activation: InviteActivation, kind: PendingCreate['kind']) => {
+      const operation: PendingCreate = { kind };
+      activation.pendingCreates.push(operation);
+      refresh();
+      return operation;
+    },
+    [refresh],
+  );
+
+  const finishCreate = useCallback(
+    (activation: InviteActivation, operation: PendingCreate) => {
+      if (activationRef.current !== activation) return;
+      activation.pendingCreates = activation.pendingCreates.filter(
+        (pending) => pending !== operation,
+      );
+      refresh();
+    },
+    [refresh],
+  );
 
   const createInvite = useCallback(
     async (terms: InviteTerms) => {
-      if (!calendarId) return false;
-      setBusy('invite');
+      const activation = activationRef.current;
+      if (!scope.enabled || !scope.calendarId || activation?.scope !== scope) return false;
+
+      const operation = startCreate(activation, 'invite');
       try {
+        if (activationRef.current !== activation) return false;
         const created = await api.post<InviteData>(
-          `/calendars/${calendarId}/invites`,
+          `/calendars/${activation.scope.calendarId}/invites`,
           inviteCreateBody(terms.role, terms.expiryHours, terms.maxUses),
         );
-        setInvites((cur) => [created, ...cur]);
+        commitMutation(activation, { kind: 'join', invite: created });
         return true;
-      } catch (e) {
-        toast.error(errorMessage(e));
+      } catch (error) {
+        if (activationRef.current === activation) toast.error(errorMessage(error));
         return false;
       } finally {
-        setBusy(null);
+        finishCreate(activation, operation);
       }
     },
-    [calendarId],
+    [commitMutation, finishCreate, scope, startCreate],
   );
 
   const createPublicLink = useCallback(async () => {
-    if (!calendarId) return false;
+    const activation = activationRef.current;
+    if (!scope.enabled || !scope.calendarId || activation?.scope !== scope) return false;
     // Guard against accidental external exposure.
     if (!window.confirm(t('share.publicConfirm'))) return false;
-    setBusy('public');
+    if (activationRef.current !== activation) return false;
+
+    const operation = startCreate(activation, 'public');
     try {
-      const created = await api.post<InviteData>(`/calendars/${calendarId}/invites`, {
-        role: PUBLIC_LINK_ROLE,
-        isPublic: true,
-      });
-      setInvites((cur) => [created, ...cur.filter((i) => !isPublicLink(i))]);
+      if (activationRef.current !== activation) return false;
+      const created = await api.post<InviteData>(
+        `/calendars/${activation.scope.calendarId}/invites`,
+        {
+          role: PUBLIC_LINK_ROLE,
+          isPublic: true,
+        },
+      );
+      commitMutation(activation, { kind: 'public', invite: created });
       return true;
-    } catch (e) {
-      toast.error(errorMessage(e));
+    } catch (error) {
+      if (activationRef.current === activation) toast.error(errorMessage(error));
       return false;
     } finally {
-      setBusy(null);
+      finishCreate(activation, operation);
     }
-  }, [calendarId, t]);
+  }, [commitMutation, finishCreate, scope, startCreate, t]);
 
   const revokeInvite = useCallback(
     async (id: string) => {
-      if (!calendarId) return false;
+      const activation = activationRef.current;
+      if (!scope.enabled || !scope.calendarId || activation?.scope !== scope) return false;
+
       try {
-        await api.delete(`/calendars/${calendarId}/invites/${id}`);
-        setInvites((cur) => cur.filter((i) => i.id !== id));
+        if (activationRef.current !== activation) return false;
+        await api.delete(`/calendars/${activation.scope.calendarId}/invites/${id}`);
+        commitMutation(activation, { kind: 'revoke', id });
         return true;
-      } catch (e) {
-        toast.error(errorMessage(e));
+      } catch (error) {
+        if (activationRef.current === activation) toast.error(errorMessage(error));
         return false;
       }
     },
-    [calendarId],
+    [commitMutation, scope],
   );
+
+  const activation = activationRef.current?.scope === scope ? activationRef.current : null;
+  const invites =
+    scope.enabled && scope.calendarId ? (invitesByCalendar.get(scope.calendarId) ?? []) : [];
+  const latestCreate = activation?.pendingCreates[activation.pendingCreates.length - 1];
 
   return {
     invites,
-    joinInvites: invites.filter((i) => !isPublicLink(i)),
+    joinInvites: invites.filter((invite) => !isPublicLink(invite)),
     publicLink: invites.find(isPublicLink) ?? null,
-    loading,
-    busy,
+    loading: activation?.loading ?? false,
+    busy: latestCreate?.kind ?? null,
     createInvite,
     createPublicLink,
     revokeInvite,

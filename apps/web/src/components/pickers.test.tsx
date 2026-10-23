@@ -442,3 +442,80 @@ describe('DateTimeField', () => {
     expect(onDateChange).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('DateTimeField from the keyboard', () => {
+  const baseDate = DateTime.fromISO('2026-04-19T09:00:00');
+
+  function renderField(onDateChange = vi.fn(), onTimeChange = vi.fn()) {
+    render(
+      <DateTimeField
+        label="Start"
+        dateValue={baseDate}
+        timeValue="09:00"
+        showTime
+        onDateChange={onDateChange}
+        onTimeChange={onTimeChange}
+      />,
+    );
+    return { onDateChange, onTimeChange };
+  }
+
+  it('picks another day with the arrow keys and returns focus to the date button', async () => {
+    const { onDateChange } = renderField();
+    const user = userEvent.setup();
+    const dateButton = screen.getByRole('button', { name: /Apr 19, 2026/ });
+
+    dateButton.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: '2026-04-19' })).toHaveFocus();
+
+    await user.keyboard('{ArrowRight}{ArrowDown}{Enter}');
+
+    expect(onDateChange).toHaveBeenCalledTimes(1);
+    const picked = onDateChange.mock.calls[0]?.[0] as DateTime;
+    expect(picked.toISODate()).toBe('2026-04-27');
+    expect(dateButton).toHaveFocus();
+  });
+
+  it('closes the picker on Escape without letting the key reach the dialog behind', async () => {
+    renderField();
+    const user = userEvent.setup();
+    const behind = vi.fn();
+    document.addEventListener('keydown', behind);
+    const dateButton = screen.getByRole('button', { name: /Apr 19, 2026/ });
+
+    await user.click(dateButton);
+    await user.keyboard('{Escape}');
+
+    document.removeEventListener('keydown', behind);
+    expect(screen.queryByRole('button', { name: '2026-04-19' })).toBeNull();
+    expect(behind).not.toHaveBeenCalled();
+    expect(dateButton).toHaveFocus();
+  });
+
+  it('keeps Tab inside the open date picker', async () => {
+    renderField();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Apr 19, 2026/ }));
+
+    for (let i = 0; i < 6; i++) await user.tab();
+
+    const panel = screen.getByRole('button', { name: '2026-04-19' }).parentElement?.parentElement;
+    expect(panel?.contains(document.activeElement)).toBe(true);
+  });
+
+  it('picks a time with the arrow keys and returns focus to the time button', async () => {
+    const { onTimeChange } = renderField();
+    const user = userEvent.setup();
+    const timeButton = screen.getByRole('button', { name: '09:00' });
+
+    timeButton.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: '09:00', pressed: true })).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(onTimeChange).toHaveBeenCalledWith('09:15');
+    expect(timeButton).toHaveFocus();
+  });
+});

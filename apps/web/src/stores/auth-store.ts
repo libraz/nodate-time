@@ -6,6 +6,7 @@ import {
   endSession,
   errorMessage,
   hasToken,
+  isSessionStorageEvent,
   SESSION_EXPIRED_EVENT,
   setToken,
 } from '@/lib/api';
@@ -78,6 +79,8 @@ interface AuthResponse {
 }
 
 let fetchMeInFlight = false;
+// Set when the stored session changed while a profile load was running.
+let fetchMeAgain = false;
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -157,7 +160,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   fetchMe: async () => {
-    if (!hasToken() || fetchMeInFlight) return;
+    if (!hasToken()) return;
+    if (fetchMeInFlight) {
+      fetchMeAgain = true;
+      return;
+    }
     fetchMeInFlight = true;
     try {
       const user = await api.get<User>('/user');
@@ -165,6 +172,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       // flight. Without this, a late success would restore isAuthenticated and
       // flash the authed shell before the next request bounces to /login.
       if (!hasToken()) return;
+      // A different account's data must not outlive the sign-in that replaced it.
+      const previous = useAuthStore.getState().user;
+      if (previous && previous.id !== user.id) {
+        useCalendarStore.getState().resetSessionData();
+        useUiStore.getState().resetSessionUi();
+      }
       set({ user, isAuthenticated: true, isInitializing: false, initError: null });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
     } catch (e) {
@@ -175,6 +188,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isInitializing: false, initError: errorMessage(e) });
     } finally {
       fetchMeInFlight = false;
+      if (fetchMeAgain) {
+        fetchMeAgain = false;
+        void useAuthStore.getState().fetchMe();
+      }
     }
   },
 
@@ -232,6 +249,17 @@ export const useAuthStore = create<AuthState>((set) => ({
 if (typeof window !== 'undefined') {
   window.addEventListener(SESSION_EXPIRED_EVENT, () => {
     useAuthStore.getState().logout();
+  });
+
+  // Another tab signing in, out or switching account rewrites the shared
+  // storage; this tab's rendered data has to follow it.
+  window.addEventListener('storage', (e) => {
+    if (!isSessionStorageEvent(e)) return;
+    if (!hasToken()) {
+      if (useAuthStore.getState().isAuthenticated) useAuthStore.getState().logout();
+      return;
+    }
+    void useAuthStore.getState().fetchMe();
   });
 
   // A token can lapse while the tab sits in the background, leaving the cached

@@ -158,7 +158,7 @@ export function AlbumPanel() {
       try {
         // Read the capture time before preparing the file: re-encoding drops
         // the EXIF block, and this is the value the album orders by.
-        const takenAt = await readCaptureTime(file);
+        const takenAt = await readCaptureTime(file, timezone);
         const resized = await prepareImageForAlbum(file);
         // The grid draws the photo itself when there is no thumbnail, so
         // failing to make one is not a reason to fail the upload.
@@ -209,7 +209,7 @@ export function AlbumPanel() {
         setUploading(false);
       }
     },
-    [activeCalendarId, reload, setError],
+    [activeCalendarId, reload, setError, timezone],
   );
 
   const handleDelete = useCallback(

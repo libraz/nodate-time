@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
+import { copyText } from '@/lib/clipboard';
+import { formatDateTime } from '@/lib/format-datetime';
 import {
   canManage,
   DEFAULT_INVITE_ROLE,
@@ -9,6 +11,7 @@ import {
   type Role,
   roleLabelKey,
 } from '@/lib/permissions';
+import { toast } from '@/lib/toast';
 import { useInvites } from '@/lib/use-invites';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
@@ -26,6 +29,8 @@ const manages = (calendar: Calendar) => canManage(calendar.role);
 export function SharePanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
+  const timezone = useUiStore((s) => s.timezone);
+  const locale = useUiStore((s) => s.locale);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'share', () =>
     toggleRightPanel('share'),
@@ -62,11 +67,17 @@ export function SharePanel() {
     [createInvite, inviteRole, inviteExpiry, inviteUses],
   );
 
-  const copy = useCallback((key: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  }, []);
+  const copy = useCallback(
+    async (key: string, text: string) => {
+      if (!(await copyText(text))) {
+        toast.error(t('common.copyFailed'));
+        return;
+      }
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    },
+    [t],
+  );
 
   if (rightPanel !== 'share') return null;
 
@@ -187,7 +198,8 @@ export function SharePanel() {
                           )}
                           {inv.expiresAt && (
                             <p className="text-caption text-[var(--color-text-tertiary)]">
-                              {t('invites.expiresAt')}: {new Date(inv.expiresAt).toLocaleString()}
+                              {t('invites.expiresAt')}:{' '}
+                              {formatDateTime(inv.expiresAt, timezone, locale)}
                             </p>
                           )}
                           <div className="flex items-center justify-between">

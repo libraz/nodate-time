@@ -158,6 +158,32 @@ describe('share landing for a public link', () => {
   });
 });
 
+describe('share landing near midnight in the grid zone', () => {
+  // The device may be on any date; the page opens on, and marks, the day it is in the grid zone.
+  it('opens on the grid zone month and marks its today', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-31T16:30:00Z')); // 2026-11-01 01:30 in Tokyo
+    try {
+      apiGet.mockImplementation((path) =>
+        String(path).includes('/events')
+          ? Promise.resolve([])
+          : Promise.resolve(shareResponse({ joinable: false, spent: false })),
+      );
+
+      render(<SharedCalendarView />);
+
+      await waitFor(() => expect(askedFor('/events')).toHaveLength(1));
+      expect(askedFor('/events')[0]).toContain('start=2026-11-01');
+      const marked = screen
+        .getAllByText('1')
+        .filter((el) => (el as HTMLElement).style.fontWeight === '700');
+      expect(marked).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('share landing when the month does not arrive', () => {
   const published = () => shareResponse({ joinable: false, spent: false });
   const publicEvent = (id: string, title: string, startAt: string) => ({

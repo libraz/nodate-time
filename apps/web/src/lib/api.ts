@@ -1,5 +1,6 @@
 import { getT } from '@/i18n';
 import { errorMessageKey } from '@/lib/error-codes';
+import { isSafeRedirect } from '@/lib/safe-redirect';
 import { toast } from '@/lib/toast';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
@@ -61,6 +62,15 @@ export function clearToken(): void {
 }
 
 /**
+ * Reports whether a storage event is a change to the stored session, made by
+ * another tab (the event never fires in the tab that wrote). A null key is
+ * the whole storage being cleared.
+ */
+export function isSessionStorageEvent(e: StorageEvent): boolean {
+  return e.key === null || e.key === 'tt_token' || e.key === 'tt_refresh';
+}
+
+/**
  * Reports whether this browser still has a way in. An expired access token
  * with a refresh token beside it counts: the session is alive, the request
  * just has to renew first.
@@ -85,36 +95,56 @@ interface TokenPair {
  */
 let refreshInFlight: Promise<TokenPair | null> | null = null;
 
-/** Trades a refresh token for a new pair without storing it. */
+/**
+ * Trades a refresh token for a new pair without storing it.
+ *
+ * Resolves null only when the server definitively refuses the token (401/403).
+ * A network error, a 5xx or a malformed body throws instead: the session may
+ * be perfectly alive, and treating the failure as a refusal would sign the
+ * user out of it.
+ */
 async function exchangeRefreshToken(refreshToken: string): Promise<TokenPair | null> {
-  try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { token?: string; refreshToken?: string };
-    if (!body.token) return null;
-    return body.refreshToken
-      ? { token: body.token, refreshToken: body.refreshToken }
-      : { token: body.token };
-  } catch {
-    // A renewal that fails because the network is down is not a revoked
-    // session; the caller retries the original request either way and the
-    // server has the last word.
-    return null;
-  }
+  const res = await fetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (res.status === 401 || res.status === 403) return null;
+  if (!res.ok) throw await buildError(res);
+  const body = (await res.json().catch(() => null)) as {
+    token?: string;
+    refreshToken?: string;
+  } | null;
+  if (!body?.token) throw new ApiError(502, 'Malformed refresh response');
+  return body.refreshToken
+    ? { token: body.token, refreshToken: body.refreshToken }
+    : { token: body.token };
+}
+
+/** Runs a renewal exclusively across the tabs of this browser where locks exist. */
+function withRenewalLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  return locks ? locks.request('nodate:session-renewal', fn) : fn();
 }
 
 async function refreshSession(): Promise<TokenPair | null> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
-  const pair = await exchangeRefreshToken(refreshToken);
-  // A sign-out that landed meanwhile has already forgotten this session;
-  // storing the new pair would sign the browser back in.
-  if (pair && getRefreshToken() === refreshToken) setToken(pair.token, pair.refreshToken);
-  return pair;
+  const started = getRefreshToken();
+  if (!started) return null;
+  return withRenewalLock(async () => {
+    const current = getRefreshToken();
+    if (!current) return null;
+    // Another tab rotated the pair while this one waited its turn; spending the
+    // retired token again would be refused as a replay.
+    if (current !== started) {
+      const token = getToken();
+      if (token) return { token, refreshToken: current };
+    }
+    const pair = await exchangeRefreshToken(current);
+    // A sign-out that landed meanwhile has already forgotten this session;
+    // storing the new pair would sign the browser back in.
+    if (pair && getRefreshToken() === current) setToken(pair.token, pair.refreshToken);
+    return pair;
+  });
 }
 
 function renewSession(): Promise<TokenPair | null> {
@@ -124,6 +154,21 @@ function renewSession(): Promise<TokenPair | null> {
     });
   }
   return refreshInFlight;
+}
+
+/**
+ * The token to retry a request with after the server refused `failed`, or null
+ * when the session cannot be renewed. A pair another tab stored in the meantime
+ * is taken as is; a refusal of the refresh token only counts when no such pair
+ * appeared while it was in flight.
+ */
+async function renewedToken(failed: string | null): Promise<string | null> {
+  const stored = getToken();
+  if (stored && stored !== failed) return stored;
+  const pair = await renewSession();
+  if (pair) return pair.token;
+  const rotated = getToken();
+  return rotated && rotated !== failed ? rotated : null;
 }
 
 /**
@@ -245,7 +290,7 @@ function redirectTarget(): string | null {
   const { pathname, search, hash } = window.location;
   if (pathname === '/login') return null;
   const target = `${pathname}${search}${hash}`;
-  return target.startsWith('/') && !target.startsWith('//') ? target : null;
+  return isSafeRedirect(target) ? target : null;
 }
 
 function navigateToLogin(): void {
@@ -258,11 +303,17 @@ function navigateToLogin(): void {
   );
 }
 
-function expireSession(): never {
-  clearToken();
-  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-  toast.error(getT()('error.sessionExpired'));
-  navigateToLogin();
+/**
+ * Ends the session after the server refused `failed`, unless another tab has
+ * stored a newer pair since: that one is alive and must not be cleared.
+ */
+function expireSession(failed: string | null): never {
+  if (getToken() === failed) {
+    clearToken();
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    toast.error(getT()('error.sessionExpired'));
+    navigateToLogin();
+  }
   throw new ApiError(401, 'Unauthorized', 'AUTH.TOKEN_INVALID');
 }
 
@@ -310,16 +361,21 @@ async function requestRaw(
     await renewSession();
   }
 
-  let res = await send(path, options);
+  let sent = getToken();
+  let res = await send(path, options, sent);
 
-  if (res.status === 401 && carriesSession(path) && (await renewSession()) !== null) {
-    res = await send(path, options);
+  if (res.status === 401 && carriesSession(path)) {
+    const next = await renewedToken(sent);
+    if (next) {
+      sent = next;
+      res = await send(path, options, sent);
+    }
   }
 
   if (!res.ok) {
     const shouldRedirectOnAuth = !skipAuthRedirect && !path.startsWith('/auth/');
     if (res.status === 401 && shouldRedirectOnAuth) {
-      expireSession();
+      expireSession(sent);
     }
     throw await buildError(res);
   }
@@ -428,16 +484,20 @@ export const api = {
    *
    * The name is part of the answer rather than decoration: an export is named
    * after the calendar it came from, and a caller that drops it saves every
-   * calendar's export under one filename, over the last one.
+   * calendar's export under one filename, over the last one. Likewise the
+   * coverage: a body cut at the server's cap, or limited to a window, looks
+   * like a whole backup unless the caller is told.
    */
   getBlob: async (
     path: string,
     signal?: AbortSignal,
-  ): Promise<{ blob: Blob; filename: string }> => {
+  ): Promise<{ blob: Blob; filename: string; truncated: boolean; window: string }> => {
     const res = await requestRaw(path, { ...(signal ? { signal } : {}) });
     return {
       blob: await res.blob(),
       filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
+      truncated: res.headers.get('X-Result-Truncated') === 'true',
+      window: res.headers.get('X-Export-Window') ?? '',
     };
   },
 };

@@ -142,3 +142,33 @@ describe('moving an event preserves its wall-clock span on the destination date'
     ).toBe('2026-03-03T00:30');
   });
 });
+
+describe('moving an event from a viewer in another zone', () => {
+  const TOKYO = 'Asia/Tokyo';
+
+  // 23:00 to 03:00 on New York's own clock, well clear of any transition.
+  it("keeps the event's own clock when a Tokyo viewer moves it", () => {
+    const moved = buildMovedEvent(
+      makeEvent('2026-05-04T23:00:00-04:00', '2026-05-05T03:00:00-04:00'),
+      DateTime.fromISO('2026-05-12T12:00', { zone: TOKYO }),
+    );
+
+    const start = DateTime.fromISO(moved.startAt, { zone: NEW_YORK });
+    const end = DateTime.fromISO(moved.endAt, { zone: NEW_YORK });
+    expect(start.toFormat('HH:mm')).toBe('23:00');
+    expect(end.toFormat('HH:mm')).toBe('03:00');
+  });
+
+  // The span crosses New York's spring-forward: 4 hours on its wall clock, 3
+  // elapsed. Tokyo has no transition, so measured and applied on Tokyo's clock
+  // it stays 3 hours instead of growing by the hour New York skipped.
+  it('measures the span on the clock of the zone the new start carries', () => {
+    const moved = buildMovedEvent(
+      makeEvent('2026-03-07T23:00:00-05:00', '2026-03-08T03:00:00-04:00'),
+      DateTime.fromISO('2026-05-12T12:00', { zone: TOKYO }),
+    );
+
+    const hours = DateTime.fromISO(moved.endAt).diff(DateTime.fromISO(moved.startAt), 'hours');
+    expect(hours.hours).toBe(3);
+  });
+});
