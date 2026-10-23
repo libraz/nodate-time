@@ -15,7 +15,7 @@ import (
 // outside the Latin-1 world eventually contains one.
 //
 // What makes it worth a test of its own is where the loss lands. Import writes
-// each event in its own transaction, so a URL the column cannot hold does not
+// a refused event alone, so a URL the column cannot hold does not
 // cost the URL -- the insert rolls back and the entire event vanishes, counted
 // as failed. A file with nothing wrong with it arrives short, and what it was
 // short by is an optional property nobody would think to look at.
