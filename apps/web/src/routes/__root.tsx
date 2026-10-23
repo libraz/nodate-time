@@ -16,6 +16,7 @@ const PUBLIC_PATHS = [
   '/embed/',
   '/forgot-password',
   '/reset-password',
+  '/verify-email',
   '/oauth-complete',
 ];
 

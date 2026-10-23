@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({
@@ -126,5 +126,16 @@ describe('SettingsModal keyboard', () => {
     rerender(<Harness />);
 
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+describe('SettingsModal controls', () => {
+  it('names its close button', () => {
+    render(<SettingsModal />);
+
+    const close = within(screen.getByRole('dialog')).getByRole('button', { name: 'common.close' });
+    fireEvent.click(close);
+
+    expect(uiState.toggleSettings).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,8 +1,9 @@
 import type { DateTime } from 'luxon';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, isAbortError } from '@/lib/api';
-import { gridRange } from '@/lib/date-utils';
+import { getMonthDays, gridRange, nowInZone } from '@/lib/date-utils';
 import { type PublicEvent, type ShareFailure, shareFailureOf } from '@/lib/public-calendar';
+import { bucketEventsByDay, dayKey } from '@/lib/week-layout';
 
 export interface PublicEvents {
   /** The events read for the month and zone on screen; never another month's. */
@@ -63,4 +64,41 @@ export function usePublicEvents(
     failure,
     retry,
   };
+}
+
+/**
+ * The month a published page shows, opening on the current month in `timezone`.
+ *
+ * Held as a distance from today's month rather than a date, so a zone that
+ * changes before the first navigation reopens on its own current month.
+ */
+export function usePublicMonth(timezone: string): {
+  month: DateTime;
+  shiftMonth: (delta: number) => void;
+} {
+  const [offset, setOffset] = useState(0);
+  const month = useMemo(
+    () => nowInZone(timezone).startOf('month').plus({ months: offset }),
+    [timezone, offset],
+  );
+  const shiftMonth = useCallback((delta: number) => setOffset((n) => n + delta), []);
+  return { month, shiftMonth };
+}
+
+/** The week rows of a month grid in `timezone`, with each day's events bucketed once. */
+export function usePublicMonthGrid(
+  events: PublicEvent[],
+  month: DateTime,
+  timezone: string,
+): { weeks: DateTime[][]; eventsOn: (day: DateTime) => PublicEvent[] } {
+  return useMemo(() => {
+    const days = getMonthDays(month.year, month.month - 1, timezone);
+    const weeks: DateTime[][] = [];
+    for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+    const first = days[0];
+    const last = days[days.length - 1];
+    const buckets: Map<string, PublicEvent[]> =
+      first && last ? bucketEventsByDay(events, timezone, first, last) : new Map();
+    return { weeks, eventsOn: (day) => buckets.get(dayKey(day, timezone)) ?? [] };
+  }, [events, month, timezone]);
 }

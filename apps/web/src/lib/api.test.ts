@@ -624,3 +624,153 @@ describe('download filenames', () => {
     expect(await blob.text()).toBe('BEGIN:VCALENDAR');
   });
 });
+
+describe('export coverage headers', () => {
+  it('reports a body cut at the cap and the window it covers', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('BEGIN:VCALENDAR', {
+        status: 200,
+        headers: { 'X-Result-Truncated': 'true', 'X-Export-Window': '2026-01-01/2026-03-31' },
+      }),
+    );
+
+    const out = await api.getBlob('/calendars/cal-1/export?format=csv');
+
+    expect(out.truncated).toBe(true);
+    expect(out.window).toBe('2026-01-01/2026-03-31');
+  });
+
+  it('reports a whole export as whole', async () => {
+    fetchMock.mockResolvedValue(new Response('x', { status: 200 }));
+
+    const out = await api.getBlob('/calendars/cal-1/export?format=ics');
+
+    expect(out.truncated).toBe(false);
+    expect(out.window).toBe('');
+  });
+});
+
+describe('renewal failures', () => {
+  const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });
+  let expiredEvents = 0;
+  const onExpired = () => {
+    expiredEvents += 1;
+  };
+
+  beforeEach(() => {
+    expiredEvents = 0;
+    window.history.replaceState(null, '', '/calendar');
+    window.addEventListener('nodate:session-expired', onExpired);
+  });
+
+  afterEach(() => {
+    window.removeEventListener('nodate:session-expired', onExpired);
+  });
+
+  it('keeps the session when the renewal request cannot reach the server', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockRejectedValueOnce(new TypeError('network down'));
+
+    await expect(api.get('/calendars')).rejects.toBeInstanceOf(TypeError);
+
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-1');
+    expect(expiredEvents).toBe(0);
+    expect(window.location.pathname).toBe('/calendar');
+  });
+
+  it('keeps the session when the renewal answers 503', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'down' }, 503));
+
+    const err = await api.get('/calendars').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(503);
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-1');
+    expect(expiredEvents).toBe(0);
+  });
+
+  it('keeps the session when a renewal after a 401 hits a 5xx', async () => {
+    localStorage.setItem('tt_token', live());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ message: 'down' }, 502));
+
+    await expect(api.get('/calendars')).rejects.toMatchObject({ status: 502 });
+
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-1');
+    expect(expiredEvents).toBe(0);
+  });
+
+  it('keeps the session when the renewal body is malformed', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockResolvedValueOnce(new Response('not json', { status: 200 }));
+
+    await expect(api.get('/calendars')).rejects.toBeInstanceOf(ApiError);
+
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-1');
+    expect(expiredEvents).toBe(0);
+  });
+
+  it('still signs out when the server refuses the refresh token', async () => {
+    localStorage.setItem('tt_token', expired());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'nope' }, 401));
+
+    await expect(api.get('/calendars')).rejects.toMatchObject({ status: 401 });
+
+    expect(hasToken()).toBe(false);
+    expect(expiredEvents).toBe(1);
+    expect(window.location.pathname).toBe('/login');
+  });
+
+  // Two tabs wake with the same retired pair; the second one's refresh is
+  // refused as a replay of the rotation the first already completed.
+  it('retries with the pair another tab stored while a duplicate refresh was refused', async () => {
+    localStorage.setItem('tt_token', live());
+    localStorage.setItem('tt_refresh', 'refresh-1');
+    const other = makeJwt({ exp: Math.floor(Date.now() / 1000) + 7200 });
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      if (String(url).includes('/auth/refresh')) {
+        localStorage.setItem('tt_token', other);
+        localStorage.setItem('tt_refresh', 'refresh-2');
+        return Promise.resolve(jsonResponse({ message: 'replayed' }, 401));
+      }
+      const auth = (init.headers as Record<string, string>).Authorization;
+      return Promise.resolve(
+        auth === `Bearer ${other}` ? jsonResponse({ ok: true }) : jsonResponse({}, 401),
+      );
+    });
+
+    await expect(api.get('/calendars')).resolves.toEqual({ ok: true });
+
+    expect(localStorage.getItem('tt_token')).toBe(other);
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-2');
+    expect(expiredEvents).toBe(0);
+  });
+
+  it('does not clear a pair stored after the failing request started', async () => {
+    localStorage.setItem('tt_token', 'old-access');
+    const stored = live();
+    fetchMock
+      .mockImplementationOnce(() => {
+        localStorage.setItem('tt_token', stored);
+        localStorage.setItem('tt_refresh', 'refresh-2');
+        return Promise.resolve(jsonResponse({}, 401));
+      })
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(api.get('/calendars')).resolves.toEqual({ ok: true });
+
+    // The newer pair was used as is: no renewal spent its refresh token.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem('tt_token')).toBe(stored);
+    expect(localStorage.getItem('tt_refresh')).toBe('refresh-2');
+    expect(expiredEvents).toBe(0);
+  });
+});

@@ -7,7 +7,7 @@ const WEEKDAY_LABELS_JA = ['日', '月', '火', '水', '木', '金', '土'] as c
 const WEEKDAY_LABELS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /** Builds a day at midnight in `zone` (or the local zone when `zone` is empty). */
-function dayInZone(year: number, month: number, day: number, zone?: string): DateTime {
+export function dayInZone(year: number, month: number, day: number, zone?: string): DateTime {
   return zone && zone.length > 0
     ? DateTime.fromObject({ year, month, day }, { zone })
     : DateTime.local(year, month, day);
@@ -117,7 +117,7 @@ export function formatTime(iso: string, zone?: string): string {
 /** Formats an ISO timestamp as a short relative time string (e.g. "5m ago" / "5分前"). */
 export function formatRelativeTime(iso: string, locale: Locale = 'ja'): string {
   const dt = DateTime.fromISO(iso);
-  const diff = DateTime.now().diff(dt, ['days', 'hours', 'minutes']);
+  const diff = nowInZone().diff(dt, ['days', 'hours', 'minutes']);
   if (locale === 'en') {
     if (diff.days >= 1) return `${Math.floor(diff.days)}d ago`;
     if (diff.hours >= 1) return `${Math.floor(diff.hours)}h ago`;

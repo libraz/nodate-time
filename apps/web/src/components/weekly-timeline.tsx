@@ -14,6 +14,7 @@ import {
   getWeekdayLabel,
   isToday,
   jsDayOfWeek,
+  nowInZone,
 } from '@/lib/date-utils';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
@@ -203,7 +204,7 @@ export function WeeklyTimeline() {
   /** Pixel offset within the day column of a wall-clock minute of the day. */
   const minutesToY = (minutes: number): number => (minutes / 60) * HOUR_HEIGHT;
 
-  const now = DateTime.now().setZone(timezone);
+  const now = nowInZone(timezone);
   const nowMinutes = now.hour * 60 + now.minute;
   const currentTimeY = (nowMinutes / 60) * HOUR_HEIGHT;
 

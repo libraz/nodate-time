@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { LabelledButton } from '@/components/labelled-button';
 import { MemoDialog } from '@/components/memo-dialog';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
@@ -48,8 +49,8 @@ export function SettingsModal() {
             <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
               {t('tabs.settings')}
             </h2>
-            <button
-              type="button"
+            <LabelledButton
+              label={t('common.close')}
               onClick={toggleSettings}
               className="flex h-9 w-9 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
               style={{ borderRadius: 'var(--radius-sm)' }}
@@ -64,7 +65,7 @@ export function SettingsModal() {
               >
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
-            </button>
+            </LabelledButton>
           </div>
 
           <div className="px-6 pb-6 space-y-5">

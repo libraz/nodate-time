@@ -422,6 +422,18 @@ describe('retryFailedLoads', () => {
 });
 
 describe('fetchMemos', () => {
+  it("passes the caller's signal on and stays quiet when the load is cancelled", async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1')], memos: [] });
+    mockToast.error.mockClear();
+    const controller = new AbortController();
+    mockApi.get.mockRejectedValue(new DOMException('aborted', 'AbortError'));
+
+    await useCalendarStore.getState().fetchMemos(controller.signal);
+
+    expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/memos', false, controller.signal);
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it('reads the paged answer and walks it to the end', async () => {
     useCalendarStore.setState({ calendars: [cal('cal-1')] });
     mockApi.get.mockImplementation(async (url: string) => {

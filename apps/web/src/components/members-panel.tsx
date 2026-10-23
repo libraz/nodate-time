@@ -3,6 +3,7 @@ import { Avatar } from '@/components/avatar';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
+import { memberRowRules } from '@/lib/member-row';
 import { roleLabelKey } from '@/lib/permissions';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -152,17 +153,12 @@ export function MembersPanel() {
           ) : (
             <ul className="divide-y divide-[var(--color-separator)]">
               {members.map((m) => {
-                const isMe = m.id === me?.id;
-                const lastOwner = m.role === 'owner' && ownerCount <= 1;
-                // Touching an owner is the owner's own business, so a manager
-                // sees the row but not the controls.
-                const targetIsOwner = m.role === 'owner';
-                const mayTouch = canManageMembers && (!targetIsOwner || amOwner);
-                // You manage other members, not yourself: no self role change.
-                const canChangeRole = mayTouch && !isMe && !lastOwner;
-                // Removing yourself is leaving, which any member may do -- except
-                // the last owner, who would leave the calendar with nobody in charge.
-                const canRemove = isMe ? !lastOwner : mayTouch && !lastOwner;
+                const { isMe, canChangeRole, canRemove } = memberRowRules(m, {
+                  meId: me?.id,
+                  canManageMembers,
+                  amOwner,
+                  ownerCount,
+                });
                 return (
                   <li key={m.id} className="flex items-center gap-3 px-5 py-3">
                     {canManageMembers || isMe ? (
@@ -179,7 +175,7 @@ export function MembersPanel() {
                         {m.name}
                         {isMe && (
                           <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
-                            you
+                            {t('members.you')}
                           </span>
                         )}
                       </p>

@@ -1,13 +1,12 @@
 import { DateTime } from 'luxon';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { presetToRule, ruleToPreset } from '@/lib/recurrence-preset';
 
 type EventModalExports = typeof import('./event-modal');
 
 let clampRecurrenceUntilDate: EventModalExports['clampRecurrenceUntilDate'];
 let eventCommentText: EventModalExports['eventCommentText'];
-let presetToRule: EventModalExports['presetToRule'];
 let recurrenceUntilDateValue: EventModalExports['recurrenceUntilDateValue'];
-let ruleToPreset: EventModalExports['ruleToPreset'];
 
 beforeAll(async () => {
   const store = new Map<string, string>();
@@ -20,13 +19,9 @@ beforeAll(async () => {
     },
     configurable: true,
   });
-  ({
-    clampRecurrenceUntilDate,
-    eventCommentText,
-    presetToRule,
-    recurrenceUntilDateValue,
-    ruleToPreset,
-  } = await import('./event-modal'));
+  ({ clampRecurrenceUntilDate, eventCommentText, recurrenceUntilDateValue } = await import(
+    './event-modal'
+  ));
 });
 
 describe('event comment API contract', () => {

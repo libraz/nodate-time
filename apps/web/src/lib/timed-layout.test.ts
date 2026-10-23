@@ -216,3 +216,24 @@ describe('resizedEndForDaySegment', () => {
     expect(end.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-10-25 05:00');
   });
 });
+
+describe('layoutTimedEventsForDay on the day clocks fall back', () => {
+  const NEW_YORK = 'America/New_York';
+
+  // 01:10-01:50 EDT and 01:20-01:50 EST are an hour apart in elapsed time but
+  // draw over the same stretch of the wall-clock column.
+  it('gives blocks that share the repeated hour separate lanes', () => {
+    const day = DateTime.fromISO('2026-11-01T00:00:00', { zone: NEW_YORK });
+    const result = layoutTimedEventsForDay(
+      [
+        makeEvent('first', '2026-11-01T01:10:00-04:00', '2026-11-01T01:50:00-04:00'),
+        makeEvent('second', '2026-11-01T01:20:00-05:00', '2026-11-01T01:50:00-05:00'),
+      ],
+      day,
+      NEW_YORK,
+    );
+
+    expect(result.map((r) => r.laneCount)).toEqual([2, 2]);
+    expect(new Set(result.map((r) => r.lane)).size).toBe(2);
+  });
+});

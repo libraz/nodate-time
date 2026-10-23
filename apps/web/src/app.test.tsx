@@ -221,6 +221,34 @@ describe('App month fetching', () => {
     // Nothing waits for the response to a month nobody is on any more.
     expect(inFlight.aborted).toBe(true);
   });
+
+  // Memos belong to the calendars, not to the month on screen.
+  it('does not reload memos when the month changes', () => {
+    vi.useFakeTimers();
+    render(<App />);
+    expect(calendarState.fetchMemos).toHaveBeenCalledTimes(1);
+
+    for (const iso of ['2026-09-01', '2026-10-01', '2026-11-01', '2026-12-01', '2027-01-01']) {
+      act(() => {
+        useUiStore.setState({ currentMonth: month(iso) });
+      });
+    }
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(calendarState.fetchMemos).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the memo load a signal that is cancelled when it is superseded', () => {
+    render(<App />);
+    const [signal] = calendarState.fetchMemos.mock.calls[0] as [AbortSignal];
+    expect(signal.aborted).toBe(false);
+
+    cleanup();
+
+    expect(signal.aborted).toBe(true);
+  });
 });
 
 // CSS hides one layout, but a hidden calendar still re-renders on every change

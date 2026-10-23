@@ -1,7 +1,8 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
-import { buildMovedEvent, buildResizedEvent, isRecurringEvent } from './event-move';
+import { buildMovedEvent, buildResizedEvent, isRecurringEvent, moveSeriesRule } from './event-move';
+import { rebuildPresetRule } from './recurrence-preset';
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
@@ -136,5 +137,62 @@ describe('drag and resize payloads', () => {
 
     expect(Object.keys(resized).sort()).toEqual(wireFields);
     expect(resized).not.toHaveProperty('color');
+  });
+});
+
+describe('moveSeriesRule', () => {
+  const mondayWeekly = makeEvent({
+    id: 'a1b2c3d4-0000-0000-0000-000000000000_20260803',
+    isRecurrence: true,
+    startAt: '2026-08-03T10:00:00+09:00',
+    endAt: '2026-08-03T11:00:00+09:00',
+    recurrenceRule: { freq: 'weekly', interval: 1, byDay: ['MO'], count: 5 },
+  });
+  const tuesday = DateTime.fromISO('2026-08-04T10:00:00', { zone: 'Asia/Tokyo' });
+
+  it('rebuilds a preset rule for the new start, as an editor date change does', () => {
+    const payload = moveSeriesRule(mondayWeekly, buildMovedEvent(mondayWeekly, tuesday));
+
+    expect(payload.recurrenceRule).toEqual({
+      freq: 'weekly',
+      interval: 1,
+      byDay: ['TU'],
+      count: 5,
+    });
+    expect(payload.recurrenceRule).toEqual(
+      rebuildPresetRule('weekly', tuesday, mondayWeekly.recurrenceRule),
+    );
+  });
+
+  it('reads the new start in the event zone, not the viewer’s', () => {
+    // Tuesday 09:00 in Tokyo is Monday 20:00 in New York, so the series stays on Monday.
+    const newYorkMonday = makeEvent({
+      isRecurrence: true,
+      timezone: 'America/New_York',
+      startAt: '2026-08-03T20:00:00-04:00',
+      endAt: '2026-08-03T21:00:00-04:00',
+      recurrenceRule: { freq: 'weekly', interval: 1, byDay: ['MO'] },
+    });
+    const nextMonday = DateTime.fromISO('2026-08-11T09:00:00', { zone: 'Asia/Tokyo' });
+
+    const payload = moveSeriesRule(newYorkMonday, buildMovedEvent(newYorkMonday, nextMonday));
+
+    expect(payload.recurrenceRule).toMatchObject({ byDay: ['MO'] });
+  });
+
+  it('leaves a custom rule as it is', () => {
+    const custom = makeEvent({
+      isRecurrence: true,
+      recurrenceRule: { freq: 'weekly', interval: 2, byDay: ['MO', 'WE'] },
+    });
+    const moved = buildMovedEvent(custom, tuesday);
+
+    expect(moveSeriesRule(custom, moved).recurrenceRule).toEqual(custom.recurrenceRule);
+  });
+
+  it('leaves the payload alone when the start did not move', () => {
+    const resized = buildResizedEvent(mondayWeekly, DateTime.fromISO('2026-08-03T12:00:00+09:00'));
+
+    expect(moveSeriesRule(mondayWeekly, resized)).toBe(resized);
   });
 });

@@ -245,3 +245,48 @@ describe('SharePanel links a listing cannot reproduce', () => {
     expect(await screen.findByDisplayValue('http://localhost:3000/share/token-1')).toBeTruthy();
   });
 });
+
+describe('SharePanel copy', () => {
+  const setClipboard = (writeText: (text: string) => Promise<void>) =>
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+  });
+
+  it('acknowledges the copy only once the clipboard write has resolved', async () => {
+    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
+    let finish: () => void = () => {};
+    setClipboard(() => new Promise<void>((resolve) => (finish = resolve)));
+
+    render(<SharePanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: 'common.copied' })).toBeNull();
+
+    await act(async () => finish());
+    expect(screen.getByRole('button', { name: 'common.copied' })).toBeTruthy();
+  });
+
+  it('shows an error and no acknowledgement when the clipboard write is rejected', async () => {
+    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
+    setClipboard(() => Promise.reject(new DOMException('denied', 'NotAllowedError')));
+
+    render(<SharePanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
+    await act(async () => {});
+
+    expect(toastError).toHaveBeenCalledWith('common.copyFailed');
+    expect(screen.queryByRole('button', { name: 'common.copied' })).toBeNull();
+  });
+
+  it('shows an error when there is no clipboard API', async () => {
+    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
+
+    render(<SharePanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
+    await act(async () => {});
+
+    expect(toastError).toHaveBeenCalledWith('common.copyFailed');
+  });
+});

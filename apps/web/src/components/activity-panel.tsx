@@ -27,6 +27,7 @@ const ENTITY_LABEL: Record<string, TranslationKey> = {
   event: 'activity.entityEvent',
   memo: 'activity.entityMemo',
   member: 'activity.entityMember',
+  attendee: 'activity.entityAttendee',
   invite: 'activity.entityInvite',
   comment: 'activity.entityComment',
   checklist: 'activity.entityChecklist',

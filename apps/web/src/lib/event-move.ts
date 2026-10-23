@@ -1,5 +1,6 @@
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { fromISOInZone } from '@/lib/date-utils';
+import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
 import type { EventInput } from '@/stores/calendar-store';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -8,8 +9,9 @@ import type { CalendarEvent } from '@/types/calendar';
  * duration and every other field. `newStart` must carry the intended timezone.
  */
 export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventInput {
-  const start = fromISOInZone(evt.startAt, evt.timezone);
-  const end = fromISOInZone(evt.endAt, evt.timezone);
+  // Measured in the zone newStart carries, the one the span is re-applied in.
+  const start = DateTime.fromISO(evt.startAt, { zone: newStart.zone });
+  const end = DateTime.fromISO(evt.endAt, { zone: newStart.zone });
   const duration = end
     .setZone('UTC', { keepLocalTime: true })
     .diff(start.setZone('UTC', { keepLocalTime: true }), ['days', 'hours', 'minutes']);
@@ -37,6 +39,27 @@ export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventIn
     flexibility: evt.flexibility,
     visibility: evt.visibility,
   };
+}
+
+/**
+ * Re-targets a move of one occurrence at the whole series.
+ *
+ * The server shifts the series start by the same wall-clock amount the
+ * occurrence moved, so the dates in `payload` stay as built. The rule does not
+ * follow on its own: a weekly-Monday series whose start lands on a Tuesday would
+ * be refused or keep its Monday. A preset rule is rebuilt for the new start in
+ * the zone the server expands in, exactly as the editor does for a date change;
+ * a custom rule is the user's own and is left alone.
+ */
+export function moveSeriesRule(evt: CalendarEvent, payload: EventInput): EventInput {
+  const rule = evt.recurrenceRule;
+  if (!rule) return payload;
+  const oldStart = fromISOInZone(evt.startAt, evt.timezone);
+  const newStart = fromISOInZone(payload.startAt, evt.timezone);
+  if (+newStart === +oldStart) return payload;
+  const preset = ruleToPreset(rule, oldStart);
+  if (preset === 'custom') return payload;
+  return { ...payload, recurrenceRule: rebuildPresetRule(preset, newStart, rule) };
 }
 
 /**

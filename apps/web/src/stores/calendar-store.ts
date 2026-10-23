@@ -72,7 +72,8 @@ interface CalendarState {
    * signal so the requests it has already moved past stop costing anything.
    */
   fetchEvents: (start: string, end: string, signal?: AbortSignal) => Promise<void>;
-  fetchMemos: () => Promise<void>;
+  /** Loads every calendar's memos; a caller that can supersede the load passes a signal. */
+  fetchMemos: (signal?: AbortSignal) => Promise<void>;
   fetchMembers: (calendarId: string) => Promise<void>;
   fetchLabels: (calendarId: string) => Promise<void>;
   /** Re-runs whichever of the startup loads did not come back. */
@@ -106,7 +107,7 @@ interface CalendarState {
      * The revision this edit started from, as the server reported it. Sent as
      * If-Match so a save built on a copy someone else has since replaced is
      * refused instead of overwriting them. Omitted where there is nothing to
-     * be stale about -- a drag applies the gesture the user just made.
+     * be stale about -- a caller that has no copy to compare against.
      */
     revision?: string | null,
   ) => Promise<void>;
@@ -309,7 +310,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
-  async fetchMemos() {
+  async fetchMemos(signal) {
     const requestGeneration = ++memoRequestGeneration;
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
@@ -326,7 +327,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         let cursor = '';
         for (let page = 0; page < maxMemoPages; page++) {
           const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-          const res = await api.get<MemoPage>(`/calendars/${cal.id}/memos${query}`);
+          const res = await api.get<MemoPage>(`/calendars/${cal.id}/memos${query}`, false, signal);
           for (const m of res.items ?? []) {
             collected.push({ ...m, calendarId: cal.id });
           }
@@ -343,7 +344,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     )
       return;
     for (const result of results) {
-      if (result.status === 'rejected') toast.error(errorMessage(result.reason));
+      if (result.status === 'rejected' && !isAbortError(result.reason)) {
+        toast.error(errorMessage(result.reason));
+      }
     }
     const known = new Set(calendars.map((c) => c.id));
     set((s) => ({

@@ -4,6 +4,7 @@ import {
   atMinutesIntoDay,
   eventTimesForSave,
   minutesIntoDay,
+  recurrenceAnchorStart,
   shiftStartKeepingDuration,
 } from './event-times';
 
@@ -175,5 +176,31 @@ describe('atMinutesIntoDay', () => {
     expect(atMinutesIntoDay(dayStart, 30 * 60).toFormat('yyyy-MM-dd HH:mm')).toBe(
       '2026-03-09 00:00',
     );
+  });
+});
+
+describe('recurrenceAnchorStart', () => {
+  // Monday 20:00 in New York is Tuesday 09:00 for a viewer in Tokyo.
+  it('reads a timed start typed in the viewer zone as the day it is in the anchor zone', () => {
+    const start = recurrenceAnchorStart(
+      { allDay: false, startAt: '2026-08-04T09:00' },
+      TOKYO,
+      NEW_YORK,
+    );
+
+    expect(start.zoneName).toBe(NEW_YORK);
+    expect(start.toFormat('yyyy-MM-dd HH:mm')).toBe('2026-08-03 20:00');
+    expect(start.weekday).toBe(1);
+  });
+
+  it('keeps an all-day date as typed, since it is already a date in the anchor zone', () => {
+    const start = recurrenceAnchorStart(
+      { allDay: true, startAt: '2026-08-03T09:00' },
+      TOKYO,
+      NEW_YORK,
+    );
+
+    expect(start.toISODate()).toBe('2026-08-03');
+    expect(start.zoneName).toBe(NEW_YORK);
   });
 });

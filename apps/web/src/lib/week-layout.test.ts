@@ -2,7 +2,9 @@ import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
 import {
+  bucketEventsByDay,
   bucketEventsByWeek,
+  dayKey,
   eventOccupiesDay,
   eventStartDay,
   isMultiDay,
@@ -426,5 +428,55 @@ describe('layoutDayCell', () => {
     // The bar holds track 0, so the chips start at track 1 and the third is cut.
     expect(friday.singleSlots.map((s) => s.track)).toEqual([1, 2]);
     expect(friday.overflow).toBe(1);
+  });
+
+  it('orders single-day chips all-day first and then by start, whatever the input order', () => {
+    const at = (id: string, hour: string, allDay = false) =>
+      makeEvent({
+        id,
+        allDay,
+        startAt: `2026-04-24T${hour}:00+09:00`,
+        endAt: `2026-04-24T${hour}:30+09:00`,
+      });
+    const singles = [at('ten', '10'), at('eight', '08'), at('day', '00', true), at('nine', '09')];
+
+    const friday = layoutDayCell(5, [], singles);
+
+    // Three tracks are drawn; the latest-starting event is the one hidden.
+    expect(friday.singleSlots.map((s) => s.evt.id)).toEqual(['day', 'eight', 'nine']);
+    expect(friday.overflow).toBe(1);
+  });
+});
+
+describe('bucketEventsByDay', () => {
+  const first = DateTime.fromISO('2026-03-01', { zone: ZONE });
+  const last = DateTime.fromISO('2026-03-31', { zone: ZONE });
+
+  it('places each event on the same days eventOccupiesDay accepts', () => {
+    const events = [
+      makeEvent({ startAt: '2026-03-10T01:00:00+09:00', endAt: '2026-03-10T02:00:00+09:00' }),
+      makeEvent({ startAt: '2026-03-12T10:00:00+09:00', endAt: '2026-03-14T10:00:00+09:00' }),
+      makeEvent({
+        allDay: true,
+        timezone: ZONE,
+        startAt: '2026-03-20T00:00:00+09:00',
+        endAt: '2026-03-22T00:00:00+09:00',
+      }),
+      makeEvent({ startAt: '2026-02-27T10:00:00+09:00', endAt: '2026-03-02T10:00:00+09:00' }),
+    ];
+    const buckets = bucketEventsByDay(events, ZONE, first, last);
+
+    for (let d = 0; d < 31; d++) {
+      const day = first.plus({ days: d });
+      const expected = events.filter((e) => eventOccupiesDay(e, day, ZONE));
+      expect(buckets.get(dayKey(day, ZONE)) ?? []).toEqual(expected);
+    }
+  });
+
+  it('does not walk days outside the range', () => {
+    const events = [
+      makeEvent({ startAt: '2026-01-01T00:00:00+09:00', endAt: '2026-12-31T00:00:00+09:00' }),
+    ];
+    expect(bucketEventsByDay(events, ZONE, first, last).size).toBe(31);
   });
 });

@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import { readCaptureTime, readCaptureTimeFromBuffer } from './exif';
 
@@ -90,14 +91,25 @@ describe('readCaptureTimeFromBuffer', () => {
       exif: [{ tag: 0x9003, value: '2026:03:08 05:30:00' }],
     });
 
-    const taken = readCaptureTimeFromBuffer(buffer);
-    // No offset tag, so the camera's wall clock is read as the reader's own --
-    // which is what puts the photo beside the thing it was taken at.
-    expect(taken?.getFullYear()).toBe(2026);
-    expect(taken?.getMonth()).toBe(2);
-    expect(taken?.getDate()).toBe(8);
-    expect(taken?.getHours()).toBe(5);
-    expect(taken?.getMinutes()).toBe(30);
+    // No offset tag, so the camera's wall clock is read in the zone given.
+    expect(readCaptureTimeFromBuffer(buffer, 'Asia/Tokyo')?.toISOString()).toBe(
+      '2026-03-07T20:30:00.000Z',
+    );
+  });
+
+  it('reads a stamp without an offset in the zone given, not the device zone', () => {
+    const buffer = jpegWithExif({
+      exif: [{ tag: 0x9003, value: '2026:03:08 00:30:00' }],
+    });
+
+    const inTokyo = readCaptureTimeFromBuffer(buffer, 'Asia/Tokyo');
+    const inNewYork = readCaptureTimeFromBuffer(buffer, 'America/New_York');
+    expect(inTokyo?.toISOString()).toBe('2026-03-07T15:30:00.000Z');
+    expect(inNewYork?.toISOString()).toBe('2026-03-08T05:30:00.000Z');
+    // The capture day the album buckets by is the one in the account zone.
+    expect(DateTime.fromJSDate(inTokyo as Date, { zone: 'Asia/Tokyo' }).toISODate()).toBe(
+      '2026-03-08',
+    );
   });
 
   // Both byte orders are in the wild; a parser that reads only one produces
@@ -108,9 +120,9 @@ describe('readCaptureTimeFromBuffer', () => {
       exif: [{ tag: 0x9003, value: '2026:03:08 05:30:00' }],
     });
 
-    const taken = readCaptureTimeFromBuffer(buffer);
-    expect(taken?.getFullYear()).toBe(2026);
-    expect(taken?.getHours()).toBe(5);
+    expect(readCaptureTimeFromBuffer(buffer, 'UTC')?.toISOString()).toBe(
+      '2026-03-08T05:30:00.000Z',
+    );
   });
 
   it('uses the recorded UTC offset when the camera wrote one', () => {
@@ -122,7 +134,9 @@ describe('readCaptureTimeFromBuffer', () => {
     });
 
     // 05:30+09:00 is 20:30 UTC the day before, whatever zone the test runs in.
-    expect(readCaptureTimeFromBuffer(buffer)?.toISOString()).toBe('2026-03-07T20:30:00.000Z');
+    expect(readCaptureTimeFromBuffer(buffer, 'UTC')?.toISOString()).toBe(
+      '2026-03-07T20:30:00.000Z',
+    );
   });
 
   it('falls back to the file timestamp when the shutter time is absent', () => {
@@ -131,7 +145,9 @@ describe('readCaptureTimeFromBuffer', () => {
       exif: [{ tag: 0x9011, value: '+00:00' }],
     });
 
-    expect(readCaptureTimeFromBuffer(buffer)?.toISOString()).toBe('2026-01-02T09:00:00.000Z');
+    expect(readCaptureTimeFromBuffer(buffer, 'UTC')?.toISOString()).toBe(
+      '2026-01-02T09:00:00.000Z',
+    );
   });
 
   // A screenshot, a download, anything through an editor that strips metadata.
@@ -139,20 +155,20 @@ describe('readCaptureTimeFromBuffer', () => {
   // not a failure.
   it('reports nothing for a JPEG with no EXIF at all', () => {
     const bare = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-    expect(readCaptureTimeFromBuffer(bare.buffer)).toBeNull();
+    expect(readCaptureTimeFromBuffer(bare.buffer, 'UTC')).toBeNull();
   });
 
   it('reports nothing for a file that is not a JPEG', () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    expect(readCaptureTimeFromBuffer(png.buffer)).toBeNull();
+    expect(readCaptureTimeFromBuffer(png.buffer, 'UTC')).toBeNull();
   });
 
   it('reports nothing rather than throwing on a truncated file', () => {
     const full = new Uint8Array(
       jpegWithExif({ exif: [{ tag: 0x9003, value: '2026:03:08 05:30:00' }] }),
     );
-    expect(() => readCaptureTimeFromBuffer(full.slice(0, 20).buffer)).not.toThrow();
-    expect(readCaptureTimeFromBuffer(full.slice(0, 20).buffer)).toBeNull();
+    expect(() => readCaptureTimeFromBuffer(full.slice(0, 20).buffer, 'UTC')).not.toThrow();
+    expect(readCaptureTimeFromBuffer(full.slice(0, 20).buffer, 'UTC')).toBeNull();
   });
 });
 
@@ -166,6 +182,6 @@ describe('readCaptureTime', () => {
     });
     const file = new File([buffer], 'photo.jpg', { type: 'image/jpeg' });
 
-    expect((await readCaptureTime(file))?.toISOString()).toBe('2026-07-04T12:00:00.000Z');
+    expect((await readCaptureTime(file, 'UTC'))?.toISOString()).toBe('2026-07-04T12:00:00.000Z');
   });
 });

@@ -1,7 +1,7 @@
-import { DateTime } from 'luxon';
+import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MonthWeekRow } from '@/components/month-week-row';
-import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
+import { dayInZone, formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -238,9 +238,9 @@ export function MonthScroll() {
     if (active && active !== activeMonthRef.current) {
       activeMonthRef.current = active;
       const [y, m] = active.split('-').map(Number);
-      if (y && m) setCurrentMonth(DateTime.local(y, m, 1));
+      if (y && m) setCurrentMonth(dayInZone(y, m, 1, timezone));
     }
-  }, [setCurrentMonth]);
+  }, [setCurrentMonth, timezone]);
 
   useLayoutEffect(() => {
     if (!anchorKey) return;

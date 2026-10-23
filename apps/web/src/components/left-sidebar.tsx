@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { CalendarList } from '@/components/calendar-list';
+import { LabelledButton } from '@/components/labelled-button';
 import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
 import { useUiStore } from '@/stores/ui-store';
@@ -24,8 +25,9 @@ export function LeftSidebar() {
         <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
           {t('tabs.memo')}
         </span>
-        <button
-          type="button"
+        <LabelledButton
+          label={t('tabs.memo')}
+          expanded={memoExpanded}
           onClick={() => setMemoExpanded((v) => !v)}
           className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-hover)]"
         >
@@ -45,7 +47,7 @@ export function LeftSidebar() {
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-        </button>
+        </LabelledButton>
       </div>
 
       {memoExpanded && (

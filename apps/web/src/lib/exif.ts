@@ -10,6 +10,7 @@
  * Only the tags required for that are parsed. A general EXIF library would
  * read hundreds more and none of them would be used.
  */
+import { DateTime } from 'luxon';
 
 /** APP1 is the JPEG marker segment EXIF lives in. */
 const app1Marker = 0xffe1;
@@ -103,29 +104,28 @@ const utcOffsetPattern = /^[+-]\d{2}:\d{2}$/;
 /**
  * Parses "YYYY:MM:DD HH:MM:SS" plus an optional "+09:00" offset.
  *
- * EXIF records the time on the camera's own clock with no zone attached, so
- * without an offset tag the only reading available is the one the person
- * looking at the photo would give it: their own wall clock. That is also what
- * phone galleries do, and it is what puts a photo taken at noon next to the
- * lunch it was taken at.
+ * EXIF records the camera's own clock with no zone attached. Without an offset
+ * tag the stamp is read in `zone`, the zone the album buckets photos into days
+ * with, so a photo lands on the same day wherever the browser happens to run.
  */
-function parseExifDate(value: string, offset: string | null): Date | null {
+function parseExifDate(value: string, offset: string | null, zone: string): Date | null {
   const parts = value.trim().match(exifDatePattern);
   if (!parts) return null;
   const [, year, month, day, hour, minute, second] = parts;
   const stamp = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
   const trimmed = offset?.trim() ?? '';
-  const zone = utcOffsetPattern.test(trimmed) ? trimmed : '';
-  const parsed = new Date(stamp + zone);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const parsed = utcOffsetPattern.test(trimmed)
+    ? DateTime.fromISO(stamp + trimmed, { setZone: true })
+    : DateTime.fromISO(stamp, { zone });
+  return parsed.isValid ? parsed.toJSDate() : null;
 }
 
 /**
  * Reads the capture time out of a JPEG, or null when the file carries none --
  * which is the common case for screenshots, downloads, and anything that has
- * been through an editor that strips metadata.
+ * been through an editor that strips metadata. A stamp with no offset is read in `zone`.
  */
-export function readCaptureTimeFromBuffer(buffer: ArrayBuffer): Date | null {
+export function readCaptureTimeFromBuffer(buffer: ArrayBuffer, zone: string): Date | null {
   const view = new DataView(buffer);
   const tiffStart = findTiffStart(view);
   if (tiffStart === null || tiffStart + 8 > view.byteLength) return null;
@@ -149,22 +149,22 @@ export function readCaptureTimeFromBuffer(buffer: ArrayBuffer): Date | null {
 
   const original = exif.get(tagDateTimeOriginal);
   if (original) {
-    const parsed = parseExifDate(readAscii(ifd, original), offset);
+    const parsed = parseExifDate(readAscii(ifd, original), offset, zone);
     if (parsed) return parsed;
   }
   // Falls back to the file timestamp, which editing software rewrites -- so it
   // is worth less than the shutter time, and only worth more than nothing.
   const fallback = ifd0.get(tagDateTime);
-  return fallback ? parseExifDate(readAscii(ifd, fallback), offset) : null;
+  return fallback ? parseExifDate(readAscii(ifd, fallback), offset, zone) : null;
 }
 
 /**
  * readCaptureTimeFromBuffer for a picked file. Never throws: a photo whose
  * metadata cannot be read is still a photo worth uploading.
  */
-export async function readCaptureTime(file: File): Promise<Date | null> {
+export async function readCaptureTime(file: File, zone: string): Promise<Date | null> {
   try {
-    return readCaptureTimeFromBuffer(await file.arrayBuffer());
+    return readCaptureTimeFromBuffer(await file.arrayBuffer(), zone);
   } catch {
     return null;
   }

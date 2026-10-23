@@ -92,6 +92,24 @@ export function shiftStartKeepingDuration(
 }
 
 /**
+ * The event's start in `anchorZone`, the zone the server expands a recurrence
+ * rule in.
+ *
+ * A timed start is typed in the viewer's zone and has to be carried across; an
+ * all-day start is a date typed in the anchor zone already. Reading the typed
+ * string in either zone alone gives the wrong weekday and day of month whenever
+ * the two zones disagree about the date.
+ */
+export function recurrenceAnchorStart(
+  form: Pick<EventTimeForm, 'allDay' | 'startAt'>,
+  viewerZone: string,
+  anchorZone: string,
+): DateTime {
+  if (form.allDay) return DateTime.fromISO(form.startAt, { zone: anchorZone });
+  return DateTime.fromISO(form.startAt, { zone: viewerZone }).setZone(anchorZone);
+}
+
+/**
  * Turns what the editor holds into the instants the API stores.
  *
  * The two zones are not interchangeable. A timed event is an instant, and the

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -139,5 +139,58 @@ describe('embedded calendar', () => {
     expect(await screen.findByText('share.readOnly')).toBeTruthy();
     await waitFor(() => expect(apiGetListing).toHaveBeenCalled());
     expect(screen.queryByText('calendar.eventsTruncated')).toBeNull();
+  });
+
+  // A calendar lookup refused with a 429 used to leave a dead-end message.
+  it('offers a retry that refetches the calendar after a busy lookup', async () => {
+    let lookups = 0;
+    apiGet.mockImplementation((path) => {
+      if (String(path).includes('/events')) return Promise.resolve([]);
+      lookups++;
+      if (lookups === 1) return Promise.reject(new ApiError(429, 'busy'));
+      return Promise.resolve(calendar());
+    });
+
+    render(<EmbeddedCalendarView />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'share.retry' }));
+
+    expect(await screen.findByText('share.readOnly')).toBeTruthy();
+    expect(lookups).toBe(2);
+  });
+
+  it('offers a retry that refetches the events after a busy listing', async () => {
+    let listings = 0;
+    apiGet.mockImplementation((path) => {
+      if (!String(path).includes('/events')) return Promise.resolve(calendar());
+      listings++;
+      return listings === 1 ? Promise.reject(new ApiError(503, 'down')) : Promise.resolve([]);
+    });
+
+    render(<EmbeddedCalendarView />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'share.retry' }));
+
+    expect(await screen.findByText('share.readOnly')).toBeTruthy();
+    expect(listings).toBe(2);
+  });
+
+  // The device may be on any date; the page shows the month it is in the grid zone.
+  it('opens on the current month in the grid zone', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-31T16:30:00Z')); // 2026-11-01 01:30 in Tokyo
+    try {
+      apiGet.mockImplementation((path) =>
+        Promise.resolve(String(path).includes('/events') ? [] : calendar()),
+      );
+
+      render(<EmbeddedCalendarView />);
+
+      await waitFor(() => expect(eventsAsked()).toBe(1));
+      const asked = String(apiGet.mock.calls.find((c) => String(c[0]).includes('/events'))?.[0]);
+      expect(asked).toContain('start=2026-11-01');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

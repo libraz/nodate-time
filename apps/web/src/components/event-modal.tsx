@@ -2,13 +2,18 @@ import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HistoryTimeline } from '@/components/history-timeline';
+import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { type Locale, type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
 import { formatRelativeTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { seriesId } from '@/lib/event-move';
-import { eventTimesForSave, shiftStartKeepingDuration } from '@/lib/event-times';
+import {
+  eventTimesForSave,
+  recurrenceAnchorStart,
+  shiftStartKeepingDuration,
+} from '@/lib/event-times';
 import {
   canDeleteComment,
   canEdit,
@@ -18,6 +23,12 @@ import {
   showAsLabelKey,
   visibilityLabelKey,
 } from '@/lib/permissions';
+import {
+  getNthWeekday,
+  rebuildPresetRule,
+  ruleToPreset,
+  WEEKDAY_CODES,
+} from '@/lib/recurrence-preset';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import { useIsDesktop } from '@/lib/use-is-desktop';
@@ -53,7 +64,6 @@ export function eventCommentText(comment: EventComment): string {
   return comment.body;
 }
 
-const WEEKDAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
 const WEEKDAY_NAMES_EN = [
   'Sunday',
   'Monday',
@@ -74,52 +84,6 @@ function weekdayName(dayIndex: number, locale: Locale): string {
   return locale === 'en' ? (WEEKDAY_NAMES_EN[dayIndex] ?? '') : getWeekdayLabel(dayIndex, locale);
 }
 
-function getNthWeekday(dt: DateTime): number {
-  return Math.ceil(dt.day / 7);
-}
-
-export function presetToRule(preset: RecurrencePreset, dt: DateTime): RecurrenceRule | null {
-  const dayIdx = dt.weekday % 7;
-  const dayCode = WEEKDAY_CODES[dayIdx] ?? 'SU';
-  switch (preset) {
-    case 'none':
-      return null;
-    case 'daily':
-      return { freq: 'daily', interval: 1 };
-    case 'weekly':
-      return { freq: 'weekly', interval: 1, byDay: [dayCode] };
-    case 'weekdays':
-      return { freq: 'weekly', interval: 1, byDay: ['MO', 'TU', 'WE', 'TH', 'FR'] };
-    case 'monthly_nth':
-      return { freq: 'monthly', interval: 1, bySetPos: getNthWeekday(dt), byDay: [dayCode] };
-    case 'monthly_date':
-      return { freq: 'monthly', interval: 1, byMonthDay: dt.day };
-    case 'yearly':
-      return { freq: 'yearly', interval: 1 };
-    case 'custom':
-      return null;
-  }
-}
-
-/**
- * The rule a preset makes for `dt`, keeping the end condition the current rule
- * carries. A preset says how a series repeats, not when it stops, so rebuilding
- * one on a date or preset change must not quietly make the series endless.
- */
-export function rebuildPresetRule(
-  preset: RecurrencePreset,
-  dt: DateTime,
-  current: RecurrenceRule | null,
-): RecurrenceRule | null {
-  const next = presetToRule(preset, dt);
-  if (!next || !current) return next;
-  return {
-    ...next,
-    ...(current.until ? { until: current.until } : {}),
-    ...(current.count ? { count: current.count } : {}),
-  };
-}
-
 /**
  * Produces an API-valid recurrence rule:
  * - drops a monthly `byDay` that lacks `bySetPos` (the server rejects it),
@@ -137,28 +101,6 @@ function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): Recurre
     next.until = end.toISO() ?? next.until;
   }
   return next;
-}
-
-export function ruleToPreset(rule: RecurrenceRule | null, dt: DateTime): RecurrencePreset {
-  if (!rule) return 'none';
-  const dayIdx = dt.weekday % 7;
-  const dayCode = WEEKDAY_CODES[dayIdx] ?? 'SU';
-
-  if (rule.freq === 'daily' && rule.interval === 1) return 'daily';
-  if (rule.freq === 'yearly' && rule.interval === 1) return 'yearly';
-  if (rule.freq === 'weekly' && rule.interval === 1) {
-    if (
-      rule.byDay?.length === 5 &&
-      ['MO', 'TU', 'WE', 'TH', 'FR'].every((d) => rule.byDay?.includes(d))
-    )
-      return 'weekdays';
-    if (rule.byDay?.length === 1 && rule.byDay[0] === dayCode) return 'weekly';
-  }
-  if (rule.freq === 'monthly' && rule.interval === 1) {
-    if (rule.bySetPos && rule.byDay?.length === 1) return 'monthly_nth';
-    if (rule.byMonthDay) return 'monthly_date';
-  }
-  return 'custom';
 }
 
 export function recurrenceUntilDateValue(until: string, zone: string): DateTime {
@@ -472,18 +414,17 @@ function CommentsSection({
             className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
             style={{ borderRadius: 'var(--radius-sm)' }}
           />
-          <button
-            type="button"
+          <LabelledButton
+            label={t('event.send')}
             onClick={handleSend}
             disabled={!newComment.trim() || isSending}
             className="flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-accent)] disabled:opacity-40"
             style={{ borderRadius: 'var(--radius-sm)' }}
-            aria-label={t('event.send')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
-          </button>
+          </LabelledButton>
         </div>
       )}
     </div>
@@ -596,8 +537,9 @@ function ChecklistSection({
         <div className="mb-3 space-y-1">
           {items.map((item) => (
             <div key={item.id} className="group flex items-center gap-2">
-              <button
-                type="button"
+              <LabelledButton
+                label={item.title}
+                pressed={item.done}
                 onClick={() => handleToggle(item)}
                 disabled={!editable}
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border)] disabled:cursor-default"
@@ -618,7 +560,7 @@ function ChecklistSection({
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
                 )}
-              </button>
+              </LabelledButton>
               <span
                 className="flex-1 text-default"
                 style={{
@@ -629,10 +571,9 @@ function ChecklistSection({
                 {item.title}
               </span>
               {editable && (
-                <button
-                  type="button"
+                <LabelledButton
+                  label={t('common.delete')}
                   onClick={() => handleDelete(item.id)}
-                  aria-label={t('common.delete')}
                   className="reveal-on-hover text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg
@@ -645,7 +586,7 @@ function ChecklistSection({
                   >
                     <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
-                </button>
+                </LabelledButton>
               )}
             </div>
           ))}
@@ -819,10 +760,9 @@ function AttachmentsSection({
                 {t('event.download')}
               </button>
               {editable && (
-                <button
-                  type="button"
+                <LabelledButton
+                  label={t('common.delete')}
                   onClick={() => handleDelete(att.id)}
-                  aria-label={t('common.delete')}
                   className="reveal-on-hover shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg
@@ -835,7 +775,7 @@ function AttachmentsSection({
                   >
                     <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
-                </button>
+                </LabelledButton>
               )}
             </div>
           ))}
@@ -920,6 +860,22 @@ export function EventModal() {
   // open would move the dates and shift every later occurrence across a DST
   // boundary. A new event takes the zone its author is working in.
   const anchorZone = editingEvent?.timezone || timezone;
+  // The start as the server expands the rule: in the anchor zone, whichever zone
+  // the fields are typed in.
+  const recurrenceStart = (f: Pick<FormState, 'allDay' | 'startAt'>) =>
+    recurrenceAnchorStart(f, timezone, anchorZone);
+  // A preset follows the start it describes; a custom rule is the user's own.
+  const withPresetRule = (f: FormState): FormState =>
+    f.recurrencePreset !== 'custom' && f.recurrenceRule
+      ? {
+          ...f,
+          recurrenceRule: rebuildPresetRule(
+            f.recurrencePreset,
+            recurrenceStart(f),
+            f.recurrenceRule,
+          ),
+        }
+      : f;
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1309,8 +1265,8 @@ export function EventModal() {
     <>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3">
-        <button
-          type="button"
+        <LabelledButton
+          label={t('common.close')}
           onClick={requestClose}
           className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
           style={{ borderRadius: 'var(--radius-sm)' }}
@@ -1325,7 +1281,7 @@ export function EventModal() {
           >
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
-        </button>
+        </LabelledButton>
         <span className="text-callout font-medium text-[var(--color-text-secondary)]">
           {editingEvent ? t('event.editEvent') : t('event.createEvent')}
         </span>
@@ -1443,12 +1399,7 @@ export function EventModal() {
             onDateChange={(date) => {
               setForm((f) => {
                 const moved = shiftStartKeepingDuration(f, date, timezone);
-                const newStartDt = DateTime.fromISO(moved.startAt, { zone: timezone });
-                const recurrenceRule =
-                  f.recurrencePreset !== 'custom' && f.recurrenceRule
-                    ? rebuildPresetRule(f.recurrencePreset, newStartDt, f.recurrenceRule)
-                    : f.recurrenceRule;
-                return { ...f, startAt: moved.startAt, endAt: moved.endAt, recurrenceRule };
+                return withPresetRule({ ...f, startAt: moved.startAt, endAt: moved.endAt });
               });
             }}
             onTimeChange={(time) => {
@@ -1460,9 +1411,9 @@ export function EventModal() {
                 const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
                 if (endDt <= startDt) {
                   const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
-                  return { ...f, startAt: newStart, endAt: newEnd };
+                  return withPresetRule({ ...f, startAt: newStart, endAt: newEnd });
                 }
-                return { ...f, startAt: newStart };
+                return withPresetRule({ ...f, startAt: newStart });
               });
             }}
           />
@@ -1506,9 +1457,10 @@ export function EventModal() {
             <span className="text-default text-[var(--color-text-primary)]">
               {t('calendar.allDay')}
             </span>
-            <button
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, allDay: !f.allDay }))}
+            <LabelledButton
+              label={t('calendar.allDay')}
+              pressed={form.allDay}
+              onClick={() => setForm((f) => withPresetRule({ ...f, allDay: !f.allDay }))}
               className="toggle-track relative h-7 w-12"
               style={{
                 backgroundColor: form.allDay ? 'var(--color-accent)' : 'var(--color-surface-inset)',
@@ -1518,7 +1470,7 @@ export function EventModal() {
                 className="toggle-knob absolute top-0.5 h-6 w-6"
                 style={{ left: form.allDay ? '22px' : '2px' }}
               />
-            </button>
+            </LabelledButton>
           </div>
 
           {/* Recurrence */}
@@ -1529,7 +1481,7 @@ export function EventModal() {
             <CustomSelect
               value={form.recurrencePreset}
               options={(() => {
-                const startDt = DateTime.fromISO(form.startAt);
+                const startDt = recurrenceStart(form);
                 const dayLabel = weekdayName(jsDayOfWeek(startDt), locale);
                 const nth = getNthWeekday(startDt);
                 return [
@@ -1561,7 +1513,7 @@ export function EventModal() {
                   return;
                 }
                 setShowCustomRecurrence(false);
-                const startDt = DateTime.fromISO(form.startAt);
+                const startDt = recurrenceStart(form);
                 setForm((f) => ({
                   ...f,
                   recurrencePreset: preset,
@@ -1606,7 +1558,7 @@ export function EventModal() {
                     ]}
                     onChange={(val) => {
                       const freq = val as RecurrenceRule['freq'];
-                      const startDt = DateTime.fromISO(form.startAt);
+                      const startDt = recurrenceStart(form);
                       const dayCode = WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU';
                       setForm((f) => {
                         if (!f.recurrenceRule) return f;
@@ -1640,6 +1592,7 @@ export function EventModal() {
                         <button
                           key={code}
                           type="button"
+                          aria-pressed={selected}
                           onClick={() =>
                             setForm((f) => {
                               if (!f.recurrenceRule) return f;
@@ -1686,7 +1639,7 @@ export function EventModal() {
                       { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
                     ]}
                     onChange={(mode) => {
-                      const startDt = DateTime.fromISO(form.startAt);
+                      const startDt = recurrenceStart(form);
                       setForm((f) => {
                         if (!f.recurrenceRule) return f;
                         if (mode === 'weekday') {
@@ -1755,7 +1708,7 @@ export function EventModal() {
                       type="number"
                       min={1}
                       max={31}
-                      value={form.recurrenceRule.byMonthDay ?? DateTime.fromISO(form.startAt).day}
+                      value={form.recurrenceRule.byMonthDay ?? recurrenceStart(form).day}
                       onChange={(e) => {
                         const val = Math.max(1, Math.min(31, Number(e.target.value)));
                         setForm((f) => ({
@@ -1808,7 +1761,7 @@ export function EventModal() {
                       name="recEnd"
                       checked={!!form.recurrenceRule.until}
                       onChange={() => {
-                        const defaultEnd = DateTime.fromISO(form.startAt)
+                        const defaultEnd = recurrenceStart(form)
                           .plus({ months: 1 })
                           .toFormat('yyyy-MM-dd');
                         setForm((f) => ({
@@ -1831,7 +1784,11 @@ export function EventModal() {
                         showTime={false}
                         onDateChange={(date) =>
                           setForm((f) => {
-                            const clamped = clampRecurrenceUntilDate(date, f.startAt, anchorZone);
+                            const clamped = clampRecurrenceUntilDate(
+                              date,
+                              recurrenceStart(f).toISO() ?? f.startAt,
+                              anchorZone,
+                            );
                             return {
                               ...f,
                               recurrenceRule: f.recurrenceRule
@@ -1841,9 +1798,7 @@ export function EventModal() {
                           })
                         }
                         onTimeChange={() => {}}
-                        minDate={DateTime.fromISO(form.startAt, { zone: anchorZone }).startOf(
-                          'day',
-                        )}
+                        minDate={recurrenceStart(form).startOf('day')}
                       />
                     )}
                   </label>
@@ -1893,7 +1848,7 @@ export function EventModal() {
           {/* Recurrence label for editing recurring events */}
           {editingEvent?.isRecurrence && form.recurrenceRule && (
             <p className="mt-1 text-footnote text-[var(--color-text-tertiary)]">
-              {recurrenceLabel(form.recurrenceRule, DateTime.fromISO(form.startAt), t, locale)}
+              {recurrenceLabel(form.recurrenceRule, recurrenceStart(form), t, locale)}
             </p>
           )}
         </div>
@@ -1989,6 +1944,7 @@ export function EventModal() {
                   value={form.memo}
                   onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
                   placeholder={t('event.memo')}
+                  maxLength={16000}
                   rows={2}
                   className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                 />
@@ -2018,9 +1974,10 @@ export function EventModal() {
                   {(membersMap[form.calendarId] ?? []).map((m) => {
                     const isSelected = form.participants.includes(m.id);
                     return (
-                      <button
+                      <LabelledButton
                         key={m.id}
-                        type="button"
+                        label={m.name}
+                        pressed={isSelected}
                         onClick={() =>
                           setForm((f) => ({
                             ...f,
@@ -2039,7 +1996,7 @@ export function EventModal() {
                         }}
                       >
                         {m.name[0]}
-                      </button>
+                      </LabelledButton>
                     );
                   })}
                   {form.participants.length === 0 && (

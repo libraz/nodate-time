@@ -446,6 +446,8 @@ describe('ExportSection', () => {
     apiGetBlob.mockResolvedValue({
       blob: new Blob(['BEGIN:VCALENDAR']),
       filename: 'Family.ics',
+      truncated: false,
+      window: 'full',
     });
 
     render(<ExportSection />);
@@ -465,7 +467,12 @@ describe('ExportSection', () => {
       revokeObjectURL: vi.fn(),
     });
     uiState.timezone = 'America/New_York';
-    apiGetBlob.mockResolvedValue({ blob: new Blob(['a,b']), filename: 'Family.csv' });
+    apiGetBlob.mockResolvedValue({
+      blob: new Blob(['a,b']),
+      filename: 'Family.csv',
+      truncated: false,
+      window: 'full',
+    });
 
     render(<ExportSection />);
     fireEvent.click(screen.getByRole('button', { name: 'settings.exportCsv' }));
@@ -477,6 +484,73 @@ describe('ExportSection', () => {
     uiState.timezone = 'Asia/Tokyo';
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+});
+
+describe('ExportSection coverage', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:export'),
+      revokeObjectURL: vi.fn(),
+    });
+    calendarState.calendars = [calendar('owner')];
+    toastError.mockReset();
+    toastInfo.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function exportIcs(coverage: { truncated: boolean; window: string }) {
+    apiGetBlob.mockResolvedValue({ blob: new Blob(['x']), filename: 'F.ics', ...coverage });
+    render(<ExportSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'settings.exportIcal' }));
+    await waitFor(() => expect(apiGetBlob).toHaveBeenCalled());
+    await act(async () => {});
+  }
+
+  it('warns when the export stopped at the server cap', async () => {
+    await exportIcs({ truncated: true, window: 'full' });
+    expect(toastError).toHaveBeenCalledWith('settings.exportTruncated');
+  });
+
+  it('says which window a bounded export covers', async () => {
+    await exportIcs({ truncated: false, window: '2026-01-01/2026-03-31' });
+    expect(toastInfo).toHaveBeenCalledWith('settings.exportWindow:2026-01-01 – 2026-03-31');
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('says nothing extra for a whole export', async () => {
+    await exportIcs({ truncated: false, window: 'full' });
+    expect(toastInfo).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExportSection without a calendar', () => {
+  afterEach(() => {
+    calendarState.calendars = [calendar('owner')];
+  });
+
+  it('sends no import request when no calendar is selected', async () => {
+    calendarState.calendars = [];
+    apiPost.mockReset();
+    render(<ExportSection />);
+
+    fireEvent.change(screen.getByPlaceholderText('settings.importPlaceholder'), {
+      target: { value: 'BEGIN:VCALENDAR\nEND:VCALENDAR' },
+    });
+
+    const button = screen.getByRole('button', {
+      name: 'settings.importPasted',
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(apiPost).not.toHaveBeenCalled();
   });
 });
 

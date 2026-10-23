@@ -150,6 +150,12 @@ export function useEventDrag({
     [onDrop, endPending, cancelFrame],
   );
 
+  const handleCancel = useCallback(() => {
+    endPending();
+    cancelFrame();
+    setDrag(null);
+  }, [endPending, cancelFrame]);
+
   // Blocks page scrolling once a touch drag is active.
   const preventTouchScroll = useCallback((e: TouchEvent) => {
     if (pending.current?.active) e.preventDefault();
@@ -173,7 +179,7 @@ export function useEventDrag({
       pending.current = p;
       window.addEventListener('pointermove', handleMove, { signal });
       window.addEventListener('pointerup', handleUp, { signal });
-      window.addEventListener('pointercancel', handleUp, { signal });
+      window.addEventListener('pointercancel', handleCancel, { signal });
       if (e.pointerType !== 'mouse') {
         document.addEventListener('touchmove', preventTouchScroll, { signal, passive: false });
         p.timer = window.setTimeout(() => {
@@ -190,7 +196,7 @@ export function useEventDrag({
         }, longPressMs);
       }
     },
-    [handleMove, handleUp, preventTouchScroll, resolveKey, longPressMs],
+    [handleMove, handleUp, handleCancel, preventTouchScroll, resolveKey, longPressMs],
   );
 
   /** Returns true if the click follows a drag and should be ignored. */
@@ -265,9 +271,13 @@ export function useEventResize<T>({
         }, 0);
         onCommit(event, ev.clientY, origin);
       };
+      const onCancel = () => {
+        ctrl.abort();
+        onEnd();
+      };
       window.addEventListener('pointermove', onMove, { signal: ctrl.signal });
       window.addEventListener('pointerup', onUp, { signal: ctrl.signal });
-      window.addEventListener('pointercancel', onUp, { signal: ctrl.signal });
+      window.addEventListener('pointercancel', onCancel, { signal: ctrl.signal });
     },
     [onPreview, onCommit, onEnd, threshold],
   );

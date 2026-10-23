@@ -715,3 +715,49 @@ describe('EventModal monthly weekday position', () => {
     expect(screen.getByRole('option', { name: 'event.recurrenceNthFifth' })).toBeInTheDocument();
   });
 });
+
+describe('EventModal named controls', () => {
+  it('names the editor close button apart from the backdrop', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.getAllByRole('button', { name: 'common.close' }).length).toBeGreaterThanOrEqual(
+      2,
+    );
+  });
+
+  it('exposes the all-day toggle with its state and flips it with the form', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const toggle = screen.getByRole('button', { name: 'calendar.allDay' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('EventModal recurrence presets across zones', () => {
+  // Monday 20:00 in New York is Tuesday 09:00 for a viewer in Tokyo; the server
+  // expands the rule in New York, so "weekly" has to mean Monday.
+  it('saves a weekly preset on the weekday of the event’s own zone', async () => {
+    const newYorkMonday: CalendarEvent = {
+      ...event,
+      startAt: '2026-08-04T00:00:00Z',
+      endAt: '2026-08-04T01:00:00Z',
+      timezone: 'America/New_York',
+    };
+    calendarState.events = [newYorkMonday];
+    mockApi.getWithRevision.mockResolvedValue({ data: newYorkMonday, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNone/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'event.recurrenceWeekly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload.recurrenceRule).toMatchObject({ freq: 'weekly', byDay: ['MO'] });
+  });
+});

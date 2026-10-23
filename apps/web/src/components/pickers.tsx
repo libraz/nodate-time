@@ -84,6 +84,38 @@ function useOutsideClose(
   }, [active]);
 }
 
+const POPUP_FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"])';
+
+/**
+ * Keys every floating panel owes the keyboard: Escape closes it without also
+ * closing the dialog behind, and Tab stays inside it. The panel is portalled
+ * out of the dialog, so the dialog's own trap cannot see it.
+ */
+function handlePopupKeys(e: React.KeyboardEvent<HTMLElement>, close: () => void) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    return;
+  }
+  if (e.key !== 'Tab') return;
+  e.stopPropagation();
+  const stops = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(POPUP_FOCUSABLE));
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (!first || !last) {
+    e.preventDefault();
+    return;
+  }
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 /* ============================================
    DatePicker — inline calendar for date selection
    ============================================ */
@@ -98,6 +130,8 @@ interface DatePickerDropdownProps {
   minDate?: DateTime;
   style: React.CSSProperties;
   floatingRef: React.RefObject<HTMLDivElement | null>;
+  /** The field that opened the picker; takes focus back when the picker closes. */
+  returnFocusRef: React.RefObject<HTMLElement | null>;
 }
 
 function DatePickerDropdown({
@@ -107,12 +141,57 @@ function DatePickerDropdown({
   minDate,
   style,
   floatingRef,
+  returnFocusRef,
 }: DatePickerDropdownProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const [viewMonth, setViewMonth] = useState(value.startOf('month'));
+  // The day the arrow keys are on; only that day is a Tab stop.
+  const [focusDay, setFocusDay] = useState(value);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   useOutsideClose([floatingRef], onClose, true);
+
+  const closeToField = () => {
+    onClose();
+    returnFocusRef.current?.focus();
+  };
+
+  // Opening, and every arrow move, puts focus on the day it names.
+  useEffect(() => {
+    gridRef.current
+      ?.querySelector<HTMLElement>(`[data-day="${focusDay.toISODate()}"]`)
+      ?.focus({ preventScroll: true });
+  }, [focusDay]);
+
+  const moveFocus = (e: React.KeyboardEvent, next: DateTime) => {
+    e.preventDefault();
+    if (minDate && next < minDate.startOf('day')) return;
+    setFocusDay(next);
+    setViewMonth(next.startOf('month'));
+  };
+
+  const handleGridKey = (e: React.KeyboardEvent) => {
+    const next = (() => {
+      switch (e.key) {
+        case 'ArrowLeft':
+          return focusDay.minus({ days: 1 });
+        case 'ArrowRight':
+          return focusDay.plus({ days: 1 });
+        case 'ArrowUp':
+          return focusDay.minus({ days: 7 });
+        case 'ArrowDown':
+          return focusDay.plus({ days: 7 });
+        case 'PageUp':
+          return focusDay.minus({ months: 1 });
+        case 'PageDown':
+          return focusDay.plus({ months: 1 });
+        default:
+          return null;
+      }
+    })();
+    if (next) moveFocus(e, next);
+  };
 
   const weekdays = locale === 'ja' ? WEEKDAYS_JA : WEEKDAYS_EN;
 
@@ -131,12 +210,16 @@ function DatePickerDropdown({
   const handleSelect = (day: DateTime) => {
     if (minDate && day < minDate.startOf('day')) return;
     onChange(day);
-    onClose();
+    closeToField();
   };
 
+  const tabDay = focusDay.hasSame(viewMonth, 'month') ? focusDay : viewMonth.startOf('month');
+
   return createPortal(
+    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons
     <div
       ref={floatingRef}
+      onKeyDown={(e) => handlePopupKeys(e, closeToField)}
       className="dropdown-panel fixed z-[9999] w-[280px] bg-[var(--color-surface-elevated)] p-3 ring-1 ring-[var(--color-border)]"
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
@@ -204,7 +287,8 @@ function DatePickerDropdown({
       </div>
 
       {/* Date grid */}
-      <div className="grid grid-cols-7 gap-0">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons */}
+      <div ref={gridRef} onKeyDown={handleGridKey} className="grid grid-cols-7 gap-0">
         {emptySlots > 0 && <div style={{ gridColumn: `span ${emptySlots}` }} />}
         {calendarDays.map((day) => {
           const isSelected = day.hasSame(value, 'day');
@@ -219,7 +303,10 @@ function DatePickerDropdown({
               type="button"
               onClick={() => handleSelect(day)}
               disabled={isDisabled}
+              data-day={day.toISODate()}
+              tabIndex={day.hasSame(tabDay, 'day') ? 0 : -1}
               aria-label={day.toFormat('yyyy-MM-dd')}
+              aria-pressed={isSelected}
               className="flex h-9 w-full items-center justify-center rounded-full text-body tabular-nums transition-colors"
               style={{
                 backgroundColor: isSelected ? 'var(--color-accent)' : 'transparent',
@@ -258,6 +345,8 @@ interface TimePickerDropdownProps {
   onClose: () => void;
   style: React.CSSProperties;
   floatingRef: React.RefObject<HTMLDivElement | null>;
+  /** The field that opened the picker; takes focus back when the picker closes. */
+  returnFocusRef: React.RefObject<HTMLElement | null>;
 }
 
 const TIME_SLOTS = (() => {
@@ -276,14 +365,40 @@ function TimePickerDropdown({
   onClose,
   style,
   floatingRef,
+  returnFocusRef,
 }: TimePickerDropdownProps) {
   const selectedRef = useRef<HTMLButtonElement>(null);
 
   useOutsideClose([floatingRef], onClose, true);
 
+  const closeToField = () => {
+    onClose();
+    returnFocusRef.current?.focus();
+  };
+
   useEffect(() => {
+    selectedRef.current?.focus({ preventScroll: true });
     selectedRef.current?.scrollIntoView({ block: 'center' });
   }, []);
+
+  // Slots are one Tab stop; the arrows walk the list.
+  const handleListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const slots = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button'));
+    const at = slots.indexOf(document.activeElement as HTMLElement);
+    const target =
+      e.key === 'ArrowDown'
+        ? slots[Math.min(at + 1, slots.length - 1)]
+        : e.key === 'ArrowUp'
+          ? slots[Math.max(at - 1, 0)]
+          : e.key === 'Home'
+            ? slots[0]
+            : e.key === 'End'
+              ? slots[slots.length - 1]
+              : undefined;
+    if (!target) return;
+    e.preventDefault();
+    target.focus();
+  };
 
   const nearestSlot = useMemo(() => {
     const [h, m] = value.split(':').map(Number);
@@ -295,8 +410,13 @@ function TimePickerDropdown({
   }, [value]);
 
   return createPortal(
+    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons
     <div
       ref={floatingRef}
+      onKeyDown={(e) => {
+        handlePopupKeys(e, closeToField);
+        handleListKey(e);
+      }}
       className="dropdown-panel fixed z-[9999] max-h-[240px] w-[100px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
@@ -307,9 +427,11 @@ function TimePickerDropdown({
             key={slot}
             ref={isSelected ? selectedRef : undefined}
             type="button"
+            tabIndex={isSelected ? 0 : -1}
+            aria-pressed={isSelected}
             onClick={() => {
               onChange(slot);
-              onClose();
+              closeToField();
             }}
             className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
             style={{
@@ -714,6 +836,7 @@ export function DateTimeField({
             {...(minDate ? { minDate } : {})}
             style={{ top: dateFloating.pos.top, left: dateFloating.pos.left }}
             floatingRef={dateFloating.floatingRef}
+            returnFocusRef={dateFloating.anchorRef}
           />
         )}
         {showTime && (
@@ -736,6 +859,7 @@ export function DateTimeField({
                 onClose={handleCloseTimePicker}
                 style={{ top: timeFloating.pos.top, left: timeFloating.pos.left }}
                 floatingRef={timeFloating.floatingRef}
+                returnFocusRef={timeFloating.anchorRef}
               />
             )}
           </>

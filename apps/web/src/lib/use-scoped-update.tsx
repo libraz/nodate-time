@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
-import { isRecurringEvent } from '@/lib/event-move';
+import { api, errorMessage } from '@/lib/api';
+import { isRecurringEvent, moveSeriesRule } from '@/lib/event-move';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
@@ -12,38 +12,72 @@ interface PendingUpdate {
   payload: EventInput;
 }
 
+/** The failures that mean the copy on screen is out of date rather than that the write was bad. */
+function staleOrGone(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false;
+  const { code, status } = e as { code?: unknown; status?: unknown };
+  return code === 'EVENT.STALE' || status === 404;
+}
+
 /**
  * Wraps event updates from drag/resize. A non-recurring event commits
  * immediately; a recurring one first asks whether to change this occurrence or
  * the whole series. Render the returned `dialog` somewhere in the view.
+ *
+ * The update replaces every field, so it is only sent when the copy it was
+ * built from is still the stored one, and it names that revision.
  */
 export function useScopedUpdate() {
   const t = useT();
   const updateEvent = useCalendarStore((s) => s.updateEvent);
+  const fetchEvents = useCalendarStore((s) => s.fetchEvents);
+  const visibleRange = useCalendarStore((s) => s.visibleRange);
   const [pending, setPending] = useState<PendingUpdate | null>(null);
   const dialogRef = useModalA11y<HTMLDivElement>(pending !== null, () => setPending(null));
 
+  const refetch = useCallback(() => {
+    const { start, end } = visibleRange();
+    void fetchEvents(start, end);
+  }, [fetchEvents, visibleRange]);
+
   const commit = useCallback(
-    (event: CalendarEvent, payload: EventInput, scope?: 'this' | 'all') => {
-      updateEvent(event.calendarId, event.id, payload, scope).catch((e) =>
-        toast.error(errorMessage(e, t('error.saveFailed'))),
-      );
+    async (event: CalendarEvent, payload: EventInput, scope?: 'this' | 'all') => {
+      try {
+        const { data: current, revision } = await api.getWithRevision<CalendarEvent>(
+          `/calendars/${event.calendarId}/events/${event.id}`,
+        );
+        // A copy someone has changed since is refused here; the If-Match below
+        // covers a change landing between this read and the write.
+        if (current.updatedAt !== event.updatedAt) {
+          toast.error(t('apiError.EVENT.STALE'));
+          refetch();
+          return;
+        }
+        await updateEvent(event.calendarId, event.id, payload, scope, revision);
+      } catch (e) {
+        toast.error(errorMessage(e, t('error.saveFailed')));
+        if (staleOrGone(e)) refetch();
+      }
     },
-    [updateEvent, t],
+    [updateEvent, refetch, t],
   );
 
   /** Commit an update, prompting for scope when the event is recurring. */
   const requestUpdate = useCallback(
     (event: CalendarEvent, payload: EventInput) => {
-      if (isRecurringEvent(event)) setPending({ event, payload });
-      else commit(event, payload);
+      // Only an expanded occurrence (composite id) has a scope to choose.
+      if (isRecurringEvent(event) && event.id.includes('_')) setPending({ event, payload });
+      else void commit(event, payload);
     },
     [commit],
   );
 
   const choose = useCallback(
     (scope: 'this' | 'all') => {
-      if (pending) commit(pending.event, pending.payload, scope);
+      if (pending) {
+        const { event, payload } = pending;
+        void commit(event, scope === 'all' ? moveSeriesRule(event, payload) : payload, scope);
+      }
       setPending(null);
     },
     [pending, commit],

@@ -4,6 +4,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
 import { APP_NAME } from '@/lib/app-name';
+import { safeRedirect } from '@/lib/safe-redirect';
 import { useAuthStore } from '@/stores/auth-store';
 
 export interface OAuthSearch {
@@ -44,17 +45,17 @@ function OAuthCompletePage() {
       // Strip the tokens from the URL hash so they do not stay in history.
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
       setToken(tokens.token, tokens.refreshToken);
-      try {
-        await fetchMe();
-      } catch {
-        // User resolution failed after a successful redirect; surface the error
-        // on the login screen instead of leaving the user on a blank shell.
-        if (!cancelled) navigate({ to: '/login', search: { error: 'oauth_failed' } });
+      // fetchMe reports a failed profile load through the store rather than by
+      // throwing, so the outcome is read from there.
+      await fetchMe();
+      if (cancelled) return;
+      if (!useAuthStore.getState().user) {
+        // Surface the failure on the login screen instead of leaving a blank shell.
+        useAuthStore.getState().logout();
+        navigate({ to: '/login', search: { error: 'oauth_failed' } });
         return;
       }
-      if (cancelled) return;
-      const dest = redirect?.startsWith('/') && !redirect.startsWith('//') ? redirect : '/';
-      navigate({ to: dest });
+      navigate({ to: safeRedirect(redirect) });
     })();
     return () => {
       cancelled = true;
