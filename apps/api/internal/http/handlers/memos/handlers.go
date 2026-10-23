@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -81,25 +82,22 @@ func mapMemo(m generated.CalendarMemo) MemoResponse {
 	}
 }
 
-// loadMemo resolves a memo public id inside the calendar the caller has
-// already proved access to, so an id from another calendar cannot be
-// reached by guessing.
-func loadMemo(ctx context.Context, deps Deps, calID uint32, memoID string) (generated.CalendarMemo, error) {
+// lockMemo reads a memo for a write, under its row lock, inside the
+// transaction that commits the write. An id from another calendar cannot be
+// reached by guessing, and a memo deleted in the meantime is not found.
+func lockMemo(ctx context.Context, q *generated.Queries, calID uint32, memoID string) (generated.CalendarMemo, error) {
 	memoPub, err := parseUUID(memoID)
 	if err != nil {
 		return generated.CalendarMemo{}, apierrors.MemoNotFound
 	}
-	memo, err := deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+	memo, err := q.GetMemoForUpdate(ctx, generated.GetMemoForUpdateParams{
 		PublicID:   memoPub,
 		CalendarID: calID,
 	})
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return generated.CalendarMemo{}, apierrors.MemoNotFound
-		}
-		return generated.CalendarMemo{}, apierrors.InternalUnexpected
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarMemo{}, apierrors.MemoNotFound
 	}
-	return memo, nil
+	return memo, err
 }
 
 // defaultMemoPageSize and maxMemoPageSize bound one page of memos.
@@ -120,13 +118,15 @@ func encodeMemoCursor(publicID []byte) string {
 
 // resolveMemoCursor turns a cursor back into the ordering triple it names. A
 // cursor from another calendar does not resolve here, so it is refused rather
-// than silently paging through this one from an unrelated position.
+// than silently paging through this one from an unrelated position. A memo
+// deleted since the page was issued still resolves: it has an ordering
+// position, and the list being walked must not break under it.
 func resolveMemoCursor(ctx context.Context, deps Deps, calID uint32, cursor string) (generated.CalendarMemo, error) {
 	pub, err := parseUUID(cursor)
 	if err != nil {
 		return generated.CalendarMemo{}, err
 	}
-	return deps.Queries.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
+	return deps.Queries.GetMemoCursor(ctx, generated.GetMemoCursorParams{
 		PublicID:   pub,
 		CalendarID: calID,
 	})
@@ -205,7 +205,7 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 
 		var created generated.CalendarMemo
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
 			if _, err := q.CreateMemo(ctx, generated.CreateMemoParams{
@@ -254,35 +254,37 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			return nil, toAPIError(err)
 		}
 
-		memo, err := loadMemo(ctx, deps, cal.ID, in.MemoID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		// An omitted field keeps the stored value, so a partial update does not
-		// blank out the rest of the memo.
-		title := memo.Title
-		if in.Body.Title != nil {
-			title = *in.Body.Title
-		}
-		body := memo.Body
-		if in.Body.Body != nil {
-			body = nullString(*in.Body.Body)
-		}
-		done := memo.Done
-		if in.Body.Done != nil {
-			done = *in.Body.Done
-		}
-		sortWeight := memo.SortWeight
-		if in.Body.SortOrder != nil {
-			sortWeight = *in.Body.SortOrder
-		}
-
 		var updated generated.CalendarMemo
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
+			memo, err := lockMemo(ctx, q, cal.ID, in.MemoID)
+			if err != nil {
+				return err
+			}
+
+			// An omitted field keeps the stored value, so a partial update does
+			// not blank out the rest of the memo. The stored value is the one
+			// read under the lock, so a concurrent update of another field is
+			// kept rather than written back over.
+			title := memo.Title
+			if in.Body.Title != nil {
+				title = *in.Body.Title
+			}
+			body := memo.Body
+			if in.Body.Body != nil {
+				body = nullString(*in.Body.Body)
+			}
+			done := memo.Done
+			if in.Body.Done != nil {
+				done = *in.Body.Done
+			}
+			sortWeight := memo.SortWeight
+			if in.Body.SortOrder != nil {
+				sortWeight = *in.Body.SortOrder
+			}
+
 			if err := q.UpdateMemo(ctx, generated.UpdateMemoParams{
 				Title:      title,
 				Body:       body,
@@ -292,7 +294,6 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			}); err != nil {
 				return err
 			}
-			var err error
 			updated, err = q.GetMemoByPublicID(ctx, generated.GetMemoByPublicIDParams{
 				PublicID:   memo.PublicID,
 				CalendarID: cal.ID,
@@ -325,17 +326,23 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 			return nil, toAPIError(err)
 		}
 
-		memo, err := loadMemo(ctx, deps, cal.ID, in.MemoID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
-			if err := q.SoftDeleteMemo(ctx, memo.ID); err != nil {
+			memo, err := lockMemo(ctx, q, cal.ID, in.MemoID)
+			if err != nil {
 				return err
+			}
+			// The log row is appended only for a delete this transaction made.
+			res, err := q.SoftDeleteMemo(ctx, memo.ID)
+			if err != nil {
+				return err
+			}
+			if changed, err := blobref.ChangedOne(res); err != nil {
+				return err
+			} else if !changed {
+				return apierrors.MemoNotFound
 			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,

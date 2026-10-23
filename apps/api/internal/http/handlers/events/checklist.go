@@ -2,8 +2,11 @@ package events
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -62,7 +65,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -71,14 +74,16 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		var item generated.CalendarEventChecklistItem
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
 			}
 			if _, err := q.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
 				PublicID:        pubID[:],
 				WorkspaceID:     deps.WorkspaceID,
-				EventID:         evt.ID,
+				EventID:         w.evt.ID,
 				Title:           in.Body.Title,
 				Done:            false,
 				SortWeight:      int32(in.Body.SortOrder),
@@ -86,60 +91,68 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 			}); err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeChecklistAdded, in.Body.Title, pubID[:])
+			if err := logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
+				eventlog.TypeChecklistAdded, in.Body.Title, pubID[:]); err != nil {
+				return err
+			}
+			item, err = q.GetChecklistItemByPublicID(ctx, pubID[:])
+			return err
 		}); err != nil {
 			return nil, toAPIError(err)
 		}
 
-		item, err := deps.Queries.GetChecklistItemByPublicID(ctx, pubID[:])
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		out := &CreateChecklistItemOutput{}
-		out.Body = mapChecklistItem(item)
-		return out, nil
+		return &CreateChecklistItemOutput{Body: mapChecklistItem(item)}, nil
 	}
+}
+
+// lockChecklistItem reads one live item of the event under its row lock.
+func lockChecklistItem(ctx context.Context, q *generated.Queries, eventID uint32, itemID string) (generated.CalendarEventChecklistItem, error) {
+	pub, err := parseUUID(itemID)
+	if err != nil {
+		return generated.CalendarEventChecklistItem{}, apierrors.ChecklistItemNotFound
+	}
+	item, err := q.GetChecklistItemForUpdate(ctx, generated.GetChecklistItemForUpdateParams{
+		PublicID: pub,
+		EventID:  eventID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarEventChecklistItem{}, apierrors.ChecklistItemNotFound
+	}
+	return item, err
 }
 
 // UpdateChecklistItem modifies an existing checklist item.
 func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		itemPub, err := parseUUID(in.ItemID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-		item, err := deps.Queries.GetChecklistItemByPublicID(ctx, itemPub)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-		if item.EventID != evt.ID {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-
-		// Every field keeps its stored value when omitted.
-		title := item.Title
-		if in.Body.Title != nil {
-			title = *in.Body.Title
-		}
-		done := item.Done
-		if in.Body.Done != nil {
-			done = *in.Body.Done
-		}
-		sortOrder := item.SortWeight
-		if in.Body.SortOrder != nil {
-			sortOrder = int32(*in.Body.SortOrder)
-		}
+		var updated generated.CalendarEventChecklistItem
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
+			}
+			item, err := lockChecklistItem(ctx, q, w.evt.ID, in.ItemID)
+			if err != nil {
+				return err
+			}
+			// Every field keeps its stored value when omitted, merged over the
+			// row as it stands under the lock rather than as it was first read.
+			title := item.Title
+			if in.Body.Title != nil {
+				title = *in.Body.Title
+			}
+			done := item.Done
+			if in.Body.Done != nil {
+				done = *in.Body.Done
+			}
+			sortOrder := item.SortWeight
+			if in.Body.SortOrder != nil {
+				sortOrder = int32(*in.Body.SortOrder)
 			}
 			if err := q.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
 				Title:      title,
@@ -149,52 +162,52 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			}); err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeChecklistSet, title, item.PublicID)
+			if err := logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
+				eventlog.TypeChecklistSet, title, item.PublicID); err != nil {
+				return err
+			}
+			updated, err = q.GetChecklistItemByPublicID(ctx, item.PublicID)
+			return err
 		}); err != nil {
 			return nil, toAPIError(err)
 		}
 
-		updated, err := deps.Queries.GetChecklistItemByPublicID(ctx, item.PublicID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		out := &UpdateChecklistItemOutput{}
-		out.Body = mapChecklistItem(updated)
-		return out, nil
+		return &UpdateChecklistItemOutput{Body: mapChecklistItem(updated)}, nil
 	}
 }
 
-// DeleteChecklistItem removes a checklist item from an event.
+// DeleteChecklistItem removes a checklist item from an event. Only the delete
+// that retired the row logs: a second one racing it waits on the item's lock
+// and then finds nothing live to remove.
 func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 	return func(ctx context.Context, in *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, err := resolveEventForEdit(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		itemPub, err := parseUUID(in.ItemID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-		item, err := deps.Queries.GetChecklistItemByPublicID(ctx, itemPub)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-		if item.EventID != evt.ID {
-			return nil, apierrors.ToHuma(apierrors.ChecklistItemNotFound)
-		}
-
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
 			}
-			if err := q.SoftDeleteChecklistItem(ctx, item.ID); err != nil {
+			item, err := lockChecklistItem(ctx, q, w.evt.ID, in.ItemID)
+			if err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
+			res, err := q.SoftDeleteChecklistItem(ctx, item.ID)
+			if err != nil {
+				return err
+			}
+			removed, err := blobref.ChangedOne(res)
+			if err != nil {
+				return err
+			}
+			if !removed {
+				return apierrors.ChecklistItemNotFound
+			}
+			return logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
 				eventlog.TypeChecklistGone, item.Title, item.PublicID)
 		}); err != nil {
 			return nil, toAPIError(err)

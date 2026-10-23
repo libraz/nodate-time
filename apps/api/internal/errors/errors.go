@@ -45,7 +45,6 @@ var _ huma.StatusError = (*HumaError)(nil)
 var (
 	AuthTokenMissing        = &Spec{Status: 401, Code: "AUTH.TOKEN_MISSING", Message: "Authorization header is required"}
 	AuthTokenInvalid        = &Spec{Status: 401, Code: "AUTH.TOKEN_INVALID", Message: "Bearer token is invalid or expired"}
-	AuthEmailExists         = &Spec{Status: 409, Code: "AUTH.EMAIL_EXISTS", Message: "Email address is already registered"}
 	AuthRegisterFailed      = &Spec{Status: 400, Code: "AUTH.REGISTER_FAILED", Message: "Unable to register with the supplied information"}
 	AuthBadCredentials      = &Spec{Status: 401, Code: "AUTH.BAD_CREDENTIALS", Message: "Invalid email or password"}
 	AuthWrongPassword       = &Spec{Status: 400, Code: "AUTH.WRONG_PASSWORD", Message: "Current password is incorrect"}
@@ -74,8 +73,7 @@ var (
 // --- Event errors ---
 
 var (
-	EventNotFound     = &Spec{Status: 404, Code: "EVENT.NOT_FOUND", Message: "Event not found"}
-	EventAccessDenied = &Spec{Status: 403, Code: "EVENT.ACCESS_DENIED", Message: "You do not have access to this event"}
+	EventNotFound = &Spec{Status: 404, Code: "EVENT.NOT_FOUND", Message: "Event not found"}
 	// EventEditDenied separates "you may write to this calendar" from "you may
 	// change this particular event". Sharing a calendar is not the same as
 	// handing everyone on it the right to rewrite each other's plans.
@@ -129,7 +127,10 @@ var (
 
 var (
 	AlbumPhotoNotFound = &Spec{Status: 404, Code: "ALBUM.NOT_FOUND", Message: "Album photo not found"}
-	AlbumPhotoTooLarge = &Spec{Status: 400, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
+	// AlbumInvalidContentType names the album's own accepted types, which
+	// include GIF; the avatar's narrower list is InvalidImageContentType.
+	AlbumInvalidContentType = &Spec{Status: 400, Code: "ALBUM.INVALID_CONTENT_TYPE", Message: "Only JPEG, PNG, WebP, and GIF images are accepted"}
+	AlbumPhotoTooLarge      = &Spec{Status: 400, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
 	// AlbumThumbnailTooLarge refuses the small rendering a photo is uploaded
 	// with, not the photo. Deliberately not ALBUM.TOO_LARGE: that one names
 	// the photo's own ceiling, so a rejected 1.5MB thumbnail would be
@@ -146,10 +147,9 @@ var (
 // --- Member errors ---
 
 var (
-	MemberNotFound      = &Spec{Status: 404, Code: "MEMBER.NOT_FOUND", Message: "Member not found"}
-	MemberAlreadyExists = &Spec{Status: 409, Code: "MEMBER.ALREADY_EXISTS", Message: "User is already a member of this calendar"}
-	MemberLastAdmin     = &Spec{Status: 400, Code: "MEMBER.LAST_ADMIN", Message: "Cannot remove the last admin"}
-	MemberSelfModify    = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
+	MemberNotFound   = &Spec{Status: 404, Code: "MEMBER.NOT_FOUND", Message: "Member not found"}
+	MemberLastAdmin  = &Spec{Status: 400, Code: "MEMBER.LAST_ADMIN", Message: "Cannot remove the last admin"}
+	MemberSelfModify = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
 )
 
 // --- Instance admin errors ---

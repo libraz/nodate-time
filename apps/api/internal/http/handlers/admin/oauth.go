@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
@@ -35,12 +37,12 @@ const SecretMask = "********"
 // --- DTOs ---
 
 type ProviderInfo struct {
-	Provider  string    `json:"provider"`
-	ClientID  string    `json:"clientId"`
-	HasSecret bool      `json:"hasSecret"`
-	Enabled   bool      `json:"enabled"`
-	Source    string    `json:"source" doc:"db | env | none"`
-	UpdatedAt time.Time `json:"updatedAt,omitempty"`
+	Provider  string     `json:"provider"`
+	ClientID  string     `json:"clientId"`
+	HasSecret bool       `json:"hasSecret"`
+	Enabled   bool       `json:"enabled"`
+	Source    string     `json:"source" doc:"db | env | none"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty" required:"false"`
 }
 
 type ListProvidersInput struct{}
@@ -86,7 +88,7 @@ func ListOAuthProviders(deps Deps) func(context.Context, *ListProvidersInput) (*
 				info.ClientID = row.ClientID
 				info.HasSecret = len(row.ClientSecretCiphertext) > 0
 				info.Enabled = row.Enabled
-				info.UpdatedAt = nullTimeValue(row.UpdatedAt)
+				info.UpdatedAt = nullTimePtr(row.UpdatedAt)
 				info.Source = "db"
 			} else if !errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -148,18 +150,37 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		updatedBy := sql.NullInt32{Int32: int32(userID), Valid: userID > 0}
-		if err := deps.Queries.UpsertOAuthProviderConfig(ctx, generated.UpsertOAuthProviderConfigParams{
-			PublicID:               pubID[:],
-			Provider:               generated.OauthProviderConfigsProvider(in.Provider),
-			ClientID:               in.Body.ClientID,
-			ClientSecretCiphertext: encSecret,
-			Enabled:                in.Body.Enabled,
-			UpdatedByUserID:        updatedBy,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		row, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
+		var row generated.OauthProviderConfig
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := q.UpsertOAuthProviderConfig(ctx, generated.UpsertOAuthProviderConfigParams{
+				PublicID:               pubID[:],
+				Provider:               generated.OauthProviderConfigsProvider(in.Provider),
+				ClientID:               in.Body.ClientID,
+				ClientSecretCiphertext: encSecret,
+				Enabled:                in.Body.Enabled,
+				UpdatedByUserID:        updatedBy,
+			}); err != nil {
+				return err
+			}
+			var err error
+			row, err = q.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
+			if err != nil {
+				return err
+			}
+			// The secret is not part of the record, only whether one is stored.
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      userID,
+				Action:           auditOAuthProviderSet,
+				ResourceType:     "oauth_provider",
+				ResourcePublicID: row.PublicID,
+				Payload: map[string]any{
+					"provider":  in.Provider,
+					"clientId":  row.ClientID,
+					"enabled":   row.Enabled,
+					"hasSecret": len(row.ClientSecretCiphertext) > 0,
+				},
+			})
+		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
@@ -169,21 +190,53 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			HasSecret: len(row.ClientSecretCiphertext) > 0,
 			Enabled:   row.Enabled,
 			Source:    "db",
-			UpdatedAt: nullTimeValue(row.UpdatedAt),
+			UpdatedAt: nullTimePtr(row.UpdatedAt),
 		}}, nil
 	}
 }
 
-func nullTimeValue(n sql.NullTime) time.Time {
+func nullTimePtr(n sql.NullTime) *time.Time {
 	if !n.Valid {
-		return time.Time{}
+		return nil
 	}
-	return n.Time
+	return &n.Time
 }
 
 func DeleteOAuthProvider(deps Deps) func(context.Context, *DeleteProviderInput) (*DeleteProviderOutput, error) {
 	return func(ctx context.Context, in *DeleteProviderInput) (*DeleteProviderOutput, error) {
-		if err := deps.Queries.DeleteOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider)); err != nil {
+		actorID, _ := middleware.ActorFromContext(ctx)
+		err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			existing, err := q.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
+			if errors.Is(err, sql.ErrNoRows) {
+				return apierrors.NotFound
+			}
+			if err != nil {
+				return err
+			}
+			res, err := q.DeleteOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
+			if err != nil {
+				return err
+			}
+			// Report a miss rather than a silent success: an operator who thinks
+			// they removed a stored override and did not still has one in effect.
+			if changed, err := blobref.ChangedOne(res); err != nil {
+				return err
+			} else if !changed {
+				return apierrors.NotFound
+			}
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      actorID,
+				Action:           auditOAuthProviderDelete,
+				ResourceType:     "oauth_provider",
+				ResourcePublicID: existing.PublicID,
+				Payload:          map[string]any{"provider": in.Provider},
+			})
+		})
+		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &DeleteProviderOutput{}, nil

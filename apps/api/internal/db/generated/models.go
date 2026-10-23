@@ -1793,8 +1793,6 @@ type Session struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// SHA-256 hex of the refresh token this session last traded in; presenting it again is a replay
-	PrevRefreshHash sql.NullString `json:"prevRefreshHash"`
 	// When the refresh token was last exchanged
 	RotatedAt sql.NullTime `json:"rotatedAt"`
 }

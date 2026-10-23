@@ -21,5 +21,5 @@ ON DUPLICATE KEY UPDATE
 -- name: SetOAuthProviderEnabled :exec
 UPDATE oauth_provider_configs SET enabled = ?, updated_by_user_id = ? WHERE provider = ?;
 
--- name: DeleteOAuthProviderConfig :exec
+-- name: DeleteOAuthProviderConfig :execresult
 DELETE FROM oauth_provider_configs WHERE provider = ?;

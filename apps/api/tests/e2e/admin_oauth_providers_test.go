@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	"github.com/libraz/nodate-time/apps/api/internal/http/app"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/http/router"
@@ -37,7 +38,12 @@ func newTxAdminServer(t *testing.T, tx *sql.Tx, oauth users.OAuthConfig) *httpte
 		Cipher:        cipher,
 		AuthRateLimit: -1,
 	}
-	srv := httptest.NewServer(app.NewHandler(deps, app.Options{}))
+	handler := app.NewHandler(deps, app.Options{})
+	// Handlers that open their own transaction join this one, so their writes
+	// roll back with it too.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(dbtx.WithTx(r.Context(), tx)))
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -115,4 +121,79 @@ func TestAdminOAuthProviderSaveCycle(t *testing.T) {
 	require.True(t, putProvider(t, srv.URL, admin.AccessToken, "line",
 		map[string]any{"clientId": "db-line-client", "clientSecret": "line-secret", "enabled": true}))
 	require.Len(t, readProviderRow(t, tx, "line").publicID, 16)
+}
+
+// A provider with no stored row has no update time, and the listing says so by
+// leaving the field out instead of sending the zero time.
+func TestAdminOAuthListingOmitsUpdatedAtWithoutAStoredRow(t *testing.T) {
+	bootstrap(t)
+
+	admin := helpers.NewTenant(t, testServerURL)
+	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
+
+	tx, err := testDB.Begin()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.Exec(`DELETE FROM oauth_provider_configs WHERE provider IN ('google', 'line')`)
+	require.NoError(t, err)
+
+	srv := newTxAdminServer(t, tx, users.OAuthConfig{
+		Google: users.OAuthProviderConfig{ClientID: "env-google-client", ClientSecret: "env-google-secret"},
+	})
+
+	list := func() map[string]map[string]any {
+		status, raw := helpers.DoJSONStatus(t, http.MethodGet, srv.URL+"/admin/oauth-providers", admin.AccessToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var out struct {
+			Providers []map[string]any `json:"providers"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &out))
+		byName := map[string]map[string]any{}
+		for _, p := range out.Providers {
+			byName[p["provider"].(string)] = p
+		}
+		return byName
+	}
+
+	before := list()
+	require.Equal(t, "env", before["google"]["source"])
+	require.Equal(t, "none", before["line"]["source"])
+	for name, p := range before {
+		require.NotContains(t, p, "updatedAt", "%s has no stored row, so no update time", name)
+	}
+
+	putProvider(t, srv.URL, admin.AccessToken, "google",
+		map[string]any{"clientId": "db-google-client", "clientSecret": "", "enabled": true})
+	after := list()
+	require.Equal(t, "db", after["google"]["source"])
+	require.NotEmpty(t, after["google"]["updatedAt"], "a stored row reports when it was saved")
+	require.NotContains(t, after["line"], "updatedAt")
+}
+
+// Deleting a provider that has no stored row removed nothing, so it is a miss
+// rather than a success; deleting a stored one succeeds once.
+func TestAdminOAuthDeleteReportsAMissingRow(t *testing.T) {
+	bootstrap(t)
+
+	admin := helpers.NewTenant(t, testServerURL)
+	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
+
+	tx, err := testDB.Begin()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.Exec(`DELETE FROM oauth_provider_configs WHERE provider IN ('google', 'line')`)
+	require.NoError(t, err)
+
+	srv := newTxAdminServer(t, tx, users.OAuthConfig{})
+	url := srv.URL + "/admin/oauth-providers/line"
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodDelete, url, admin.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, string(raw))
+
+	putProvider(t, srv.URL, admin.AccessToken, "line",
+		map[string]any{"clientId": "db-line-client", "clientSecret": "line-secret", "enabled": true})
+	status, raw = helpers.DoJSONStatus(t, http.MethodDelete, url, admin.AccessToken, nil)
+	require.Less(t, status, 300, string(raw))
+	status, raw = helpers.DoJSONStatus(t, http.MethodDelete, url, admin.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "the second delete finds nothing: %s", raw)
 }

@@ -53,17 +53,28 @@ INNER JOIN users u ON u.id = ec.author_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE ec.public_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL;
 
--- name: GetEventCommentByPublicIDAndEvent :one
-SELECT ec.*, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
-       so.storage_key AS user_avatar_storage_key,
-       u.public_id AS user_public_id
-FROM calendar_event_comments ec
-INNER JOIN users u ON u.id = ec.author_id
-LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-WHERE ec.public_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL;
+-- GetEventCommentForUpdate reads a live comment under its row lock, inside the
+-- transaction that writes it, so authorship and existence are decided on the
+-- row the write replaces. It joins nothing: a locking read over the author
+-- would lock the user row too.
+-- name: GetEventCommentForUpdate :one
+SELECT * FROM calendar_event_comments
+WHERE public_id = ? AND event_id = ? AND enabled = TRUE AND deleted_at IS NULL
+FOR UPDATE;
+
+-- GetEventCommentCursor resolves a page cursor to its ordering pair. Removed
+-- comments are included: the cursor names a position in the thread, and the
+-- comment it was taken from being removed since does not move that position.
+-- name: GetEventCommentCursor :one
+SELECT id, created_at FROM calendar_event_comments
+WHERE public_id = ? AND event_id = ?;
 
 -- name: UpdateEventComment :exec
-UPDATE calendar_event_comments SET body = ?, edited_at = NOW(3) WHERE id = ?;
+UPDATE calendar_event_comments SET body = ?, edited_at = NOW(3)
+WHERE id = ? AND deleted_at IS NULL;
 
--- name: SoftDeleteEventComment :exec
-UPDATE calendar_event_comments SET deleted_at = NOW(3) WHERE id = ?;
+-- SoftDeleteEventComment retires one live comment. The deleted_at guard makes
+-- the affected-row count say whether this call is the one that removed it.
+-- name: SoftDeleteEventComment :execresult
+UPDATE calendar_event_comments SET deleted_at = NOW(3)
+WHERE id = ? AND deleted_at IS NULL;

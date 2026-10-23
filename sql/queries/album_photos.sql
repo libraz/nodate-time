@@ -24,6 +24,13 @@ WHERE ap.id = ? AND ap.uploaded_by_user_id = ? AND ap.enabled = FALSE AND ap.ret
 -- name: GetAlbumPhotoByPublicID :one
 SELECT * FROM album_photos WHERE public_id = ?;
 
+-- GetAlbumPhotoForUpdate is the read an edit or delete merges over: it takes
+-- the row lock and only matches a live photo of this calendar, so a photo
+-- deleted in the meantime is simply not there.
+-- name: GetAlbumPhotoForUpdate :one
+SELECT * FROM album_photos
+WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE;
+
 -- Both listings join the uploader's avatar object, so a page carries the key
 -- its pictures are signed from rather than costing a lookup per photo.
 --
@@ -84,9 +91,9 @@ ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?;
 
 -- name: UpdateAlbumPhotoMeta :exec
-UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ?;
+UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ? AND enabled = TRUE;
 
--- name: SoftDeleteAlbumPhoto :exec
+-- name: SoftDeleteAlbumPhoto :execresult
 UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND enabled = TRUE;
 
 -- name: DeletePendingAlbumPhoto :exec

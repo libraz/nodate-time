@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -18,41 +21,43 @@ import (
 func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, error) {
 	return func(ctx context.Context, in *SetRsvpInput) (*SetRsvpOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
+		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		actor, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, toAPIError(err)
-		}
-		target, err := attendeeRow(ctx, deps, evt, in.EventID)
-		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		eventRef := sql.NullInt32{Int32: int32(target.ID), Valid: true}
-		if _, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
-			EventID: eventRef,
-			UserID:  userID,
-		}); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
+		var att generated.CalendarEventAttendee
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			w, err := lockEventAccess(ctx, q, cal, evt.ID, userID, occurrenceDate, attendeeScope(occurrenceDate))
+			if err != nil {
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if err := deps.Queries.SetEventAttendeeRsvp(ctx, generated.SetEventAttendeeRsvpParams{
-			Rsvp:    generated.CalendarEventAttendeesRsvp(in.Body.Rsvp),
-			EventID: eventRef,
-			UserID:  userID,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			att, err = lockAttendee(ctx, q, w.row.ID, userID)
+			if err != nil {
+				return err
+			}
+			att.Rsvp = generated.CalendarEventAttendeesRsvp(in.Body.Rsvp)
+			if err := q.SetEventAttendeeRsvp(ctx, generated.SetEventAttendeeRsvpParams{
+				Rsvp:    att.Rsvp,
+				EventID: att.EventID,
+				UserID:  userID,
+			}); err != nil {
+				return err
+			}
+			return logAttendeeChange(ctx, q, deps, userID, w, actor.PublicID, "rsvp", in.Body.Rsvp)
+		})
+		if err != nil {
+			return nil, toAPIError(err)
 		}
 
 		return &SetRsvpOutput{Body: AttendeeResponse{
-			UserID: pubIDToHex(actorPublicID(ctx, deps, userID)),
-			Rsvp:   in.Body.Rsvp,
+			UserID:  pubIDToHex(actor.PublicID),
+			Rsvp:    string(att.Rsvp),
+			CanEdit: att.CanEdit,
 		}}, nil
 	}
 }
@@ -66,18 +71,10 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInput) (*SetAttendeeCanEditOutput, error) {
 	return func(ctx context.Context, in *SetAttendeeCanEditInput) (*SetAttendeeCanEditOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		seriesID, occurrenceDate := parseCompositeID(in.EventID)
-		if seriesID == "" {
-			seriesID = in.EventID
-		}
-		w, err := resolveEventAccess(ctx, deps, in.CalendarID, seriesID, occurrenceDate, actorID)
+		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, actorID, resolveCalendar)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		if err := requireEventEdit(ctx, deps, w, actorID, editGrants); err != nil {
-			return nil, toAPIError(err)
-		}
-
 		targetPub, err := parseUUID(in.UserID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
@@ -87,50 +84,85 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
 		}
 
-		eventRef := sql.NullInt32{Int32: int32(w.row.ID), Valid: true}
-		att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
-			EventID: eventRef,
-			UserID:  target.ID,
+		var att generated.CalendarEventAttendee
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			w, err := lockEventAccess(ctx, q, cal, evt.ID, actorID, occurrenceDate, attendeeScope(occurrenceDate))
+			if err != nil {
+				return err
+			}
+			if err := requireEventEdit(ctx, q, w, actorID, editGrants); err != nil {
+				return err
+			}
+			att, err = lockAttendee(ctx, q, w.row.ID, target.ID)
+			if err != nil {
+				return err
+			}
+			att.CanEdit = in.Body.CanEdit
+			if err := q.SetEventAttendeeCanEdit(ctx, generated.SetEventAttendeeCanEditParams{
+				CanEdit: att.CanEdit,
+				EventID: att.EventID,
+				UserID:  target.ID,
+			}); err != nil {
+				return err
+			}
+			return logAttendeeChange(ctx, q, deps, actorID, w, target.PublicID, "canEdit", att.CanEdit)
 		})
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.EventNotAttendee)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		if err := deps.Queries.SetEventAttendeeCanEdit(ctx, generated.SetEventAttendeeCanEditParams{
-			CanEdit: in.Body.CanEdit,
-			EventID: eventRef,
-			UserID:  target.ID,
-		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		return &SetAttendeeCanEditOutput{Body: AttendeeResponse{
 			UserID:  pubIDToHex(target.PublicID),
 			Rsvp:    string(att.Rsvp),
-			CanEdit: in.Body.CanEdit,
+			CanEdit: att.CanEdit,
 		}}, nil
 	}
 }
 
-// attendeeRow returns the row whose attendees the event id a caller named
-// shows: an edited occurrence keeps its own participants on its override row,
-// so its answers and edit grants live there too; any other occurrence shows the
-// series'.
-func attendeeRow(ctx context.Context, deps Deps, series generated.CalendarEvent, eventID string) (generated.CalendarEvent, error) {
-	_, occurrenceDate := parseCompositeID(eventID)
-	return occurrenceRow(ctx, deps.Queries, series, occurrenceDate)
+// attendeeScope is the scope an attendee write takes: an occurrence id answers
+// for that occurrence's attendees, which are its override's once it has been
+// edited, and any other id for the series'.
+func attendeeScope(occurrenceDate string) string {
+	if occurrenceDate != "" {
+		return scopeThis
+	}
+	return scopeAll
 }
 
-// actorPublicID looks up the caller's public id for echoing back in a
-// response. A failed lookup yields an empty id rather than an error: the write
-// has already happened, and the caller knows who they are.
-func actorPublicID(ctx context.Context, deps Deps, userID uint32) []byte {
-	u, err := deps.Queries.GetUserByID(ctx, userID)
-	if err != nil {
-		return nil
+// lockAttendee reads one live attendee row under its row lock.
+func lockAttendee(ctx context.Context, q *generated.Queries, eventID, userID uint32) (generated.CalendarEventAttendee, error) {
+	att, err := q.GetEventAttendeeForUpdate(ctx, generated.GetEventAttendeeForUpdateParams{
+		EventID: sql.NullInt32{Int32: int32(eventID), Valid: true},
+		UserID:  userID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarEventAttendee{}, apierrors.EventNotAttendee
 	}
-	return u.PublicID
+	return att, err
+}
+
+// logAttendeeChange records an answer or an edit grant changing, and gives the
+// series a new revision the way every other write to the event does: the
+// attendee list is part of what a copy held for a later save says.
+func logAttendeeChange(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess, userPubID []byte, field string, value any) error {
+	if err := q.TouchCalendarEvent(ctx, w.evt.ID); err != nil {
+		return err
+	}
+	extra := map[string]any{
+		"event": pubIDToHex(w.evt.PublicID),
+		"user":  pubIDToHex(userPubID),
+		field:   value,
+	}
+	if w.scope.occurrence != nil {
+		extra["originalStart"] = w.scope.occurrence.StartAt.Format(time.RFC3339)
+	}
+	return eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  w.cal.ID,
+		ActorUserID: actorID,
+		Type:        eventlog.TypeAttendeeUpdated,
+		Summary:     w.evt.Title,
+		Subject:     w.evt.PublicID,
+		Extra:       extra,
+	})
 }

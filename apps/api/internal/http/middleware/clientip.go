@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"unicode/utf8"
 )
 
 type (
@@ -72,6 +73,21 @@ func ClientIPFromContext(ctx context.Context) (string, bool) {
 // controls this header, so it is cut rather than trusted whole.
 const maxUserAgentLen = 255
 
+// clampUserAgent makes the header storable: valid UTF-8, since the column
+// refuses anything else, and at most maxUserAgentLen bytes, cut on a rune
+// boundary so the cut cannot produce an invalid sequence of its own.
+func clampUserAgent(ua string) string {
+	ua = strings.ToValidUTF8(ua, "")
+	if len(ua) <= maxUserAgentLen {
+		return ua
+	}
+	end := maxUserAgentLen
+	for end > 0 && !utf8.RuneStart(ua[end]) {
+		end--
+	}
+	return ua[:end]
+}
+
 // WithUserAgent stores the client hint for the current request.
 func WithUserAgent(ctx context.Context, ua string) context.Context {
 	return context.WithValue(ctx, ctxKeyUserAgent{}, ua)
@@ -96,11 +112,7 @@ func ClientIPMiddleware(trustedProxies []netip.Prefix) func(http.Handler) http.H
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := WithClientIP(r.Context(), ClientIP(r, trustedProxies))
-			ua := r.UserAgent()
-			if len(ua) > maxUserAgentLen {
-				ua = ua[:maxUserAgentLen]
-			}
-			ctx = WithUserAgent(ctx, ua)
+			ctx = WithUserAgent(ctx, clampUserAgent(r.UserAgent()))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

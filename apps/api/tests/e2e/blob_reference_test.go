@@ -129,7 +129,7 @@ func TestDeletingACalendarWhileAPhotoInItConfirms(t *testing.T) {
 		calendarID := newCalendar(t, tt, fmt.Sprintf("Raced %d", round))
 		calURL := testServerURL + "/calendars/" + calendarID
 		stamp := fmt.Sprintf("%d-%d", round, time.Now().UnixNano())
-		uploadPhotoBytes(t, tt, calendarID, distinctPNG("kept-"+stamp), "kept")
+		keptID := uploadPhotoBytes(t, tt, calendarID, distinctPNG("kept-"+stamp), "kept")
 
 		body := distinctPNG("raced-" + stamp)
 		var pres albumPresignResp
@@ -157,6 +157,23 @@ func TestDeletingACalendarWhileAPhotoInItConfirms(t *testing.T) {
 
 		require.Equal(t, http.StatusNoContent, deleted, "round %d", round)
 		require.Contains(t, []int{http.StatusOK, http.StatusNotFound}, confirmed, "round %d", round)
+
+		// Whichever request committed first, nothing in the deleted calendar
+		// is left enabled: a confirm that lost the race must not bring its
+		// photo back, and one that won must still be retired by the delete.
+		for name, photoID := range map[string]string{"kept": keptID, "raced": pres.PhotoID} {
+			var enabled bool
+			require.NoError(t, testDB.QueryRow(
+				"SELECT enabled FROM album_photos WHERE public_id = UUID_TO_BIN(?)", photoID,
+			).Scan(&enabled), "round %d: %s photo", round, name)
+			require.False(t, enabled, "round %d: the %s photo is enabled in a deleted calendar", round, name)
+		}
+		var live int
+		require.NoError(t, testDB.QueryRow(
+			`SELECT COUNT(*) FROM album_photos ap JOIN calendars c ON c.id = ap.calendar_id
+			  WHERE c.public_id = UUID_TO_BIN(?) AND ap.enabled = TRUE`, calendarID,
+		).Scan(&live))
+		require.Zero(t, live, "round %d: no photo of a deleted calendar stays enabled", round)
 	}
 }
 
@@ -204,7 +221,7 @@ func TestARetiredAttachmentOutlivesTheAbandonedUploadSweep(t *testing.T) {
 		time.Now().Add(-10*24*time.Hour), attachmentID)
 	require.NoError(t, err)
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	var rows int
 	require.NoError(t, testDB.QueryRow(

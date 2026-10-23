@@ -2,6 +2,7 @@ package calendars
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,7 +31,7 @@ func (t zoneTransition) onset() time.Time {
 func writeVTimezone(b *strings.Builder, zone string, from, now time.Time) {
 	loc := loadLocationOrUTC(zone)
 	scanStart := time.Date(from.UTC().Year()-1, 1, 1, 0, 0, 0, 0, time.UTC)
-	lastYear := now.UTC().Year() + 2
+	lastYear := now.UTC().Year() + 2 + ruleSampleYears
 	scanEnd := time.Date(lastYear+1, 1, 1, 0, 0, 0, 0, time.UTC)
 	transitions := findTransitions(loc, scanStart, scanEnd)
 
@@ -127,6 +128,12 @@ func findTransitions(loc *time.Location, start, end time.Time) []zoneTransition 
 	return out
 }
 
+// ruleSampleYears is how far past the near future the yearly pattern is read.
+// The tz database projects a zone's current rule forward, and twelve years
+// put a fixed date on every weekday, which is what tells "the first Sunday on
+// or after the 2nd" apart from "the first Sunday".
+const ruleSampleYears = 12
+
 var icsWeekdayCodes = [...]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
 
 // transitionRule renders the yearly rule a transition follows, counted from
@@ -180,10 +187,52 @@ func yearlyRules(transitions []zoneTransition, lastYear int) (int, []string) {
 				best, bestRule = y, transitionRule(r, last)
 			}
 		}
+		if y, rule := onOrAfterRule(byYear, ref, i, lastYear); y < best {
+			best, bestRule = y, rule
+		}
 		rules[i] = bestRule
 		if best > from {
 			from = best
 		}
 	}
 	return from, rules
+}
+
+// onOrAfterRule follows ref[i] back while each year's transition falls on the
+// same weekday of the same month inside one seven-day stretch, the shape of a
+// tz rule such as "Sunday on or after the 2nd", and renders that stretch as
+// the RFC 5545 on-or-after form. An ordinal rule is this form too, so it only
+// wins where no ordinal fits as many years.
+func onOrAfterRule(byYear map[int][]zoneTransition, ref []zoneTransition, i, lastYear int) (int, string) {
+	r := ref[i]
+	ro := r.onset()
+	lo, hi := ro.Day(), ro.Day()
+	y := lastYear
+	for {
+		ts := byYear[y-1]
+		if len(ts) != len(ref) {
+			break
+		}
+		t, o := ts[i], ts[i].onset()
+		if t.from != r.from || t.to != r.to || t.name != r.name || t.dst != r.dst ||
+			o.Month() != ro.Month() || o.Weekday() != ro.Weekday() ||
+			o.Hour() != ro.Hour() || o.Minute() != ro.Minute() || o.Second() != ro.Second() {
+			break
+		}
+		if max(hi, o.Day())-min(lo, o.Day()) > 6 {
+			break
+		}
+		lo, hi = min(lo, o.Day()), max(hi, o.Day())
+		y--
+	}
+	// The stretch has to fit the month in every year, February included.
+	if lo+6 > time.Date(2023, ro.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day() {
+		return lastYear + 1, ""
+	}
+	days := make([]string, 7)
+	for d := range days {
+		days[d] = strconv.Itoa(lo + d)
+	}
+	return y, fmt.Sprintf("FREQ=YEARLY;BYMONTH=%d;BYMONTHDAY=%s;BYDAY=%s",
+		int(ro.Month()), strings.Join(days, ","), icsWeekdayCodes[ro.Weekday()])
 }

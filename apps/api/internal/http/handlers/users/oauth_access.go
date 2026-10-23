@@ -26,14 +26,22 @@ func emailDomainAllowed(email string, allowedDomains []string) bool {
 	return false
 }
 
-// emailAllowedToSignIn decides whether an account with the given email may
-// access the platform, whether via OAuth sign-in or password registration.
-// The domain allowlist applies first; if the domain is not allowed, the
+// emailAllowedToSignIn is the one admission decision every session-issuing
+// path makes: registration, password login and each provider sign-in. The
+// domain allowlist applies first; if the domain is not allowed, the
 // individually allow-listed addresses (managed in the admin panel) are
 // consulted as a fallback. An empty domain allowlist means unrestricted.
-func emailAllowedToSignIn(ctx context.Context, q *generated.Queries, allowedDomains []string, email string) (bool, error) {
-	if emailDomainAllowed(email, allowedDomains) {
+//
+// verifiedEmail must be an address the caller has evidence the user owns.
+// A path with no such address passes "", which a restricted deployment
+// refuses: an unproven address satisfying either list would let anyone claim
+// an allowed domain.
+func emailAllowedToSignIn(ctx context.Context, q *generated.Queries, allowedDomains []string, verifiedEmail string) (bool, error) {
+	if emailDomainAllowed(verifiedEmail, allowedDomains) {
 		return true, nil
 	}
-	return q.IsEmailAllowed(ctx, strings.ToLower(strings.TrimSpace(email)))
+	if verifiedEmail == "" {
+		return false, nil
+	}
+	return q.IsEmailAllowed(ctx, strings.ToLower(strings.TrimSpace(verifiedEmail)))
 }

@@ -55,9 +55,9 @@ func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
 	}
 }
 
-// TestBuildICSTimedEmitsUTC verifies timed events are normalized to UTC (Z),
-// so no TZID reference is emitted without an accompanying VTIMEZONE component.
-func TestBuildICSTimedEmitsUTC(t *testing.T) {
+// A timed event leaves in its own zone, defined by a VTIMEZONE in the same
+// file, so a re-import keeps the zone; one in UTC stays a bare instant.
+func TestBuildICSTimedEventCarriesItsZone(t *testing.T) {
 	start := time.Date(2025, 6, 24, 1, 0, 0, 0, time.UTC) // 10:00 JST
 	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
@@ -65,11 +65,23 @@ func TestBuildICSTimedEmitsUTC(t *testing.T) {
 		Timezone: "Asia/Tokyo",
 	}
 	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour)}})
-	if !strings.Contains(out, "DTSTART:20250624T010000Z") {
-		t.Errorf("timed event should emit a UTC instant, got:\n%s", out)
+	for _, want := range []string{
+		"DTSTART;TZID=Asia/Tokyo:20250624T100000",
+		"DTEND;TZID=Asia/Tokyo:20250624T110000",
+		"BEGIN:VTIMEZONE\r\nTZID:Asia/Tokyo\r\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
 	}
-	if strings.Contains(out, "TZID=") {
-		t.Errorf("export must not reference TZID without a VTIMEZONE component, got:\n%s", out)
+
+	ev.Timezone = "UTC"
+	out = buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour)}})
+	if !strings.Contains(out, "DTSTART:20250624T010000Z") {
+		t.Errorf("a UTC event should emit a UTC instant, got:\n%s", out)
+	}
+	if strings.Contains(out, "TZID") {
+		t.Errorf("a UTC event needs no zone definition, got:\n%s", out)
 	}
 }
 

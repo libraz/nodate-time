@@ -69,6 +69,73 @@ func (q *Queries) GetMemoByPublicID(ctx context.Context, arg GetMemoByPublicIDPa
 	return i, err
 }
 
+const getMemoCursor = `-- name: GetMemoCursor :one
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, title, body, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_memos WHERE public_id = ? AND calendar_id = ?
+`
+
+type GetMemoCursorParams struct {
+	PublicID   []byte `json:"publicId"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+// GetMemoCursor resolves the memo a page cursor names. It matches deleted
+// memos too: one deleted between two pages still has an ordering position,
+// and refusing its cursor would break a list that is being walked.
+func (q *Queries) GetMemoCursor(ctx context.Context, arg GetMemoCursorParams) (CalendarMemo, error) {
+	row := q.db.QueryRowContext(ctx, getMemoCursor, arg.PublicID, arg.CalendarID)
+	var i CalendarMemo
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CreatedByUserID,
+		&i.Title,
+		&i.Body,
+		&i.Done,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getMemoForUpdate = `-- name: GetMemoForUpdate :one
+SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, title, body, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_memos
+WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE
+`
+
+type GetMemoForUpdateParams struct {
+	PublicID   []byte `json:"publicId"`
+	CalendarID uint32 `json:"calendarId"`
+}
+
+// GetMemoForUpdate is the read a write merges over: it takes the row lock, so
+// the fields it returns are the ones the write replaces, and a memo deleted
+// in the meantime is simply not there.
+func (q *Queries) GetMemoForUpdate(ctx context.Context, arg GetMemoForUpdateParams) (CalendarMemo, error) {
+	row := q.db.QueryRowContext(ctx, getMemoForUpdate, arg.PublicID, arg.CalendarID)
+	var i CalendarMemo
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.CalendarID,
+		&i.CreatedByUserID,
+		&i.Title,
+		&i.Body,
+		&i.Done,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listMemosByCalendarAfter = `-- name: ListMemosByCalendarAfter :many
 SELECT id, public_id, workspace_id, calendar_id, created_by_user_id, title, body, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_memos
 WHERE calendar_id = ? AND enabled = TRUE
@@ -195,17 +262,16 @@ func (q *Queries) ListMemosByCalendarFirstPage(ctx context.Context, arg ListMemo
 	return items, nil
 }
 
-const softDeleteMemo = `-- name: SoftDeleteMemo :exec
-UPDATE calendar_memos SET enabled = FALSE WHERE id = ?
+const softDeleteMemo = `-- name: SoftDeleteMemo :execresult
+UPDATE calendar_memos SET enabled = FALSE WHERE id = ? AND enabled = TRUE
 `
 
-func (q *Queries) SoftDeleteMemo(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteMemo, id)
-	return err
+func (q *Queries) SoftDeleteMemo(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteMemo, id)
 }
 
 const updateMemo = `-- name: UpdateMemo :exec
-UPDATE calendar_memos SET title = ?, body = ?, done = ?, sort_weight = ? WHERE id = ?
+UPDATE calendar_memos SET title = ?, body = ?, done = ?, sort_weight = ? WHERE id = ? AND enabled = TRUE
 `
 
 type UpdateMemoParams struct {

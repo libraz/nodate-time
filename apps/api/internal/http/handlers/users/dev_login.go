@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 )
 
@@ -21,7 +22,7 @@ const devAccountEmailSuffix = "@example.com"
 func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput, error) {
 	return func(ctx context.Context, in *DevLoginInput) (*DevLoginOutput, error) {
 		email := strings.ToLower(strings.TrimSpace(in.Body.Email))
-		if !strings.HasSuffix(email, devAccountEmailSuffix) {
+		if !strings.HasSuffix(email, devAccountEmailSuffix) || !auth.StorableEmail(email) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 

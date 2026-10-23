@@ -46,6 +46,14 @@ func TestRuleValidate(t *testing.T) {
 		{"until date before the start day", Rule{Freq: "daily", Interval: 1, Until: until("2026-04-02")}, true},
 		{"until instant equal to start", Rule{Freq: "daily", Interval: 1, Until: until("2026-04-03T15:00:00+09:00")}, false},
 		{"until instant earlier the same day", Rule{Freq: "daily", Interval: 1, Until: until("2026-04-03T14:59:00+09:00")}, true},
+		{"count and until together", Rule{Freq: "daily", Interval: 1, Count: 3, Until: until("2026-12-31")}, true},
+		// The start is a Friday, the 3rd, and the first Friday of April.
+		{"weekly byDay first reached after until", Rule{Freq: "weekly", Interval: 1, ByDay: []string{"MO"}, Until: until("2026-04-05")}, true},
+		{"weekly byDay reached before until", Rule{Freq: "weekly", Interval: 1, ByDay: []string{"MO"}, Until: until("2026-04-06")}, false},
+		{"monthly day already past, until this month", Rule{Freq: "monthly", Interval: 1, ByMonthDay: 2, Until: until("2026-04-30")}, true},
+		{"monthly day already past, until next month", Rule{Freq: "monthly", Interval: 1, ByMonthDay: 2, Until: until("2026-05-02")}, false},
+		{"monthly nth weekday already past, until this month", Rule{Freq: "monthly", Interval: 1, ByDay: []string{"WE"}, BySetPos: 1, Until: until("2026-04-30")}, true},
+		{"monthly nth weekday later this month", Rule{Freq: "monthly", Interval: 1, ByDay: []string{"FR"}, BySetPos: 2, Until: until("2026-04-10")}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,5 +87,60 @@ func TestValidatedRuleProducesItsFirstOccurrence(t *testing.T) {
 	}
 	if !OccursAt(r, start, start.Add(time.Hour), "UTC", start) {
 		t.Fatal("a series whose until equals its start must still occur at its start")
+	}
+}
+
+// Whatever rule Validate accepts expands to at least one occurrence between
+// its start and the end ComputeEnd records for it, so the event shows up
+// somewhere.
+func TestEveryValidatedRuleHasAnOccurrence(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+	until := func(s string) *string { return &s }
+	var rules []Rule
+	for _, interval := range []int{1, 2} {
+		rules = append(rules,
+			Rule{Freq: "daily", Interval: interval},
+			Rule{Freq: "yearly", Interval: interval},
+			Rule{Freq: "monthly", Interval: interval},
+		)
+		for _, day := range []string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"} {
+			rules = append(rules, Rule{Freq: "weekly", Interval: interval, ByDay: []string{day}})
+			for pos := 1; pos <= 5; pos++ {
+				rules = append(rules, Rule{Freq: "monthly", Interval: interval, ByDay: []string{day}, BySetPos: pos})
+			}
+		}
+		for day := 1; day <= 31; day++ {
+			rules = append(rules, Rule{Freq: "monthly", Interval: interval, ByMonthDay: day})
+		}
+	}
+	ends := []func(Rule) Rule{
+		func(r Rule) Rule { return r },
+		func(r Rule) Rule { r.Count = 1; return r },
+		func(r Rule) Rule { r.Until = until("2026-04-03"); return r },
+		func(r Rule) Rule { r.Until = until("2026-04-09"); return r },
+		func(r Rule) Rule { r.Until = until("2026-04-30"); return r },
+		func(r Rule) Rule { r.Until = until("2026-05-20T00:00:00Z"); return r },
+	}
+	start := time.Date(2026, 4, 3, 15, 0, 0, 0, tokyo)
+	end := start.Add(time.Hour)
+	accepted := 0
+	for _, base := range rules {
+		for _, withEnd := range ends {
+			r := withEnd(base)
+			if r.Validate(start) != nil {
+				continue
+			}
+			accepted++
+			last := ComputeEnd(&r, start, end)
+			if len(Expand(&r, start, end, start, last.Add(time.Second))) == 0 {
+				t.Errorf("validated rule %+v (until %v) expands to nothing", r, r.Until)
+			}
+		}
+	}
+	if accepted == 0 {
+		t.Fatal("no rule was accepted, so nothing was checked")
 	}
 }

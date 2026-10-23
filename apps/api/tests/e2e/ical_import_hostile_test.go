@@ -373,31 +373,48 @@ func TestICalImportJoinsFoldedLinesIntoOneValue(t *testing.T) {
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
-// A description too long for a title column still fits the one it goes in, and
-// what fits must arrive whole. This is the other half of the truncation
-// question: refusing what does not fit is only right if what does fit survives.
-func TestICalImportKeepsALongDescriptionWhole(t *testing.T) {
+// A description longer than the memo the events API accepts is cut to that
+// length, on a character boundary, so the event lands and an unchanged save of
+// it is not refused. One within the limit arrives whole.
+func TestICalImportCutsALongDescriptionToTheMemoLimit(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	calURL := hostileCalendar(t, tt, "Long description")
 
-	const size = 200000
-	ics := wrap(vevent("UID:desc@example.com", "SUMMARY:Long notes",
-		"DESCRIPTION:"+strings.Repeat("B", size),
-		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
-	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
-
-	listed := listHostile(t, calURL, tt.AccessToken)
-	require.Len(t, listed, 1)
-
-	var evt struct {
-		Memo string `json:"memo"`
+	const limit = 16000
+	cases := []struct {
+		name, desc string
+		want       int
+	}{
+		{"within the limit", strings.Repeat("あ", limit), limit},
+		{"far past the limit", strings.Repeat("B", 100) + strings.Repeat("あ", 200000), limit},
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
-	require.Len(t, evt.Memo, size, "the description must arrive at its full length or not at all")
-	deleteEverything(t, calURL, tt.AccessToken, listed)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			calURL := hostileCalendar(t, tt, "Long description "+c.name)
+			ics := wrap(vevent("UID:desc@example.com", "SUMMARY:Long notes",
+				"DESCRIPTION:"+c.desc, "DTSTART:20260601T100000Z", "DTEND:20260601T110000Z"))
+			require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, tt.AccessToken, ics))
+
+			listed := listHostile(t, calURL, tt.AccessToken)
+			require.Len(t, listed, 1)
+			var evt struct {
+				Memo string `json:"memo"`
+			}
+			helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
+			require.True(t, utf8.ValidString(evt.Memo), "the cut must not split a character")
+			require.Equal(t, c.want, utf8.RuneCountInString(evt.Memo))
+			require.True(t, strings.HasPrefix(c.desc, evt.Memo), "the memo is the start of the description")
+
+			body := eventBody("Long notes", "2026-06-01T10:00:00Z", "2026-06-01T11:00:00Z")
+			body["memo"] = evt.Memo
+			status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+listed[0].ID,
+				tt.AccessToken, body)
+			require.Equal(t, http.StatusOK, status, "an unchanged save of the imported memo: %s", cut(string(raw), 400))
+			deleteEverything(t, calURL, tt.AccessToken, listed)
+		})
+	}
 }
 
 // A rule the expander cannot honour must not collapse into a single occurrence
@@ -420,7 +437,10 @@ func TestICalImportRefusesRecurrenceItCannotHonour(t *testing.T) {
 		{"negative INTERVAL", "FREQ=DAILY;INTERVAL=-1", importReport{Skipped: 1}},
 		{"COUNT past what an int can hold", "FREQ=DAILY;COUNT=99999999999999999999", importReport{Skipped: 1}},
 		{"nothing that parses as a rule", "=;;==;FREQ", importReport{Skipped: 1}},
-		{"an unsupported ordinal BYDAY", "FREQ=MONTHLY;BYDAY=2MO", importReport{Skipped: 1}},
+		{"a negative ordinal BYDAY", "FREQ=MONTHLY;BYDAY=-1MO", importReport{Skipped: 1}},
+		{"an ordinal BYDAY on a weekly rule", "FREQ=WEEKLY;BYDAY=2MO", importReport{Skipped: 1}},
+		{"COUNT and UNTIL together", "FREQ=DAILY;COUNT=3;UNTIL=20260610T000000Z", importReport{Skipped: 1}},
+		{"a day of the month short months skip", "FREQ=MONTHLY;BYMONTHDAY=31", importReport{Skipped: 1}},
 	}
 
 	for _, c := range cases {

@@ -28,10 +28,11 @@ UPDATE identities
 SET password_hash = ?, failed_attempts = 0, locked_until_at = NULL
 WHERE user_id = ? AND provider = 'local';
 
--- RecordFailedLogin counts failures inside the lockout window rather than for
--- the lifetime of the identity: a failure arriving after the lock it earned has
--- run out starts a new count of one. A counter that never forgets means a
--- single guess re-locks the account for another full window, forever.
+-- RecordFailedLogin counts consecutive failures since the last success or the
+-- last lock running out. Nothing records when each failure happened, so ones
+-- spread over any length of time accumulate until they reach the threshold.
+-- A failure arriving after an expired lock starts a new count of one: a
+-- counter that never forgets would re-lock on a single guess, forever.
 --
 -- Counting and locking are one statement so that a single clock answers both.
 -- Deciding the lock in Go against time.Now() while the reset here is decided

@@ -255,7 +255,7 @@ func (q *Queries) RevokeCalendarMember(ctx context.Context, arg RevokeCalendarMe
 }
 
 const updateCalendarMemberColor = `-- name: UpdateCalendarMemberColor :exec
-UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id = ?
+UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE
 `
 
 type UpdateCalendarMemberColorParams struct {
@@ -270,7 +270,7 @@ func (q *Queries) UpdateCalendarMemberColor(ctx context.Context, arg UpdateCalen
 }
 
 const updateCalendarMemberRole = `-- name: UpdateCalendarMemberRole :exec
-UPDATE calendar_members SET role = ? WHERE calendar_id = ? AND user_id = ?
+UPDATE calendar_members SET role = ? WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE
 `
 
 type UpdateCalendarMemberRoleParams struct {

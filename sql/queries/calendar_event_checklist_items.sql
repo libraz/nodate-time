@@ -20,8 +20,19 @@ WHERE public_id = ? AND enabled = TRUE;
 INSERT INTO calendar_event_checklist_items (public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight)
 VALUES (?, ?, ?, ?, ?, ?, ?);
 
--- name: UpdateChecklistItem :exec
-UPDATE calendar_event_checklist_items SET title = ?, done = ?, sort_weight = ? WHERE id = ?;
+-- GetChecklistItemForUpdate reads a live item of one event under its row lock,
+-- inside the transaction that writes it, so a partial update merges over the
+-- row it replaces.
+-- name: GetChecklistItemForUpdate :one
+SELECT * FROM calendar_event_checklist_items
+WHERE public_id = ? AND event_id = ? AND enabled = TRUE
+FOR UPDATE;
 
--- name: SoftDeleteChecklistItem :exec
-UPDATE calendar_event_checklist_items SET enabled = FALSE WHERE id = ?;
+-- name: UpdateChecklistItem :exec
+UPDATE calendar_event_checklist_items SET title = ?, done = ?, sort_weight = ?
+WHERE id = ? AND enabled = TRUE;
+
+-- SoftDeleteChecklistItem retires one live item. The enabled guard makes the
+-- affected-row count say whether this call is the one that removed it.
+-- name: SoftDeleteChecklistItem :execresult
+UPDATE calendar_event_checklist_items SET enabled = FALSE WHERE id = ? AND enabled = TRUE;

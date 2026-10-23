@@ -56,6 +56,13 @@ WHERE user_id = sqlc.arg(user_id) AND enabled = TRUE
 SELECT * FROM calendar_event_attendees
 WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
 
+-- GetEventAttendeeForUpdate reads a live attendee row under its row lock,
+-- inside the transaction that changes its answer or edit grant.
+-- name: GetEventAttendeeForUpdate :one
+SELECT * FROM calendar_event_attendees
+WHERE event_id = ? AND user_id = ? AND enabled = TRUE
+FOR UPDATE;
+
 -- name: SetEventAttendeeRsvp :exec
 UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
 

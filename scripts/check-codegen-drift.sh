@@ -255,22 +255,15 @@ GENERATED_NAMES = {"models.go", "db.go", "querier.go", "copyfrom.go", "batch.go"
 # been written yet. The second kind records outstanding work — it leaves
 # this list when the endpoint is wired, not when the list gets long.
 ALLOWED = {
-    # Emitted by sqlc onto Queries in db.go; not a query. The transaction
-    # helper builds its Queries with generated.New(tx), so nothing reaches
-    # for it.
-    "WithTx",
-
     # Superseded by CountCalendarOwnersForUpdate. The last-owner guard has
     # to hold its count across the role change or two concurrent
     # demotions both pass, so the locking variant is the only one a
     # caller should want.
     "CountCalendarOwners",
-    # Locking variants of reads whose callers do not yet take the lock:
-    # the membership write reads through GetCalendarMember and the
-    # password change through GetLocalIdentityByUser. Wiring is
-    # outstanding, and deleting these would remove the fix rather than
-    # the problem.
-    "GetCalendarMemberForUpdate",
+    # Locking variant of a read whose caller does not yet take the lock:
+    # the password change reads through GetLocalIdentityByUser. Wiring is
+    # outstanding, and deleting it would remove the fix rather than the
+    # problem.
     "GetLocalIdentityByUserForUpdate",
 
     # No account screen yet. Listing a user's linked identities and

@@ -155,7 +155,7 @@ func main() {
 	}
 
 	// Background cleanup of expired tokens and abandoned upload rows/objects.
-	cleanup.Run(backgroundCtx, queries, storageClient, 15*time.Minute)
+	cleanup.Run(backgroundCtx, db, storageClient, 15*time.Minute)
 
 	// Build app router. Mail goes out through a dispatcher so a slow relay
 	// costs a background goroutine instead of the request that triggered it.

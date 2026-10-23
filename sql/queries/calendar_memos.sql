@@ -30,12 +30,25 @@ LIMIT ?;
 SELECT * FROM calendar_memos
 WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE;
 
+-- GetMemoForUpdate is the read a write merges over: it takes the row lock, so
+-- the fields it returns are the ones the write replaces, and a memo deleted
+-- in the meantime is simply not there.
+-- name: GetMemoForUpdate :one
+SELECT * FROM calendar_memos
+WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE;
+
+-- GetMemoCursor resolves the memo a page cursor names. It matches deleted
+-- memos too: one deleted between two pages still has an ordering position,
+-- and refusing its cursor would break a list that is being walked.
+-- name: GetMemoCursor :one
+SELECT * FROM calendar_memos WHERE public_id = ? AND calendar_id = ?;
+
 -- name: CreateMemo :execresult
 INSERT INTO calendar_memos (public_id, workspace_id, calendar_id, created_by_user_id, title, body, sort_weight)
 VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateMemo :exec
-UPDATE calendar_memos SET title = ?, body = ?, done = ?, sort_weight = ? WHERE id = ?;
+UPDATE calendar_memos SET title = ?, body = ?, done = ?, sort_weight = ? WHERE id = ? AND enabled = TRUE;
 
--- name: SoftDeleteMemo :exec
-UPDATE calendar_memos SET enabled = FALSE WHERE id = ?;
+-- name: SoftDeleteMemo :execresult
+UPDATE calendar_memos SET enabled = FALSE WHERE id = ? AND enabled = TRUE;

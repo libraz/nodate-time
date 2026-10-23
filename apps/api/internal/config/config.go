@@ -68,8 +68,8 @@ type Config struct {
 	// quick login (/auth/dev-login) is independent of this flag and stays
 	// available whenever IsDev() is true, so dev verification is never blocked.
 	PasswordLoginEnabled bool `env:"TC_PASSWORD_LOGIN_ENABLED" envDefault:"true"`
-	// SMTP delivery. When SMTPHost is set, password-reset and invite mails are
-	// sent via SMTP; otherwise they go to the console mailer, which Validate
+	// SMTP delivery. When SMTPHost is set, password-reset and email-verification
+	// mails are sent via SMTP; otherwise they go to the console mailer, which Validate
 	// accepts only with AllowConsoleMailer.
 	SMTPHost           string `env:"TC_SMTP_HOST" envDefault:""`
 	SMTPPort           int    `env:"TC_SMTP_PORT" envDefault:"587"`
@@ -142,9 +142,10 @@ type Config struct {
 
 	// Comma-separated list of email domains allowed to sign up or sign in
 	// (e.g. "example.com,agency.co.jp"). It applies to every path that creates
-	// or admits an account: Google and LINE sign-in and password registration.
-	// Empty means no restriction. When set, addresses outside these domains are
-	// rejected unless individually allow-listed in the admin panel.
+	// or admits an account: password registration and login, and Google
+	// sign-in. Empty means no restriction. When set, addresses outside these
+	// domains are rejected unless individually allow-listed in the admin
+	// panel, and LINE sign-in, which verifies no address, is refused.
 	GoogleAllowedDomains string `env:"TC_GOOGLE_ALLOWED_DOMAINS" envDefault:""`
 
 	LINEClientID     string `env:"TC_LINE_CLIENT_ID" envDefault:""`
@@ -244,8 +245,8 @@ func LoadForTooling() (*Config, error) {
 // secret is as cheap to generate as to copy, and the default CORS list is
 // already explicit localhost origins.
 //
-// TC_ENV only adds the development affordances (/auth/dev-login); it takes no
-// protection away.
+// TC_ENV only adds the development affordances (/auth/dev-login, and the
+// console mailer logging whole messages); it takes no protection away.
 func (c *Config) Validate() error {
 	// The signing secret is the session system. Its default is committed here,
 	// so accepting it anywhere reachable lets anyone mint a token for any

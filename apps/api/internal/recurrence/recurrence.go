@@ -15,8 +15,8 @@ type Rule struct {
 	ByDay      []string `json:"byDay,omitempty"`      // weekly: any of MO..SU (weeks start on Sunday: WKST=SU); monthly: exactly one, with bySetPos
 	ByMonthDay int      `json:"byMonthDay,omitempty"` // monthly only: 1-31, clamped to the month's last day
 	BySetPos   int      `json:"bySetPos,omitempty"`   // monthly only: Nth weekday of month (1-5), with one byDay
-	Until      *string  `json:"until,omitempty"`      // RFC 3339 instant, or a date meaning the end of that day in the event's zone
-	Count      int      `json:"count,omitempty"`      // max occurrences (1-1000; 0 means unbounded)
+	Until      *string  `json:"until,omitempty"`      // RFC 3339 instant, or a date meaning the end of that day in the event's zone; not with count
+	Count      int      `json:"count,omitempty"`      // max occurrences (1-1000; 0 means unbounded); not with until
 }
 
 // ErrInvalidRule is a rule the expander would not honour as written.
@@ -60,13 +60,41 @@ func (r *Rule) Validate(eventStart time.Time) error {
 			return ErrInvalidRule
 		}
 	}
+	// RFC 5545 allows one end condition per rule, and Expand would stop at
+	// whichever came first while an export could only name one of them.
+	if r.Count > 0 && r.Until != nil {
+		return ErrInvalidRule
+	}
+	first, ok := firstOccurrence(r, eventStart)
+	if !ok {
+		return ErrInvalidRule
+	}
 	if r.Until != nil {
 		until, ok := untilInstant(*r.Until, eventStart.Location())
-		if !ok || until.Before(eventStart) {
+		if !ok || first.After(until) {
 			return ErrInvalidRule
 		}
 	}
 	return nil
+}
+
+// firstOccurrence is the first start Expand produces for the rule, which is
+// later than eventStart when the start itself is off the rule's grid.
+func firstOccurrence(rule *Rule, eventStart time.Time) (time.Time, bool) {
+	r := *rule
+	r.Count = 0
+	r.Until = nil
+	it := newIterator(&r, eventStart)
+	for scanned := 0; scanned < maxExpansionIterations; scanned++ {
+		t := it.next()
+		if t.IsZero() {
+			return time.Time{}, false
+		}
+		if !t.Before(eventStart) {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // untilInstant reads an until as the last instant the series may start at.

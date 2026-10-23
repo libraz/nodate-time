@@ -8,8 +8,39 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 )
+
+const appendInstanceAuditLog = `-- name: AppendInstanceAuditLog :execresult
+INSERT INTO instance_audit_logs (public_id, actor_user_id, action, target_resource_type, target_resource_public_id, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type AppendInstanceAuditLogParams struct {
+	PublicID               []byte          `json:"publicId"`
+	ActorUserID            sql.NullInt32   `json:"actorUserId"`
+	Action                 string          `json:"action"`
+	TargetResourceType     sql.NullString  `json:"targetResourceType"`
+	TargetResourcePublicID sql.NullString  `json:"targetResourcePublicId"`
+	PayloadJSON            json.RawMessage `json:"payloadJson"`
+	OccurredAt             time.Time       `json:"occurredAt"`
+}
+
+// AppendInstanceAuditLog records one instance-wide change in the transaction
+// that makes it, the way events does for a change inside a calendar. The
+// payload is already redacted by the caller.
+func (q *Queries) AppendInstanceAuditLog(ctx context.Context, arg AppendInstanceAuditLogParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, appendInstanceAuditLog,
+		arg.PublicID,
+		arg.ActorUserID,
+		arg.Action,
+		arg.TargetResourceType,
+		arg.TargetResourcePublicID,
+		arg.PayloadJSON,
+		arg.OccurredAt,
+	)
+}
 
 const countInstanceAdminsForUpdate = `-- name: CountInstanceAdminsForUpdate :one
 SELECT COUNT(*) FROM instance_admins

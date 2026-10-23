@@ -31,7 +31,7 @@ CREATE TABLE album_photos (
   UNIQUE KEY uniq_album_photos_workspace_public_id (workspace_id, public_id),
   KEY idx_album_photos_calendar_taken (calendar_id, enabled, taken_at, id),
   KEY idx_album_photos_event (calendar_event_id),
-  KEY idx_album_photos_enabled_created (enabled, created_at) COMMENT 'Supports the abandoned-upload sweep',
+  KEY idx_album_photos_enabled_created (enabled, created_at),
 
   CONSTRAINT fk_album_photos_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_album_photos_calendar FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE,

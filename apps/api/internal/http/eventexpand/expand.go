@@ -43,12 +43,12 @@ type Overrides map[uint32][]generated.CalendarEvent
 //
 // A listing expands each series in the window, so loading per series made the
 // query count a function of how many recurring events a calendar holds. A
-// failure yields an empty set rather than an error: the caller falls back to
-// showing the series as the rule describes it, which is what it did before
-// any override existed.
-func LoadOverrides(ctx context.Context, loader BatchOverrideLoader, seriesIDs []uint32) Overrides {
+// failed read is returned rather than rendered as "no overrides": that would
+// show edited occurrences with the series' contents, bring cancelled-and-moved
+// ones back at their old dates and drop the moved ones, all under a success.
+func LoadOverrides(ctx context.Context, loader BatchOverrideLoader, seriesIDs []uint32) (Overrides, error) {
 	if len(seriesIDs) == 0 {
-		return Overrides{}
+		return Overrides{}, nil
 	}
 	keys := make([]sql.NullInt32, 0, len(seriesIDs))
 	for _, id := range seriesIDs {
@@ -56,7 +56,7 @@ func LoadOverrides(ctx context.Context, loader BatchOverrideLoader, seriesIDs []
 	}
 	rows, err := loader.ListRecurrenceOverridesByParents(ctx, keys)
 	if err != nil {
-		return Overrides{}
+		return nil, err
 	}
 	out := make(Overrides, len(seriesIDs))
 	for _, r := range rows {
@@ -66,7 +66,7 @@ func LoadOverrides(ctx context.Context, loader BatchOverrideLoader, seriesIDs []
 		parent := uint32(r.RecurrenceParentID.Int32)
 		out[parent] = append(out[parent], r)
 	}
-	return out
+	return out, nil
 }
 
 type Instance struct {

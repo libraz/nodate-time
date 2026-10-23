@@ -77,8 +77,28 @@ func TestRateKeyKeepsIPv4AndUnmapsIPv4InIPv6(t *testing.T) {
 		"2001:db8:1:2:3:4:5:6": "2001:db8:1:2::/64",
 		"not-an-ip":            "not-an-ip",
 	} {
-		if got := rateKey(in); got != want {
-			t.Errorf("rateKey(%q) = %q, want %q", in, got, want)
+		if got := RateKey(in); got != want {
+			t.Errorf("RateKey(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A full counter refuses a new key rather than forgetting one whose window is
+// still open, and makes room again once windows run out.
+func TestWindowCounterWithoutEvictionRefusesWhenFull(t *testing.T) {
+	c := NewWindowCounter(time.Minute, 2)
+	now := time.Now()
+	c.Take("a", now)
+	c.Take("a", now)
+	c.Take("b", now)
+
+	if _, _, held := c.TakeWithoutEviction("c", now); held {
+		t.Fatal("a new key was admitted into a full counter")
+	}
+	if count, _, held := c.TakeWithoutEviction("a", now); !held || count != 3 {
+		t.Fatalf("held key counted %d (held %v), want 3: its window must not have been forgotten", count, held)
+	}
+	if _, _, held := c.TakeWithoutEviction("c", now.Add(time.Minute)); !held {
+		t.Fatal("expired windows should make room")
 	}
 }

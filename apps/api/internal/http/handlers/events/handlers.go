@@ -61,10 +61,6 @@ func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userI
 	return calresolve.Write(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
-func resolveCalendarMember(ctx context.Context, deps Deps, calPubID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
-	return calresolve.Member(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
-}
-
 // toAPIError maps an apierrors.Spec returned by a helper onto a huma error,
 // falling back to an internal error for anything unexpected.
 func toAPIError(err error) error {
@@ -500,6 +496,13 @@ var supportedNotificationOffsets = map[int]bool{
 	60: true, 120: true, 1440: true, 2880: true,
 }
 
+// SupportedNotificationOffset reports whether a reminder offset, in minutes
+// before the start, is one the clients can show and edit. Importers use it to
+// drop an alarm that does not land on one.
+func SupportedNotificationOffset(minutes int) bool {
+	return supportedNotificationOffsets[minutes]
+}
+
 // validateNotificationOffset rejects a reminder the product has no way to
 // represent. Checking it here rather than only in the picker is what keeps a
 // direct API caller from storing an offset that the event modal then silently
@@ -508,7 +511,7 @@ func validateNotificationOffset(offset *int) *apierrors.Spec {
 	if offset == nil {
 		return nil
 	}
-	if !supportedNotificationOffsets[*offset] {
+	if !SupportedNotificationOffset(*offset) {
 		return apierrors.EventNotificationOffsetInvalid
 	}
 	return nil
@@ -523,7 +526,7 @@ func validateNotificationOffset(offset *int) *apierrors.Spec {
 // currentOwnerID is the owner the event already has, or 0 for a new event.
 // Naming it again is not filing the event under anybody, so it stays
 // acceptable even if that user has since left the calendar.
-func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string, fallbackUserID, currentOwnerID uint32) (uint32, *apierrors.Spec) {
+func resolveOwner(ctx context.Context, q *generated.Queries, calID uint32, ownerID *string, fallbackUserID, currentOwnerID uint32) (uint32, *apierrors.Spec) {
 	if ownerID == nil || *ownerID == "" {
 		return fallbackUserID, nil
 	}
@@ -531,14 +534,14 @@ func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string,
 	if err != nil {
 		return 0, apierrors.BadRequest
 	}
-	u, err := deps.Queries.GetUserByPublicID(ctx, pub)
+	u, err := q.GetUserByPublicID(ctx, pub)
 	if err != nil {
 		return 0, apierrors.BadRequest
 	}
 	if currentOwnerID != 0 && u.ID == currentOwnerID {
 		return u.ID, nil
 	}
-	if _, err := deps.Queries.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
+	if _, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: calID,
 		UserID:     u.ID,
 	}); err != nil {
@@ -550,11 +553,11 @@ func resolveOwner(ctx context.Context, deps Deps, calID uint32, ownerID *string,
 // changesGrants reports whether an update reaches past the event's fields:
 // handing it to another owner, or dropping an attendee who holds an edit grant,
 // which takes that grant away. row is the row the update replaces.
-func changesGrants(ctx context.Context, deps Deps, row generated.CalendarEvent, ownerID uint32, participants []eventParticipant) (bool, error) {
+func changesGrants(ctx context.Context, q *generated.Queries, row generated.CalendarEvent, ownerID uint32, participants []eventParticipant) (bool, error) {
 	if ownerID != 0 && ownerID != row.OwnerUserID {
 		return true, nil
 	}
-	attendees, err := deps.Queries.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
+	attendees, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
 	if err != nil {
 		return false, err
 	}
@@ -704,99 +707,90 @@ func loadEventInCalendar(ctx context.Context, deps Deps, calID uint32, eventPubl
 	return evt, nil
 }
 
-// resolveEventWrite resolves the calendar, the event and the caller's right to
-// change that particular event, in one step.
-//
-// Writing to a calendar and rewriting a given event are different grants. A
-// shared calendar carries one layer per person, and an editor who may add to
-// their own layer has no business rewriting somebody else's medical
-// appointment. Membership decides whether the calendar is writable at all;
-// the event's owner, the people running the calendar, and attendees the owner
-// explicitly trusted decide the rest.
-//
-// eventPublicID must already be the series id. occurrenceDate names the
-// occurrence a write is confined to, or is empty for a write to the series;
-// an edited occurrence's own attendees decide who may change it, because they
-// are the attendees that occurrence shows.
-func resolveEventWrite(ctx context.Context, deps Deps, calPubID, eventPublicID, occurrenceDate string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
-	w, err := resolveEventAccess(ctx, deps, calPubID, eventPublicID, occurrenceDate, userID)
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarEvent{}, err
-	}
-	if err := requireEventEdit(ctx, deps, w, userID, editFields); err != nil {
-		return generated.Calendar{}, generated.CalendarEvent{}, err
-	}
-	return w.cal, w.evt, nil
+// eventWriteTarget resolves what a write to an event names: the calendar, the
+// series row and, for a composite id, the occurrence date. It refuses a caller
+// who may not write to the calendar at all and decides nothing else -- whether
+// they may change this event is decided inside the write's transaction, on rows
+// read under lock, by lockEventAccess.
+func eventWriteTarget(ctx context.Context, deps Deps, calPubID, eventID string, userID uint32) (generated.Calendar, generated.CalendarEvent, string, error) {
+	return eventTarget(ctx, deps, calPubID, eventID, userID, resolveCalendarWrite)
 }
 
-// eventAccess is everything an edit-right decision reads. row is the row whose
-// attendees answer for the write: the series, or an edited occurrence's
-// override.
+// eventTarget is eventWriteTarget with the calendar gate the caller names.
+func eventTarget(
+	ctx context.Context, deps Deps, calPubID, eventID string, userID uint32,
+	gate func(context.Context, Deps, string, uint32) (generated.Calendar, error),
+) (generated.Calendar, generated.CalendarEvent, string, error) {
+	seriesID, occurrenceDate := parseCompositeID(eventID)
+	if seriesID == "" {
+		seriesID = eventID
+	}
+	cal, err := gate(ctx, deps, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, "", err
+	}
+	evt, err := loadEventInCalendar(ctx, deps, cal.ID, seriesID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, "", err
+	}
+	return cal, evt, occurrenceDate, nil
+}
+
+// eventAccess is everything an edit-right decision reads, each row read under
+// lock in the transaction that writes. row is the row whose attendees answer
+// for the write: the series, or an edited occurrence's override when the write
+// is confined to that occurrence.
 type eventAccess struct {
 	cal    generated.Calendar
 	member generated.CalendarMember
 	evt    generated.CalendarEvent
 	row    generated.CalendarEvent
+	scope  writeScope
 }
 
-// resolveEventAccess loads what requireEventEdit decides on, deciding nothing.
-func resolveEventAccess(ctx context.Context, deps Deps, calPubID, eventPublicID, occurrenceDate string, userID uint32) (eventAccess, error) {
-	cal, member, err := resolveCalendarMember(ctx, deps, calPubID, userID)
-	if err != nil {
-		return eventAccess{}, err
-	}
-	evt, err := loadEventInCalendar(ctx, deps, cal.ID, eventPublicID)
-	if err != nil {
-		return eventAccess{}, err
-	}
-	row, err := occurrenceRow(ctx, deps.Queries, evt, occurrenceDate)
-	if err != nil {
-		return eventAccess{}, err
-	}
-	return eventAccess{cal: cal, member: member, evt: evt, row: row}, nil
-}
-
-// resolveEventForEdit is resolveEventWrite for the paths that take an event id
-// straight from the request: checklist items, attachments and the like hang off
-// the series, so a composite occurrence id resolves to its parent.
-func resolveEventForEdit(ctx context.Context, deps Deps, calPubID, eventID string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
-	if parentUUID, _ := parseCompositeID(eventID); parentUUID != "" {
-		eventID = parentUUID
-	}
-	return resolveEventWrite(ctx, deps, calPubID, eventID, "", userID)
-}
-
-// occurrenceRow returns the row whose attendees answer for one occurrence of
-// evt: the override standing in for it once it has been edited, otherwise evt
-// itself. An empty occurrenceDate, or an event without a rule, names evt.
+// lockEventAccess is the first step of every write to an event: its own
+// columns, its exclusion list, or a row hanging off it (an override, an
+// attendee, an attachment, a comment, a checklist item). It takes the
+// calendar's shared lock, the caller's membership and then the series row
+// under their locks, and resolves what occurrenceDate and scope address on
+// that row. It decides nothing itself; requireEventEdit decides on what it
+// returns.
 //
-// Get and list render an edited occurrence's attendees from its override, so
-// every read or write of an occurrence's attendees goes through here to reach
-// the same rows.
-func occurrenceRow(ctx context.Context, q *generated.Queries, evt generated.CalendarEvent, occurrenceDate string) (generated.CalendarEvent, error) {
-	if occurrenceDate == "" || evt.RecurrenceRule == nil {
-		return evt, nil
-	}
-	rule := recurrence.ParseRule(*evt.RecurrenceRule)
-	if rule == nil {
-		return generated.CalendarEvent{}, apierrors.EventNotFound
-	}
-	occ, err := occurrenceForDate(rule, evt, occurrenceDate)
+// The order is the point. A row inserted under the event takes a shared lock
+// on it for the foreign key, and two writers each holding that while waiting to
+// upgrade it deadlock; a delete taking the rows under an event before the event
+// deadlocks with a confirm going the other way. Calendar, membership, event,
+// then what hangs off it, avoids both, and is the order a member's removal
+// takes them in. TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock and
+// TestDeletingAnEventWhileAnUploadOnItConfirms are what notice.
+func lockEventAccess(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32, occurrenceDate, scope string) (eventAccess, error) {
+	member, evt, err := calresolve.LockEventMember(ctx, q, cal.ID, eventID, userID)
 	if err != nil {
-		return generated.CalendarEvent{}, apierrors.EventNotFound
+		return eventAccess{}, err
 	}
-	child, err := q.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
-		RecurrenceParentID:      sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-		RecurrenceOriginalStart: sql.NullTime{Time: occ.StartAt, Valid: true},
-	})
-	switch {
-	case err == nil:
-		return child, nil
-	case errors.Is(err, sql.ErrNoRows):
-		return evt, nil
-	default:
-		return generated.CalendarEvent{}, err
+	target, err := resolveScope(ctx, q, evt, occurrenceDate, scope)
+	if err != nil {
+		return eventAccess{}, err
 	}
+	row := evt
+	if target.confined && target.override != nil {
+		row = *target.override
+	}
+	return eventAccess{cal: cal, member: member, evt: evt, row: row, scope: target}, nil
+}
+
+// lockEventEdit is lockEventAccess for a write to the event as a whole that
+// needs the right to change its fields: checklist items and attachments hang
+// off the series, so a composite id has already resolved to its parent.
+func lockEventEdit(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
+	w, err := lockEventAccess(ctx, q, cal, eventID, userID, "", scopeAll)
+	if err != nil {
+		return eventAccess{}, err
+	}
+	if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
+		return eventAccess{}, err
+	}
+	return w, nil
 }
 
 // editRight is how far a write reaches into one event.
@@ -815,17 +809,21 @@ const (
 // requireEventEdit is the one place an event's edit rights are decided. A
 // viewer never writes; the people running the calendar and the event's owner
 // may do anything; an attendee the owner trusted may change the fields only.
-func requireEventEdit(ctx context.Context, deps Deps, w eventAccess, userID uint32, need editRight) error {
+// An edited occurrence's own owner -- the one a read of it reports -- counts as
+// its owner for a write confined to it, and for nothing beyond it.
+//
+// w must come from lockEventAccess in q's transaction.
+func requireEventEdit(ctx context.Context, q *generated.Queries, w eventAccess, userID uint32, need editRight) error {
 	if !calresolve.CanWrite(w.member.Role) {
 		return apierrors.CalendarRoleRequired
 	}
-	if calresolve.CanManage(w.member.Role) || w.evt.OwnerUserID == userID {
+	if calresolve.CanManage(w.member.Role) || w.evt.OwnerUserID == userID || w.row.OwnerUserID == userID {
 		return nil
 	}
 	if need == editGrants {
 		return apierrors.EventEditDenied
 	}
-	att, err := deps.Queries.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
+	att, err := q.GetEventAttendee(ctx, generated.GetEventAttendeeParams{
 		EventID: sql.NullInt32{Int32: int32(w.row.ID), Valid: true},
 		UserID:  userID,
 	})
@@ -881,7 +879,10 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		for _, e := range recurringRows {
 			seriesIDs = append(seriesIDs, e.ID)
 		}
-		overrides := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+		overrides, err := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 
 		// One cap over everything the window holds, cut by date: a listing
 		// past it loses the tail of the window, never a whole series or the
@@ -1072,19 +1073,18 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
 
-		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, userID, 0)
-		if spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-		participants, spec := validateEventParticipants(ctx, deps.Queries, cal.ID, in.Body.Participants)
-		if spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-
 		var created generated.CalendarEvent
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
+			}
+			ownerID, spec := resolveOwner(ctx, q, cal.ID, in.Body.OwnerID, userID, 0)
+			if spec != nil {
+				return spec
+			}
+			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.Participants)
+			if spec != nil {
+				return spec
 			}
 			result, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
 				PublicID:           pubID[:],
@@ -1161,34 +1161,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEventOutput, error) {
 	return func(ctx context.Context, in *UpdateEventInput) (*UpdateEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-
-		// For composite IDs (recurring instances), resolve the parent series.
-		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
-		isOccurrence := parentUUID != ""
-		eventID := in.EventID
-		if isOccurrence {
-			eventID = parentUUID
-		}
-
-		// A write confined to one occurrence is granted by that occurrence's
-		// attendees; anything else by the series'.
-		grantDate := ""
-		if isOccurrence && in.Scope == "this" {
-			grantDate = occurrenceDate
-		}
-		w, err := resolveEventAccess(ctx, deps, in.CalendarID, eventID, grantDate, userID)
+		cal, evt, occurrenceDate, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
-		}
-		if err := requireEventEdit(ctx, deps, w, userID, editFields); err != nil {
-			return nil, toAPIError(err)
-		}
-		cal, evt := w.cal, w.evt
-		// A stale copy is reported as stale before its contents are judged:
-		// what it names may have changed since, a member who has left included.
-		// lockEvent checks again under the lock.
-		if !matchesETag(in.IfMatch, evt) {
-			return nil, apierrors.ToHuma(apierrors.EventStale)
 		}
 
 		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
@@ -1210,48 +1185,55 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 				return nil, apierrors.ToHuma(spec)
 			}
 		}
-		ownerID, spec := resolveOwner(ctx, deps, cal.ID, in.Body.OwnerID, 0, w.row.OwnerUserID)
-		if spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-		participants, spec := validateEventParticipants(ctx, deps.Queries, cal.ID, in.Body.Participants)
-		if spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-		regrants, err := changesGrants(ctx, deps, w.row, ownerID, participants)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if regrants {
-			if err := requireEventEdit(ctx, deps, w, userID, editGrants); err != nil {
-				return nil, toAPIError(err)
-			}
-		}
 
-		edit := eventEdit{
-			body:         in,
-			actorID:      userID,
-			cal:          cal,
-			startAt:      startAt,
-			endAt:        endAt,
-			ownerID:      ownerID,
-			participants: participants,
-		}
-		// Both scopes re-read the series under its lock and check If-Match
-		// against that copy; the row resolved above only answered whether the
-		// caller may edit it.
-		var (
-			resp EventResponse
-			etag string
-		)
-		switch {
-		case isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil:
-			resp, etag, err = editOccurrence(ctx, deps, edit, evt.ID, occurrenceDate)
-		case isOccurrence && in.Scope == "all":
-			resp, etag, err = editSeries(ctx, deps, edit, evt.ID, occurrenceDate)
-		default:
-			resp, etag, err = editSeries(ctx, deps, edit, evt.ID, "")
-		}
+		var edited editedRows
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			w, err := lockEventAccess(ctx, q, cal, evt.ID, userID, occurrenceDate, in.Scope)
+			if err != nil {
+				return err
+			}
+			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
+				return err
+			}
+			// A stale copy is reported as stale before its contents are judged:
+			// what it names may have changed since, a member who has left included.
+			// The tag names the series row, which every scope writes.
+			if !matchesETag(in.IfMatch, w.evt) {
+				return apierrors.EventStale
+			}
+			ownerID, spec := resolveOwner(ctx, q, cal.ID, in.Body.OwnerID, 0, w.row.OwnerUserID)
+			if spec != nil {
+				return spec
+			}
+			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.Participants)
+			if spec != nil {
+				return spec
+			}
+			regrants, err := changesGrants(ctx, q, w.row, ownerID, participants)
+			if err != nil {
+				return err
+			}
+			if regrants {
+				if err := requireEventEdit(ctx, q, w, userID, editGrants); err != nil {
+					return err
+				}
+			}
+			edit := eventEdit{
+				body:         in,
+				actorID:      userID,
+				cal:          cal,
+				startAt:      startAt,
+				endAt:        endAt,
+				ownerID:      ownerID,
+				participants: participants,
+			}
+			if w.scope.confined {
+				edited, err = editOccurrence(ctx, q, deps, edit, w)
+			} else {
+				edited, err = editSeries(ctx, q, deps, edit, w)
+			}
+			return err
+		})
 		if err != nil {
 			var spec *apierrors.Spec
 			if errors.As(err, &spec) {
@@ -1260,132 +1242,35 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			slog.ErrorContext(ctx, "failed to update event", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &UpdateEventOutput{ETag: etag, Body: resp}, nil
+		resp, err := edited.render(ctx, deps, cal)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		// The tag names the series row, which every edit touches.
+		return &UpdateEventOutput{ETag: eventETag(edited.series), Body: resp}, nil
 	}
 }
 
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
 	return func(ctx context.Context, in *DeleteEventInput) (*DeleteEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-
-		// For composite IDs, resolve the parent series.
-		parentUUID, occurrenceDate := parseCompositeID(in.EventID)
-		isOccurrence := parentUUID != ""
-		eventID := in.EventID
-		if isOccurrence {
-			eventID = parentUUID
-		}
-
-		// A write confined to one occurrence is granted by that occurrence's
-		// attendees; anything else by the series'.
-		grantDate := ""
-		if isOccurrence && in.Scope == "this" {
-			grantDate = occurrenceDate
-		}
-		cal, evt, err := resolveEventWrite(ctx, deps, in.CalendarID, eventID, grantDate, userID)
+		cal, evt, occurrenceDate, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		// Single-occurrence delete: add the occurrence to the series'
-		// exclusion list. The contract allows exactly one representation of a
-		// cancelled occurrence, and this is it -- a tombstone row would give a
-		// reader a second place to look and a way to disagree with the first.
-		if isOccurrence && in.Scope == "this" && evt.RecurrenceRule != nil {
-			var originalStart time.Time
-			err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-				// The exclusion list is a whole-column replace, so it is read
-				// under the series' row lock: two cancellations reading the
-				// same old list would each write one missing the other's.
-				current, err := lockEvent(ctx, q, cal.ID, evt.ID, "")
-				if err != nil {
-					return err
-				}
-				if current.RecurrenceRule == nil {
-					return apierrors.EventNotFound
-				}
-				rule := recurrence.ParseRule(*current.RecurrenceRule)
-				if rule == nil {
-					return apierrors.EventNotFound
-				}
-				occ, err := occurrenceForDate(rule, current, occurrenceDate)
-				if err != nil {
-					return apierrors.EventNotFound
-				}
-				originalStart = occ.StartAt
-				column, err := recurrence.ParseExceptions(current.RecurrenceExceptions).With(originalStart).MarshalColumn()
-				if err != nil {
-					return err
-				}
-				if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
-					RecurrenceExceptions: column,
-					ID:                   current.ID,
-				}); err != nil {
-					return err
-				}
-				return eventlog.Append(ctx, q, eventlog.Entry{
-					WorkspaceID: deps.WorkspaceID,
-					CalendarID:  cal.ID,
-					ActorUserID: userID,
-					Type:        eventlog.TypeEventDeleted,
-					Summary:     current.Title,
-					Subject:     current.PublicID,
-					Extra: map[string]any{
-						"scope":         "occurrence",
-						"originalStart": originalStart.Format(time.RFC3339),
-					},
-				})
-			})
-			if err != nil {
-				var spec *apierrors.Spec
-				if errors.As(err, &spec) {
-					return nil, apierrors.ToHuma(spec)
-				}
-				slog.ErrorContext(ctx, "failed to cancel occurrence", "eventID", evt.ID, "error", err)
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
-			return &DeleteEventOutput{}, nil
-		}
-
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			// A concurrent delete that won the lock leaves nothing to do here.
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
-				return err
-			}
-			// Release the blobs this event's attachments were holding. The
-			// objects themselves are swept once nothing refers to them, so
-			// the only thing to do here is drop the references.
-			//
-			// The listing locks the live rows and they are retired in the same
-			// transaction, which is what makes the release exactly once: a
-			// concurrent delete of the same event, or of one attachment on it,
-			// waits on those locks and then finds the rows already retired.
-			eventRef := sql.NullInt32{Int32: int32(evt.ID), Valid: true}
-			objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, eventRef)
+			w, err := lockEventAccess(ctx, q, cal, evt.ID, userID, occurrenceDate, in.Scope)
 			if err != nil {
 				return err
 			}
-			for _, objectID := range objectIDs {
-				if err := blobref.Release(ctx, q, objectID); err != nil {
-					return err
-				}
-			}
-			if err := q.SoftDeleteAttachmentsByEvent(ctx, eventRef); err != nil {
+			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
 				return err
 			}
-			// Whole-series delete. Soft delete keeps the row, so its override
-			// rows keep their parent and the history stays readable.
-			if err := q.SoftDeleteCalendarEvent(ctx, evt.ID); err != nil {
-				return err
+			if w.scope.confined {
+				return cancelOccurrence(ctx, q, deps, userID, w)
 			}
-			return eventlog.Append(ctx, q, eventlog.Entry{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  cal.ID,
-				ActorUserID: userID,
-				Type:        eventlog.TypeEventDeleted,
-				Summary:     evt.Title,
-				Subject:     evt.PublicID,
-			})
+			return deleteWholeEvent(ctx, q, deps, userID, w)
 		})
 		if err != nil {
 			var spec *apierrors.Spec
@@ -1395,9 +1280,80 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			slog.ErrorContext(ctx, "failed to delete event", "eventID", evt.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-
 		return &DeleteEventOutput{}, nil
 	}
+}
+
+// cancelOccurrence adds one occurrence to the series' exclusion list. The
+// contract allows exactly one representation of a cancelled occurrence, and
+// this is it -- a tombstone row would give a reader a second place to look and
+// a way to disagree with the first. The list is a whole-column replace, which
+// is why it is rewritten from the copy read under the series' row lock: two
+// cancellations reading the same old list would each write one missing the
+// other's.
+func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
+	originalStart := w.scope.occurrence.StartAt
+	column, err := recurrence.ParseExceptions(w.evt.RecurrenceExceptions).With(originalStart).MarshalColumn()
+	if err != nil {
+		return err
+	}
+	if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
+		RecurrenceExceptions: column,
+		ID:                   w.evt.ID,
+	}); err != nil {
+		return err
+	}
+	return eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  w.cal.ID,
+		ActorUserID: actorID,
+		Type:        eventlog.TypeEventDeleted,
+		Summary:     w.evt.Title,
+		Subject:     w.evt.PublicID,
+		Extra: map[string]any{
+			"scope":         "occurrence",
+			"originalStart": originalStart.Format(time.RFC3339),
+		},
+	})
+}
+
+// deleteWholeEvent retires a one-off event or a whole series, with the
+// references its attachments hold.
+func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
+	// Release the blobs this event's attachments were holding. The objects
+	// themselves are swept once nothing refers to them, so the only thing to
+	// do here is drop the references.
+	//
+	// The listing locks the live rows and they are retired in the same
+	// transaction, which is what makes the release exactly once: a concurrent
+	// delete of the same event, or of one attachment on it, waits on those
+	// locks and then finds the rows already retired.
+	eventRef := sql.NullInt32{Int32: int32(w.evt.ID), Valid: true}
+	objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, eventRef)
+	if err != nil {
+		return err
+	}
+	for _, objectID := range objectIDs {
+		if err := blobref.Release(ctx, q, objectID); err != nil {
+			return err
+		}
+	}
+	if err := q.SoftDeleteAttachmentsByEvent(ctx, eventRef); err != nil {
+		return err
+	}
+	// Soft delete keeps the row, so its override rows keep their parent and the
+	// history stays readable.
+	if err := q.SoftDeleteCalendarEvent(ctx, w.evt.ID); err != nil {
+		return err
+	}
+	return eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  w.cal.ID,
+		ActorUserID: actorID,
+		Type:        eventlog.TypeEventDeleted,
+		Summary:     w.evt.Title,
+		Subject:     w.evt.PublicID,
+	})
 }
 
 // logEventActivity records something that happened to an event -- a comment, a
@@ -1444,13 +1400,15 @@ type commentListRow struct {
 
 // resolveCommentCursor turns a cursor back into the ordering pair it names.
 // It is looked up within the event the caller has already proved access to,
-// so a comment id from elsewhere does not resolve.
+// so a comment id from elsewhere does not resolve; a comment removed since the
+// cursor was issued still does, because its position in the thread has not
+// moved.
 func resolveCommentCursor(ctx context.Context, deps Deps, eventID uint32, cursor string) (time.Time, uint32, error) {
 	pub, err := parseUUID(cursor)
 	if err != nil {
 		return time.Time{}, 0, err
 	}
-	c, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
+	c, err := deps.Queries.GetEventCommentCursor(ctx, generated.GetEventCommentCursorParams{
 		PublicID: pub,
 		EventID:  sql.NullInt32{Int32: int32(eventID), Valid: true},
 	})
@@ -1564,12 +1522,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*CreateCommentOutput, error) {
 	return func(ctx context.Context, in *CreateCommentInput) (*CreateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -1578,43 +1531,82 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
+		var stored generated.GetEventCommentByPublicIDRow
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockCommentWrite(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
 			}
 			if _, err := q.CreateEventComment(ctx, generated.CreateEventCommentParams{
 				PublicID:    pubID[:],
 				WorkspaceID: deps.WorkspaceID,
-				EventID:     sql.NullInt32{Int32: int32(evt.ID), Valid: true},
+				EventID:     sql.NullInt32{Int32: int32(w.evt.ID), Valid: true},
 				AuthorID:    userID,
 				Body:        in.Body.Content,
 			}); err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeCommentAdded, in.Body.Content, pubID[:])
+			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentAdded, pubID[:]); err != nil {
+				return err
+			}
+			// Read back so createdAt is the stored value rather than a guess at it.
+			stored, err = q.GetEventCommentByPublicID(ctx, pubID[:])
+			return err
 		}); err != nil {
 			return nil, toAPIError(err)
 		}
 
-		// Read the row back so createdAt is the stored value rather than a
-		// client-side guess at it.
-		stored, err := deps.Queries.GetEventCommentByPublicID(ctx, pubID[:])
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		out := &CreateCommentOutput{}
-		out.Body = CommentResponse{
-			ID:           pubIDToHex(stored.PublicID),
-			UserPublicID: pubIDToHex(stored.UserPublicID),
-			UserName:     stored.UserDisplayName,
-			UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, stored.UserAvatarStorageKey, stored.UserAvatarURL),
-			Body:         stored.Body,
-			CreatedAt:    stored.CreatedAt,
-		}
-		return out, nil
+		return &CreateCommentOutput{Body: mapComment(ctx, deps, stored)}, nil
 	}
+}
+
+// mapComment renders a stored comment with its author.
+func mapComment(ctx context.Context, deps Deps, c generated.GetEventCommentByPublicIDRow) CommentResponse {
+	return CommentResponse{
+		ID:           pubIDToHex(c.PublicID),
+		UserPublicID: pubIDToHex(c.UserPublicID),
+		UserName:     c.UserDisplayName,
+		UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, c.UserAvatarStorageKey, c.UserAvatarURL),
+		Body:         c.Body,
+		CreatedAt:    c.CreatedAt,
+	}
+}
+
+// lockCommentWrite is lockEventAccess for a comment: anyone who may write to
+// the calendar may comment on any event in it, so the role is the whole check.
+func lockCommentWrite(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
+	w, err := lockEventAccess(ctx, q, cal, eventID, userID, "", scopeAll)
+	if err != nil {
+		return eventAccess{}, err
+	}
+	if !calresolve.CanWrite(w.member.Role) {
+		return eventAccess{}, apierrors.CalendarRoleRequired
+	}
+	return w, nil
+}
+
+// lockComment reads one live comment of the event under its row lock.
+func lockComment(ctx context.Context, q *generated.Queries, eventID uint32, commentID string) (generated.CalendarEventComment, error) {
+	pub, err := parseUUID(commentID)
+	if err != nil {
+		return generated.CalendarEventComment{}, apierrors.CommentNotFound
+	}
+	c, err := q.GetEventCommentForUpdate(ctx, generated.GetEventCommentForUpdateParams{
+		PublicID: pub,
+		EventID:  sql.NullInt32{Int32: int32(eventID), Valid: true},
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarEventComment{}, apierrors.CommentNotFound
+	}
+	return c, err
+}
+
+// logCommentActivity records a comment being added, edited or removed. The
+// entry names the event and the comment but carries none of its text: the log
+// is append-only and readable by every member, so text written into it would
+// outlive the edit that replaced it and the removal that took it down.
+func logCommentActivity(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess, eventType string, commentPubID []byte) error {
+	return logEventActivity(ctx, q, deps, w.cal.ID, actorID, w.evt, eventType, w.evt.Title, commentPubID)
 }
 
 func resolveCommentEvent(ctx context.Context, deps Deps, calID uint32, eventID string) (generated.CalendarEvent, error) {
@@ -1629,33 +1621,23 @@ func resolveCommentEvent(ctx context.Context, deps Deps, calID uint32, eventID s
 func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*UpdateCommentOutput, error) {
 	return func(ctx context.Context, in *UpdateCommentInput) (*UpdateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		commentPub, err := parseUUID(in.CommentID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
-		}
-		comment, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
-			PublicID: commentPub,
-			EventID:  sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
-		}
-		if comment.AuthorID != userID {
-			return nil, apierrors.ToHuma(apierrors.CommentAccessDenied)
-		}
-
+		var stored generated.GetEventCommentByPublicIDRow
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockCommentWrite(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
+			}
+			comment, err := lockComment(ctx, q, w.evt.ID, in.CommentID)
+			if err != nil {
+				return err
+			}
+			if comment.AuthorID != userID {
+				return apierrors.CommentAccessDenied
 			}
 			if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
 				Body: in.Body.Content,
@@ -1663,69 +1645,56 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			}); err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeCommentEdited, in.Body.Content, comment.PublicID)
+			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentEdited, comment.PublicID); err != nil {
+				return err
+			}
+			stored, err = q.GetEventCommentByPublicID(ctx, comment.PublicID)
+			return err
 		}); err != nil {
 			return nil, toAPIError(err)
 		}
 
-		out := &UpdateCommentOutput{}
-		out.Body = CommentResponse{
-			ID:           pubIDToHex(comment.PublicID),
-			UserPublicID: pubIDToHex(comment.UserPublicID),
-			UserName:     comment.UserDisplayName,
-			UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, comment.UserAvatarStorageKey, comment.UserAvatarURL),
-			Body:         in.Body.Content,
-			CreatedAt:    comment.CreatedAt,
-		}
-		return out, nil
+		return &UpdateCommentOutput{Body: mapComment(ctx, deps, stored)}, nil
 	}
 }
 
 func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*DeleteCommentOutput, error) {
 	return func(ctx context.Context, in *DeleteCommentInput) (*DeleteCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, member, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
+		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
-		}
-		if !calresolve.CanWrite(member.Role) {
-			return nil, apierrors.ToHuma(apierrors.CalendarRoleRequired)
-		}
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		commentPub, err := parseUUID(in.CommentID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
-		}
-		comment, err := deps.Queries.GetEventCommentByPublicIDAndEvent(ctx, generated.GetEventCommentByPublicIDAndEventParams{
-			PublicID: commentPub,
-			EventID:  sql.NullInt32{Int32: int32(evt.ID), Valid: true},
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.CommentNotFound)
-		}
-		// Removing a comment is moderation as well as authorship: whoever
-		// administers a shared calendar has to be able to take down what
-		// someone else posted on it. Editing stays the author's alone -- the
-		// two are not the same power, since an edit puts words in someone's
-		// mouth while a removal only takes them off the wall.
-		if comment.AuthorID != userID && !calresolve.CanManage(member.Role) {
-			return nil, apierrors.ToHuma(apierrors.CommentAccessDenied)
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEvent(ctx, q, cal.ID, evt.ID, ""); err != nil {
+			w, err := lockCommentWrite(ctx, q, cal, evt.ID, userID)
+			if err != nil {
 				return err
 			}
-			if err := q.SoftDeleteEventComment(ctx, comment.ID); err != nil {
+			comment, err := lockComment(ctx, q, w.evt.ID, in.CommentID)
+			if err != nil {
 				return err
 			}
-			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeCommentRemoved, comment.Body, comment.PublicID)
+			// Removing a comment is moderation as well as authorship: whoever
+			// administers a shared calendar has to be able to take down what
+			// someone else posted on it. Editing stays the author's alone -- the
+			// two are not the same power, since an edit puts words in someone's
+			// mouth while a removal only takes them off the wall.
+			if comment.AuthorID != userID && !calresolve.CanManage(w.member.Role) {
+				return apierrors.CommentAccessDenied
+			}
+			res, err := q.SoftDeleteEventComment(ctx, comment.ID)
+			if err != nil {
+				return err
+			}
+			removed, err := blobref.ChangedOne(res)
+			if err != nil {
+				return err
+			}
+			if !removed {
+				return apierrors.CommentNotFound
+			}
+			return logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentRemoved, comment.PublicID)
 		}); err != nil {
 			return nil, toAPIError(err)
 		}

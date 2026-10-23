@@ -1374,7 +1374,7 @@ CREATE TABLE album_photos (
   UNIQUE KEY uniq_album_photos_workspace_public_id (workspace_id, public_id),
   KEY idx_album_photos_calendar_taken (calendar_id, enabled, taken_at, id),
   KEY idx_album_photos_event (calendar_event_id),
-  KEY idx_album_photos_enabled_created (enabled, created_at) COMMENT 'Supports the abandoned-upload sweep',
+  KEY idx_album_photos_enabled_created (enabled, created_at),
 
   CONSTRAINT fk_album_photos_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
   CONSTRAINT fk_album_photos_calendar FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE,
@@ -1887,12 +1887,18 @@ ALTER TABLE events
 -- A stored generated column gives the same value a name the optimiser can
 -- reach. It lives here rather than in core/ because the payload key it reads
 -- is this product's convention: the contract promises a JSON document, not
--- that `$.id` identifies a subject.
+-- that `$.id` identifies a subject. For the same reason the expression yields
+-- NULL for anything that is not a 36-character UUID, so a payload another
+-- writer shapes differently still inserts instead of failing the column.
 -- ====================================
 ALTER TABLE events
   ADD COLUMN subject_public_id VARCHAR(36)
     CHARACTER SET latin1 COLLATE latin1_swedish_ci
-    GENERATED ALWAYS AS (payload_json->>'$.id') STORED
+    GENERATED ALWAYS AS (
+      IF(CHAR_LENGTH(payload_json->>'$.id') = 36
+           AND payload_json->>'$.id' REGEXP '^[0-9a-fA-F-]{36}$',
+         payload_json->>'$.id', NULL)
+    ) STORED
     COMMENT 'Public id of the entity this event is about, lifted out of the payload so one entity history can be indexed. Generated: never written directly.',
   ADD KEY idx_events_workspace_calendar_subject
     (workspace_id, calendar_id, subject_public_id, id);
@@ -1939,27 +1945,17 @@ ALTER TABLE sessions
 
 -- >>> sessions_rotation.sql
 -- ====================================
--- sessions — remember the refresh hash that was just spent
+-- sessions — remember when the refresh token was last exchanged
 --
--- Rotation overwrites the stored hash, which leaves nothing behind that could
--- recognise a second use of the token it replaced. A replayed refresh token
--- then looks exactly like a random string: both match no row, both get the
--- same refusal, and a token that leaked is spent in silence.
---
--- Keeping the retired hash is what makes the replay nameable. A refresh
--- request matching it is, by construction, presenting a token this session
--- already traded in — either the legitimate client retrying an exchange whose
--- reply it never saw, or somebody else holding a copy. Nothing distinguishes
--- the two, so the session is closed and both sides sign in again.
---
--- It lives here rather than in core/ because what a retired token means is
--- this product's policy. The contract stores a hash; it does not say what a
--- second presentation of a spent one implies.
+-- The retired hash itself is the contract's rotated_from_hash, and replay
+-- detection reads only that column. What a second presentation of it implies
+-- is this product's policy: the session is closed, unless the exchange that
+-- retired it was seconds ago, which reads as one client asking twice. That
+-- grace window needs the time of the last exchange, which the contract does
+-- not keep, so it lives here.
 -- ====================================
 ALTER TABLE sessions
-  ADD COLUMN prev_refresh_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'SHA-256 hex of the refresh token this session last traded in; presenting it again is a replay',
-  ADD COLUMN rotated_at DATETIME(3) NULL COMMENT 'When the refresh token was last exchanged',
-  ADD KEY idx_sessions_prev_refresh_hash (prev_refresh_hash);
+  ADD COLUMN rotated_at DATETIME(3) NULL COMMENT 'When the refresh token was last exchanged';
 
 DROP VIEW IF EXISTS `storage_objects_unreferenced`;
 

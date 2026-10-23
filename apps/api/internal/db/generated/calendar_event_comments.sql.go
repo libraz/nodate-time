@@ -89,44 +89,49 @@ func (q *Queries) GetEventCommentByPublicID(ctx context.Context, publicID []byte
 	return i, err
 }
 
-const getEventCommentByPublicIDAndEvent = `-- name: GetEventCommentByPublicIDAndEvent :one
-SELECT ec.id, ec.public_id, ec.workspace_id, ec.event_id, ec.author_id, ec.body, ec.edited_at, ec.sort_weight, ec.notes, ec.enabled, ec.deleted_at, ec.updated_at, ec.created_at, u.display_name AS user_display_name, u.avatar_url AS user_avatar_url,
-       so.storage_key AS user_avatar_storage_key,
-       u.public_id AS user_public_id
-FROM calendar_event_comments ec
-INNER JOIN users u ON u.id = ec.author_id
-LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-WHERE ec.public_id = ? AND ec.event_id = ? AND ec.enabled = TRUE AND ec.deleted_at IS NULL
+const getEventCommentCursor = `-- name: GetEventCommentCursor :one
+SELECT id, created_at FROM calendar_event_comments
+WHERE public_id = ? AND event_id = ?
 `
 
-type GetEventCommentByPublicIDAndEventParams struct {
+type GetEventCommentCursorParams struct {
 	PublicID []byte        `json:"publicId"`
 	EventID  sql.NullInt32 `json:"eventId"`
 }
 
-type GetEventCommentByPublicIDAndEventRow struct {
-	ID                   uint32         `json:"id"`
-	PublicID             []byte         `json:"publicId"`
-	WorkspaceID          uint32         `json:"workspaceId"`
-	EventID              sql.NullInt32  `json:"eventId"`
-	AuthorID             uint32         `json:"authorId"`
-	Body                 string         `json:"body"`
-	EditedAt             sql.NullTime   `json:"editedAt"`
-	SortWeight           int32          `json:"sortWeight"`
-	Notes                sql.NullString `json:"notes"`
-	Enabled              bool           `json:"enabled"`
-	DeletedAt            sql.NullTime   `json:"deletedAt"`
-	UpdatedAt            sql.NullTime   `json:"updatedAt"`
-	CreatedAt            time.Time      `json:"createdAt"`
-	UserDisplayName      string         `json:"userDisplayName"`
-	UserAvatarURL        sql.NullString `json:"userAvatarUrl"`
-	UserAvatarStorageKey sql.NullString `json:"userAvatarStorageKey"`
-	UserPublicID         []byte         `json:"userPublicId"`
+type GetEventCommentCursorRow struct {
+	ID        uint32    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg GetEventCommentByPublicIDAndEventParams) (GetEventCommentByPublicIDAndEventRow, error) {
-	row := q.db.QueryRowContext(ctx, getEventCommentByPublicIDAndEvent, arg.PublicID, arg.EventID)
-	var i GetEventCommentByPublicIDAndEventRow
+// GetEventCommentCursor resolves a page cursor to its ordering pair. Removed
+// comments are included: the cursor names a position in the thread, and the
+// comment it was taken from being removed since does not move that position.
+func (q *Queries) GetEventCommentCursor(ctx context.Context, arg GetEventCommentCursorParams) (GetEventCommentCursorRow, error) {
+	row := q.db.QueryRowContext(ctx, getEventCommentCursor, arg.PublicID, arg.EventID)
+	var i GetEventCommentCursorRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
+const getEventCommentForUpdate = `-- name: GetEventCommentForUpdate :one
+SELECT id, public_id, workspace_id, event_id, author_id, body, edited_at, sort_weight, notes, enabled, deleted_at, updated_at, created_at FROM calendar_event_comments
+WHERE public_id = ? AND event_id = ? AND enabled = TRUE AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetEventCommentForUpdateParams struct {
+	PublicID []byte        `json:"publicId"`
+	EventID  sql.NullInt32 `json:"eventId"`
+}
+
+// GetEventCommentForUpdate reads a live comment under its row lock, inside the
+// transaction that writes it, so authorship and existence are decided on the
+// row the write replaces. It joins nothing: a locking read over the author
+// would lock the user row too.
+func (q *Queries) GetEventCommentForUpdate(ctx context.Context, arg GetEventCommentForUpdateParams) (CalendarEventComment, error) {
+	row := q.db.QueryRowContext(ctx, getEventCommentForUpdate, arg.PublicID, arg.EventID)
+	var i CalendarEventComment
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
@@ -141,10 +146,6 @@ func (q *Queries) GetEventCommentByPublicIDAndEvent(ctx context.Context, arg Get
 		&i.DeletedAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.UserDisplayName,
-		&i.UserAvatarURL,
-		&i.UserAvatarStorageKey,
-		&i.UserPublicID,
 	)
 	return i, err
 }
@@ -336,17 +337,20 @@ func (q *Queries) ListEventCommentsLatest(ctx context.Context, arg ListEventComm
 	return items, nil
 }
 
-const softDeleteEventComment = `-- name: SoftDeleteEventComment :exec
-UPDATE calendar_event_comments SET deleted_at = NOW(3) WHERE id = ?
+const softDeleteEventComment = `-- name: SoftDeleteEventComment :execresult
+UPDATE calendar_event_comments SET deleted_at = NOW(3)
+WHERE id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteEventComment(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteEventComment, id)
-	return err
+// SoftDeleteEventComment retires one live comment. The deleted_at guard makes
+// the affected-row count say whether this call is the one that removed it.
+func (q *Queries) SoftDeleteEventComment(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteEventComment, id)
 }
 
 const updateEventComment = `-- name: UpdateEventComment :exec
-UPDATE calendar_event_comments SET body = ?, edited_at = NOW(3) WHERE id = ?
+UPDATE calendar_event_comments SET body = ?, edited_at = NOW(3)
+WHERE id = ? AND deleted_at IS NULL
 `
 
 type UpdateEventCommentParams struct {

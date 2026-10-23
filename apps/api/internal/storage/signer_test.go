@@ -36,7 +36,34 @@ func TestGetURLRoundTrips(t *testing.T) {
 	require.False(t, grant.Download)
 	require.Empty(t, grant.ContentType)
 	require.Zero(t, grant.ByteSize)
-	require.WithinDuration(t, time.Now().Add(time.Hour), grant.ExpiresAt, 2*time.Second)
+	require.WithinDuration(t, time.Now().Add(time.Hour), grant.ExpiresAt, time.Hour/readBuckets+2*time.Second)
+	require.False(t, grant.ExpiresAt.Before(time.Now().Add(time.Hour-time.Second)), "a read URL is never shorter than the lifetime asked for")
+}
+
+func TestGetURLIsIdenticalWithinAnExpiryBucket(t *testing.T) {
+	s := testSigner()
+	// Two mints a few milliseconds apart straddle a bucket boundary only
+	// rarely; retry so the assertion is about the bucket, not the clock.
+	for attempt := 0; attempt < 5; attempt++ {
+		first, err := s.GetURL("albums/a/photo", time.Hour)
+		require.NoError(t, err)
+		time.Sleep(1100 * time.Millisecond)
+		second, err := s.GetURL("albums/a/photo", time.Hour)
+		require.NoError(t, err)
+		if first == second {
+			return
+		}
+	}
+	t.Fatal("URLs minted a second apart for the same key never matched")
+}
+
+func TestGetURLStaysValidForAtLeastItsLifetime(t *testing.T) {
+	s := testSigner()
+	raw, err := s.GetURL("albums/a/photo", time.Hour)
+	require.NoError(t, err)
+	key, q := parse(t, raw)
+	_, err = s.Verify("GET", key, q, time.Now().Add(time.Hour-time.Second))
+	require.NoError(t, err)
 }
 
 func TestPutURLCarriesTheSizeAndTypeItBinds(t *testing.T) {

@@ -192,7 +192,7 @@ func rotateSession(ctx context.Context, deps Deps, refreshToken string) (Credent
 // which one they landed in only informs whoever is holding a token they
 // should not have.
 func closeReplayedSession(ctx context.Context, deps Deps, spent string) error {
-	session, err := deps.Queries.GetSessionByPrevRefreshHash(ctx,
+	session, err := deps.Queries.GetSessionByRotatedFromHash(ctx,
 		sql.NullString{String: spent, Valid: true})
 	if err != nil {
 		// Including sql.ErrNoRows, which is the ordinary case: a value no

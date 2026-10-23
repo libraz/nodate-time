@@ -10,13 +10,12 @@ import (
 	"database/sql"
 )
 
-const deleteOAuthProviderConfig = `-- name: DeleteOAuthProviderConfig :exec
+const deleteOAuthProviderConfig = `-- name: DeleteOAuthProviderConfig :execresult
 DELETE FROM oauth_provider_configs WHERE provider = ?
 `
 
-func (q *Queries) DeleteOAuthProviderConfig(ctx context.Context, provider OauthProviderConfigsProvider) error {
-	_, err := q.db.ExecContext(ctx, deleteOAuthProviderConfig, provider)
-	return err
+func (q *Queries) DeleteOAuthProviderConfig(ctx context.Context, provider OauthProviderConfigsProvider) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteOAuthProviderConfig, provider)
 }
 
 const getOAuthProviderConfig = `-- name: GetOAuthProviderConfig :one

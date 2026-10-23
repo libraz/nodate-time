@@ -57,15 +57,31 @@ ORDER BY start_at;
 -- recurrence_end is compared inclusively because a zero-length series ends
 -- exactly where its last occurrence starts, and that marker belongs to the
 -- window opening on it.
+--
+-- A series is also selected when one of its changed occurrences overlaps the
+-- window on its own dates, with the same test the non-recurring query applies.
+-- An occurrence can be moved to before the series' start, which no bound on
+-- the series row covers. Every windowed reader -- listing, share and export --
+-- goes through this one query.
 -- name: ListRecurringCalendarEventsByCalendarAndRange :many
-SELECT * FROM calendar_events
-WHERE calendar_id = ?
-  AND enabled = TRUE
-  AND recurrence_rule IS NOT NULL
-  AND recurrence_parent_id IS NULL
-  AND start_at < sqlc.arg(range_end)
-  AND (recurrence_end IS NULL OR recurrence_end >= sqlc.arg(range_start))
-ORDER BY start_at;
+SELECT * FROM calendar_events s
+WHERE s.calendar_id = ?
+  AND s.enabled = TRUE
+  AND s.recurrence_rule IS NOT NULL
+  AND s.recurrence_parent_id IS NULL
+  AND (
+    (s.start_at < sqlc.arg(range_end)
+      AND (s.recurrence_end IS NULL OR s.recurrence_end >= sqlc.arg(range_start)))
+    OR EXISTS (
+      SELECT 1 FROM calendar_events o
+      WHERE o.recurrence_parent_id = s.id
+        AND o.enabled = TRUE
+        AND o.start_at < sqlc.arg(range_end)
+        AND (o.end_at > sqlc.arg(range_start)
+          OR (o.end_at = o.start_at AND o.end_at >= sqlc.arg(range_start)))
+    )
+  )
+ORDER BY s.start_at;
 
 -- ListCalendarEventsForExport returns every series head in a calendar, dated or
 -- not, recurring or not. Overrides are excluded: they belong to the series
@@ -74,8 +90,8 @@ ORDER BY start_at;
 -- There is deliberately no window. An export is a backup, and a backup that
 -- quietly stops at a boundary is worse than no backup -- the caller cannot
 -- tell the difference between "the calendar had nothing there" and "the
--- server decided not to look". Callers that want a window apply it to the
--- result themselves and say so.
+-- server decided not to look". A windowed export reads through the range
+-- queries above instead, and says which window it covered.
 -- name: ListCalendarEventsForExport :many
 SELECT * FROM calendar_events
 WHERE calendar_id = ?
@@ -236,14 +252,15 @@ INSERT INTO calendar_events (
 -- event a file is offering, so a second import of the same file can leave it
 -- alone instead of writing a second copy of everything in it.
 --
--- Scoped to enabled rows to match uniq_calendar_events_source_uid, which is
--- itself scoped to live rows through source_uid_key. An event deleted here is
+-- Matched on source_uid_key, which is source_uid on an enabled row and NULL
+-- otherwise, so the lookup is one probe of uniq_calendar_events_source_uid
+-- and sees live rows only. An event deleted here is
 -- meant to be importable again, so a soft-deleted row must not answer this
 -- question -- reading it would make the deletion permanent in a way the user
 -- never asked for and cannot undo from the app.
 -- name: FindCalendarEventBySourceUID :one
 SELECT * FROM calendar_events
-WHERE calendar_id = ? AND source_uid = ? AND enabled = TRUE;
+WHERE calendar_id = ? AND source_uid_key = sqlc.arg(source_uid);
 
 -- name: UpdateCalendarEvent :exec
 UPDATE calendar_events

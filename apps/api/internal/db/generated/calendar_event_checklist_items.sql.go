@@ -62,6 +62,40 @@ func (q *Queries) GetChecklistItemByPublicID(ctx context.Context, publicID []byt
 	return i, err
 }
 
+const getChecklistItemForUpdate = `-- name: GetChecklistItemForUpdate :one
+SELECT id, public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_checklist_items
+WHERE public_id = ? AND event_id = ? AND enabled = TRUE
+FOR UPDATE
+`
+
+type GetChecklistItemForUpdateParams struct {
+	PublicID []byte `json:"publicId"`
+	EventID  uint32 `json:"eventId"`
+}
+
+// GetChecklistItemForUpdate reads a live item of one event under its row lock,
+// inside the transaction that writes it, so a partial update merges over the
+// row it replaces.
+func (q *Queries) GetChecklistItemForUpdate(ctx context.Context, arg GetChecklistItemForUpdateParams) (CalendarEventChecklistItem, error) {
+	row := q.db.QueryRowContext(ctx, getChecklistItemForUpdate, arg.PublicID, arg.EventID)
+	var i CalendarEventChecklistItem
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.EventID,
+		&i.CreatedByUserID,
+		&i.Title,
+		&i.Done,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listChecklistItems = `-- name: ListChecklistItems :many
 SELECT id, public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_checklist_items
 WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
@@ -119,17 +153,19 @@ func (q *Queries) ListChecklistItems(ctx context.Context, arg ListChecklistItems
 	return items, nil
 }
 
-const softDeleteChecklistItem = `-- name: SoftDeleteChecklistItem :exec
-UPDATE calendar_event_checklist_items SET enabled = FALSE WHERE id = ?
+const softDeleteChecklistItem = `-- name: SoftDeleteChecklistItem :execresult
+UPDATE calendar_event_checklist_items SET enabled = FALSE WHERE id = ? AND enabled = TRUE
 `
 
-func (q *Queries) SoftDeleteChecklistItem(ctx context.Context, id uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteChecklistItem, id)
-	return err
+// SoftDeleteChecklistItem retires one live item. The enabled guard makes the
+// affected-row count say whether this call is the one that removed it.
+func (q *Queries) SoftDeleteChecklistItem(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, softDeleteChecklistItem, id)
 }
 
 const updateChecklistItem = `-- name: UpdateChecklistItem :exec
-UPDATE calendar_event_checklist_items SET title = ?, done = ?, sort_weight = ? WHERE id = ?
+UPDATE calendar_event_checklist_items SET title = ?, done = ?, sort_weight = ?
+WHERE id = ? AND enabled = TRUE
 `
 
 type UpdateChecklistItemParams struct {

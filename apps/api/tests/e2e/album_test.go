@@ -321,10 +321,11 @@ func TestAlbumPresignRejectsSVG(t *testing.T) {
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/svg+xml", "byteSize": 128})
 	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Contains(t, string(raw), "ALBUM.INVALID_CONTENT_TYPE")
 }
 
 // TestAlbumPresignRejectsMismatchedContentTypeParams verifies a parameterized
@@ -335,10 +336,11 @@ func TestAlbumPresignRejectsMismatchedContentTypeParams(t *testing.T) {
 	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
-	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/svg+xml; charset=utf-8", "byteSize": 128})
 	assert.Equal(t, http.StatusBadRequest, status)
+	assert.Contains(t, string(raw), "ALBUM.INVALID_CONTENT_TYPE")
 }
 
 // TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt verifies the

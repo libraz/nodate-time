@@ -209,7 +209,7 @@ func TestTheSweepKeepsAnObjectHeldOnlyAsAThumbnail(t *testing.T) {
 			"an object a live photo still points at as its thumbnail must not be offered to the sweep")
 	}
 
-	cleanup.RunOnce(testCtx(), generated.New(testDB), getTestStorage())
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	var rows int
 	require.NoError(t, testDB.QueryRow(
@@ -244,7 +244,7 @@ func TestPresignRefusesAThumbnailThatIsNotOne(t *testing.T) {
 		code string
 		body map[string]any
 	}{
-		{"active content", "IMAGE.INVALID_CONTENT_TYPE", map[string]any{
+		{"active content", "ALBUM.INVALID_CONTENT_TYPE", map[string]any{
 			"thumbnailContentType": "image/svg+xml", "thumbnailByteSize": 128,
 		}},
 		{"a full-size picture in a thumbnail's clothing", "ALBUM.THUMBNAIL_TOO_LARGE", map[string]any{

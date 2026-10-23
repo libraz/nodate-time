@@ -10,6 +10,8 @@
 //
 // It also owns the order a write locks a calendar's rows in: LockShared,
 // LockExclusive and LockEvent are the first statement of every such transaction.
+// A write that decides on the caller's grant re-reads it there, under lock,
+// through LockMember and its siblings.
 package calresolve
 
 import (
@@ -17,6 +19,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -207,9 +210,104 @@ func LockEvent(ctx context.Context, q *generated.Queries, calendarID, eventID ui
 	if err := LockShared(ctx, q, calendarID); err != nil {
 		return generated.CalendarEvent{}, err
 	}
+	return lockEventRow(ctx, q, eventID)
+}
+
+func lockEventRow(ctx context.Context, q *generated.Queries, eventID uint32) (generated.CalendarEvent, error) {
 	evt, err := q.GetCalendarEventByIDForUpdate(ctx, eventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return generated.CalendarEvent{}, apierrors.EventNotFound
 	}
 	return evt, err
+}
+
+// LockMember is LockShared followed by the caller's membership, read under its
+// row lock in the same transaction. A write decides the caller's role from
+// this copy, never from the one Member read before the transaction began: a
+// member removed or demoted in between would otherwise still write with the
+// grant they no longer hold. It fails with CalendarAccessDenied once the
+// membership is gone.
+//
+// The membership is locked after the calendar and before any event, which is
+// the order a member's removal takes them in as well.
+func LockMember(ctx context.Context, q *generated.Queries, calendarID, userID uint32) (generated.CalendarMember, error) {
+	if err := LockShared(ctx, q, calendarID); err != nil {
+		return generated.CalendarMember{}, err
+	}
+	member, err := q.GetCalendarMemberForUpdate(ctx, generated.GetCalendarMemberForUpdateParams{
+		CalendarID: calendarID,
+		UserID:     userID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return generated.CalendarMember{}, apierrors.CalendarAccessDenied
+	}
+	return member, err
+}
+
+// LockWrite is LockMember admitting the roles Write admits.
+func LockWrite(ctx context.Context, q *generated.Queries, calendarID, userID uint32) (generated.CalendarMember, error) {
+	member, err := LockMember(ctx, q, calendarID, userID)
+	if err != nil {
+		return generated.CalendarMember{}, err
+	}
+	if !CanWrite(member.Role) {
+		return generated.CalendarMember{}, apierrors.CalendarRoleRequired
+	}
+	return member, nil
+}
+
+// LockManage is LockMember admitting the roles Manage admits.
+func LockManage(ctx context.Context, q *generated.Queries, calendarID, userID uint32) (generated.CalendarMember, error) {
+	member, err := LockMember(ctx, q, calendarID, userID)
+	if err != nil {
+		return generated.CalendarMember{}, err
+	}
+	if !CanManage(member.Role) {
+		return generated.CalendarMember{}, apierrors.CalendarRoleRequired
+	}
+	return member, nil
+}
+
+// LockMembers is LockShared followed by several memberships under their row
+// locks, for a write that decides on the caller's grant and another member's
+// row at once. They are locked in ascending user id, so two writers naming
+// the same pair the other way round queue instead of deadlocking. A user with
+// no live membership is absent from the result; what that means is the
+// caller's to say.
+func LockMembers(ctx context.Context, q *generated.Queries, calendarID uint32, userIDs ...uint32) (map[uint32]generated.CalendarMember, error) {
+	if err := LockShared(ctx, q, calendarID); err != nil {
+		return nil, err
+	}
+	ordered := slices.Clone(userIDs)
+	slices.Sort(ordered)
+	ordered = slices.Compact(ordered)
+	members := make(map[uint32]generated.CalendarMember, len(ordered))
+	for _, userID := range ordered {
+		member, err := q.GetCalendarMemberForUpdate(ctx, generated.GetCalendarMemberForUpdateParams{
+			CalendarID: calendarID,
+			UserID:     userID,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		members[userID] = member
+	}
+	return members, nil
+}
+
+// LockEventMember is LockMember followed by the event's exclusive lock: the
+// first step of a write to an event that decides on the caller's grant.
+func LockEventMember(ctx context.Context, q *generated.Queries, calendarID, eventID, userID uint32) (generated.CalendarMember, generated.CalendarEvent, error) {
+	member, err := LockMember(ctx, q, calendarID, userID)
+	if err != nil {
+		return generated.CalendarMember{}, generated.CalendarEvent{}, err
+	}
+	evt, err := lockEventRow(ctx, q, eventID)
+	if err != nil {
+		return generated.CalendarMember{}, generated.CalendarEvent{}, err
+	}
+	return member, evt, nil
 }
