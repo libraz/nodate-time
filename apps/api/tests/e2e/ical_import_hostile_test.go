@@ -913,12 +913,12 @@ func TestICalImportAccountsForEveryEventInALargeHostileFile(t *testing.T) {
 	deleteEverything(t, calURL, tt.AccessToken, listed)
 }
 
-// Each event is its own transaction, so one the store refuses has to leave
+// An event the store refuses is rolled back alone, so it has to leave
 // nothing at all: no row, and no entry in the log either. A refusal that
 // still wrote its log entry would put a creation in the activity feed for an
 // event that does not exist, which nobody could then open or delete.
 //
-// The events either side of it are already committed. That is the per-event
+// The events either side of it are still committed. That is the per-event
 // contract working as intended, and the response counts all three.
 func TestICalImportLeavesNoTraceOfAnEventItRefused(t *testing.T) {
 	bootstrap(t)
