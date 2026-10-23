@@ -36,7 +36,7 @@ dev: db-up $(DEV_JWT_SECRET_FILE)
 
 # Database
 db-up:
-	docker compose up -d mysql
+	docker compose up -d --wait mysql
 
 db-down:
 	docker compose down

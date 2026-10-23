@@ -55,8 +55,12 @@ make db-schema   # layered sources -> schema.sql
 make sqlc        # schema + queries -> apps/api/internal/db/generated/
 ```
 
-`make verify-codegen` checks the pairing without writing anything, and
-is what the pre-commit hook and CI both run.
+`make verify-codegen` checks the pairing without writing anything: it runs
+`scripts/check-codegen-drift.sh` and `scripts/check-error-messages.sh`, and CI
+runs it. The pre-commit hook (`.githooks/pre-commit`) runs
+`check-codegen-drift.sh --staged`, plus `check-vendored-core.sh --local-only`
+when `sql/core/` is staged; it does not run the error-message check. The hook is
+reached through `core.hooksPath`, so it only runs where that is configured.
 
 ## A schema change also ships its upgrade
 
@@ -71,7 +75,8 @@ into the upgrade file from the latest tag, written as the statements an
 existing database needs rather than the definition a new one gets. When a
 change alters what an existing row means, the file says how to tell the old
 rows apart and sets them accordingly, the way `from-v0.1.0.sql` marks the rows
-v0.1.0 had already deleted.
+v0.1.0 had already deleted. Each step checks what the database already has, so a
+run that stopped partway can be repeated.
 
 To check one, apply the previous release's `schema.sql` and then the upgrade
 to one scratch database, the current `schema.sql` to another, and compare

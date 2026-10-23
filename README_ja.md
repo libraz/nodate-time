@@ -55,8 +55,8 @@ apps/
     cmd/api/           エントリポイント
     cmd/createuser/    ユーザー作成 CLI
     cmd/healthcheck/   コンテナのヘルスチェック
-    internal/          config, auth, audit, cleanup, db/generated,
-                       errors, mailer, recurrence, secrets, storage,
+    internal/          config, auth, cleanup, db/generated, errors,
+                       eventlog, mailer, recurrence, secrets, storage,
                        http/{handlers,middleware,router}
     tests/e2e/         E2E テスト
   web/                 React SPA
@@ -96,6 +96,7 @@ compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + We
 ```bash
 bun install            # 依存インストール（Bun 必須）
 make db-up             # MySQL 起動（compose.yml）
+make minio-up          # MinIO 起動（添付・アルバム・アバターに必要）
 make db-apply          # スキーマ生成・適用
 make db-seed-users     # demo@example.com / admin@example.com を作成
 make dev               # DB + API + Web を一括起動
@@ -103,6 +104,8 @@ make dev               # DB + API + Web を一括起動
 
 - API: <http://localhost:8080>（`/health`, OpenAPI は Huma が生成）
 - Web: <http://localhost:5173>
+
+`make dev` が起動するのは MySQL だけなので、`make minio-up` をしないと添付・アルバム・アバターのエンドポイントは 503 を返す。
 
 開発環境（`TC_ENV=development`）では `/auth/dev-login` でシードユーザーにパスワードレスログインできる。
 
@@ -153,13 +156,13 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信。ホスト未設定だと `TC_ALLOW_CONSOLE_MAILER` がない限り API は起動を拒否する | 未設定 |
 | `TC_ALLOW_CONSOLE_MAILER` | SMTP リレーなしで動かす。メールは配送されずログに書かれる。開発環境以外ではログに残るのは件名だけで、宛先も本文も出ない | `false`（`make dev` は `true`） |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | 空 |
-| `TC_GOOGLE_ALLOWED_DOMAINS` | サインアップ / サインインを許可するメールドメイン（カンマ区切り）。Google・LINE・パスワード登録のすべてが検査する。リスト外のアドレスでも、管理者が個別にアロウリストへ登録していれば通る | 制限なし |
+| `TC_GOOGLE_ALLOWED_DOMAINS` | サインアップ / サインインを許可するメールドメイン（カンマ区切り）。パスワードの登録・ログインと Google サインインが検査する。LINE はメールアドレスを検証しないため、リストを設定している間は拒否される。リスト外のアドレスでも、個別にアロウリストへ登録されていれば通り、`createuser` は作成したアカウントをアロウリストに登録する | 制限なし |
 | `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | 空 |
 | `TC_SECRETS_KEY` | DB に保存する秘密情報の暗号鍵（hex/base64 32 バイト） | 空 |
 | `TC_METRICS_ADDR` | 管理用リスナーの待ち受けアドレス。空で無効化 | `127.0.0.1:9464` |
 | `TC_METRICS_ALLOWED_CIDRS` | 管理用リスナーに到達できるネットワーク。直接の TCP ピアと照合する。空はすべて拒否 | loopback + プライベート帯 |
 
-> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・デフォルトの MinIO 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、MinIO 認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV` が足すのは `/auth/dev-login` だけ。
+> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・デフォルトの MinIO 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、MinIO 認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV=development` が足すのは `/auth/dev-login` と、コンソールメーラーがメール全文（宛先も本文も）をログに書くことだけ。
 
 DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_MINIO_API_PORT`, `TC_MINIO_CONSOLE_PORT`。
 
@@ -173,7 +176,7 @@ Huma v2 で OpenAPI 記述が自動生成される。認証なしで `/openapi.j
 - **要認証** — `/auth/logout`, `/user/*`, `/calendars`, `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`, `/invites/{token}/accept`
 - **管理者** — `/admin/oauth-providers`, `/admin/allowed-emails`, `/admin/instance-admins`
 
-認証なしのエンドポイントは IP 単位でレート制限される。
+サインイン・登録・パスワード再設定・OAuth（`/auth/*`）と公開共有リンク（`/share/*`）は IP 単位でレート制限される。`/health`、OpenAPI と docs のルート、`/blobs/*` は対象外。
 
 ## 可観測性
 
@@ -182,7 +185,7 @@ Huma v2 で OpenAPI 記述が自動生成される。認証なしで `/openapi.j
 | パス | 答えるもの |
 | --- | --- |
 | `/metrics` | Prometheus テキスト形式。マッチしたルート別のリクエスト数・レイテンシヒストグラム・レスポンスサイズ、処理中リクエスト数、コネクションプールの飽和、Go ランタイム、スコープ別のレート制限拒否数、送信メールの結果別件数 |
-| `/debug/pprof/*` | 稼働中プロセスの CPU・ヒープ・goroutine・mutex プロファイル |
+| `/debug/pprof/*` | 稼働中プロセスの CPU・ヒープ・goroutine プロファイル |
 | `/health/detail` | 依存先ごとの詳細レポート（DB・オブジェクトストレージ・メールリレー）。失敗したプローブが返したエラーを含む。503 を返すのは**必須**依存が落ちたときだけで、メールリレーが不通なだけでロードバランサから外されることはない |
 
 遮断は二重で、どちらも転送ヘッダを見ない。既定で loopback にバインドし、さらに直接の TCP ピアを `TC_METRICS_ALLOWED_CIDRS` と照合する。リスト外からのリクエストには 403 ではなく 404 を返す — 「許可されていない」という応答はエンドポイントの存在を裏付けてしまうため。**このポートの前にリバースプロキシの設定を置かないこと。** プロキシ経由では全リクエストがプロキシのアドレスから届くので、許可エントリ 1 つでインターネット全体を通すことになる。
@@ -198,6 +201,8 @@ go tool pprof http://127.0.0.1:9464/debug/pprof/profile?seconds=30
 公開側の `/health` はロードバランサが必要とするもののまま。軽く、認証不要で、どの依存先が不調かは語らない。
 
 **アクセスログは URL ではなくルートを記録する。** 共有トークンはパスの一部であり、パスワード再設定はトークンをクエリに載せる。素直にアクセスログを取ると、最も長く保存され最も広く読まれる場所に有効な資格情報を書き残すことになる。各行が持つのは、マッチしたルートパターン・ステータス・所要時間・レスポンスサイズ・クライアント IP・リクエスト識別子。識別子は `X-Request-Id` として返り、そのリクエストが出す他のすべてのログ行にも付くので、1 つの値で一連の流れを拾える。呼び出し側が指定した識別子を採用するのは `TC_TRUSTED_PROXIES` に載っているホップからのときだけ。
+
+web サービスの nginx も同じ規則に従う。アクセスログに載るのはクエリ文字列を除いたパスだけで、`/share/`・`/embed/`・`/invites/` の URL はトークンの区間を置き換え、`Referer` は記録しない。失敗時にだけ書かれるエラーログには、失敗したリクエストのリクエスト行と `Referer` がそのまま載る。
 
 ## テスト
 
@@ -243,7 +248,15 @@ certbot renew --webroot -w /path/to/acme \
 
 TLS を別の場所で終端したい場合——ホスト上のリバースプロキシ、あるいはトンネル——は、`web` サービスから TLS テンプレートのマウントと証明書の 2 つのボリュームを外し、`127.0.0.1:8081:80` を publish する。イメージは平文 HTTP で応答し、`/api` は同じように自分で API へ流すので、ブラウザから見た構成は上と変わらない。ホスト側のプロキシはその 1 ポートだけを向けばよい。
 
-設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SMTP_HOST` がなければ API が起動を拒否する（`TC_ALLOW_CONSOLE_MAILER=true` ならメールを配送せずログに書いて起動する）。上の表のその他の変数も同じ既定値のまま渡る。`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
+設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SMTP_HOST` がなければ API が起動を拒否する（`TC_ALLOW_CONSOLE_MAILER=true` ならメールを配送せずログに書いて起動する）。上の表のその他の変数も同じ既定値のまま渡る。例外は次のとおり。
+
+- `TC_CORS_ALLOWED_ORIGINS` は常に `TC_WEB_URL` になる。`.env` に書いた値は無視される。
+- `TC_PORT` は渡さない。API はコンテナ内で 8080 を待ち受け、ホスト側の loopback ポートは `TC_API_PORT`（既定 8080）で決める。
+- `TC_METRICS_ADDR` の既定は `:9464`。コンテナはホストの loopback にバインドできないため。`127.0.0.1` に閉じているのは公開側のポート（`TC_METRICS_PORT`、既定 9464）。
+- `TC_ENV` は常に `production`、`TC_DB_DSN` は `TC_DB_USER`・`TC_DB_PASSWORD`・`TC_DB_NAME` から組み立てられる。
+`TC_SECRETS_KEY` は任意で、設定しない場合、管理画面は OAuth のクライアントシークレットを平文で保存する代わりに保存自体を拒否する。
+
+web サービスが返すページにはすべて、フレーム埋め込みを禁じる Content-Security-Policy、`nosniff`、`Referrer-Policy: no-referrer` が付き、TLS を自分で終端する場合は HSTS も付く。例外は `/embed/*` で、どのサイトからでもフレームに入れられる。ポリシーが許すスクリプトと接続先は配信元と同じオリジンだけなので、別オリジンで API を配信する場合は `apps/web/nginx/security-headers.conf` の `connect-src` を広げる。
 
 ```sh
 docker compose -f compose.prod.yml up -d --build
@@ -260,12 +273,14 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 先に上記のとおり 2 つのボリュームをバックアップする。そのうえで、今のリリースから移行先までの各リリースについて `sql/upgrades/from-<そのリリース>.sql` を古い順に当て、それから再ビルドする。
 
 ```sh
+docker compose -f compose.prod.yml stop api
 docker compose -f compose.prod.yml exec -T mysql \
-  mysql -u root -p"$TC_DB_ROOT_PASSWORD" nodate_time < sql/upgrades/from-v0.1.0.sql
-docker compose -f compose.prod.yml up -d --build
+  sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+  < sql/upgrades/from-v0.1.0.sql \
+  && docker compose -f compose.prod.yml up -d --build
 ```
 
-更新用の SQL はデータを残し、稼働中の旧版もその結果の上でそのまま動く。だから新しい API を起動する前に当てる。すでに当てたファイルをもう一度流しても、最初の文で止まって何も変わらない。
+パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はない。再ビルドは更新が成功したときだけ走る。更新用の SQL はデータを残す。旧版の API は先に止めること。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまう。ファイルの各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せる。
 
 v0.1.0 から上げる場合は、配備の形も変わっている。
 
@@ -283,8 +298,9 @@ v0.1.0 から上げる場合は、配備の形も変わっている。
 メンテナンスの止まったストレージを使い続けるのは見落としではなく判断による。プライベートネットワークにしか応答しないので、もう修正されないコードは認証を持たない呼び出し元が到達できるコードではない。加えて、イメージ化されなかった最終リリースの修正はサービスアカウントと STS に関するもので、このデプロイはどちらも使っていない。この釣り合いが受け入れられないなら、`TC_S3_*` を任意の S3 互換エンドポイントに向ければよく、設定より上は何も変わらない——どちらにせよストレージに触るのは API で、ブラウザではない。
 
 ```sh
-docker compose -f compose.prod.yml exec mysql \
-  mysqldump -u root -p"$TC_DB_ROOT_PASSWORD" --single-transaction nodate_time > backup.sql
+docker compose -f compose.prod.yml exec -T mysql \
+  sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction "$MYSQL_DATABASE"' \
+  > backup.sql
 ```
 
 ## ライセンス
