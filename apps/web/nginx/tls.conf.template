@@ -14,6 +14,8 @@ server {
     listen 80;
     server_name ${TC_PUBLIC_HOST};
 
+    access_log /var/log/nginx/access.log app;
+
     # Renewal is served over plain HTTP by definition, so it is answered here
     # rather than redirected. certbot --webroot writes into the directory this
     # is mounted from.
