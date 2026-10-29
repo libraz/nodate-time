@@ -36,3 +36,25 @@ func TestActivityCursorCarriesNoInternalNumber(t *testing.T) {
 		t.Fatalf("cursor %q reads as a number", cursor)
 	}
 }
+
+func TestEntityTypeOf(t *testing.T) {
+	cases := map[string]string{
+		"calendar.created":                  "calendar",
+		"calendar.reminder":                 "calendar",
+		"calendar.event.created":            "event",
+		"calendar.event.comment.created":    "comment",
+		"calendar.event.checklist.updated":  "checklist",
+		"calendar.event.attachment.deleted": "attachment",
+		"calendar.event.attendee.added":     "attendee",
+		"calendar.event.rsvp.updated":       "rsvp",
+		"calendar.event.invite.rotated":     "invite",
+		"calendar.member.role_changed":      "member",
+		"calendar.subscription.updated":     "subscription",
+		"workspace.member.added":            "member",
+	}
+	for kind, want := range cases {
+		if got := entityTypeOf(kind); got != want {
+			t.Errorf("entityTypeOf(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}

@@ -145,12 +145,12 @@ func readPayload(raw json.RawMessage) payloadFields {
 
 // entityTypeOf reads the entity out of a dotted event type:
 // "calendar.event.created" is about an event, "calendar.memo.deleted" about
-// a memo. Matching on the segment rather than the whole string keeps a new
-// verb from needing a change here.
+// a memo, "calendar.event.comment.created" about a comment. The entity is the
+// segment before the verb, so a new verb needs no change here.
 func entityTypeOf(eventType string) string {
 	parts := strings.Split(eventType, ".")
 	if len(parts) >= 3 {
-		return parts[1]
+		return parts[len(parts)-2]
 	}
 	if len(parts) == 2 {
 		return parts[0]
