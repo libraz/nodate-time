@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-vendored.sh — verify a vendored directory still matches its upstream.
 #
-#   bash sql/core/tools/check-vendored.sh <dir> [--local-only]
+#   bash sql/core/tools/check-vendored.sh <dir> [--mode local|pin|all]
 #
 # <dir> holds an UPSTREAM.json written by vendor.sh. Three checks:
 #
@@ -11,23 +11,29 @@
 #   behind  the upstream default branch (UPSTREAM_DEFAULT_BRANCH, default
 #           main) has not moved on without a re-vendor
 #
-# local needs nothing but this checkout. pin and behind need the upstream to
-# be reachable; when it is not the script fails rather than passing, because
-# "could not check" must not look like "no drift". --local-only runs just the
-# first.
+# Modes:
+#   local   the local check only; no network.
+#   pin     local, then pin.
+#   all     (default) pin, then behind.
+#
+# pin and behind need the upstream to be reachable; when it is not the script
+# fails rather than passing, because "could not check" must not look like "no
+# drift". local and pin are deterministic; behind changes whenever upstream
+# does, so run it on a schedule rather than on every change.
 #
 # Exit codes: 0 intact, 1 drift, 2 the check could not be performed.
 
 set -euo pipefail
 export LC_ALL=C
 
-usage() { sed -n '2,20p' "${BASH_SOURCE[0]}"; }
+usage() { sed -n '2,25p' "${BASH_SOURCE[0]}"; }
 
 DIR=""
-LOCAL_ONLY=0
-for arg in "$@"; do
+MODE="all"
+while [[ $# -gt 0 ]]; do
+  arg="$1"
   case "${arg}" in
-    --local-only) LOCAL_ONLY=1 ;;
+    --mode) MODE="${2:-}"; shift 2; continue ;;
     -h | --help) usage; exit 0 ;;
     -*) echo "check-vendored.sh: unknown argument: ${arg}" >&2; exit 2 ;;
     *)
@@ -38,7 +44,12 @@ for arg in "$@"; do
       DIR="${arg}"
       ;;
   esac
+  shift
 done
+case "${MODE}" in
+  local | pin | all) ;;
+  *) echo "check-vendored.sh: --mode must be one of local, pin, all" >&2; exit 2 ;;
+esac
 if [[ -z "${DIR}" ]]; then
   usage >&2
   exit 2
@@ -110,7 +121,7 @@ if [[ -n "${problems}" ]]; then
 fi
 echo "vendored copy matches its manifest ($(wc -l <"${TMP}/recorded" | tr -d ' ') files)"
 
-if [[ ${LOCAL_ONLY} -eq 1 ]]; then
+if [[ "${MODE}" == "local" ]]; then
   exit 0
 fi
 
@@ -150,7 +161,7 @@ if ! fetch_into "${TMP}/upstream" "${REF}"; then
   sed 's/^/  /' "${TMP}/fetch.err" >&2 2>/dev/null || true
   echo "" >&2
   echo "The pinned ref must be reachable for this check to mean anything." >&2
-  echo "If it has not been pushed upstream yet, push it; use --local-only" >&2
+  echo "If it has not been pushed upstream yet, push it; use --mode local" >&2
   echo "to assert only that the copy is unedited." >&2
   exit 2
 fi
@@ -166,6 +177,10 @@ if ! diff -ru -x UPSTREAM.json -x .DS_Store "${TMP}/upstream/${SRC}" "${DIR}" >"
   exit 1
 fi
 echo "${DIR} matches ${REPO} at ${REF}."
+
+if [[ "${MODE}" == "pin" ]]; then
+  exit 0
+fi
 
 # ── behind: the pin itself is what went stale ───────────────────────
 #

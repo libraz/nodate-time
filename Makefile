@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core storage-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up format lint
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -121,11 +121,21 @@ test-conformance: db-schema
 test-upgrade-path:
 	bash scripts/check-upgrade-path.sh
 
-# Verify sql/core is still the upstream text, unedited and current, and
-# that no product layer reshapes a core table.
+# Verify sql/core is unedited (offline) and that no product layer reshapes
+# a core table.
 check-core:
-	bash sql/core/tools/check-vendored.sh sql/core
+	bash sql/core/tools/check-vendored.sh sql/core --mode local
 	bash sql/core/tools/check-no-core-alters.sh sql
+
+# Verify sql/core is unedited and matches the commit it claims to come from
+# (needs network).
+check-core-pin:
+	bash sql/core/tools/check-vendored.sh sql/core --mode pin
+
+# Verify sql/core is the upstream default branch, on top of the pin checks
+# (needs network). Run on a schedule, not per PR.
+check-core-current:
+	bash sql/core/tools/check-vendored.sh sql/core --mode all
 
 storage-up:
 	docker compose up -d storage

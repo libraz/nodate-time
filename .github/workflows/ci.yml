@@ -57,14 +57,12 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: apps/api/go.sum
 
-      # sql/core is a copy of the shared schema contract. The full check
-      # asserts three things: that the copy is unedited here, that it
-      # still matches the commit it claims to come from, and that the
-      # commit it claims is still what upstream says today. Only the last
-      # one can catch a contract that moved while this copy stood still,
-      # and it is the one that needs the network.
-      - name: Vendored contract is intact and current
-        run: bash sql/core/tools/check-vendored.sh sql/core
+      # sql/core is a copy of the shared schema contract. This asserts that
+      # the copy is unedited here and still matches the commit it claims to
+      # come from. Whether upstream has moved on is not asserted here, since
+      # that would redden unrelated PRs; vendored-drift.yml reports it daily.
+      - name: Vendored contract is unedited and matches its pin
+        run: make check-core-pin
 
       # A product layer may add tables but never reshapes a core table.
       - name: No product layer alters a core table
