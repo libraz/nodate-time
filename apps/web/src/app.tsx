@@ -7,6 +7,7 @@ import { LoadFailure, LoadFailureBanner } from '@/components/load-failure';
 import { MonthScroll } from '@/components/month-scroll';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
+import { Highlight } from '@/components/search-results';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { fetchWindow } from '@/lib/date-utils';
@@ -16,6 +17,7 @@ import {
   searchResultDay,
   searchResultLabel,
 } from '@/lib/search';
+import { useCalendarShortcuts } from '@/lib/shortcuts';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
@@ -161,12 +163,12 @@ function MobileSearchView() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-callout font-medium text-[var(--color-text-primary)]">
-                      {evt.title}
+                      <Highlight text={evt.title} query={query} />
                     </p>
                     <p className="text-body text-[var(--color-text-secondary)]">{dateLabel}</p>
                     {evt.location && (
                       <p className="truncate text-body text-[var(--color-text-tertiary)]">
-                        {evt.location}
+                        <Highlight text={evt.location} query={query} />
                       </p>
                     )}
                   </div>
@@ -401,6 +403,7 @@ export function App() {
   // CSS hides the other layout; the calendar inside it is not mounted at all,
   // or it re-renders on every change and measures itself while undisplayed.
   const isDesktop = useIsDesktop();
+  useCalendarShortcuts(isDesktop);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
   const showActivity = useUiStore((s) => s.showActivity);
   const showDayDetail = useUiStore((s) => s.showDayDetail);

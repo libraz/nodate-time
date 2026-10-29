@@ -38,6 +38,11 @@ vi.mock('@/stores/calendar-store', () => ({
 
 import { SearchPanel } from './search-panel';
 
+/** Matches a result line by its whole text, which the match highlight splits across nodes. */
+function fullText(text: string) {
+  return (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === text;
+}
+
 function event(id: string, calendarId: string, title: string): CalendarEvent {
   return {
     id,
@@ -118,7 +123,7 @@ describe('SearchPanel', () => {
     // The panel draws twice: a fullscreen overlay for narrow widths and a
     // dropdown for wide ones. Both are in the document; CSS picks one.
     expect(screen.getAllByPlaceholderText('search.placeholder')).toHaveLength(2);
-    expect(screen.getAllByText('Morning Rehearsal')).toHaveLength(2);
+    expect(screen.getAllByText(fullText('Morning Rehearsal'))).toHaveLength(2);
     expect(screen.queryAllByText('Lunch')).toHaveLength(0);
   });
 
@@ -143,8 +148,44 @@ describe('SearchPanel', () => {
 
     render(<SearchPanel />);
 
-    expect(screen.getAllByText('Rehearsal at home')).toHaveLength(2);
+    expect(screen.getAllByText(fullText('Rehearsal at home'))).toHaveLength(2);
     expect(screen.queryAllByText('Rehearsal at work')).toHaveLength(0);
+  });
+});
+
+describe('SearchPanel results', () => {
+  it('marks the part of a title the query matched', () => {
+    calendarState.events = [event('e1', 'cal-1', 'Morning Rehearsal')];
+    uiState.searchQuery = 'rehe';
+
+    render(<SearchPanel />);
+
+    const marks = screen.getAllByText('Rehe', { selector: 'mark' });
+    expect(marks).toHaveLength(2);
+  });
+
+  it('walks the results with the arrow keys and opens the top one on Enter', () => {
+    calendarState.events = [
+      event('e1', 'cal-1', 'Rehearsal A'),
+      event('e2', 'cal-1', 'Rehearsal B'),
+    ];
+    uiState.searchQuery = 'rehearsal';
+    const { container } = render(<SearchPanel />);
+    const dropdown = container.querySelector('.modal-panel') as HTMLElement;
+    const box = dropdown.querySelector('input') as HTMLInputElement;
+    const rows = dropdown.querySelectorAll<HTMLElement>('[data-search-result]');
+
+    box.focus();
+    fireEvent.keyDown(box, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rows[0]);
+    fireEvent.keyDown(rows[0] as HTMLElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rows[1]);
+    fireEvent.keyDown(rows[1] as HTMLElement, { key: 'ArrowUp' });
+    fireEvent.keyDown(rows[0] as HTMLElement, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(box);
+
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(uiState.openEventModal).toHaveBeenCalledWith('e1');
   });
 });
 
