@@ -44,9 +44,12 @@ func requireCredentialsDead(t *testing.T, baseURL, email, password string, reg r
 }
 
 // Someone registers an address they do not read; its owner then signs in with
-// a provider that vouches for it. The account becomes the owner's, and
-// nothing the registrant set up still opens it.
-func TestEmailOwnershipProviderSignInClaimsASquattedAccount(t *testing.T) {
+// a provider that vouches for it. The provider's word does not hand over an
+// account that holds a password nobody proved belongs to the address's owner
+// (sql/core/PROTOCOL.md, Identity rule 2): the link is refused and the account
+// is left exactly as the registrant set it up. The owner's way in is the
+// confirmation link, below.
+func TestEmailOwnershipProviderSignInCannotClaimASquattedAccount(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -68,17 +71,13 @@ func TestEmailOwnershipProviderSignInClaimsASquattedAccount(t *testing.T) {
 	squatter := registerAt(t, app.URL, email, password)
 
 	location := runGoogleCallback(t, app.URL)
-	require.Contains(t, location, "#token=", location)
-	token, _ := tokensFromRedirect(t, location)
-	var me struct {
-		ID            string `json:"id"`
-		EmailVerified bool   `json:"emailVerified"`
-	}
-	helpers.DoJSON(t, http.MethodGet, app.URL+"/user", token, nil, &me)
-	require.Equal(t, squatter.User.ID, me.ID, "the owner signs in to the account holding their address")
-	require.True(t, me.EmailVerified)
+	require.Equal(t, helpers.TestWebURL+"/login?error=AUTH.LINK_REFUSED", location)
 
-	requireCredentialsDead(t, app.URL, email, password, squatter)
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, app.URL+"/auth/login", "",
+		map[string]any{"email": email, "password": password})
+	require.Equal(t, http.StatusOK, status, "the refusal leaves the squatter's password in place")
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet, app.URL+"/user", squatter.Token, nil)
+	require.Equal(t, http.StatusOK, status, "and the sessions it opened")
 }
 
 // The owner follows the confirmation link the registration sent them, from a

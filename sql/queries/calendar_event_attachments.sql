@@ -50,7 +50,9 @@ SELECT EXISTS (
 
 -- CreateEventAttachment starts disabled. The row only becomes visible once
 -- the upload has actually landed, so a presigned URL that is never used
--- leaves nothing pointing at an object that does not exist.
+-- leaves nothing visible pointing at an object that does not exist. The row
+-- counts towards the object's ref_count from here on: blobref.Reserve took
+-- the reference in the same transaction.
 -- name: CreateEventAttachment :execresult
 INSERT INTO calendar_event_attachments (public_id, workspace_id, event_id, uploader_id, storage_object_id, filename, enabled)
 VALUES (?, ?, ?, ?, ?, ?, FALSE);
@@ -71,36 +73,18 @@ WHERE a.id = ? AND a.uploader_id = ? AND a.enabled = FALSE AND a.retired_at IS N
 
 -- SoftDeleteAttachment retires one live row. The enabled = TRUE guard makes
 -- the affected-row count say whether this call is the one that retired it,
--- which is what decides whether it releases the reference.
+-- which is what decides whether it logs the delete. A retired row still
+-- points at the object, so it keeps its reference until it is hard-deleted.
 -- name: SoftDeleteAttachment :execresult
 UPDATE calendar_event_attachments SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
 WHERE id = ? AND enabled = TRUE;
 
--- name: DeletePendingAttachment :exec
+-- DeletePendingAttachment drops a reservation whose upload did not match. The
+-- affected-row count says whether this call removed it, and so whether it
+-- gives back the reference the row held.
+-- name: DeletePendingAttachment :execresult
 DELETE FROM calendar_event_attachments
-WHERE id = ? AND uploader_id = ? AND enabled = FALSE;
-
--- Only a confirmed row holds a reference: an unconfirmed reservation never
--- incremented one, and a row already soft-deleted released its own. Listing
--- either would decrement a count nobody took, and because objects are
--- content-addressed and shared, that drives a blob another calendar is still
--- using down to zero and into the sweep.
---
--- FOR UPDATE is what makes the listing the set of rows this transaction
--- retires. A concurrent delete of the same rows waits here, then reads them
--- as already retired, so each row is released once; a plain read would let
--- both list them and both release.
--- name: ListAttachmentObjectIDsByEvent :many
-SELECT storage_object_id FROM calendar_event_attachments
-WHERE event_id = ? AND enabled = TRUE
-FOR UPDATE;
-
--- name: ListAttachmentObjectIDsByCalendar :many
-SELECT a.storage_object_id
-FROM calendar_event_attachments a
-INNER JOIN calendar_events e ON e.id = a.event_id
-WHERE e.calendar_id = ? AND a.enabled = TRUE
-FOR UPDATE;
+WHERE id = ? AND uploader_id = ? AND enabled = FALSE AND retired_at IS NULL;
 
 -- name: SoftDeleteAttachmentsByEvent :exec
 UPDATE calendar_event_attachments SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
@@ -115,8 +99,9 @@ WHERE e.calendar_id = ? AND a.enabled = TRUE;
 -- DeleteAbandonedAttachment removes a reservation whose upload never
 -- landed. It re-checks enabled = FALSE so a row confirmed between the
 -- sweep listing it and this delete is left alone, and retired_at IS NULL so a
--- deleted attachment is kept for its own, longer retention.
--- name: DeleteAbandonedAttachment :exec
+-- deleted attachment is kept for its own, longer retention. The affected-row
+-- count decides whether the sweep gives back the row's reference.
+-- name: DeleteAbandonedAttachment :execresult
 DELETE FROM calendar_event_attachments
 WHERE id = ? AND enabled = FALSE AND retired_at IS NULL;
 
@@ -138,17 +123,34 @@ LIMIT ?;
 -- ListRetiredAttachments walks soft-deleted rows whose retention has run out.
 --
 -- A soft-deleted row keeps the file's name and uploader for the activity
--- history, but it still points at the blob through a RESTRICT foreign key, so
--- the object cannot be collected while it exists. Removing the row after a
--- retention window is what finally lets the sweep reclaim the bytes; the
--- reference itself was released when the row was soft-deleted.
+-- history, and it still holds its reference on the blob, so the object cannot
+-- be collected while it exists. Removing the row after a retention window is
+-- what gives the reference back and lets the bytes be reclaimed.
 -- name: ListRetiredAttachments :many
-SELECT a.id
+SELECT a.id, a.storage_object_id
 FROM calendar_event_attachments a
 WHERE a.enabled = FALSE AND a.retired_at IS NOT NULL AND a.updated_at < ? AND a.id > ?
 ORDER BY a.id
 LIMIT ?;
 
--- name: DeleteRetiredAttachment :exec
+-- name: DeleteRetiredAttachment :execresult
 DELETE FROM calendar_event_attachments
 WHERE id = ? AND enabled = FALSE AND retired_at IS NOT NULL;
+
+-- ListReservationsOfObject names the reservations pointing at an object the
+-- unconfirmed sweep is reclaiming, for the upload keys only they name
+-- (workspace/<workspace>/uploads/<attachment>). A live or retired row is never
+-- one: it was confirmed, which verified the object.
+-- name: ListReservationsOfObject :many
+SELECT a.public_id, w.public_id AS workspace_public_id
+FROM calendar_event_attachments a
+INNER JOIN workspaces w ON w.id = a.workspace_id
+WHERE a.storage_object_id = ? AND a.enabled = FALSE AND a.retired_at IS NULL;
+
+-- DeleteReservationsOfObject drops those reservations in the transaction that
+-- deletes the object. The object goes with them, so no reference is given
+-- back. Anything else still pointing at it refuses the object's delete through
+-- its RESTRICT foreign key, and the sweep skips it.
+-- name: DeleteReservationsOfObject :exec
+DELETE FROM calendar_event_attachments
+WHERE storage_object_id = ? AND enabled = FALSE AND retired_at IS NULL;

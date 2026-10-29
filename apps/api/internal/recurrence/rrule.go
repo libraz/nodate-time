@@ -1,6 +1,7 @@
 package recurrence
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,7 +89,13 @@ func ParseRRule(value string, start time.Time) (*Rule, bool) {
 		!rule.readMonthDays(byMonthDay, setPos, byMonth, start) {
 		return nil, false
 	}
-	if !weekStartAgrees(rule, wkst, start.Weekday()) || rule.Validate(start) != nil {
+	if wkstMatters(rule) {
+		if wkst != "MO" && wkst != "SU" {
+			return nil, false
+		}
+		rule.Wkst = wkst
+	}
+	if rule.Validate(start) != nil {
 		return nil, false
 	}
 	return &rule, true
@@ -120,11 +127,11 @@ func (r *Rule) readByDay(byDay []string, setPos *int) bool {
 			return false
 		}
 		r.ByDay = []string{code}
-		r.BySetPos = n
+		r.BySetPos = []int{n}
 		return true
 	}
 	if *setPos > 0 {
-		r.BySetPos = *setPos
+		r.BySetPos = []int{*setPos}
 		*setPos = 0
 	}
 	return true
@@ -164,9 +171,9 @@ func (r *Rule) readMonthDays(byMonthDay []string, setPos, byMonth int, start tim
 		case byMonth != 0:
 			return false
 		case clamped != 0:
-			r.ByMonthDay = clamped
-		case len(days) == 1 && days[0] >= 1 && days[0] <= 28:
-			r.ByMonthDay = days[0]
+			r.ByMonthDay = []int{clamped}
+		case len(days) > 0 && days[len(days)-1] <= 28 && days[0] >= 1:
+			r.ByMonthDay = days
 		case len(days) > 0:
 			return false
 		case len(r.ByDay) == 0 && start.Day() > 28:
@@ -199,43 +206,19 @@ func parseUntil(val string, loc *time.Location) (string, bool) {
 	return "", false
 }
 
-// weekStartAgrees reports whether a rule expands the same under week start
-// wkst as under the expander's Sunday. Only a weekly rule with an interval
-// and BYDAY groups days into weeks; the grouping differs exactly when the
-// days in play -- BYDAY and DTSTART's own -- fall on both sides of the
-// stretch from Sunday up to wkst.
-func weekStartAgrees(rule Rule, wkst string, startDay time.Weekday) bool {
-	if wkst == "SU" || rule.Freq != "weekly" || rule.Interval <= 1 || len(rule.ByDay) == 0 {
-		return true
-	}
-	w, ok := weekdayByCode[wkst]
-	if !ok {
-		return false
-	}
-	inside, outside := false, false
-	mark := func(d time.Weekday) {
-		if d < w {
-			inside = true
-		} else {
-			outside = true
-		}
-	}
-	mark(startDay)
-	for _, code := range rule.ByDay {
-		if d, ok := weekdayByCode[code]; ok {
-			mark(d)
-		}
-	}
-	return !(inside && outside)
+// wkstMatters reports whether the week start changes what a rule expands to:
+// only a weekly rule with an interval and BYDAY groups days into weeks.
+func wkstMatters(rule Rule) bool {
+	return rule.Freq == "weekly" && rule.Interval > 1 && len(rule.ByDay) > 0
 }
 
 // FormatRRule renders the rule as an RFC 5545 RRULE value that expands from
 // start to the dates Expand produces. start is DTSTART in the event's own
 // location; allDay selects the value type UNTIL is written in.
 //
-// WKST is always written out: the expander is fixed to a Sunday week start,
-// which differs from the RFC default, and a weekly rule with an interval
-// would land on different days in a client that assumed Monday.
+// WKST is always written out, from the rule's own wkst (MO when absent), so a
+// weekly rule with an interval lands on the same days in a client that
+// assumed the other default.
 func FormatRRule(r *Rule, start time.Time, allDay bool) string {
 	if r == nil || r.Freq == "" {
 		return ""
@@ -245,20 +228,26 @@ func FormatRRule(r *Rule, start time.Time, allDay bool) string {
 		parts = append(parts, "INTERVAL="+strconv.Itoa(r.Interval))
 	}
 	switch {
-	case r.Freq == "monthly" && r.BySetPos > 0 && len(r.ByDay) > 0:
-		parts = append(parts, "BYDAY="+strings.Join(r.ByDay, ","), "BYSETPOS="+strconv.Itoa(r.BySetPos))
+	case r.Freq == "monthly" && len(r.BySetPos) > 0 && len(r.ByDay) > 0:
+		parts = append(parts, "BYDAY="+strings.Join(r.ByDay, ","), "BYSETPOS="+strconv.Itoa(r.BySetPos[0]))
+	case r.Freq == "monthly" && len(r.ByMonthDay) > 1:
+		// Several days cannot also carry the clamping BYSETPOS; a day past the
+		// 28th is then skipped in short months by a client that follows the RFC.
+		days := slices.Clone(r.ByMonthDay)
+		slices.Sort(days)
+		parts = append(parts, "BYMONTHDAY="+joinInts(days))
 	case r.Freq == "monthly":
-		day := r.ByMonthDay
-		if day == 0 {
-			day = start.Day()
+		day := start.Day()
+		if len(r.ByMonthDay) == 1 {
+			day = r.ByMonthDay[0]
 		}
 		switch {
 		case day == 31:
 			parts = append(parts, "BYMONTHDAY=-1")
 		case day > 28:
 			parts = append(parts, "BYMONTHDAY="+clampedDays(day), "BYSETPOS=-1")
-		case r.ByMonthDay > 0:
-			parts = append(parts, "BYMONTHDAY="+strconv.Itoa(r.ByMonthDay))
+		case len(r.ByMonthDay) == 1:
+			parts = append(parts, "BYMONTHDAY="+strconv.Itoa(day))
 		}
 	case r.Freq == "yearly" && start.Month() == time.February && start.Day() == 29:
 		parts = append(parts, "BYMONTH=2", "BYMONTHDAY="+clampedDays(29), "BYSETPOS=-1")
@@ -280,8 +269,20 @@ func FormatRRule(r *Rule, start time.Time, allDay bool) string {
 	if u := formatUntil(until, start.Location(), allDay); u != "" {
 		parts = append(parts, "UNTIL="+u)
 	}
-	parts = append(parts, "WKST=SU")
+	wkst := r.Wkst
+	if wkst == "" {
+		wkst = "MO"
+	}
+	parts = append(parts, "WKST="+wkst)
 	return strings.Join(parts, ";")
+}
+
+func joinInts(values []int) string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = strconv.Itoa(v)
+	}
+	return strings.Join(out, ",")
 }
 
 // clampedDays lists 28 through day, which with BYSETPOS=-1 picks day or the

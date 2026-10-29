@@ -49,6 +49,13 @@
 --   mints a new one; restoring the old token would make revocation
 --   reversible by anyone who still held the link.
 --
+-- The NULL property this file uses on purpose applies to every other
+-- nullable column in a unique key too, whether or not anyone meant it
+-- to. That generalisation is its own rule, in
+-- sql/core/conformance/schema/50-nullable-unique-keys.sql, which is
+-- where the second shape above — the value-naming generated column —
+-- gets its remaining instances.
+--
 -- The first check below is the mechanical half. It does not know which
 -- shape a table should take, but it refuses the one shape that is always
 -- wrong — including in tables that do not exist yet.

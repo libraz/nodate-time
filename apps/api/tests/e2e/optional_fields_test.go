@@ -111,14 +111,14 @@ func TestMemoUpdateKeepsOmittedFields(t *testing.T) {
 // takes a grant the ordinary sign-up flow does not hand out.
 func TestAllowedEmailNeedsNoReason(t *testing.T) {
 	bootstrap(t)
-	t.Parallel()
+	// A live allow-list row restricts the whole instance: serial phase only.
 
 	admin := helpers.NewTenant(t, testServerURL)
 	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
 
-	// The allow-list is unique on the address and this test leaves its row
-	// behind, so the address has to differ per run.
+	// The allow-list is unique on the address and the row outlives a withdrawal, so the address has to differ per run.
 	address := fmt.Sprintf("allowed-%d@example.com", time.Now().UnixNano())
+	t.Cleanup(func() { withdrawAllowedEmail(t, address) })
 	status, body := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/admin/allowed-emails", admin.AccessToken,
 		map[string]any{"email": address})

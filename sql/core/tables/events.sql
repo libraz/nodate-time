@@ -29,6 +29,9 @@ CREATE TABLE events (
   actor_agent_id INT UNSIGNED NULL COMMENT 'Acting ai_agents.id when the event was produced by an AI agent (judge / task agent). See actor_user_id comment for the three-way exclusion rule.',
   actor_system_source VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'Third actor source, for events emitted by a background process rather than a person or an agent. Free-form and namespaced by the writer, e.g. `worker:scheduler` or `worker:retention`. Not an FK because such a process has no row in the database. See actor_user_id comment for the three-way exclusion rule.',
   reverses_event_id BIGINT UNSIGNED NULL COMMENT 'Internal FK to events.id. Non-NULL means this event is a compensating reverse of another event (e.g., user undoing an auto-completion). A projection reading the log cancels both events out. The log is immutable: a reversal is a new row, never an UPDATE or DELETE of the original.',
+  -- Written by the appender, not generated from payload_json: a generated
+  -- column would bind every writer to one payload shape.
+  subject_public_id BINARY(16) NULL COMMENT 'public_id of the entity this event is about, so one entity history is an index range. Set for every kind whose event-kinds registry entry names a subject table, NULL for the rest. Written by the appender alongside the payload; never derived from it.',
 
   type VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'Event type (e.g., task.created, signal.attached, signal.judged)',
   payload_json JSON NOT NULL CHECK (JSON_VALID(payload_json)) COMMENT 'Event payload',
@@ -45,6 +48,11 @@ CREATE TABLE events (
   KEY idx_events_workspace_id_occurred_at (workspace_id, occurred_at),
   KEY idx_events_workspace_id_task_id_occurred_at (workspace_id, task_id, occurred_at),
   KEY idx_events_workspace_id_calendar_id_occurred_at (workspace_id, calendar_id, occurred_at),
+  -- A calendar feed paged by id: a range over one calendar in id order, so
+  -- a page stops at LIMIT instead of sorting the calendar's whole history.
+  KEY idx_events_workspace_calendar_id (workspace_id, calendar_id, id),
+  -- One entity's history inside a calendar, newest first.
+  KEY idx_events_workspace_calendar_subject (workspace_id, calendar_id, subject_public_id, id),
   KEY idx_events_workspace_id_type (workspace_id, type),
   KEY idx_events_workspace_id_actor_agent_id (workspace_id, actor_agent_id),
   KEY idx_events_triggered_by_signal (triggered_by_signal_id),

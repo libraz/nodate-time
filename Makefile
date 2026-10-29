@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance check-core storage-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core storage-up format lint
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -42,7 +42,7 @@ db-down:
 	docker compose down
 
 db-schema:
-	bash sql/build-schema.sh > sql/schema.sql
+	bash sql/core/tools/build-schema.sh core time > sql/schema.sql
 
 db-apply: db-schema
 	docker run --rm -i --network host mysql:8.4 \
@@ -116,9 +116,16 @@ test-conformance: db-schema
 		--dsn root:$${TC_DB_ROOT_PASSWORD:-rootpw}@127.0.0.1:$${TC_DB_PORT:-33306}/$${TC_DB_NAME:-timetree_clone} \
 		--mode all
 
-# Verify sql/core is still the upstream text, unedited and current.
+# Upgrade v0.1.0 and the last pre-layering main to the current schema on
+# scratch databases, twice each, and check the result against a fresh build.
+test-upgrade-path:
+	bash scripts/check-upgrade-path.sh
+
+# Verify sql/core is still the upstream text, unedited and current, and
+# that no product layer reshapes a core table.
 check-core:
-	bash scripts/check-vendored-core.sh
+	bash sql/core/tools/check-vendored.sh sql/core
+	bash sql/core/tools/check-no-core-alters.sh sql
 
 storage-up:
 	docker compose up -d storage

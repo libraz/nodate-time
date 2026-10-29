@@ -13,7 +13,12 @@ import (
 // What a lockout costs the owner of the account, once the window it was set
 // for has passed.
 
-// The counter belongs to a window, not to the identity's lifetime. Ten wrong
+// lockoutGuesses is the shared threshold: five consecutive failures lock an
+// identity for fifteen minutes, whichever application counted them
+// (sql/core/PROTOCOL.md, Identity rule 4).
+const lockoutGuesses = 5
+
+// The counter belongs to a window, not to the identity's lifetime. Five wrong
 // passwords lock the account for fifteen minutes; once those are over, the
 // guesses that earned the lock are spent and the next one is the first of a
 // new count. Otherwise a single request every quarter of an hour keeps any
@@ -27,11 +32,11 @@ func TestTheFailedLoginCounterStartsOverOnceTheWindowHasPassed(t *testing.T) {
 	const password = "correcthorsebattery"
 	registerFor(t, email, password)
 
-	for range 10 {
+	for range lockoutGuesses {
 		loginStatus(t, email, "definitely-not-it")
 	}
 	attempts, locked := identityLockState(t, email)
-	require.Equal(t, 10, attempts)
+	require.Equal(t, lockoutGuesses, attempts)
 	require.True(t, locked.Valid)
 
 	expireLock(t, email)
@@ -40,7 +45,7 @@ func TestTheFailedLoginCounterStartsOverOnceTheWindowHasPassed(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, status)
 	attempts, locked = identityLockState(t, email)
 	require.Equal(t, 1, attempts,
-		"a guess after the window is the first of a new count, not the eleventh")
+		"a guess after the window is the first of a new count, not the sixth")
 	require.False(t, locked.Valid,
 		"so it cannot re-lock the account by itself")
 
@@ -50,8 +55,8 @@ func TestTheFailedLoginCounterStartsOverOnceTheWindowHasPassed(t *testing.T) {
 }
 
 // Decaying the counter must not decay the lockout itself: a new window still
-// takes a full ten guesses, counted from the one that opened it.
-func TestANewWindowStillTakesTenGuessesToLock(t *testing.T) {
+// takes a full five guesses, counted from the one that opened it.
+func TestANewWindowStillTakesFiveGuessesToLock(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -59,13 +64,13 @@ func TestANewWindowStillTakesTenGuessesToLock(t *testing.T) {
 	const password = "correcthorsebattery"
 	registerFor(t, email, password)
 
-	for range 10 {
+	for range lockoutGuesses {
 		loginStatus(t, email, "definitely-not-it")
 	}
 	expireLock(t, email)
 
-	// The first guess of the new window, plus eight more, leave one to spare.
-	for i := range 9 {
+	// The first guess of the new window, plus three more, leave one to spare.
+	for i := range lockoutGuesses - 1 {
 		require.Equal(t, http.StatusUnauthorized, mustGuess(t, email), "guess %d", i+1)
 		attempts, locked := identityLockState(t, email)
 		require.Equal(t, i+1, attempts, "guess %d of the new window", i+1)
@@ -74,8 +79,8 @@ func TestANewWindowStillTakesTenGuessesToLock(t *testing.T) {
 
 	require.Equal(t, http.StatusUnauthorized, mustGuess(t, email))
 	attempts, locked := identityLockState(t, email)
-	require.Equal(t, 10, attempts)
-	require.True(t, locked.Valid, "the tenth guess of the new window locks it again")
+	require.Equal(t, lockoutGuesses, attempts)
+	require.True(t, locked.Valid, "the fifth guess of the new window locks it again")
 }
 
 func mustGuess(t *testing.T, email string) int {
@@ -104,7 +109,7 @@ func TestALockedAccountCostsTheSameToRefuseAsAnUnknownAddress(t *testing.T) {
 
 	email := fmt.Sprintf("lock-timing-%d@test.local", time.Now().UnixNano())
 	registerFor(t, email, "correcthorsebattery")
-	for range 10 {
+	for range lockoutGuesses {
 		loginStatus(t, email, "definitely-not-it")
 	}
 	_, locked := identityLockState(t, email)
@@ -149,7 +154,7 @@ func TestFailedLoginsCountSinceTheLastSuccessHoweverOld(t *testing.T) {
 	email := fmt.Sprintf("lock-lifetime-%d@test.local", time.Now().UnixNano())
 	registerFor(t, email, "correcthorsebattery")
 
-	for range 9 {
+	for range lockoutGuesses - 1 {
 		loginStatus(t, email, "definitely-not-it")
 	}
 	_, err := testDB.Exec(
@@ -159,6 +164,6 @@ func TestFailedLoginsCountSinceTheLastSuccessHoweverOld(t *testing.T) {
 
 	loginStatus(t, email, "definitely-not-it")
 	attempts, locked := identityLockState(t, email)
-	require.Equal(t, 10, attempts)
-	require.True(t, locked.Valid, "the tenth failure locks however long after the ninth it came")
+	require.Equal(t, lockoutGuesses, attempts)
+	require.True(t, locked.Valid, "the fifth failure locks however long after the fourth it came")
 }

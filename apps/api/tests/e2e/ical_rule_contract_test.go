@@ -9,9 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// One rule contract holds for the API and for import alike: a rule with both
-// end conditions, or one whose first occurrence falls past its own until, is
-// refused on create, on a series edit, and in a file.
+// One rule contract holds for the API and for import alike. A rule with both
+// end conditions is refused on create, on a series edit, and in a file. The
+// event's start is always the first occurrence (PROTOCOL.md section
+// Recurrence), so a rule whose pattern next matches only past its own until
+// is accepted everywhere as a series of that one occurrence.
 func TestRuleContractIsTheSameForTheAPIAndForImport(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -22,39 +24,50 @@ func TestRuleContractIsTheSameForTheAPIAndForImport(t *testing.T) {
 	seriesURL := calURL + "/events/" + strings.Split(occ[0].ID, "_")[0]
 
 	// The series starts on Friday 2026-04-03.
-	refused := map[string]map[string]any{
-		"count and until": {"freq": "weekly", "interval": 1, "byDay": []string{"FR"},
-			"count": 3, "until": "2026-12-31"},
+	bothEnds := map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"},
+		"count": 3, "until": "2026-12-31"}
+	create := map[string]any{
+		"title": "Refused", "allDay": false, "timezone": "Asia/Tokyo",
+		"startAt": "2026-04-03T15:00:00+09:00", "endAt": "2026-04-03T16:00:00+09:00",
+		"recurrenceRule": bothEnds,
+	}
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, create)
+	require.Equal(t, http.StatusBadRequest, status, "create, count and until: %s", raw)
+	update := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
+	update["recurrenceRule"] = bothEnds
+	status, raw = helpers.DoJSONStatus(t, http.MethodPut, seriesURL, tt.AccessToken, update)
+	require.Equal(t, http.StatusBadRequest, status, "update, count and until: %s", raw)
+
+	startOnly := map[string]map[string]any{
 		"first Monday after the until": {"freq": "weekly", "interval": 1, "byDay": []string{"MO"},
 			"until": "2026-04-05"},
 		"day of month already past, until this month": {"freq": "monthly", "interval": 1,
-			"byMonthDay": 2, "until": "2026-04-30"},
+			"byMonthDay": []int{2}, "until": "2026-04-30"},
 	}
-	for name, rule := range refused {
-		create := map[string]any{
-			"title": "Refused", "allDay": false, "timezone": "Asia/Tokyo",
+	for name, rule := range startOnly {
+		target := hostileCalendar(t, tt, "API "+name)
+		helpers.DoJSON(t, http.MethodPost, target+"/events", tt.AccessToken, map[string]any{
+			"title": "Start only", "allDay": false, "timezone": "Asia/Tokyo",
 			"startAt": "2026-04-03T15:00:00+09:00", "endAt": "2026-04-03T16:00:00+09:00",
 			"recurrenceRule": rule,
-		}
-		status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, create)
-		require.Equal(t, http.StatusBadRequest, status, "create, %s: %s", name, raw)
-
-		update := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
-		update["recurrenceRule"] = rule
-		status, raw = helpers.DoJSONStatus(t, http.MethodPut, seriesURL, tt.AccessToken, update)
-		require.Equal(t, http.StatusBadRequest, status, "update, %s: %s", name, raw)
+		}, nil)
+		require.Equal(t, []string{"Start only@2026-04-03T06:00:00Z"},
+			listedStarts(t, target, tt.AccessToken, "start=2026-04-01&end=2026-05-31&tz=Asia/Tokyo"), name)
 	}
 
-	for name, rrule := range map[string]string{
-		"count and until":              "FREQ=DAILY;COUNT=3;UNTIL=20260701T000000Z",
-		"first Monday after the until": "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260607T235959Z",
-	} {
-		importURL := hostileCalendar(t, tt, "Import "+name)
-		ics := wrap(vevent("UID:contract@example.com", "SUMMARY:Rule",
-			"DTSTART:20260603T100000Z", "DTEND:20260603T110000Z", "RRULE:"+rrule)) // a Wednesday
-		require.Equal(t, importReport{Skipped: 1}, importOK(t, importURL, tt.AccessToken, ics), name)
-		require.Empty(t, listHostile(t, importURL, tt.AccessToken), name)
-	}
+	bothEndsImport := hostileCalendar(t, tt, "Import count and until")
+	ics := wrap(vevent("UID:contract@example.com", "SUMMARY:Rule",
+		"DTSTART:20260603T100000Z", "DTEND:20260603T110000Z", "RRULE:FREQ=DAILY;COUNT=3;UNTIL=20260701T000000Z"))
+	require.Equal(t, importReport{Skipped: 1}, importOK(t, bothEndsImport, tt.AccessToken, ics))
+	require.Empty(t, listHostile(t, bothEndsImport, tt.AccessToken))
+
+	startOnlyImport := hostileCalendar(t, tt, "Import first Monday after the until")
+	ics = wrap(vevent("UID:contract@example.com", "SUMMARY:Rule",
+		"DTSTART:20260603T100000Z", "DTEND:20260603T110000Z", "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20260607T235959Z")) // a Wednesday
+	require.Equal(t, importReport{Imported: 1}, importOK(t, startOnlyImport, tt.AccessToken, ics))
+	listed := listHostile(t, startOnlyImport, tt.AccessToken)
+	require.Len(t, listed, 1)
+	require.Equal(t, "2026-06-03T10:00:00Z", listed[0].StartAt)
 }
 
 // BYDAY=2MO is how mainstream clients write "the second Monday", and it has
@@ -107,7 +120,7 @@ func TestMonthEndSeriesCrossesTheICalBoundaryOnTheSameDays(t *testing.T) {
 	}, nil)
 
 	ics := fetchICS(t, sourceURL, tt.AccessToken)
-	require.Contains(t, ics, "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1;WKST=SU")
+	require.Contains(t, ics, "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1;WKST=MO")
 
 	targetURL := testServerURL + "/calendars/" + newCalendar(t, tt, "Month end copy")
 	var res importResult

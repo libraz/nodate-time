@@ -23,6 +23,10 @@ CREATE TABLE calendar_event_comments (
   UNIQUE KEY uniq_calendar_event_comments_public_id (public_id),
   UNIQUE KEY uniq_calendar_event_comments_workspace_public_id (workspace_id, public_id),
   KEY idx_calendar_event_comments_event (workspace_id, event_id, created_at),
+  -- A thread read from its newest end. Every predicate is an equality here,
+  -- so created_at supplies the order and LIMIT stops the backward scan.
+  -- Without it a large table plans an index merge plus a filesort.
+  KEY idx_calendar_event_comments_thread (workspace_id, event_id, enabled, deleted_at, created_at, id),
   KEY idx_calendar_event_comments_workspace_author (workspace_id, author_id),
   KEY idx_calendar_event_comments_deleted_at (deleted_at),
 

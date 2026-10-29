@@ -120,8 +120,8 @@ func resolveScope(ctx context.Context, q *generated.Queries, series generated.Ca
 	if series.RecurrenceRule == nil {
 		return writeScope{}, apierrors.EventNotFound
 	}
-	rule := recurrence.ParseRule(*series.RecurrenceRule)
-	if rule == nil {
+	rule, err := recurrence.ParseRule(*series.RecurrenceRule)
+	if err != nil || rule == nil {
 		return writeScope{}, apierrors.EventNotFound
 	}
 	occ, err := occurrenceForDate(rule, series, occurrenceDate)
@@ -176,8 +176,8 @@ func checkRecurrenceRule(data *json.RawMessage, start time.Time, tz string) *api
 	if data == nil || len(*data) == 0 || string(*data) == "null" {
 		return nil
 	}
-	rule := recurrence.ParseRule(*data)
-	if rule == nil || rule.Validate(start.In(recurrence.LoadLocation(tz))) != nil {
+	rule, err := recurrence.ParseRule(*data)
+	if err != nil || rule == nil || rule.Validate(start.In(recurrence.LoadLocation(tz))) != nil {
 		return apierrors.BadRequest
 	}
 	return nil
@@ -187,8 +187,8 @@ func prepareRecurrence(ruleData *json.RawMessage, startAt, endAt time.Time, tz s
 	if ruleData == nil || string(*ruleData) == "null" {
 		return nil, sql.NullTime{}
 	}
-	rule := recurrence.ParseRule(*ruleData)
-	if rule == nil {
+	rule, err := recurrence.ParseRule(*ruleData)
+	if err != nil || rule == nil {
 		return nil, sql.NullTime{}
 	}
 	// Anchor the recurrence end in the event's timezone so DST does not shift
@@ -290,7 +290,7 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 		CalendarID:  e.cal.ID,
 		ActorUserID: e.actorID,
 		Type:        eventlog.TypeEventUpdated,
-		Summary:     e.body.Body.Title,
+		Title:       e.body.Body.Title,
 		Subject:     current.PublicID,
 		Extra: map[string]any{
 			"scope":         "occurrence",
@@ -349,6 +349,9 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 // all".
 func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdit, w eventAccess) (editedRows, error) {
 	current := w.evt
+	if current.TaskID.Valid {
+		return editProjected(ctx, q, deps, e, w)
+	}
 	f := mergeFields(e, current)
 	startAt, endAt := e.startAt, e.endAt
 	if w.scope.occurrence != nil {
@@ -403,7 +406,56 @@ func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdi
 		CalendarID:  e.cal.ID,
 		ActorUserID: e.actorID,
 		Type:        eventlog.TypeEventUpdated,
-		Summary:     e.body.Body.Title,
+		Title:       e.body.Body.Title,
+		Subject:     current.PublicID,
+	}); err != nil {
+		return editedRows{}, err
+	}
+	return editedRows{series: updated}, nil
+}
+
+// editProjected applies an edit to an event a task projects (PROTOCOL.md
+// obligation 3). The title and dates mirror the task, and the all-day flag,
+// zone and rule decide what those dates mean, so a change to any of them is
+// refused; the columns with no task-side counterpart are written as usual.
+func editProjected(ctx context.Context, q *generated.Queries, deps Deps, e eventEdit, w eventAccess) (editedRows, error) {
+	current := w.evt
+	f := mergeFields(e, current)
+	rule := e.body.Body.RecurrenceRule
+	if e.body.Body.Title != current.Title ||
+		e.body.Body.AllDay != current.AllDay ||
+		f.timezone != current.Timezone ||
+		!current.StartAt.Valid || !e.startAt.Equal(current.StartAt.Time) ||
+		!current.EndAt.Valid || !e.endAt.Equal(current.EndAt.Time) ||
+		(rule != nil && string(*rule) != "null") {
+		return editedRows{}, apierrors.EventTaskOwned
+	}
+	if err := q.UpdateProjectedEventDetails(ctx, generated.UpdateProjectedEventDetailsParams{
+		Visibility:         f.visibility,
+		ShowAs:             f.showAs,
+		Flexibility:        f.flexibility,
+		Location:           nullString(e.body.Body.Location),
+		Memo:               nullString(e.body.Body.Memo),
+		URL:                nullString(e.body.Body.URL),
+		OwnerUserID:        f.ownerID,
+		NotificationOffset: ptrIntToNullInt32(e.body.Body.NotificationOffset),
+		ID:                 current.ID,
+	}); err != nil {
+		return editedRows{}, err
+	}
+	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants); err != nil {
+		return editedRows{}, err
+	}
+	updated, err := q.GetCalendarEventByID(ctx, current.ID)
+	if err != nil {
+		return editedRows{}, err
+	}
+	if err := eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: deps.WorkspaceID,
+		CalendarID:  e.cal.ID,
+		ActorUserID: e.actorID,
+		Type:        eventlog.TypeEventUpdated,
+		Title:       current.Title,
 		Subject:     current.PublicID,
 	}); err != nil {
 		return editedRows{}, err
@@ -474,8 +526,8 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 		}
 		return q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{ID: after.ID})
 	}
-	rule := recurrence.ParseRule(*after.RecurrenceRule)
-	if rule == nil || !after.StartAt.Valid || !after.EndAt.Valid {
+	rule, err := recurrence.ParseRule(*after.RecurrenceRule)
+	if err != nil || rule == nil || !after.StartAt.Valid || !after.EndAt.Valid {
 		return nil
 	}
 

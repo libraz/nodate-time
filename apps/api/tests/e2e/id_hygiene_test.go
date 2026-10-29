@@ -113,6 +113,6 @@ func TestEventSideChangesReachTheHistory(t *testing.T) {
 		require.NoError(t, err, "a history id must be a public id, got %q", h.ID)
 	}
 	require.True(t, actions["calendar.event.created"])
-	require.True(t, actions["calendar.comment.added"], "a comment must reach the event's history")
-	require.True(t, actions["calendar.checklist.added"], "a checklist item must reach the event's history")
+	require.True(t, actions["calendar.event.comment.created"], "a comment must reach the event's history")
+	require.True(t, actions["calendar.event.checklist.created"], "a checklist item must reach the event's history")
 }

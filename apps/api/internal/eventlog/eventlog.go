@@ -15,6 +15,7 @@ package eventlog
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -23,44 +24,139 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
-// Event types. The names are dotted and consumers match on prefix, so
-// adding a kind never requires a consumer to change.
+// Event types. The names are the registry's: sql/core/event-kinds.yaml for
+// kinds on core tables and sql/time/event-kinds.yaml for this product's own.
+// They are dotted and consumers match on prefix, so adding a kind never
+// requires a consumer to change. TestRegistry holds this block, kinds below
+// and both yaml files to the same set.
 const (
-	TypeEventCreated   = "calendar.event.created"
-	TypeEventUpdated   = "calendar.event.updated"
-	TypeEventDeleted   = "calendar.event.deleted"
-	TypeMemoCreated    = "calendar.memo.created"
-	TypeMemoUpdated    = "calendar.memo.updated"
-	TypeMemoDeleted    = "calendar.memo.deleted"
-	TypeMemberJoined   = "calendar.member.joined"
-	TypeMemberLeft     = "calendar.member.left"
+	TypeCalendarSetUp               = "calendar.created"
+	TypeCalendarEdited              = "calendar.updated"
+	TypeCalendarGone                = "calendar.deleted"
+	TypeCalendarSubscribed          = "calendar.subscribed"
+	TypeCalendarSubscriptionUpdated = "calendar.subscription.updated"
+
+	TypeMemberAdded    = "calendar.member.added"
 	TypeMemberRemoved  = "calendar.member.removed"
 	TypeMemberRoleSet  = "calendar.member.role_changed"
 	TypeMemberColorSet = "calendar.member.updated"
-	TypeInviteCreated  = "calendar.invite.created"
-	TypeInviteRevoked  = "calendar.invite.revoked"
-	TypePhotoUploaded  = "calendar.photo.uploaded"
-	TypePhotoUpdated   = "calendar.photo.updated"
-	TypePhotoDeleted   = "calendar.photo.deleted"
-	TypeCalendarSetUp  = "calendar.created"
-	TypeCalendarEdited = "calendar.updated"
-	TypeCalendarGone   = "calendar.deleted"
+
+	TypeEventCreated = "calendar.event.created"
+	TypeEventUpdated = "calendar.event.updated"
+	TypeEventDeleted = "calendar.event.deleted"
+
 	// What people do to an event after it exists is most of what happens on a
 	// shared calendar. Without these the history of an event reads as though
 	// nobody ever discussed it, ticked anything off, or attached anything.
-	TypeCommentAdded    = "calendar.comment.added"
-	TypeCommentEdited   = "calendar.comment.edited"
-	TypeCommentRemoved  = "calendar.comment.removed"
-	TypeChecklistAdded  = "calendar.checklist.added"
-	TypeChecklistSet    = "calendar.checklist.updated"
-	TypeChecklistGone   = "calendar.checklist.removed"
-	TypeAttachmentAdded = "calendar.attachment.added"
-	TypeAttachmentGone  = "calendar.attachment.removed"
-	// TypeAttendeeUpdated is an attendee's answer or edit grant changing. A
-	// grant decides who may rewrite the event, so it is an access change and
-	// belongs in the history as much as the edits it permits.
-	TypeAttendeeUpdated = "calendar.attendee.updated"
+	TypeCommentCreated    = "calendar.event.comment.created"
+	TypeCommentUpdated    = "calendar.event.comment.updated"
+	TypeCommentDeleted    = "calendar.event.comment.deleted"
+	TypeChecklistCreated  = "calendar.event.checklist.created"
+	TypeChecklistUpdated  = "calendar.event.checklist.updated"
+	TypeChecklistDeleted  = "calendar.event.checklist.deleted"
+	TypeAttachmentCreated = "calendar.event.attachment.created"
+	TypeAttachmentDeleted = "calendar.event.attachment.deleted"
+	TypeAttendeeAdded     = "calendar.event.attendee.added"
+	TypeAttendeeRemoved   = "calendar.event.attendee.removed"
+	// TypeAttendeeUpdated is an attendee's edit grant changing. A grant decides
+	// who may rewrite the event, so it is an access change and belongs in the
+	// history as much as the edits it permits. An answer is TypeRSVPUpdated.
+	TypeAttendeeUpdated    = "calendar.event.attendee.updated"
+	TypeRSVPUpdated        = "calendar.event.rsvp.updated"
+	TypeEventInviteCreated = "calendar.event.invite.created"
+	TypeEventInviteRotated = "calendar.event.invite.rotated"
+	TypeEventInviteRevoked = "calendar.event.invite.revoked"
+
+	TypeMemoCreated   = "calendar.memo.created"
+	TypeMemoUpdated   = "calendar.memo.updated"
+	TypeMemoCompleted = "calendar.memo.completed"
+	TypeMemoDeleted   = "calendar.memo.deleted"
+
+	TypeReminder = "calendar.reminder"
+
+	TypeWorkspaceMemberAdded       = "workspace.member.added"
+	TypeWorkspaceMemberRemoved     = "workspace.member.removed"
+	TypeWorkspaceMemberRoleChanged = "workspace.member.role_changed"
+
+	// Kinds only this product writes (sql/time/event-kinds.yaml).
+	TypeInviteCreated = "calendar.invite.created"
+	TypeInviteRevoked = "calendar.invite.revoked"
+	TypePhotoUploaded = "calendar.photo.uploaded"
+	TypePhotoUpdated  = "calendar.photo.updated"
+	TypePhotoDeleted  = "calendar.photo.deleted"
 )
+
+// Tables a kind's subject can name, and the payload key each one's public id
+// is also written under.
+const (
+	subjectEvent  = "calendar_events"
+	subjectMemo   = "calendar_memos"
+	subjectPhoto  = "album_photos"
+	subjectInvite = "calendar_invites"
+)
+
+var subjectPayloadKey = map[string]string{
+	subjectEvent:  "eventId",
+	subjectMemo:   "memoId",
+	subjectPhoto:  "photoId",
+	subjectInvite: "inviteId",
+}
+
+// kinds maps every kind to the table its subject_public_id names, empty when
+// the column stays NULL. It is the registries' subject column, held here so
+// Append can refuse a row the registries would not allow.
+var kinds = map[string]string{
+	TypeCalendarSetUp:               "",
+	TypeCalendarEdited:              "",
+	TypeCalendarGone:                "",
+	TypeCalendarSubscribed:          "",
+	TypeCalendarSubscriptionUpdated: "",
+	TypeMemberAdded:                 "",
+	TypeMemberRemoved:               "",
+	TypeMemberRoleSet:               "",
+	TypeMemberColorSet:              "",
+	TypeEventCreated:                subjectEvent,
+	TypeEventUpdated:                subjectEvent,
+	TypeEventDeleted:                subjectEvent,
+	TypeCommentCreated:              subjectEvent,
+	TypeCommentUpdated:              subjectEvent,
+	TypeCommentDeleted:              subjectEvent,
+	TypeChecklistCreated:            subjectEvent,
+	TypeChecklistUpdated:            subjectEvent,
+	TypeChecklistDeleted:            subjectEvent,
+	TypeAttachmentCreated:           subjectEvent,
+	TypeAttachmentDeleted:           subjectEvent,
+	TypeAttendeeAdded:               subjectEvent,
+	TypeAttendeeRemoved:             subjectEvent,
+	TypeAttendeeUpdated:             subjectEvent,
+	TypeRSVPUpdated:                 subjectEvent,
+	TypeEventInviteCreated:          subjectEvent,
+	TypeEventInviteRotated:          subjectEvent,
+	TypeEventInviteRevoked:          subjectEvent,
+	TypeMemoCreated:                 subjectMemo,
+	TypeMemoUpdated:                 subjectMemo,
+	TypeMemoCompleted:               subjectMemo,
+	TypeMemoDeleted:                 subjectMemo,
+	TypeReminder:                    "",
+	TypeWorkspaceMemberAdded:        "",
+	TypeWorkspaceMemberRemoved:      "",
+	TypeWorkspaceMemberRoleChanged:  "",
+	TypeInviteCreated:               subjectInvite,
+	TypeInviteRevoked:               subjectInvite,
+	TypePhotoUploaded:               subjectPhoto,
+	TypePhotoUpdated:                subjectPhoto,
+	TypePhotoDeleted:                subjectPhoto,
+}
+
+// labelKeys names the payload key the registry gives Entry.Summary on the
+// kinds whose label is not a free-text summary.
+var labelKeys = map[string]string{
+	TypeChecklistCreated:  "itemTitle",
+	TypeChecklistUpdated:  "itemTitle",
+	TypeChecklistDeleted:  "itemTitle",
+	TypeAttachmentCreated: "filename",
+	TypeAttachmentDeleted: "filename",
+}
 
 // summaryMaxRunes bounds the stored summary. It is cut on a rune boundary
 // so a multi-byte character is never split in half.
@@ -75,15 +171,32 @@ type Entry struct {
 	// ActorUserID is the acting user. Zero means a system action.
 	ActorUserID uint32
 	Type        string
-	// Summary is the human-readable line the activity feed shows.
+	// Title is the event's title, written as payload "title" on every kind
+	// whose subject is an event.
+	Title string
+	// Summary is the human-readable label of what changed: payload "summary",
+	// or the key the registry names for the kind (itemTitle, filename).
 	Summary string
-	// Subject is the public id of the row that changed, as it appears in
-	// API responses. The log stores public ids only: an internal id in a
-	// payload would leak the sequence the API exists to hide.
+	// Subject is the public id of the entity the kind's registry subject
+	// names, as it appears in API responses, and is written to
+	// events.subject_public_id. It is required for a kind with a subject and
+	// refused for one without. The log stores public ids only: an internal id
+	// in a payload would leak the sequence the API exists to hide.
 	Subject []byte
-	// Extra carries type-specific keys. A consumer that does not recognise
-	// a key must preserve it, so nothing here is a closed set.
+	// Extra carries the keys the registry requires beyond the subject's own
+	// (calendarId, userId, commentId, ...) and any type-specific ones. A
+	// consumer that does not recognise a key must preserve it, so nothing
+	// here is a closed set.
 	Extra map[string]any
+}
+
+// UUID renders a public id the way payloads carry it.
+func UUID(b []byte) string {
+	u, err := uuid.FromBytes(b)
+	if err != nil {
+		return hex.EncodeToString(b)
+	}
+	return u.String()
 }
 
 // Append writes the entry. q must be bound to the same transaction as the
@@ -98,17 +211,33 @@ func Append(ctx context.Context, q *generated.Queries, e Entry) error {
 		return fmt.Errorf("eventlog: entry %q has no workspace", e.Type)
 	}
 
-	payload := make(map[string]any, len(e.Extra)+2)
+	subjectTable, known := kinds[e.Type]
+	if !known {
+		return fmt.Errorf("eventlog: %q is not a registered kind", e.Type)
+	}
+	switch {
+	case subjectTable != "" && len(e.Subject) != 16:
+		return fmt.Errorf("eventlog: entry %q needs the public id of a %s row as its subject", e.Type, subjectTable)
+	case subjectTable == "" && len(e.Subject) > 0:
+		return fmt.Errorf("eventlog: entry %q has no subject in the registry", e.Type)
+	}
+
+	payload := make(map[string]any, len(e.Extra)+4)
 	for k, v := range e.Extra {
 		payload[k] = v
 	}
-	if len(e.Subject) > 0 {
-		if u, err := uuid.FromBytes(e.Subject); err == nil {
-			payload["id"] = u.String()
-		}
+	if subjectTable != "" {
+		payload[subjectPayloadKey[subjectTable]] = UUID(e.Subject)
+	}
+	if subjectTable == subjectEvent {
+		payload["title"] = truncateRunes(e.Title, summaryMaxRunes)
 	}
 	if e.Summary != "" {
-		payload["summary"] = truncateRunes(e.Summary, summaryMaxRunes)
+		key := labelKeys[e.Type]
+		if key == "" {
+			key = "summary"
+		}
+		payload[key] = truncateRunes(e.Summary, summaryMaxRunes)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -121,13 +250,14 @@ func Append(ctx context.Context, q *generated.Queries, e Entry) error {
 	}
 
 	if _, err := q.AppendEvent(ctx, generated.AppendEventParams{
-		PublicID:    pubID[:],
-		WorkspaceID: e.WorkspaceID,
-		CalendarID:  nullID(e.CalendarID),
-		ActorUserID: nullID(e.ActorUserID),
-		Type:        e.Type,
-		PayloadJSON: body,
-		OccurredAt:  time.Now().UTC(),
+		PublicID:        pubID[:],
+		WorkspaceID:     e.WorkspaceID,
+		CalendarID:      nullID(e.CalendarID),
+		ActorUserID:     nullID(e.ActorUserID),
+		SubjectPublicID: e.Subject,
+		Type:            e.Type,
+		PayloadJSON:     body,
+		OccurredAt:      time.Now().UTC(),
 	}); err != nil {
 		return fmt.Errorf("eventlog: append %q: %w", e.Type, err)
 	}

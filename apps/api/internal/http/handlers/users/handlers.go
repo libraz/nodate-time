@@ -18,6 +18,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
+	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 // dummyPasswordHash is compared against when a login is attempted for an
@@ -139,6 +140,7 @@ func requestOrigin(ctx context.Context) (userAgent, ipAddress string) {
 
 func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput, error) {
 	return func(ctx context.Context, in *RegisterInput) (*RegisterOutput, error) {
+		in.Body.Email = auth.NormalizeEmail(in.Body.Email)
 		// Answered before anything is looked up, because the lookup is what the
 		// column cannot do: comparing an address it cannot store is a charset
 		// error, which reached the caller as a server fault. The OIDC callback
@@ -214,16 +216,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 
 			// Every user joins the single workspace: the contract scopes
 			// calendars by it, so an account outside it could reach nothing.
-			memberPubID, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
-			if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
-				PublicID:    memberPubID[:],
-				WorkspaceID: deps.WorkspaceID,
-				UserID:      userID,
-				Role:        generated.WorkspaceMembersRoleMember,
-			}); err != nil {
+			if _, err := workspace.Join(ctx, q, deps.WorkspaceID, userID); err != nil {
 				return err
 			}
 
@@ -267,14 +260,15 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 	return func(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
 		// No account can hold an address the column cannot store, and looking
 		// one up is a charset error. Answered like any unknown address.
-		if !auth.StorableEmail(in.Body.Email) {
+		email := auth.NormalizeEmail(in.Body.Email)
+		if !auth.StorableEmail(email) {
 			auth.CheckPassword(in.Body.Password, dummyPasswordHash)
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
 		identity, err := deps.Queries.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
 			Provider: generated.IdentitiesProviderLocal,
-			Subject:  in.Body.Email,
+			Subject:  email,
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -301,8 +295,13 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
+		// A disabled account is answered like a wrong password: the caller has
+		// shown the password, not that the account still exists.
 		user, err := deps.Queries.GetUserByID(ctx, identity.UserID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -317,8 +316,18 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
+		// Asked only once the password is right, so the answer tells nobody
+		// without it that the account has a second factor.
+		if requiresSecondFactor(identity) {
+			return nil, apierrors.ToHuma(apierrors.AuthMFARequired)
+		}
+
 		if err := deps.Queries.RecordSuccessfulLogin(ctx, identity.ID); err != nil {
 			slog.WarnContext(ctx, "failed to clear login lockout", "identityID", identity.ID, "error", err)
+		}
+
+		if err := joinWorkspace(ctx, deps.DB, deps.WorkspaceID, user.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		userAgent, ipAddress := requestOrigin(ctx)
@@ -337,11 +346,46 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 
 // lockoutThreshold and lockoutWindow bound password guessing. The counter
 // lives on the identity rather than the user, so locking a password does not
-// also lock a provider sign-in that never had one.
+// also lock a provider sign-in that never had one. Every application on the
+// database counts on the same row, so the values are the shared ones
+// (sql/core/PROTOCOL.md, Identity rule 4): a looser one here would be the
+// limit for all of them.
 const (
-	lockoutThreshold = 10
+	lockoutThreshold = 5
 	lockoutWindow    = 15 * time.Minute
 )
+
+// requiresSecondFactor reports whether the account has confirmed a second
+// factor on its local identity. This application cannot verify one, so every
+// path that would issue such an account a session refuses it instead
+// (sql/core/PROTOCOL.md, Identity rule 1).
+func requiresSecondFactor(local generated.Identity) bool {
+	return local.MfaConfirmedAt.Valid
+}
+
+// userRequiresSecondFactor is requiresSecondFactor for a caller holding the
+// user rather than the local identity. An account with no local identity has
+// no factor to ask for.
+func userRequiresSecondFactor(ctx context.Context, q *generated.Queries, userID uint32) (bool, error) {
+	local, err := q.GetLocalIdentityByUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return requiresSecondFactor(local), nil
+}
+
+// joinWorkspace adds a signing-in user to the workspace if they have never
+// belonged to it, which is how an account another application created comes
+// to reach anything here. A removed member stays removed.
+func joinWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID uint32) error {
+	return dbtx.Run(ctx, db, func(q *generated.Queries) error {
+		_, err := workspace.Join(ctx, q, workspaceID, userID)
+		return err
+	})
+}
 
 // passwordMatches compares password against a local identity's hash. An
 // identity with no hash still costs one comparison, against the dummy, so
@@ -447,6 +491,12 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 				return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
 			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// Changing the password hands this device a fresh session, which an
+		// account with a second factor cannot be given here.
+		if requiresSecondFactor(identity) {
+			return nil, apierrors.ToHuma(apierrors.AuthMFARequired)
 		}
 
 		// The same counter as Login, so a stolen session cannot guess the

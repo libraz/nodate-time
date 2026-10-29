@@ -101,9 +101,10 @@ func canReadObject(ctx context.Context, q *generated.Queries, objectID, userID u
 //
 // Two rows are written: a storage_objects row for the blob, keyed on its
 // digest so identical bytes reuse one object, and an attachment row that
-// starts disabled. The attachment takes no reference on the object until
-// the upload is confirmed, so a presign nobody ever uses leaves the object
-// at zero references for the sweep to collect.
+// starts disabled. The attachment row counts towards the object's references
+// from the moment it exists (blobref.Reserve takes it in the same
+// transaction); a presign nobody ever uses is reclaimed by the cleanup sweep,
+// which deletes the row and gives the reference back.
 //
 // The object may already exist -- as another attachment, or as an album photo
 // whose bytes sit at the photo's own key. A caller who can read it already
@@ -254,38 +255,52 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 }
 
 // discardReservation removes a reservation whose upload did not match what
-// was declared. The attachment row is dropped; the object row is left for the
-// sweep, because other reservations of the same digest may point at it.
+// was declared. The attachment row is dropped and gives back its reference in
+// the same transaction; the object row is left for the sweep, because other
+// reservations of the same digest may point at it.
 //
-// The bytes go too while the object is still unverified. They are at a key
-// derived from a digest they do not match, so nobody can confirm against them,
-// and the relay never overwrites a key -- left in place they would block every
-// honest upload of that file. A verified object's bytes are never touched.
-//
-// Bytes at the reservation's own upload key go unconditionally: nothing else
-// can be stored there.
+// The bytes are queued for removal too. Those at the reservation's own upload
+// key go unconditionally: nothing else can be stored there. Those at the
+// object's key go while the object is still unverified: they are at a key
+// derived from a digest they do not match, so nobody can confirm against
+// them, and the relay never overwrites a key -- left in place they would
+// block every honest upload of that file. The drainer never removes a key a
+// verified object claims. They are removed right after the commit rather than
+// left to the drainer, so the real file can be uploaded straight away.
 //
 // Best-effort: errors are logged rather than surfaced, since the caller is
 // already returning the mismatch to the client.
 func discardReservation(ctx context.Context, deps Deps, att generated.GetPendingAttachmentByPublicIDRow, key string) {
-	if err := deps.Queries.DeletePendingAttachment(ctx, generated.DeletePendingAttachmentParams{
-		ID:         att.ID,
-		UploaderID: att.UploaderID,
-	}); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched attachment row", "attachmentID", att.ID, "error", err)
-	}
-	if key != att.StorageKey {
-		if err := deps.Storage.DeleteObject(ctx, key); err != nil {
-			slog.WarnContext(ctx, "failed to delete mismatched attachment upload", "key", key, "error", err)
+	var queued []string
+	if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		queued = nil
+		res, err := q.DeletePendingAttachment(ctx, generated.DeletePendingAttachmentParams{
+			ID:         att.ID,
+			UploaderID: att.UploaderID,
+		})
+		if err != nil {
+			return err
 		}
+		if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+			return err
+		}
+		if err := blobref.Release(ctx, q, att.StorageObjectID); err != nil {
+			return err
+		}
+		if key == att.StorageKey {
+			object, err := q.GetStorageObjectByID(ctx, att.StorageObjectID)
+			if err != nil || blobref.Verified(object) || object.StorageKey != att.StorageKey {
+				return err
+			}
+		}
+		queued = []string{key}
+		return blobref.QueueRemoval(ctx, q, key)
+	}); err != nil {
+		slog.WarnContext(ctx, "failed to discard mismatched attachment reservation", "attachmentID", att.ID, "error", err)
 		return
 	}
-	object, err := deps.Queries.GetStorageObjectByID(ctx, att.StorageObjectID)
-	if err != nil || blobref.Verified(object) || object.StorageKey != att.StorageKey {
-		return
-	}
-	if err := deps.Storage.DeleteObject(ctx, att.StorageKey); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched attachment bytes", "key", att.StorageKey, "error", err)
+	if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, queued...); err != nil {
+		slog.WarnContext(ctx, "failed to remove mismatched attachment bytes; left to the drainer", "key", key, "error", err)
 	}
 }
 
@@ -354,12 +369,12 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
 		}
 
-		// Release the reference and leave the blob alone. Objects are
+		// Retire the row and leave the blob alone. The retired row keeps its
+		// reference until the cleanup sweep removes it, and the object is
 		// content-addressed, so the same bytes may back another attachment
-		// entirely; deleting the object here would break that one. The sweep
-		// removes it once nothing refers to it.
+		// entirely.
 		//
-		// Only the delete that actually retired the row releases: a second one
+		// Only the delete that actually retired the row logs it: a second one
 		// racing it read the same live row, but its update finds it retired.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if _, err := lockEventEdit(ctx, q, cal, evt.ID, userID); err != nil {
@@ -379,11 +394,8 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 			if !retired {
 				return apierrors.AttachmentNotFound
 			}
-			if err := blobref.Release(ctx, q, att.StorageObjectID); err != nil {
-				return err
-			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeAttachmentGone, att.Filename, att.PublicID)
+				eventlog.TypeAttachmentDeleted, "attachmentId", att.Filename, att.PublicID)
 		})
 		if err != nil {
 			return nil, toAPIError(err)
@@ -394,9 +406,10 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 }
 
 // ConfirmAttachment finalizes a presigned attachment upload: it verifies the
-// object actually landed in storage, then enables the row and takes a
-// reference on the blob. An abandoned presign never enables, so it leaves no
-// attachment pointing at a missing object.
+// object actually landed in storage, then enables the row and marks the object
+// verified. The reference was taken when the reservation was created. An
+// abandoned presign never enables, so it leaves no visible attachment pointing
+// at a missing object.
 func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -470,8 +483,12 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			return nil, apierrors.ToHuma(apierrors.AttachmentDigestMismatch)
 		}
 
-		var object generated.StorageObject
+		var (
+			object generated.StorageObject
+			queued []string
+		)
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			queued = nil
 			if _, err := lockEventEdit(ctx, q, cal, evt.ID, userID); err != nil {
 				if errors.Is(err, apierrors.EventNotFound) {
 					return apierrors.AttachmentNotFound
@@ -505,7 +522,7 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			}
 			// The update re-checks enabled = FALSE and that the event and
 			// calendar are live, so a second confirm, or one that lost a race
-			// with the parent's delete, affects no rows and takes no reference.
+			// with the parent's delete, affects no rows.
 			confirmed, err := blobref.ChangedOne(res)
 			if err != nil {
 				return err
@@ -527,33 +544,33 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 				return fmt.Errorf("attachment %d points at object %d, digest resolves to %d",
 					att.ID, att.StorageObjectID, object.ID)
 			}
-			if err := blobref.Acquire(ctx, q, object.ID); err != nil {
-				return err
+			// Another upload verified the same bytes first -- an album photo
+			// stored at its own key, or the object this reservation sent its
+			// copy alongside -- so the copy at the key this confirm read is
+			// held by nothing. Queued here so the record commits with the
+			// confirm, and removed right after it; neither touches a key a
+			// verified object claims.
+			copies := []string{attachmentStorageKey(deps, att.Sha256)}
+			if key != copies[0] {
+				copies = append(copies, key)
+			}
+			for _, copyKey := range copies {
+				if object.StorageKey == copyKey {
+					continue
+				}
+				if err := blobref.QueueRemoval(ctx, q, copyKey); err != nil {
+					return err
+				}
+				queued = append(queued, copyKey)
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, evt,
-				eventlog.TypeAttachmentAdded, att.Filename, att.PublicID)
+				eventlog.TypeAttachmentCreated, "attachmentId", att.Filename, att.PublicID)
 		})
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		// Another upload verified the same bytes first -- an album photo that
-		// took the object over onto its own key, or the object this
-		// reservation sent its copy alongside -- so the copy at the key this
-		// confirm read is held by nothing. Best-effort: left behind, it is only
-		// space.
-		copies := []string{attachmentStorageKey(deps, att.Sha256)}
-		if key != copies[0] {
-			copies = append(copies, key)
-		}
-		for _, copyKey := range copies {
-			if object.StorageKey == copyKey {
-				continue
-			}
-			if used, cerr := deps.Queries.CountStorageObjectsByKey(ctx, copyKey); cerr == nil && used == 0 {
-				if derr := deps.Storage.DeleteObject(ctx, copyKey); derr != nil {
-					slog.WarnContext(ctx, "failed to delete superseded attachment bytes", "key", copyKey, "error", derr)
-				}
-			}
+		if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, queued...); err != nil {
+			slog.WarnContext(ctx, "failed to remove superseded attachment bytes; left to the drainer", "error", err)
 		}
 
 		return &ConfirmAttachmentOutput{

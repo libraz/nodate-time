@@ -42,7 +42,19 @@ CREATE TABLE calendar_events (
 
   location VARCHAR(500) NULL COMMENT 'Location text',
   memo MEDIUMTEXT NULL COMMENT 'Free-form notes (markdown)',
-  url VARCHAR(2048) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'Meeting link or related URL',
+  url VARCHAR(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT 'Meeting link or related URL. utf8mb4 rather than latin1: an internationalised address (RFC 3987) carries non-ASCII directly, and latin1 refuses the whole value.',
+
+  /**
+   * source_uid: the iCalendar UID an import read this row from, so a file
+   * imported twice is recognised instead of duplicated. Only a plain event
+   * or a series head carries one; an override shares the UID of its series
+   * by definition and is identified by uniq_calendar_events_recurrence_override.
+   * The collation is accent- and case-sensitive because a UID is opaque.
+   * source_uid_key drops a soft-deleted row out of the unique key, so
+   * deleting an event and re-importing it brings it back.
+   */
+  source_uid VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NULL COMMENT 'UID of the VEVENT this event was imported from, as the file gave it. NULL when the event was created here, when it is a recurrence override, or when the file UID exceeded the column.',
+  source_uid_key VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs GENERATED ALWAYS AS (IF(enabled, source_uid, NULL)) STORED COMMENT 'source_uid while the row is live, NULL once it is soft-deleted. Exists solely to scope uniq_calendar_events_source_uid to rows the calendar still shows. Generated: never written directly.',
 
   -- Ownership: determines whose layer this event belongs to
   owner_user_id INT UNSIGNED NOT NULL COMMENT 'Event owner (whose color/layer). Only owner, managers, or can_edit attendees may edit',
@@ -52,7 +64,7 @@ CREATE TABLE calendar_events (
   block_label VARCHAR(100) NULL COMMENT 'Label for block-kind events (e.g., Working, Focus Time, Out of Office)',
 
   -- Recurrence (RFC 5545 subset stored as JSON)
-  recurrence_rule JSON NULL COMMENT 'Recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}',
+  recurrence_rule JSON NULL COMMENT 'Recurrence rule: {freq, interval, byDay[], byMonthDay[], bySetPos[], wkst, until, count}. The shape is enforced by chk_calendar_events_recurrence_shape; the semantics are PROTOCOL.md §Recurrence.',
   recurrence_end DATETIME(3) NULL COMMENT 'Computed end date for recurrence expansion queries',
   recurrence_exceptions JSON DEFAULT NULL COMMENT 'Array of ISO 8601 occurrence starts to skip when expanding this rule. Cancelling one occurrence is an entry here, never a row.',
   /**
@@ -123,10 +135,16 @@ CREATE TABLE calendar_events (
   KEY idx_calendar_events_calendar_recurrence (calendar_id, recurrence_end),
   KEY idx_calendar_events_workspace_range (workspace_id, start_at, end_at),
   KEY idx_calendar_events_task_role (task_id, task_role, enabled),
+  -- The reminder scheduler's per-minute scan: live rows carrying a
+  -- reminder offset, so a tick reads those rather than the whole table.
+  KEY idx_calendar_events_reminder_scan (enabled, notification_offset, start_at),
   UNIQUE KEY uniq_calendar_events_task_singleton_role (task_id, task_singleton_role),
   -- One override per occurrence. Without this, two concurrent edits of
   -- the same occurrence both insert, and the expander has to pick.
   UNIQUE KEY uniq_calendar_events_recurrence_override (recurrence_parent_id, recurrence_original_start),
+  -- One live import per UID per calendar. Scoped by calendar, not
+  -- workspace: calendar_id already implies the workspace.
+  UNIQUE KEY uniq_calendar_events_source_uid (calendar_id, source_uid_key),
   FULLTEXT KEY ft_calendar_events_title_memo (title, memo),
 
   CONSTRAINT fk_calendar_events_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -157,5 +175,10 @@ CREATE TABLE calendar_events (
   CONSTRAINT chk_calendar_events_recurrence_requires_start CHECK (start_at IS NOT NULL OR recurrence_rule IS NULL),
   CONSTRAINT chk_calendar_events_notification_requires_start CHECK (start_at IS NOT NULL OR notification_offset IS NULL),
   CONSTRAINT chk_calendar_events_chronology CHECK (end_at IS NULL OR start_at IS NULL OR end_at >= start_at),
-  CONSTRAINT chk_calendar_events_milestone_no_recurrence CHECK (kind <> 'milestone' OR recurrence_rule IS NULL)
+  CONSTRAINT chk_calendar_events_milestone_no_recurrence CHECK (kind <> 'milestone' OR recurrence_rule IS NULL),
+  -- The rule's shape. Draft-4 keywords only: MySQL enforces those and
+  -- silently ignores newer ones. Which keys suit which freq is left to
+  -- each writer's validation. Must stay byte-identical to the literal in
+  -- sql/core/upgrades/0002-recurrence-shape.sql.
+  CONSTRAINT chk_calendar_events_recurrence_shape CHECK (recurrence_rule IS NULL OR JSON_SCHEMA_VALID('{"type":"object","additionalProperties":false,"required":["freq"],"properties":{"freq":{"enum":["daily","weekly","monthly","yearly"]},"interval":{"type":"integer","minimum":1,"maximum":999},"byDay":{"type":"array","minItems":1,"maxItems":7,"uniqueItems":true,"items":{"enum":["MO","TU","WE","TH","FR","SA","SU"]}},"byMonthDay":{"type":"array","minItems":1,"maxItems":31,"uniqueItems":true,"items":{"type":"integer","minimum":1,"maximum":31}},"bySetPos":{"type":"array","minItems":1,"maxItems":1,"items":{"enum":[1,2,3,4,5,-1]}},"wkst":{"enum":["MO","SU"]},"until":{"type":"string","minLength":10,"maxLength":40},"count":{"type":"integer","minimum":1,"maximum":1000}},"dependencies":{"bySetPos":["byDay"]},"not":{"required":["until","count"]}}', recurrence_rule))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Calendar events with kind/visibility/show_as classification; nullable start/end for planning-stage placeholders; task_role links to task projection. Soft-delete is signalled solely by enabled=FALSE (no deleted_at column); consumer views must propagate enabled=TRUE on every JOIN to honour soft-delete.';

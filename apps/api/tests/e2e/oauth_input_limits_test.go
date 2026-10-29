@@ -137,7 +137,7 @@ func TestOAuthStartAcceptsARedirectTooLongToStore(t *testing.T) {
 // TestOAuthRefusesAnAddressTheColumnCannotHold covers the second value a
 // caller controls that answered with a server error.
 //
-// users.email and oauth_allowed_emails.email are latin1 and documented as
+// users.email and oauth_signin_allowlist.entry_value are latin1 and documented as
 // ASCII only. An address outside that reached the allow-list lookup, MySQL
 // refused the comparison, and the handler turned that into a 500 -- mid
 // redirect, so the browser rendered a JSON error body.
@@ -184,9 +184,7 @@ func TestOAuthStillAdmitsAnOrdinaryAddressOnARestrictedDeployment(t *testing.T) 
 
 	// Allow-listed individually, which is the admin panel's answer for an
 	// address outside the permitted domains.
-	_, err := testDB.Exec(
-		`INSERT INTO oauth_allowed_emails (public_id, email) VALUES (UUID_TO_BIN(UUID()), ?)`, email)
-	require.NoError(t, err)
+	allowSignInEmail(t, email)
 
 	state, cookie := startOAuth(t, srv.URL, "/")
 

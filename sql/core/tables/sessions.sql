@@ -8,12 +8,14 @@ CREATE TABLE sessions (
   public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible ID',
   user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id',
 
+  audience VARCHAR(32) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL DEFAULT '' COMMENT 'Name of the application that issued the session (flow, time), written as a SQL literal. An application refreshes, looks up and purges only its own rows; revoking every session of a user ignores it. Empty only on a row no conforming writer produced.',
   refresh_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'SHA-256 hex of refresh token',
   user_agent VARCHAR(512) NULL COMMENT 'Client user agent at issue time',
   ip_address VARBINARY(16) NULL COMMENT 'Packed IPv4/IPv6 address at issue time',
   expires_at DATETIME(3) NOT NULL COMMENT 'Refresh token expiry',
   revoked_at DATETIME(3) NULL COMMENT 'Explicit revocation time',
   rotated_from_hash CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'SHA-256 hex of the refresh token this session last replaced. Rotation overwrites refresh_hash, so without this the superseded token leaves no trace and a replay of it is indistinguishable from a token that was never issued. Presenting a token that matches this column is the signal that a rotated token was replayed.',
+  rotated_at DATETIME(3) NULL COMMENT 'When the refresh token was last exchanged. Lets an application tell a replay of rotated_from_hash from one client asking twice within a grace window.',
   last_used_at DATETIME(3) NULL COMMENT 'Last refresh time',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
@@ -26,6 +28,9 @@ CREATE TABLE sessions (
   UNIQUE KEY uniq_sessions_refresh_hash (refresh_hash),
   KEY idx_sessions_rotated_from_hash (rotated_from_hash),
   KEY idx_sessions_user_id_expires_at (user_id, expires_at),
+  -- The expiry sweep names no user, and the composite above cannot be
+  -- entered from its second column.
+  KEY idx_sessions_expires_at (expires_at),
 
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Refresh-token backed sessions';

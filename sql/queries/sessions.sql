@@ -1,9 +1,14 @@
 -- Refresh-token sessions. Only the hash is stored, so a database read
 -- cannot yield a usable token.
+--
+-- The table is shared with every other application on the database. This
+-- one writes 'time' to audience as a literal and refreshes, looks up and
+-- purges only those rows; revoking all of a user's sessions ignores the
+-- audience (sql/core/PROTOCOL.md, Identity rule 5).
 
 -- name: CreateSession :execresult
-INSERT INTO sessions (public_id, user_id, refresh_hash, user_agent, ip_address, expires_at)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO sessions (public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at)
+VALUES (?, ?, 'time', ?, ?, ?, ?);
 
 -- GetLiveSession is the per-request check behind an access token. The
 -- token carries the session id, so revoking one device signs out that
@@ -19,6 +24,7 @@ VALUES (?, ?, ?, ?, ?, ?);
 -- name: GetLiveSession :one
 SELECT * FROM sessions
 WHERE sessions.public_id = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
@@ -27,6 +33,7 @@ WHERE sessions.public_id = ?
 -- name: GetSessionByRefreshHash :one
 SELECT * FROM sessions
 WHERE sessions.refresh_hash = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
@@ -44,7 +51,9 @@ WHERE sessions.refresh_hash = ?
 -- refresh_hash is overwritten.
 --
 -- A disabled user's session matches nothing, as in GetLiveSession, so it
--- cannot be kept alive by refreshing.
+-- cannot be kept alive by refreshing. Nor does the session of a user whose
+-- local identity has confirmed a second factor: this application cannot ask
+-- for one, so a factor enrolled elsewhere ends its sessions here.
 -- name: RotateSessionByHash :execresult
 UPDATE sessions
 SET rotated_from_hash = refresh_hash,
@@ -53,10 +62,15 @@ SET rotated_from_hash = refresh_hash,
     rotated_at = NOW(3),
     last_used_at = NOW(3)
 WHERE sessions.refresh_hash = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
-  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE);
+  AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
+  AND NOT EXISTS (
+    SELECT 1 FROM identities i
+    WHERE i.user_id = sessions.user_id AND i.provider = 'local'
+      AND i.enabled = TRUE AND i.mfa_confirmed_at IS NOT NULL);
 
 -- GetSessionByRotatedFromHash finds the session a spent refresh token used to
 -- belong to. Matching here is the only evidence that a token which opens no
@@ -64,6 +78,7 @@ WHERE sessions.refresh_hash = ?
 -- name: GetSessionByRotatedFromHash :one
 SELECT * FROM sessions
 WHERE rotated_from_hash = ?
+  AND audience = 'time'
   AND revoked_at IS NULL
   AND enabled = TRUE;
 
@@ -95,13 +110,14 @@ UPDATE sessions SET revoked_at = NOW(3) WHERE id = ?;
 
 -- RevokeAllUserSessions is what a password change calls. Replacing the
 -- credential has to invalidate every session opened with the old one, or
--- whoever knew it keeps their access.
+-- whoever knew it keeps their access -- including the sessions another
+-- application opened, so this one alone ignores the audience.
 -- name: RevokeAllUserSessions :exec
 UPDATE sessions SET revoked_at = NOW(3) WHERE user_id = ? AND revoked_at IS NULL;
 
 -- name: ListSessionsForUser :many
 SELECT * FROM sessions
-WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
+WHERE user_id = ? AND audience = 'time' AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC;
 
 -- RevokeSessionByPublicID is scoped to the owning user: a session is named by
@@ -109,7 +125,7 @@ ORDER BY created_at DESC;
 -- devices.
 -- name: RevokeSessionByPublicID :execresult
 UPDATE sessions SET revoked_at = NOW(3)
-WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL;
+WHERE public_id = ? AND user_id = ? AND audience = 'time' AND revoked_at IS NULL;
 
 -- DeleteExpiredSessions removes one batch and reports how many it took, so
 -- the caller can loop until a short batch says the backlog is drained.
@@ -121,4 +137,4 @@ WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL;
 -- run that is cut short still leaves the newest -- and enters the expiry
 -- index rather than sorting what it read.
 -- name: DeleteExpiredSessions :execresult
-DELETE FROM sessions WHERE expires_at < ? ORDER BY expires_at LIMIT ?;
+DELETE FROM sessions WHERE audience = 'time' AND expires_at < ? ORDER BY expires_at LIMIT ?;

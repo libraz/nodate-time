@@ -27,23 +27,23 @@ func TestClampedDaysCrossTheICalBoundaryUnchanged(t *testing.T) {
 	}{
 		{"monthly on the 31st", Rule{Freq: "monthly", Interval: 1},
 			time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC),
-			"FREQ=MONTHLY;BYMONTHDAY=-1;WKST=SU",
+			"FREQ=MONTHLY;BYMONTHDAY=-1;WKST=MO",
 			[]string{"2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30"}},
-		{"monthly byMonthDay 31", Rule{Freq: "monthly", Interval: 1, ByMonthDay: 31},
+		{"monthly byMonthDay 31", Rule{Freq: "monthly", Interval: 1, ByMonthDay: []int{31}},
 			time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC),
-			"FREQ=MONTHLY;BYMONTHDAY=-1;WKST=SU",
+			"FREQ=MONTHLY;BYMONTHDAY=-1;WKST=MO",
 			[]string{"2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30"}},
 		{"monthly on the 30th", Rule{Freq: "monthly", Interval: 1},
 			time.Date(2026, 1, 30, 10, 0, 0, 0, time.UTC),
-			"FREQ=MONTHLY;BYMONTHDAY=28,29,30;BYSETPOS=-1;WKST=SU",
+			"FREQ=MONTHLY;BYMONTHDAY=28,29,30;BYSETPOS=-1;WKST=MO",
 			[]string{"2026-01-30", "2026-02-28", "2026-03-30", "2026-04-30", "2026-05-30", "2026-06-30"}},
-		{"monthly on the 29th", Rule{Freq: "monthly", Interval: 1, ByMonthDay: 29},
+		{"monthly on the 29th", Rule{Freq: "monthly", Interval: 1, ByMonthDay: []int{29}},
 			time.Date(2026, 1, 29, 10, 0, 0, 0, time.UTC),
-			"FREQ=MONTHLY;BYMONTHDAY=28,29;BYSETPOS=-1;WKST=SU",
+			"FREQ=MONTHLY;BYMONTHDAY=28,29;BYSETPOS=-1;WKST=MO",
 			[]string{"2026-01-29", "2026-02-28", "2026-03-29", "2026-04-29", "2026-05-29", "2026-06-29"}},
 		{"yearly on Feb 29", Rule{Freq: "yearly", Interval: 1},
 			time.Date(2028, 2, 29, 10, 0, 0, 0, time.UTC),
-			"FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=28,29;BYSETPOS=-1;WKST=SU",
+			"FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=28,29;BYSETPOS=-1;WKST=MO",
 			[]string{"2028-02-29", "2029-02-28", "2030-02-28", "2031-02-28", "2032-02-29", "2033-02-28"}},
 	}
 	for _, c := range cases {
@@ -143,11 +143,34 @@ func TestRRuleCarriesOneEndCondition(t *testing.T) {
 	}
 	far, near := "2026-07-01T00:00:00Z", "2026-06-03T09:00:00Z"
 	countFirst := &Rule{Freq: "daily", Interval: 1, Count: 3, Until: &far}
-	if got := FormatRRule(countFirst, start, false); got != "FREQ=DAILY;COUNT=3;WKST=SU" {
+	if got := FormatRRule(countFirst, start, false); got != "FREQ=DAILY;COUNT=3;WKST=MO" {
 		t.Errorf("count reached first: got %q", got)
 	}
 	untilFirst := &Rule{Freq: "daily", Interval: 1, Count: 30, Until: &near}
-	if got := FormatRRule(untilFirst, start, false); got != "FREQ=DAILY;UNTIL=20260603T090000Z;WKST=SU" {
+	if got := FormatRRule(untilFirst, start, false); got != "FREQ=DAILY;UNTIL=20260603T090000Z;WKST=MO" {
 		t.Errorf("until reached first: got %q", got)
+	}
+}
+
+// The week start an RRULE names is kept when it changes the expansion (a weekly
+// rule with an interval and BYDAY), defaulting to MO as the RFC does.
+func TestParseRRuleKeepsTheWeekStartWhereItMatters(t *testing.T) {
+	start := time.Date(1997, 8, 5, 9, 0, 0, 0, time.UTC)
+	for rrule, want := range map[string]string{
+		"FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU":         "MO",
+		"FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU;WKST=SU": "SU",
+		"FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU;WKST=MO": "MO",
+		"FREQ=WEEKLY;BYDAY=TU,SU;WKST=SU":            "",
+	} {
+		rule, ok := ParseRRule(rrule, start)
+		if !ok {
+			t.Fatalf("ParseRRule(%q) refused", rrule)
+		}
+		if rule.Wkst != want {
+			t.Errorf("ParseRRule(%q).Wkst = %q, want %q", rrule, rule.Wkst, want)
+		}
+	}
+	if _, ok := ParseRRule("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU;WKST=WE", start); ok {
+		t.Error("a week start other than MO or SU must be refused")
 	}
 }

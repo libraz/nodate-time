@@ -20,6 +20,10 @@ CREATE TABLE calendar_event_attachments (
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',
   enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Enabled flag (soft delete)',
+  -- enabled = FALSE is two states: a reservation not yet confirmed, and a
+  -- confirmed attachment that was deleted. Only the second may never
+  -- confirm back, so the soft delete that clears enabled also sets this.
+  retired_at DATETIME(3) NULL COMMENT 'When a confirmed attachment was deleted. NULL on a live row and on a reservation that was never confirmed.',
   updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 

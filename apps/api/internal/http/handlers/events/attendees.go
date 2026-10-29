@@ -149,19 +149,24 @@ func logAttendeeChange(ctx context.Context, q *generated.Queries, deps Deps, act
 		return err
 	}
 	extra := map[string]any{
-		"event": pubIDToHex(w.evt.PublicID),
-		"user":  pubIDToHex(userPubID),
-		field:   value,
+		"userId": pubIDToHex(userPubID),
+		field:    value,
 	}
 	if w.scope.occurrence != nil {
 		extra["originalStart"] = w.scope.occurrence.StartAt.Format(time.RFC3339)
+	}
+	// An answer and an edit grant are different kinds: the first is the
+	// attendee speaking for themselves, the second an access change.
+	kind := eventlog.TypeAttendeeUpdated
+	if field == "rsvp" {
+		kind = eventlog.TypeRSVPUpdated
 	}
 	return eventlog.Append(ctx, q, eventlog.Entry{
 		WorkspaceID: deps.WorkspaceID,
 		CalendarID:  w.cal.ID,
 		ActorUserID: actorID,
-		Type:        eventlog.TypeAttendeeUpdated,
-		Summary:     w.evt.Title,
+		Type:        kind,
+		Title:       w.evt.Title,
 		Subject:     w.evt.PublicID,
 		Extra:       extra,
 	})

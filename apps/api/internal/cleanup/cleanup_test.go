@@ -68,3 +68,36 @@ func TestDeleteObjectsKeepsReferenceWhenRowDeletionFails(t *testing.T) {
 	assert.Equal(t, 2, rowCalls)
 	assert.Equal(t, []string{"retry", "retry"}, storage.deleted)
 }
+
+// A listing page full of objects the sweep cannot remove must not keep the
+// sweep from reaching the collectable one behind it: each page starts after
+// the last id seen, whatever reclaim did with it.
+func TestPageByIDReachesRowsBehindAFullPageItCannotRemove(t *testing.T) {
+	const stuck = storageSweepBatchSize + 20
+	removed := map[uint32]bool{}
+	list := func(afterID uint32) ([]candidate, error) {
+		var page []candidate
+		for id := afterID + 1; id <= stuck+1 && len(page) < storageSweepBatchSize; id++ {
+			if !removed[id] {
+				page = append(page, candidate{id: id})
+			}
+		}
+		return page, nil
+	}
+	pageByID(context.Background(), "test", list, func(c candidate) {
+		if c.id == stuck+1 {
+			removed[c.id] = true
+		}
+	})
+	require.True(t, removed[stuck+1], "the collectable row behind the stuck ones is reached")
+}
+
+// A listing error ends the sweep instead of retrying the same page.
+func TestPageByIDStopsOnAListingError(t *testing.T) {
+	calls := 0
+	pageByID(context.Background(), "test", func(uint32) ([]candidate, error) {
+		calls++
+		return nil, errors.New("down")
+	}, func(candidate) { t.Fatal("nothing listed, nothing reclaimed") })
+	require.Equal(t, 1, calls)
+}

@@ -1,11 +1,13 @@
 package e2e
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -74,8 +76,10 @@ func TestAttachingBytesAlreadyInTheAlbumReusesThePhotosObject(t *testing.T) {
 
 // An attachment reservation creates its object before any bytes exist. A photo
 // of the same digest confirmed meanwhile must not point at that unverified
-// row -- whose key here holds bytes that are not the photo at all -- but take
-// it over onto the bytes it has itself verified.
+// row -- whose key here holds bytes that are not the photo at all -- and it
+// cannot move the row onto its own bytes either: an object's key is fixed
+// when it is created (PROTOCOL.md section Storage). The photo stays on its own
+// key until the reservation is gone.
 func TestAPhotoDoesNotReuseAnUnverifiedAttachmentReservation(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -94,22 +98,30 @@ func TestAPhotoDoesNotReuseAnUnverifiedAttachmentReservation(t *testing.T) {
 	require.False(t, storageObjectByDigest(t, picture).Verified, "the reservation vouches for nothing yet")
 
 	photoID := uploadPhotoBytes(t, tt, tt.CalendarID, picture, "the real one")
-	objectID, _, objectKey := photoObjectRef(t, photoID)
+	var attached sql.NullInt32
+	require.NoError(t, testDB.QueryRow(
+		"SELECT storage_object_id FROM album_photos WHERE public_id = UUID_TO_BIN(?)", photoID).Scan(&attached))
+	require.False(t, attached.Valid, "the photo must not resolve to the unverified upload")
 	object := storageObjectByDigest(t, picture)
-	require.Equal(t, object.ID, objectID, "one object per digest")
-	require.NotEqual(t, attachmentKey, objectKey, "the photo must not resolve to the unverified upload")
-	require.True(t, object.Verified)
-	require.Equal(t, picture, helpers.FetchURL(t, photoImageURL(t, tt, tt.CalendarID, photoID)))
+	require.Equal(t, attachmentKey, object.Key, "the reservation keeps its key")
+	require.False(t, object.Verified, "and still vouches for nothing")
+	require.Equal(t, 1, object.RefCount, "only the reservation holds it")
+	require.Equal(t, picture, helpers.FetchURL(t, photoImageURL(t, tt, tt.CalendarID, photoID)),
+		"the photo is served from its own key")
 
-	// The pending attachment now confirms against the verified bytes, and the
-	// unclaimed copy at its own key is cleared.
+	// The pending attachment checks the bytes at its object's key, finds the
+	// impostor, and is discarded along with them.
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusOK, status, "confirm: %s", string(raw))
-	require.Equal(t, picture, attachmentDownloadBytes(t, tt, eventID, pres.AttachmentID))
+	require.Equal(t, http.StatusBadRequest, status, "confirm: %s", string(raw))
+	// The request queues the bytes; the drainer removes them. This test's
+	// bucket is not the one the shared database records, so the request path
+	// leaves them queued and the pass here stands in for the drainer.
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 	_, exists, err := getTestStorage().StatObject(testCtx(), attachmentKey)
 	require.NoError(t, err)
-	require.False(t, exists, "bytes no object claims are not left behind")
+	require.False(t, exists, "bytes that do not match the digest are not left behind")
+	require.Equal(t, 0, storageObjectByDigest(t, picture).RefCount, "the discarded reservation gave its reference back")
 }
 
 // An upload URL outlives the confirm of its own upload. Using it again must
@@ -153,6 +165,8 @@ func TestMismatchedAttachmentBytesDoNotBlockTheRealFile(t *testing.T) {
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
 	require.Equal(t, http.StatusBadRequest, status)
+	// As above: the pass stands in for the drainer the bytes were queued for.
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 
 	calURL, eventID, pres = reserveAttachment(t, tt, declared)
 	require.NotEmpty(t, pres.UploadURL, "the bad bytes are gone, so there is somewhere to upload")

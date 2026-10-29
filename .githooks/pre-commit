@@ -20,7 +20,7 @@ toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 # as bad data rather than as a failed build. Hashes only, no network, so
 # this stays instant and works offline.
 if git diff --cached --name-only --diff-filter=ACMR | grep -q '^sql/core/'; then
-  if ! bash "$toplevel/scripts/check-vendored-core.sh" --local-only; then
+  if ! bash "$toplevel/sql/core/tools/check-vendored.sh" "$toplevel/sql/core" --local-only; then
     echo "" >&2
     echo "✖ pre-commit hook: the vendored contract was edited here (see above)." >&2
     echo "  Change it upstream and re-vendor; editing the copy desyncs the two." >&2

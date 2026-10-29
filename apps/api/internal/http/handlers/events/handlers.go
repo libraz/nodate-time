@@ -75,8 +75,8 @@ func mapRecurrenceRule(data *json.RawMessage) *RecurrenceRuleResponse {
 	if data == nil {
 		return nil
 	}
-	rule := recurrence.ParseRule(*data)
-	if rule == nil {
+	rule, err := recurrence.ParseRule(*data)
+	if err != nil || rule == nil {
 		return nil
 	}
 	return &RecurrenceRuleResponse{
@@ -85,6 +85,7 @@ func mapRecurrenceRule(data *json.RawMessage) *RecurrenceRuleResponse {
 		ByDay:      rule.ByDay,
 		ByMonthDay: rule.ByMonthDay,
 		BySetPos:   rule.BySetPos,
+		Wkst:       rule.Wkst,
 		Until:      rule.Until,
 		Count:      rule.Count,
 	}
@@ -985,8 +986,8 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 			if evt.RecurrenceRule == nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
-			rule := recurrence.ParseRule(*evt.RecurrenceRule)
-			if rule == nil {
+			rule, rerr := recurrence.ParseRule(*evt.RecurrenceRule)
+			if rerr != nil || rule == nil {
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 			occ, oerr := occurrenceForDate(rule, evt, dateStr)
@@ -1135,7 +1136,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				CalendarID:  cal.ID,
 				ActorUserID: userID,
 				Type:        eventlog.TypeEventCreated,
-				Summary:     in.Body.Title,
+				Title:       in.Body.Title,
 				Subject:     pubID[:],
 			})
 		})
@@ -1267,6 +1268,11 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
 				return err
 			}
+			// A task-projected event goes with its task (PROTOCOL.md
+			// obligation 3); deleting it here would desync the pair.
+			if w.evt.TaskID.Valid {
+				return apierrors.EventTaskOwned
+			}
 			if w.scope.confined {
 				return cancelOccurrence(ctx, q, deps, userID, w)
 			}
@@ -1308,7 +1314,7 @@ func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, acto
 		CalendarID:  w.cal.ID,
 		ActorUserID: actorID,
 		Type:        eventlog.TypeEventDeleted,
-		Summary:     w.evt.Title,
+		Title:       w.evt.Title,
 		Subject:     w.evt.PublicID,
 		Extra: map[string]any{
 			"scope":         "occurrence",
@@ -1317,27 +1323,11 @@ func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, acto
 	})
 }
 
-// deleteWholeEvent retires a one-off event or a whole series, with the
-// references its attachments hold.
+// deleteWholeEvent retires a one-off event or a whole series with its
+// attachments. A retired attachment keeps its reference on the blob until the
+// cleanup sweep removes the row, so no count changes here.
 func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
-	// Release the blobs this event's attachments were holding. The objects
-	// themselves are swept once nothing refers to them, so the only thing to
-	// do here is drop the references.
-	//
-	// The listing locks the live rows and they are retired in the same
-	// transaction, which is what makes the release exactly once: a concurrent
-	// delete of the same event, or of one attachment on it, waits on those
-	// locks and then finds the rows already retired.
 	eventRef := sql.NullInt32{Int32: int32(w.evt.ID), Valid: true}
-	objectIDs, err := q.ListAttachmentObjectIDsByEvent(ctx, eventRef)
-	if err != nil {
-		return err
-	}
-	for _, objectID := range objectIDs {
-		if err := blobref.Release(ctx, q, objectID); err != nil {
-			return err
-		}
-	}
 	if err := q.SoftDeleteAttachmentsByEvent(ctx, eventRef); err != nil {
 		return err
 	}
@@ -1351,7 +1341,7 @@ func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, acto
 		CalendarID:  w.cal.ID,
 		ActorUserID: actorID,
 		Type:        eventlog.TypeEventDeleted,
-		Summary:     w.evt.Title,
+		Title:       w.evt.Title,
 		Subject:     w.evt.PublicID,
 	})
 }
@@ -1359,23 +1349,21 @@ func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, acto
 // logEventActivity records something that happened to an event -- a comment, a
 // checklist item, an attachment -- against the event itself.
 //
-// The subject is the event's public id rather than the comment's, because the
+// The subject is the event's public id rather than the detail's, because the
 // history a person reads is the event's: an entry filed under the comment
 // would be findable only by somebody who already knew the comment existed.
-// What changed is carried alongside it.
-func logEventActivity(ctx context.Context, q *generated.Queries, deps Deps, calID, actorID uint32, evt generated.CalendarEvent, eventType, summary string, subjectID []byte) error {
-	extra := map[string]any{"event": pubIDToHex(evt.PublicID)}
-	if len(subjectID) > 0 {
-		extra["subject"] = pubIDToHex(subjectID)
-	}
+// The detail's own id travels in the payload under detailKey (commentId,
+// itemId, attachmentId), and summary is its label (item title, file name).
+func logEventActivity(ctx context.Context, q *generated.Queries, deps Deps, calID, actorID uint32, evt generated.CalendarEvent, eventType, detailKey, summary string, detailID []byte) error {
 	return eventlog.Append(ctx, q, eventlog.Entry{
 		WorkspaceID: deps.WorkspaceID,
 		CalendarID:  calID,
 		ActorUserID: actorID,
 		Type:        eventType,
+		Title:       evt.Title,
 		Summary:     summary,
 		Subject:     evt.PublicID,
-		Extra:       extra,
+		Extra:       map[string]any{detailKey: pubIDToHex(detailID)},
 	})
 }
 
@@ -1546,7 +1534,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			}); err != nil {
 				return err
 			}
-			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentAdded, pubID[:]); err != nil {
+			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentCreated, pubID[:]); err != nil {
 				return err
 			}
 			// Read back so createdAt is the stored value rather than a guess at it.
@@ -1606,7 +1594,7 @@ func lockComment(ctx context.Context, q *generated.Queries, eventID uint32, comm
 // is append-only and readable by every member, so text written into it would
 // outlive the edit that replaced it and the removal that took it down.
 func logCommentActivity(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess, eventType string, commentPubID []byte) error {
-	return logEventActivity(ctx, q, deps, w.cal.ID, actorID, w.evt, eventType, w.evt.Title, commentPubID)
+	return logEventActivity(ctx, q, deps, w.cal.ID, actorID, w.evt, eventType, "commentId", "", commentPubID)
 }
 
 func resolveCommentEvent(ctx context.Context, deps Deps, calID uint32, eventID string) (generated.CalendarEvent, error) {
@@ -1645,7 +1633,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			}); err != nil {
 				return err
 			}
-			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentEdited, comment.PublicID); err != nil {
+			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentUpdated, comment.PublicID); err != nil {
 				return err
 			}
 			stored, err = q.GetEventCommentByPublicID(ctx, comment.PublicID)
@@ -1694,7 +1682,7 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 			if !removed {
 				return apierrors.CommentNotFound
 			}
-			return logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentRemoved, comment.PublicID)
+			return logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentDeleted, comment.PublicID)
 		}); err != nil {
 			return nil, toAPIError(err)
 		}

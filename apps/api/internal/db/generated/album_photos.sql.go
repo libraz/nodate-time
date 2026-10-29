@@ -140,7 +140,7 @@ func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePending
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
-SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos WHERE public_id = ?
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, storage_object_id, thumbnail_object_id, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at FROM album_photos WHERE public_id = ?
 `
 
 func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) (AlbumPhoto, error) {
@@ -159,6 +159,8 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 		&i.Width,
 		&i.Height,
 		&i.StorageKey,
+		&i.StorageObjectID,
+		&i.ThumbnailObjectID,
 		&i.TakenAt,
 		&i.SortWeight,
 		&i.Notes,
@@ -166,14 +168,12 @@ func (q *Queries) GetAlbumPhotoByPublicID(ctx context.Context, publicID []byte) 
 		&i.RetiredAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.StorageObjectID,
-		&i.ThumbnailObjectID,
 	)
 	return i, err
 }
 
 const getAlbumPhotoForUpdate = `-- name: GetAlbumPhotoForUpdate :one
-SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at, storage_object_id, thumbnail_object_id FROM album_photos
+SELECT id, public_id, workspace_id, calendar_id, calendar_event_id, uploaded_by_user_id, caption, content_type, byte_size, width, height, storage_key, storage_object_id, thumbnail_object_id, taken_at, sort_weight, notes, enabled, retired_at, updated_at, created_at FROM album_photos
 WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE
 `
 
@@ -201,6 +201,8 @@ func (q *Queries) GetAlbumPhotoForUpdate(ctx context.Context, arg GetAlbumPhotoF
 		&i.Width,
 		&i.Height,
 		&i.StorageKey,
+		&i.StorageObjectID,
+		&i.ThumbnailObjectID,
 		&i.TakenAt,
 		&i.SortWeight,
 		&i.Notes,
@@ -208,8 +210,6 @@ func (q *Queries) GetAlbumPhotoForUpdate(ctx context.Context, arg GetAlbumPhotoF
 		&i.RetiredAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.StorageObjectID,
-		&i.ThumbnailObjectID,
 	)
 	return i, err
 }
@@ -278,7 +278,7 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 }
 
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.storage_object_id, ap.thumbnail_object_id, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
@@ -322,6 +322,8 @@ type ListAlbumPhotosAfterRow struct {
 	Width                    sql.NullInt32  `json:"width"`
 	Height                   sql.NullInt32  `json:"height"`
 	StorageKey               string         `json:"storageKey"`
+	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	TakenAt                  time.Time      `json:"takenAt"`
 	SortWeight               int32          `json:"sortWeight"`
 	Notes                    sql.NullString `json:"notes"`
@@ -329,8 +331,6 @@ type ListAlbumPhotosAfterRow struct {
 	RetiredAt                sql.NullTime   `json:"retiredAt"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
-	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
-	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	ImageStorageKey          string         `json:"imageStorageKey"`
 	ThumbnailStorageKey      sql.NullString `json:"thumbnailStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
@@ -368,6 +368,8 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.Width,
 			&i.Height,
 			&i.StorageKey,
+			&i.StorageObjectID,
+			&i.ThumbnailObjectID,
 			&i.TakenAt,
 			&i.SortWeight,
 			&i.Notes,
@@ -375,8 +377,6 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.RetiredAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
-			&i.StorageObjectID,
-			&i.ThumbnailObjectID,
 			&i.ImageStorageKey,
 			&i.ThumbnailStorageKey,
 			&i.UploaderPublicID,
@@ -399,7 +399,7 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 }
 
 const listAlbumPhotosFirstPage = `-- name: ListAlbumPhotosFirstPage :many
-SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at, ap.storage_object_id, ap.thumbnail_object_id,
+SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.storage_object_id, ap.thumbnail_object_id, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
        tso.storage_key AS thumbnail_storage_key,
        u.public_id AS uploader_public_id,
@@ -436,6 +436,8 @@ type ListAlbumPhotosFirstPageRow struct {
 	Width                    sql.NullInt32  `json:"width"`
 	Height                   sql.NullInt32  `json:"height"`
 	StorageKey               string         `json:"storageKey"`
+	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
+	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	TakenAt                  time.Time      `json:"takenAt"`
 	SortWeight               int32          `json:"sortWeight"`
 	Notes                    sql.NullString `json:"notes"`
@@ -443,8 +445,6 @@ type ListAlbumPhotosFirstPageRow struct {
 	RetiredAt                sql.NullTime   `json:"retiredAt"`
 	UpdatedAt                sql.NullTime   `json:"updatedAt"`
 	CreatedAt                time.Time      `json:"createdAt"`
-	StorageObjectID          sql.NullInt32  `json:"storageObjectId"`
-	ThumbnailObjectID        sql.NullInt32  `json:"thumbnailObjectId"`
 	ImageStorageKey          string         `json:"imageStorageKey"`
 	ThumbnailStorageKey      sql.NullString `json:"thumbnailStorageKey"`
 	UploaderPublicID         []byte         `json:"uploaderPublicId"`
@@ -492,6 +492,8 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.Width,
 			&i.Height,
 			&i.StorageKey,
+			&i.StorageObjectID,
+			&i.ThumbnailObjectID,
 			&i.TakenAt,
 			&i.SortWeight,
 			&i.Notes,
@@ -499,8 +501,6 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.RetiredAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
-			&i.StorageObjectID,
-			&i.ThumbnailObjectID,
 			&i.ImageStorageKey,
 			&i.ThumbnailStorageKey,
 			&i.UploaderPublicID,

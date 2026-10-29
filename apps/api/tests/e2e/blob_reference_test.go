@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A storage reference is taken by the transaction that enabled a row and given
-// back by the one that retired it -- once, however many requests race for it,
-// and never for a row whose parent is already gone.
+// A storage reference is taken by the transaction that inserted a row and
+// given back by the one that removed it -- once, however many requests race
+// for it. Retiring a row changes nothing.
 
 // concurrently fires n identical requests at once and returns their statuses.
 func concurrently(t *testing.T, n int, method, url, token string) []int {
@@ -38,7 +38,8 @@ func concurrently(t *testing.T, n int, method, url, token string) []int {
 
 // The same file is attached in four calendars, so its object is shared at four
 // references. Racing deletes of one attachment, of another's whole event, and
-// of a third's whole calendar must each give back exactly one.
+// of a third's whole calendar retire rows without touching the count; racing
+// sweeps that then remove the retired rows give back exactly one each.
 func TestConcurrentDeletesReleaseEachAttachmentOnce(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -60,21 +61,35 @@ func TestConcurrentDeletesReleaseEachAttachmentOnce(t *testing.T) {
 	statuses := concurrently(t, 8, http.MethodDelete,
 		testServerURL+"/calendars/"+a.CalendarID+"/events/"+aEvent+"/attachments/"+aAttachment, a.AccessToken)
 	require.Contains(t, statuses, http.StatusNoContent)
-	require.Equal(t, 3, objectRefCount(t, storageKey), "one attachment deleted eight times is one release: %v", statuses)
+	requireRefCountIsReferrers(t, storageKey, 4, "an attachment deleted eight times is retired, not released")
 
 	statuses = concurrently(t, 8, http.MethodDelete,
 		testServerURL+"/calendars/"+b.CalendarID+"/events/"+bEvent, b.AccessToken)
 	require.Contains(t, statuses, http.StatusNoContent)
-	require.Equal(t, 2, objectRefCount(t, storageKey), "one event deleted eight times is one release: %v", statuses)
+	requireRefCountIsReferrers(t, storageKey, 4, "an event deleted eight times retires its attachment")
 
 	statuses = concurrently(t, 8, http.MethodDelete, testServerURL+"/calendars/"+d.CalendarID, d.AccessToken)
 	require.Contains(t, statuses, http.StatusNoContent)
-	require.Equal(t, 1, objectRefCount(t, storageKey), "one calendar deleted eight times is one release: %v", statuses)
+	requireRefCountIsReferrers(t, storageKey, 4, "a calendar deleted eight times retires its attachment")
+
+	_, err := testDB.Exec(`
+		UPDATE calendar_event_attachments a
+		 INNER JOIN storage_objects so ON so.id = a.storage_object_id
+		   SET a.updated_at = ?
+		 WHERE so.storage_key = ? AND a.retired_at IS NOT NULL`,
+		time.Now().Add(-31*24*time.Hour), storageKey)
+	require.NoError(t, err)
+	var sweeps sync.WaitGroup
+	for range 4 {
+		sweeps.Go(func() { cleanup.RunOnce(testCtx(), testDB, getTestStorage()) })
+	}
+	sweeps.Wait()
+	requireRefCountIsReferrers(t, storageKey, 1, "three retired rows removed by racing sweeps are three releases")
 }
 
 // Deleting an event and confirming an upload on it touch the same rows. Both
 // lock the event before anything under it, so they queue rather than deadlock,
-// and whichever lands first, the event's references all come back.
+// and whichever lands first, the count is the rows left pointing at the object.
 func TestDeletingAnEventWhileAnUploadOnItConfirms(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -114,7 +129,8 @@ func TestDeletingAnEventWhileAnUploadOnItConfirms(t *testing.T) {
 
 		require.Equal(t, http.StatusNoContent, deleted, "round %d", round)
 		require.Contains(t, []int{http.StatusOK, http.StatusNotFound}, confirmed, "round %d", round)
-		require.Equal(t, 0, objectRefCount(t, storageKey), "round %d: the deleted event holds nothing", round)
+		requireRefCountIsReferrers(t, storageKey, 2,
+			fmt.Sprintf("round %d: the retired attachment and the reservation", round))
 	}
 }
 
@@ -200,7 +216,7 @@ func TestConfirmAfterDeleteDoesNotRestoreTheAttachment(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/events/"+eventID+"/attachments",
 		tt.AccessToken, nil, &attachments)
 	require.Empty(t, attachments)
-	require.Equal(t, 0, objectRefCount(t, storageKey))
+	requireRefCountIsReferrers(t, storageKey, 1, "the retired row keeps its reference")
 }
 
 // A deleted attachment is kept for the activity history for its own retention,
@@ -231,7 +247,7 @@ func TestARetiredAttachmentOutlivesTheAbandonedUploadSweep(t *testing.T) {
 }
 
 // A reservation confirmed after its event was deleted must not come alive
-// under it: nothing would ever release the reference it took.
+// under it, and takes no reference beyond the one the reservation holds.
 func TestConfirmingAfterTheEventIsDeletedTakesNoReference(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -263,7 +279,7 @@ func TestConfirmingAfterTheEventIsDeletedTakesNoReference(t *testing.T) {
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNotFound, status)
 	storageKey := helpers.AttachmentStorageKey(testWorkspacePublicID, helpers.SHA256Hex(body))
-	require.Equal(t, 0, objectRefCount(t, storageKey))
+	requireRefCountIsReferrers(t, storageKey, 1, "only the reservation holds the object")
 }
 
 // The same for an album photo whose calendar went while it was uploading.

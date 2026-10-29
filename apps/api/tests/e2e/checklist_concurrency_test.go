@@ -27,7 +27,7 @@ func checklistLogRows(t *testing.T, eventType, itemID string) int {
 	var n int
 	require.NoError(t, testDB.QueryRow(`
 		SELECT COUNT(*) FROM events
-		 WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.subject')) = ?`,
+		 WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.itemId')) = ?`,
 		eventType, itemID).Scan(&n))
 	return n
 }
@@ -46,7 +46,7 @@ func TestConcurrentRemovalsOfOneChecklistItemRecordOne(t *testing.T) {
 	statuses := concurrently(t, 6, http.MethodDelete, checklistURL+"/"+item.ID, tt.AccessToken)
 	require.Equal(t, 1, countStatus(statuses, http.StatusNoContent), "statuses %v", statuses)
 	require.Equal(t, len(statuses)-1, countStatus(statuses, http.StatusNotFound), "statuses %v", statuses)
-	require.Equal(t, 1, checklistLogRows(t, "calendar.checklist.removed", item.ID))
+	require.Equal(t, 1, checklistLogRows(t, "calendar.event.checklist.deleted", item.ID))
 }
 
 // Two members changing different fields of one item at once both keep their
@@ -119,10 +119,10 @@ func TestAChecklistUpdateRacingARemovalNeverLandsAfterIt(t *testing.T) {
 		require.NoError(t, testDB.QueryRow(`
 			SELECT COUNT(*) FROM events updated
 			  JOIN events removed
-			    ON JSON_UNQUOTE(JSON_EXTRACT(removed.payload_json, '$.subject')) = ?
-			   AND removed.type = 'calendar.checklist.removed'
-			 WHERE updated.type = 'calendar.checklist.updated'
-			   AND JSON_UNQUOTE(JSON_EXTRACT(updated.payload_json, '$.subject')) = ?
+			    ON JSON_UNQUOTE(JSON_EXTRACT(removed.payload_json, '$.itemId')) = ?
+			   AND removed.type = 'calendar.event.checklist.deleted'
+			 WHERE updated.type = 'calendar.event.checklist.updated'
+			   AND JSON_UNQUOTE(JSON_EXTRACT(updated.payload_json, '$.itemId')) = ?
 			   AND updated.id > removed.id`, item.ID, item.ID).Scan(&updatedAfterRemoval))
 		require.Zero(t, updatedAfterRemoval, "round %d: an update was recorded after the removal", round)
 	}

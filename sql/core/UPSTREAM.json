@@ -1,19 +1,35 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "6522b0560f43c6034f687ec32294bf0d4b3de6ed",
+  "ref": "f05885b3a559aebbff60b329d136f298c86504a6",
   "files": [
     {
       "path": "PROTOCOL.md",
-      "sha256": "8669f2123b0d48a8d53fb7fef8e20ec08bd9ebde7c60082137bd116d9ff366ba"
+      "sha256": "3ce59d0825914a14977842f31b77e578590c6e537e0c1444f14b86fd73db4df7"
     },
     {
       "path": "conformance/data/10-invariants.sql",
       "sha256": "f72719f401bd8ef9aceba1d7d8a5ed92b425f9a7d58992a6f3d407bc945819c9"
     },
     {
+      "path": "conformance/data/60-storage-ref-count.sql",
+      "sha256": "f0e360849b086571ff4086f03eae1a56825694b749506082ee50b46f762571bd"
+    },
+    {
+      "path": "conformance/data/80-event-kinds.sql",
+      "sha256": "908e02baa6cdb0e17bc58b611eb9413148f599411054bd7d816385a9df4ec2d7"
+    },
+    {
+      "path": "conformance/data/90-calendar-membership.sql",
+      "sha256": "21476992fbcdf2eb2bdb08b6d52b7b5c627b46e902f67c2f42a8e88ab2a5e3e4"
+    },
+    {
+      "path": "conformance/data/95-identity-rows.sql",
+      "sha256": "5d334810221c167731ed7ab2a300a8c0dbf06eed3cba13737b75a24650834eb6"
+    },
+    {
       "path": "conformance/harness/00-procedures.sql",
-      "sha256": "3fcebef740a4feccf90835da446dea4dd94e4e77da7db4a2bf6a838fa2343fb7"
+      "sha256": "f8751bff252fdb3805e7d53faf8750f2d442bd397469cd7b452b91829de46a61"
     },
     {
       "path": "conformance/harness/10-fixtures.sql",
@@ -21,11 +37,11 @@
     },
     {
       "path": "conformance/harness/99-teardown.sql",
-      "sha256": "ac6d091c9c24386db0e8c3d6ddf0b55a6cd2fac0294672b00ed7be8e1886c98f"
+      "sha256": "36923d099c80de7e28aa774b6a794448eb295fec09fccd0d7ec1cb49ec09c7f3"
     },
     {
       "path": "conformance/run.sh",
-      "sha256": "30ad593e4fac1a23e8f7a47de52bcfbf42c3ea81a80c83794fac403a8b004723"
+      "sha256": "d33cf9386d855380968743a9d3cf27170f4624fa8356876b1811980587b63979"
     },
     {
       "path": "conformance/schema/10-structure.sql",
@@ -33,15 +49,79 @@
     },
     {
       "path": "conformance/schema/20-projection-guard.sql",
-      "sha256": "6d12f0739a9ebded830b20a3e3afaf20e286abf5fd48eb5ae322f2ebd78946a9"
+      "sha256": "064fd7fe608047ad7253b874022d561d6e3585d3c1b2b2d494ce0e76d8f9a3ad"
     },
     {
       "path": "conformance/schema/30-event-log.sql",
-      "sha256": "47638c9286a35fe819385725a8853063606d2d220db51343d367f16b53c70ccb"
+      "sha256": "57a546581ba8214cf5345087f63efc343ca69e0e5034d4d53732c665b51c4720"
     },
     {
       "path": "conformance/schema/40-soft-delete-uniqueness.sql",
-      "sha256": "d682889b123716bf121659abfa86df546c0b2237962c33a2dc6d29462308bc6e"
+      "sha256": "2f18acd70d0592db3a6dc34c8cb03a7511405036bbd4e9cfd15f488f48c56fa3"
+    },
+    {
+      "path": "conformance/schema/50-nullable-unique-keys.sql",
+      "sha256": "8c878bf3e07c9c3da2f443e6b82c207501da6c450cfadcd5bbc33806707cc30f"
+    },
+    {
+      "path": "conformance/schema/70-recurrence-shape.sql",
+      "sha256": "e4224f6a073767092664bf9e2276d42571ca65ba4e194f11976412132498c3af"
+    },
+    {
+      "path": "conformance/selftest/10-fixture-rules.sql",
+      "sha256": "5360026e282174e98d72788f5f91caeef1c3af2f1c63789fbfa9a50b112f6ac8"
+    },
+    {
+      "path": "conformance/selftest/cases/00-long-message.sql",
+      "sha256": "6e997b46cf196c8813e3dc3de50eeb6ce9f1348732f53cf16067d4d6b341fc32"
+    },
+    {
+      "path": "conformance/selftest/cases/60-ref-count-without-rows.sql",
+      "sha256": "8d882285a32c2893ede11528d49ffb3d5bd4d214a58919950643b7cd7ad419aa"
+    },
+    {
+      "path": "conformance/selftest/cases/60-row-without-ref-count.sql",
+      "sha256": "e363aebad23712698f6f2c583d9f9359eaf435ae62c265db95a426a92680033c"
+    },
+    {
+      "path": "conformance/selftest/cases/70-shape-accepts-valid-rule.sql",
+      "sha256": "98332ebc380463afc4406279554d67cd92c6a12c0586f019d919dfadc00029a7"
+    },
+    {
+      "path": "conformance/selftest/cases/70-shape-refuses-invalid-rule.sql",
+      "sha256": "91263dfdd9774c32acba1f0ee20b6752c31c2f832d439988ad9bb769737b3b5e"
+    },
+    {
+      "path": "conformance/selftest/cases/80-kind-in-wrong-case.sql",
+      "sha256": "5cccbd6ba67fb46743f7f7c9177cbdbf03b261d94a2adc29ddb18f23edf58b65"
+    },
+    {
+      "path": "conformance/selftest/cases/80-undeclared-calendar-kind.sql",
+      "sha256": "fe484b263aba62f1d1028c5a6abe57227d26ef10e5b1feacb39267863cec957e"
+    },
+    {
+      "path": "conformance/selftest/cases/90-no-workspace-membership.sql",
+      "sha256": "e5874765f769382ba79e1bbe7c9a797a5c1e7f0c881d692b612f29f103ffb9ea"
+    },
+    {
+      "path": "conformance/selftest/cases/90-removed-workspace-membership.sql",
+      "sha256": "41cb593408cf86be4b4f4929b5deb3fa047c6f627a951b43980c2c99d5e35880"
+    },
+    {
+      "path": "conformance/selftest/cases/95-mixed-case-email.sql",
+      "sha256": "e24a8a722bbd5a341894124b95eadf3a548d7aa630f2050ebf77516c27e422fb"
+    },
+    {
+      "path": "conformance/selftest/cases/95-session-without-audience.sql",
+      "sha256": "141cc5dcc5f060e2f7e1d1a23f399b293ae3b1a6b3239f5cf5020da581fd7fcb"
+    },
+    {
+      "path": "event-kinds.yaml",
+      "sha256": "d445ffa2bdfb1210a1f34dab654fe448a2fab64b210473b56826bcc042a830a6"
+    },
+    {
+      "path": "recurrence/fixtures.json",
+      "sha256": "43e56f19abcc3595f494eabf451986f7e653cc834f516b65721e789d3e9b5ded"
     },
     {
       "path": "tables/audit_logs.sql",
@@ -49,7 +129,7 @@
     },
     {
       "path": "tables/calendar_event_attachments.sql",
-      "sha256": "6326acb5d04de722132faab964d1c09a15e7da92eb2fd0f086bbe009955cacc8"
+      "sha256": "d6e7508b4fc951b131f60f5d3887b0ebbbb81c6ccf92ed710b3f2c3e75dfe50f"
     },
     {
       "path": "tables/calendar_event_attendees.sql",
@@ -61,7 +141,7 @@
     },
     {
       "path": "tables/calendar_event_comments.sql",
-      "sha256": "5c7c15cd51c9f5b4c50511c39c8bdcd9ac0bdd0ca22af76e014bbcb89c06556c"
+      "sha256": "8ede4b4faca81e9e482350630b4167ba20e3c127c300411373835ed559a623c9"
     },
     {
       "path": "tables/calendar_event_invites.sql",
@@ -73,7 +153,7 @@
     },
     {
       "path": "tables/calendar_events.sql",
-      "sha256": "ef374ca149d729d9413f67a0ff13aa338bed94028cbd1b5db71c589b6b1459b1"
+      "sha256": "277123a2caca64995ac9524bb18d0816f1f364f470cbc015951f4cad4ab96263"
     },
     {
       "path": "tables/calendar_members.sql",
@@ -101,11 +181,11 @@
     },
     {
       "path": "tables/events.sql",
-      "sha256": "97799857e27633202d2e4e87636e3ef9e8b13e960b20e0c7e7a4d39b97fa3936"
+      "sha256": "185a100e17681a1904f626c3725152ceb4e65f0b19847a4d4b096b80f0e65367"
     },
     {
       "path": "tables/identities.sql",
-      "sha256": "94d2b59e749e26085022f736ebcc5378d0c633167c876dc84cffe56d7da884a6"
+      "sha256": "645b404a56bd71315a34be127c860f142f6992db21df610203551a7d87f99eb6"
     },
     {
       "path": "tables/instance_admins.sql",
@@ -124,8 +204,12 @@
       "sha256": "c1c5e94fe42cff94ae59ace572381ccac3e6e629ffb95f91e33893ca51e66f81"
     },
     {
+      "path": "tables/oauth_signin_allowlist.sql",
+      "sha256": "6e2a0421d899c6e4e0e7fb4e48700e9579d5b7f02ee3528294a0fdd5804e332d"
+    },
+    {
       "path": "tables/oauth_states.sql",
-      "sha256": "ea8a70f13bc8621fd96649c31a7d9562d4c396f150cf24450d427a1517d3abc2"
+      "sha256": "37b7bc6d18fa9c7aa4d28b5f9c7ca90624e2e2dde1f859a3f22cefeb4610c97f"
     },
     {
       "path": "tables/personal_access_tokens.sql",
@@ -133,11 +217,15 @@
     },
     {
       "path": "tables/sessions.sql",
-      "sha256": "b629af69762b0a505c9acc9ed56f5b57532effe3d32473b50787de16aec3a5f0"
+      "sha256": "a1ca03efd45e4372900c0fe2afee567b33fe856060104384849f764b0762c46a"
+    },
+    {
+      "path": "tables/storage_blob_removals.sql",
+      "sha256": "6fd601ac5399a339d0e85b7b76a5d2963099a52b49930eb2df9bcddae6191a47"
     },
     {
       "path": "tables/storage_objects.sql",
-      "sha256": "97b4b91349dcad451bd8a2cce6b75084db7ab0d9615789c0b8ea49102f10d70b"
+      "sha256": "4730e135b66257527f24280bdfe960c213231bae26c0d4c770de2c5de7255abd"
     },
     {
       "path": "tables/user_recovery_codes.sql",
@@ -160,6 +248,26 @@
       "sha256": "fb4acab81e63d90b0455429f692ee20b315a7e080700dc4cbab1ac4aa7accdec"
     },
     {
+      "path": "tools/build-schema.sh",
+      "sha256": "2bda2e5510bbbf165b78b41dfab9dae98465fa125a1be09b437029db7ebec6c5"
+    },
+    {
+      "path": "tools/check-layer-equivalence.sh",
+      "sha256": "7d09536b013479a8331c2459d771f461c03ad1cf6cbb79c21394cb649b374528"
+    },
+    {
+      "path": "tools/check-no-core-alters.sh",
+      "sha256": "5cfc2ff87d7c0e926dc37c05528129ee2edfdd8b77f174fad59493cf371ba07f"
+    },
+    {
+      "path": "tools/check-vendored.sh",
+      "sha256": "585044d8a875e380637eaa185220345c9668ab4f69f5ddde508ef317ee1d5025"
+    },
+    {
+      "path": "tools/vendor.sh",
+      "sha256": "97335455f48fd1510f5cf242049e62ba1416652dda5e37e9a7630013af89fa91"
+    },
+    {
       "path": "triggers/trg_calendar_events_projection_guard_del.sql",
       "sha256": "f57d90c213412e25efda6956814d22ef3b306a19df3e296cb7742dceaaf95c74"
     },
@@ -170,6 +278,14 @@
     {
       "path": "triggers/trg_calendar_events_projection_guard_upd.sql",
       "sha256": "10866c6ef295f038f29d31cb5359cd5d9f1f4ddf2ceef3ebc17b511ab12c0b77"
+    },
+    {
+      "path": "upgrades/0001-adopt-product-columns.sql",
+      "sha256": "4f5a95233d28f3844e9c3cee6f4032a0ff51b31a21e85aa4444243a9b66457c2"
+    },
+    {
+      "path": "upgrades/0002-recurrence-shape.sql",
+      "sha256": "3a49e0172cfecef5e5a13d4d6923fcce70e1cebbe8c808cf0f84fe2d82bee09f"
     }
   ]
 }

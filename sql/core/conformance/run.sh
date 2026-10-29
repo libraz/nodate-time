@@ -5,12 +5,17 @@
 #   bash sql/core/conformance/run.sh --dsn ... --mode data
 #
 # Modes:
-#   schema  (default) create fixtures, assert structure and guard
-#           behaviour, remove the fixtures. Writes, so point it at a test
-#           database.
-#   data    sweep an existing database for rows no conforming writer could
-#           have produced. Read-only; safe against production.
-#   all     schema, then data.
+#   schema    (default) create fixtures, assert structure and guard
+#             behaviour, remove the fixtures. Writes, so point it at a test
+#             database.
+#   data      sweep an existing database for rows no conforming writer
+#             could have produced. Read-only; safe against production.
+#   all       schema, then data.
+#   selftest  prove the checks are not vacuous: every recurrence fixture is
+#             stored by the shape CHECK, and each case under
+#             selftest/cases/ plants one violation inside a transaction
+#             that is never committed and must make its check fail. Writes,
+#             so point it at a test database.
 #
 # Exit codes:
 #   0  the database conforms
@@ -33,16 +38,18 @@ usage() {
   cat <<'USAGE'
 run.sh — check a database against the nodate core contract.
 
-  run.sh --dsn 'user:pass@host:port/dbname' [--mode schema|data|all]
+  run.sh --dsn 'user:pass@host:port/dbname' [--mode schema|data|all|selftest]
 
 The database may also be given as NF_CONFORMANCE_DSN.
 
 Modes:
-  schema  (default) create fixtures, assert structure and guard behaviour,
-          remove the fixtures. Writes, so point it at a test database.
-  data    sweep an existing database for rows no conforming writer could
-          have produced. Read-only; safe against production.
-  all     schema, then data.
+  schema    (default) create fixtures, assert structure and guard behaviour,
+            remove the fixtures. Writes, so point it at a test database.
+  data      sweep an existing database for rows no conforming writer could
+            have produced. Read-only; safe against production.
+  all       schema, then data.
+  selftest  plant one violation per check and confirm each is caught.
+            Writes, so point it at a test database.
 
 Exit codes:
   0  the database conforms
@@ -61,8 +68,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${MODE}" in
-  schema|data|all) ;;
-  *) echo "--mode must be one of schema, data, all" >&2; exit 2 ;;
+  schema|data|all|selftest) ;;
+  *) echo "--mode must be one of schema, data, all, selftest" >&2; exit 2 ;;
 esac
 
 if [[ -z "${DSN}" ]]; then
@@ -96,7 +103,7 @@ run_sql() {
   # the first error, which is how an assertion failure ends the run.
   MYSQL_PWD="${DB_PASS}" mysql \
     --host="${DB_HOST}" --port="${DB_PORT}" --user="${DB_USER}" \
-    --batch --silent "${DB_NAME}"
+    --default-character-set=utf8mb4 --batch --silent "${DB_NAME}"
 }
 
 # concat prints the given files in order, so the whole check runs in one
@@ -114,6 +121,69 @@ concat() {
 teardown() {
   concat "${SCRIPT_DIR}/harness/00-procedures.sql" \
          "${SCRIPT_DIR}/harness/99-teardown.sql" | run_sql >/dev/null 2>&1 || true
+}
+
+# drop_procedures removes what harness/00-procedures.sql creates, reading
+# the names from its own DROP lines so the two cannot drift.
+drop_procedures() {
+  grep -E '^DROP PROCEDURE IF EXISTS ' "${SCRIPT_DIR}/harness/00-procedures.sql" \
+    | run_sql >/dev/null 2>&1 || true
+}
+
+# Every event-kind registry deployed beside this suite: core's own and one
+# per product layer, as sql/<layer>/event-kinds.yaml.
+shopt -s nullglob
+REGISTRIES=("${SCRIPT_DIR}"/../../*/event-kinds.yaml)
+shopt -u nullglob
+
+# registry_sql loads the declared kinds into nf_registered_kinds for the
+# event-kind check. Only the `- kind:` lines are read, so no YAML parser is
+# needed, and every value is held to the kind alphabet before it is
+# spliced into SQL.
+registry_sql() {
+  local file kind
+  printf 'DROP TEMPORARY TABLE IF EXISTS nf_registered_kinds;\n'
+  printf 'CREATE TEMPORARY TABLE nf_registered_kinds (kind VARBINARY(64) NOT NULL PRIMARY KEY) ENGINE=InnoDB;\n'
+  for file in "${REGISTRIES[@]}"; do
+    awk '/^[[:space:]]*-[[:space:]]*kind:/ {
+           v = $0
+           sub(/^[^:]*:[[:space:]]*/, "", v)
+           sub(/[[:space:]]*(#.*)?$/, "", v)
+           gsub(/["\047]/, "", v)
+           print v
+         }' "${file}"
+  done | sort -u | while IFS= read -r kind; do
+    printf "INSERT INTO nf_registered_kinds (kind) VALUES ('%s');\n" "${kind}"
+  done
+}
+
+check_registries() {
+  local file bad
+  if [[ ${#REGISTRIES[@]} -eq 0 ]]; then
+    echo "no event-kinds.yaml found beside the suite; expected at least sql/core/event-kinds.yaml" >&2
+    exit 2
+  fi
+  for file in "${REGISTRIES[@]}"; do
+    bad="$(awk '/^[[:space:]]*-[[:space:]]*kind:/ {
+                  v = $0
+                  sub(/^[^:]*:[[:space:]]*/, "", v)
+                  sub(/[[:space:]]*(#.*)?$/, "", v)
+                  gsub(/["\047]/, "", v)
+                  if (v !~ /^[a-z][a-z0-9_.]*$/) print FILENAME ": " v
+                }' "${file}")"
+    if [[ -n "${bad}" ]]; then
+      echo "event-kind registry entries outside [a-z0-9_.]: ${bad}" >&2
+      exit 2
+    fi
+  done
+}
+
+# fixtures_sql hands sql/core/recurrence/fixtures.json to the session as a
+# hex literal, which needs no escaping whatever the file contains.
+FIXTURES="${SCRIPT_DIR}/../recurrence/fixtures.json"
+fixtures_sql() {
+  printf "SET @nf_recurrence_fixtures = CONVERT(X'%s' USING utf8mb4);\n" \
+    "$(od -An -v -tx1 "${FIXTURES}" | tr -d ' \n')"
 }
 
 failed=0
@@ -137,16 +207,99 @@ fi
 
 if [[ "${MODE}" == "data" || "${MODE}" == "all" ]]; then
   echo "conformance: data mode against ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-  if concat "${SCRIPT_DIR}/harness/00-procedures.sql" \
-            "${SCRIPT_DIR}"/data/*.sql | run_sql; then
+  check_registries
+  if { concat "${SCRIPT_DIR}/harness/00-procedures.sql"
+       registry_sql
+       concat "${SCRIPT_DIR}"/data/*.sql; } | run_sql; then
     echo "conformance: data mode passed"
   else
     echo "conformance: data mode FAILED" >&2
     failed=1
   fi
-  # The procedures are the only thing data mode creates.
-  printf 'DROP PROCEDURE IF EXISTS nf_conformance_assert;\nDROP PROCEDURE IF EXISTS nf_conformance_expect_rejected;\n' \
-    | run_sql >/dev/null 2>&1 || true
+  # The procedures are the only thing data mode creates outside the
+  # session; its temporary tables leave with the connection.
+  drop_procedures
+fi
+
+# planted_run prints one selftest session: the harness, then the fixtures,
+# the optional case file and the check file inside a transaction that is
+# rolled back, or dropped with the connection when the check fails.
+planted_run() {
+  local case_file="$1" check_file="$2"
+  concat "${SCRIPT_DIR}/harness/00-procedures.sql"
+  registry_sql
+  printf 'START TRANSACTION;\n'
+  concat "${SCRIPT_DIR}/harness/10-fixtures.sql"
+  [[ -n "${case_file}" ]] && concat "${case_file}"
+  [[ -n "${check_file}" ]] && concat "${check_file}"
+  printf 'ROLLBACK;\n'
+}
+
+if [[ "${MODE}" == "selftest" ]]; then
+  echo "conformance: selftest against ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  check_registries
+  if [[ ! -f "${FIXTURES}" ]]; then
+    echo "recurrence fixtures not found at ${FIXTURES}" >&2
+    exit 2
+  fi
+  teardown
+
+  # The shape CHECK against the edge values, then every fixture rule.
+  if { concat "${SCRIPT_DIR}/harness/00-procedures.sql" \
+              "${SCRIPT_DIR}/harness/10-fixtures.sql" \
+              "${SCRIPT_DIR}"/schema/70-*.sql
+       fixtures_sql
+       concat "${SCRIPT_DIR}/selftest/10-fixture-rules.sql" \
+              "${SCRIPT_DIR}/harness/99-teardown.sql"; } | run_sql; then
+    echo "conformance: selftest: recurrence shape and fixture rules passed"
+  else
+    echo "conformance: selftest: recurrence shape or fixture rules FAILED" >&2
+    failed=1
+    teardown
+  fi
+
+  # Each case names its check by its numeric prefix. Where a data check of
+  # that number exists, it must pass without the case first, so the
+  # failure that follows is the case's and not something already in the
+  # database; the case must then fail it with that check's own message.
+  baselined=" "
+  cases=("${SCRIPT_DIR}"/selftest/cases/*.sql)
+  for case_file in "${cases[@]}"; do
+    [[ -e "${case_file}" ]] || continue
+    name="$(basename "${case_file}" .sql)"
+    num="${name%%-*}"
+    check_file=""
+    for f in "${SCRIPT_DIR}"/data/"${num}"-*.sql; do
+      [[ -e "${f}" ]] && check_file="${f}"
+    done
+
+    if [[ -n "${check_file}" && "${baselined}" != *" ${num} "* ]]; then
+      if ! out="$(planted_run "" "${check_file}" | run_sql 2>&1)"; then
+        echo "conformance: selftest: check ${num} fails before any violation is planted:" >&2
+        printf '%s\n' "${out}" >&2
+        failed=1
+      fi
+      baselined+="${num} "
+    fi
+
+    if out="$(planted_run "${case_file}" "${check_file}" | run_sql 2>&1)"; then
+      echo "conformance: selftest: ${name}: the planted violation was not caught" >&2
+      failed=1
+    elif [[ "${out}" != *"conformance failure: ${num} "* ]]; then
+      echo "conformance: selftest: ${name}: failed, but not with check ${num}'s message:" >&2
+      printf '%s\n' "${out}" >&2
+      failed=1
+    else
+      echo "conformance: selftest: ${name}: caught"
+    fi
+  done
+
+  teardown
+  if [[ "${failed}" -eq 0 ]]; then
+    echo "conformance: selftest passed"
+  else
+    echo "conformance: selftest FAILED" >&2
+  fi
 fi
 
 exit "${failed}"

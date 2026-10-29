@@ -41,7 +41,11 @@ func PublicIDString(b []byte) string {
 
 // Member resolves the calendar and the caller's grant on it. Membership is
 // read from calendar_members, which is the access axis; a display
-// preference row grants nothing and is never consulted here.
+// preference row grants nothing and is never consulted here. The grant
+// counts only while the caller still belongs to the calendar's workspace,
+// which GetCalendarMember checks in the same statement: a removal another
+// application made ends access here too (sql/core/PROTOCOL.md, Identity
+// rule 8).
 func Member(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, generated.CalendarMember, error) {
 	pubBytes, err := parseUUID(calendarPublicID)
 	if err != nil {

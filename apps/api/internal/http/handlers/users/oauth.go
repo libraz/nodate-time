@@ -22,6 +22,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
+	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 const (
@@ -505,13 +506,22 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		if name == "" {
 			name = "OAuth User"
 		}
-		email = strings.ToLower(strings.TrimSpace(email))
+		email = auth.NormalizeEmail(email)
 
 		// The browser is mid-redirect here, so a failure has to land on the login
 		// page like every other failure above. Returning a Huma error instead
 		// would render a raw JSON body in the address bar the user is watching.
+		// A refusal the contract names carries its API error code, so the
+		// login page can say which one it was.
 		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified, deps.Defaults.resolved())
-		if err != nil {
+		switch {
+		case errors.Is(err, errOAuthLinkRefused):
+			return oauthRedirect(deps, apierrors.AuthLinkRefused.Code), nil
+		case errors.Is(err, errOAuthMFARequired):
+			return oauthRedirect(deps, apierrors.AuthMFARequired.Code), nil
+		case errors.Is(err, errOAuthAccountUnavailable):
+			return oauthRedirect(deps, "oauth_failed"), nil
+		case err != nil:
 			slog.ErrorContext(ctx, "oauth user upsert failed", "provider", in.Provider, "error", err)
 			return oauthRedirect(deps, "oauth_failed"), nil
 		}
@@ -535,9 +545,31 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 	}
 }
 
-// upsertOAuthUser links an OAuth identity to a user, creating one if needed.
-// Wrapped in a transaction so concurrent callbacks for the same subject cannot
-// produce duplicate users or orphan oauth_account rows.
+// The refusals a provider sign-in can end in besides a fault. Each is the
+// answer, not a failure to find one, so none of them is logged as an error.
+var (
+	// errOAuthLinkRefused: the address belongs to an account whose owner never
+	// proved it and which holds a password or a second factor, either of which
+	// whoever registered it could have set (sql/core/PROTOCOL.md, Identity
+	// rule 2).
+	errOAuthLinkRefused = errors.New("oauth: link to an unverified account refused")
+	// errOAuthMFARequired: the account has a second factor this application
+	// cannot verify (rule 1).
+	errOAuthMFARequired = errors.New("oauth: second factor required")
+	// errOAuthAccountUnavailable: the account or the identity is disabled or
+	// locked.
+	errOAuthAccountUnavailable = errors.New("oauth: account unavailable")
+)
+
+// upsertOAuthUser resolves the user a provider identity signs in as: the one
+// the identity already belongs to, an existing account it links to by email,
+// or a new account. Wrapped in a transaction so concurrent callbacks for the
+// same subject cannot produce duplicate users or orphan identity rows.
+//
+// Every path ends with the user joining the workspace (a removed member stays
+// removed), and none of them issues anything to an account with a second
+// factor: that is refused before a link is written, so a refused sign-in
+// leaves no identity behind.
 func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -547,11 +579,34 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 
 	q := generated.New(tx)
 
+	userID, err := resolveOAuthUser(ctx, q, workspaceID, provider, subject, email, name, emailVerified, defaults)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := workspace.Join(ctx, q, workspaceID, userID); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
+func resolveOAuthUser(ctx context.Context, q *generated.Queries, workspaceID uint32, provider, subject, email, name string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
 	if existing, err := q.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
 		Provider: generated.IdentitiesProvider(provider),
 		Subject:  subject,
 	}); err == nil {
-		if err := tx.Commit(); err != nil {
+		if lockStands(existing, time.Now()) {
+			return 0, errOAuthAccountUnavailable
+		}
+		if _, err := q.GetUserByID(ctx, existing.UserID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, errOAuthAccountUnavailable
+			}
+			return 0, err
+		}
+		if err := refuseSecondFactor(ctx, q, existing.UserID); err != nil {
 			return 0, err
 		}
 		return existing.UserID, nil
@@ -565,16 +620,11 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	// over the victim's account.
 	if emailVerified && email != "" {
 		if u, err := q.GetUserByEmail(ctx, email); err == nil {
-			// An account whose own address was never confirmed may have been
-			// registered by someone who does not read that mailbox. The
-			// provider has just proven who does, so the account is theirs:
-			// it is confirmed, and the registrant's password and sessions
-			// end, in this transaction, before the link is made.
+			if err := refuseSecondFactor(ctx, q, u.ID); err != nil {
+				return 0, err
+			}
 			if !u.EmailVerifiedAt.Valid {
-				if _, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{ID: u.ID, Email: u.Email}); err != nil {
-					return 0, err
-				}
-				if err := revokePriorCredentials(ctx, q, u.ID); err != nil {
+				if err := claimUnverifiedAccount(ctx, q, u); err != nil {
 					return 0, err
 				}
 			}
@@ -588,9 +638,6 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 				Provider: generated.IdentitiesProvider(provider),
 				Subject:  subject,
 			}); err != nil {
-				return 0, err
-			}
-			if err := tx.Commit(); err != nil {
 				return 0, err
 			}
 			return u.ID, nil
@@ -608,7 +655,7 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	// for — a real, verified account.
 	userEmail := email
 	if !emailVerified || userEmail == "" {
-		userEmail = subject + "@oauth." + provider + ".local"
+		userEmail = auth.NormalizeEmail(subject + "@oauth." + provider + ".local")
 	}
 	// No password_hash is written. An account created through a provider has
 	// no local credential at all, which is different from having one nobody
@@ -655,24 +702,43 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	}); err != nil {
 		return 0, err
 	}
-
-	memberPubID, err := uuid.NewV7()
-	if err != nil {
-		return 0, err
-	}
-	if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
-		PublicID:    memberPubID[:],
-		WorkspaceID: workspaceID,
-		UserID:      uid,
-		Role:        generated.WorkspaceMembersRoleMember,
-	}); err != nil {
-		return 0, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
 	return uid, nil
+}
+
+// refuseSecondFactor is errOAuthMFARequired for an account with a confirmed
+// second factor.
+func refuseSecondFactor(ctx context.Context, q *generated.Queries, userID uint32) error {
+	required, err := userRequiresSecondFactor(ctx, q, userID)
+	if err != nil {
+		return err
+	}
+	if required {
+		return errOAuthMFARequired
+	}
+	return nil
+}
+
+// claimUnverifiedAccount prepares an account whose address was never proven
+// for its first provider link, which is that proof. An account holding a
+// password or a second factor is refused rather than taken over, because
+// whoever registered the address before its owner could have set either;
+// clearing them would hand the registrant's account to the provider's user
+// and erase what the real owner may have set. An account with neither is
+// confirmed and its sessions, in every application, end before the link.
+func claimUnverifiedAccount(ctx context.Context, q *generated.Queries, u generated.User) error {
+	local, err := q.GetLocalIdentityByUser(ctx, u.ID)
+	switch {
+	case err == nil:
+		if local.PasswordHash.Valid || local.MfaSecretCiphertext.String != "" || local.MfaConfirmedAt.Valid {
+			return errOAuthLinkRefused
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	if _, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{ID: u.ID, Email: u.Email}); err != nil {
+		return err
+	}
+	return q.RevokeAllUserSessions(ctx, u.ID)
 }
 
 // startOAuthSession records the sign-in and returns the access token. It

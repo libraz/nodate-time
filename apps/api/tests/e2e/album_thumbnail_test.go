@@ -173,8 +173,7 @@ func TestAThumbnailThatNeverArrivesDoesNotCostThePhoto(t *testing.T) {
 //
 // The state is arranged rather than reached: ref_count is forced to zero to
 // stand for a release that ran without the row going away, which is the drift
-// the exclusion is there for. The age is forced too, because the sweep only
-// looks at objects old enough to be past the reservation window.
+// the exclusion is there for.
 func TestTheSweepKeepsAnObjectHeldOnlyAsAThumbnail(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -192,16 +191,20 @@ func TestTheSweepKeepsAnObjectHeldOnlyAsAThumbnail(t *testing.T) {
 		  WHERE ap.public_id = UUID_TO_BIN(?)`, up.photoID).Scan(&objectID, &objectKey),
 		"the confirmed photo holds a thumbnail object")
 
-	_, err := testDB.Exec(
-		`UPDATE storage_objects SET ref_count = 0, created_at = ? WHERE id = ?`,
-		time.Now().Add(-30*24*time.Hour), objectID)
+	var held int
+	require.NoError(t, testDB.QueryRow(`SELECT ref_count FROM storage_objects WHERE id = ?`, objectID).Scan(&held))
+	_, err := testDB.Exec(`UPDATE storage_objects SET ref_count = 0 WHERE id = ?`, objectID)
 	require.NoError(t, err)
+	// Restore the count, so the drift arranged here does not outlive the test
+	// in the shared database.
+	t.Cleanup(func() {
+		_, _ = testDB.Exec(`UPDATE storage_objects SET ref_count = ? WHERE id = ?`, held, objectID)
+	})
 
 	offered, err := generated.New(testDB).ListUnreferencedStorageObjects(testCtx(),
 		generated.ListUnreferencedStorageObjectsParams{
-			CreatedAt: time.Now(),
-			ID:        objectID - 1,
-			Limit:     100,
+			ID:    objectID - 1,
+			Limit: 100,
 		})
 	require.NoError(t, err)
 	for _, obj := range offered {

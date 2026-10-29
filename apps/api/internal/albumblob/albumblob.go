@@ -12,6 +12,7 @@ package albumblob
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -66,9 +67,18 @@ type Photo struct {
 // reference, not shared storage; reclaiming the duplicate belongs to the
 // change that drops album_photos.storage_key and moves the blobs.
 //
-// q may be transaction-bound: the caller decides what else lands with this.
+// A reservation for the same digest that is still waiting for its own upload
+// holds the object at another key, which cannot be moved onto these bytes. The
+// photo is then left unattached and served from its own key, and a later
+// backfill pass attaches it once the reservation is confirmed or reclaimed.
+//
+// q must be transaction-bound: the object and the reference it takes commit
+// together.
 func Attach(ctx context.Context, q *generated.Queries, photo Photo) error {
 	object, err := ensureObject(ctx, q, photo)
+	if errors.Is(err, blobref.ErrUnverifiedElsewhere) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -91,6 +101,9 @@ func Attach(ctx context.Context, q *generated.Queries, photo Photo) error {
 // and arrives (or does not) after the picture is already the photo's.
 func AttachThumbnail(ctx context.Context, q *generated.Queries, thumbnail Photo) error {
 	object, err := ensureObject(ctx, q, thumbnail)
+	if errors.Is(err, blobref.ErrUnverifiedElsewhere) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -128,8 +141,8 @@ func referenceIfAttached(ctx context.Context, q *generated.Queries, res sql.Resu
 // reference could refuse it.
 //
 // An attachment reservation for the same digest may already hold the row with
-// nothing verified behind it. blobref.Store takes that row over onto this
-// photo's bytes rather than pointing the photo at an upload nobody checked.
+// nothing verified behind it. blobref.Store refuses that row rather than
+// pointing the photo at an upload nobody checked.
 func ensureObject(ctx context.Context, q *generated.Queries, photo Photo) (generated.StorageObject, error) {
 	return blobref.Store(ctx, q, blobref.Blob{
 		WorkspaceID: photo.WorkspaceID,

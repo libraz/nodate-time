@@ -9,8 +9,9 @@ type RecurrenceRuleResponse struct {
 	Freq       string   `json:"freq"`
 	Interval   int      `json:"interval"`
 	ByDay      []string `json:"byDay,omitempty"`
-	ByMonthDay int      `json:"byMonthDay,omitempty"`
-	BySetPos   int      `json:"bySetPos,omitempty"`
+	ByMonthDay []int    `json:"byMonthDay,omitempty"`
+	BySetPos   []int    `json:"bySetPos,omitempty"`
+	Wkst       string   `json:"wkst,omitempty"`
 	Until      *string  `json:"until,omitempty"`
 	Count      int      `json:"count,omitempty"`
 }

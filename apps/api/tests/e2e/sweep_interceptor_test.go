@@ -61,9 +61,3 @@ func (d *execInterceptDB) ExecContext(ctx context.Context, query string, args ..
 	}
 	return d.DB.ExecContext(ctx, query, args...)
 }
-
-// affectedNothing is a statement result that reports no row changed.
-type affectedNothing struct{}
-
-func (affectedNothing) LastInsertId() (int64, error) { return 0, nil }
-func (affectedNothing) RowsAffected() (int64, error) { return 0, nil }

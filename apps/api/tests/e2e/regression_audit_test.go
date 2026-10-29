@@ -680,7 +680,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 		}
 	}
 	require.True(t, seen["invite:calendar.invite.created"], "invite creation must be recorded")
-	require.True(t, seen["member:calendar.member.joined"], "invite acceptance must be recorded")
+	require.True(t, seen["member:calendar.member.added"], "invite acceptance must be recorded")
 	require.True(t, seen["member:calendar.member.role_changed"], "member role changes must be recorded")
 	require.True(t, seen["invite:calendar.invite.revoked"], "invite revocation must be recorded")
 

@@ -127,7 +127,7 @@ func TestBuildICSWritesASeriesAsOneVEventWithItsRule(t *testing.T) {
 	if n := strings.Count(out, "BEGIN:VEVENT"); n != 1 {
 		t.Errorf("expected 1 VEVENT for the series, got %d:\n%s", n, out)
 	}
-	if !strings.Contains(out, "RRULE:FREQ=DAILY;COUNT=30;WKST=SU") {
+	if !strings.Contains(out, "RRULE:FREQ=DAILY;COUNT=30;WKST=MO") {
 		t.Errorf("the rule itself must be written out:\n%s", out)
 	}
 	if !strings.Contains(out, "EXDATE:20250626T090000Z") {

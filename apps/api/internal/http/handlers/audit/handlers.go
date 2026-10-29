@@ -8,6 +8,7 @@
 package audit
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -106,12 +107,32 @@ func resolveActor(ctx context.Context, av *avatars.Resolver, publicID, name, ava
 	}
 }
 
-// payloadFields pulls the summary and subject id back out of a log row.
-// Unknown keys are left alone: the contract requires anything that
+// payloadFields pulls the label and the subject entity's id back out of a log
+// row. Unknown keys are left alone: the contract requires anything that
 // round-trips a row to preserve them, and this only reads.
 type payloadFields struct {
-	ID      string `json:"id"`
-	Summary string `json:"summary"`
+	Summary    string `json:"summary"`
+	ItemTitle  string `json:"itemTitle"`
+	Filename   string `json:"filename"`
+	Title      string `json:"title"`
+	EventID    string `json:"eventId"`
+	MemoID     string `json:"memoId"`
+	PhotoID    string `json:"photoId"`
+	InviteID   string `json:"inviteId"`
+	UserID     string `json:"userId"`
+	CalendarID string `json:"calendarId"`
+}
+
+// label is the line a feed shows for the row: the summary a writer gave, else
+// the name of the detail that changed, else the event's title.
+func (f payloadFields) label() string {
+	return cmp.Or(f.Summary, f.ItemTitle, f.Filename, f.Title)
+}
+
+// entityID is the public id of what the row is about. The registries name it
+// per kind (eventId, memoId, ...), and a membership row is about its user.
+func (f payloadFields) entityID() string {
+	return cmp.Or(f.EventID, f.MemoID, f.PhotoID, f.InviteID, f.UserID, f.CalendarID)
 }
 
 func readPayload(raw json.RawMessage) payloadFields {
@@ -191,10 +212,14 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 }
 
 func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID string) ([]HistoryItem, error) {
+	subject, err := uuid.Parse(subjectID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := deps.Queries.ListEventsBySubject(ctx, generated.ListEventsBySubjectParams{
 		WorkspaceID: deps.WorkspaceID,
 		CalendarID:  sql.NullInt32{Int32: int32(calendarID), Valid: true},
-		SubjectID:   sql.NullString{String: subjectID, Valid: true},
+		SubjectID:   subject[:],
 		Limit:       perEntityHistoryLimit,
 	})
 	if err != nil {
@@ -207,7 +232,7 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 		items = append(items, HistoryItem{
 			ID:        pubIDToHex(r.PublicID),
 			Action:    r.Type,
-			Summary:   payload.Summary,
+			Summary:   payload.label(),
 			CreatedAt: r.OccurredAt,
 			Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
 		})
@@ -263,12 +288,12 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 				HistoryItem: HistoryItem{
 					ID:        pubIDToHex(r.PublicID),
 					Action:    r.Type,
-					Summary:   payload.Summary,
+					Summary:   payload.label(),
 					CreatedAt: r.OccurredAt,
 					Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
 				},
 				EntityType: entityTypeOf(r.Type),
-				EntityID:   payload.ID,
+				EntityID:   payload.entityID(),
 			})
 		}
 		return out, nil

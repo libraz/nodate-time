@@ -27,12 +27,12 @@ func TestChangePasswordGuessesShareTheLoginLockout(t *testing.T) {
 		return status
 	}
 
-	for range 10 {
+	for range lockoutGuesses {
 		require.Equal(t, http.StatusBadRequest, change("definitely-not-it"))
 	}
 	attempts, locked := identityLockState(t, email)
-	require.Equal(t, 10, attempts, "each wrong current password is counted")
-	require.True(t, locked.Valid, "and the tenth locks the identity")
+	require.Equal(t, lockoutGuesses, attempts, "each wrong current password is counted")
+	require.True(t, locked.Valid, "and the fifth locks the identity")
 
 	require.Equal(t, http.StatusTooManyRequests, change(password),
 		"the right password is refused while the lock stands")

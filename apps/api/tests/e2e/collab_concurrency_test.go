@@ -404,7 +404,7 @@ func TestDoubleAcceptOfASingleUseLinkJoinsOnce(t *testing.T) {
 
 		require.Equal(t, []int{200, 200}, statuses, "round %d", round)
 		require.Equal(t, 1, useCountOf(t, calURL, owner.AccessToken, inv.ID), "round %d", round)
-		require.Equal(t, 1, eventCount(t, calendarID, "calendar.member.joined"), "round %d", round)
+		require.Equal(t, 1, eventCount(t, calendarID, "calendar.member.added"), "round %d", round)
 	}
 }
 

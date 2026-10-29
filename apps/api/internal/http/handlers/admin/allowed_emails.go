@@ -30,8 +30,9 @@ type ListAllowedEmailsInput struct{}
 
 type ListAllowedEmailsOutput struct {
 	Body struct {
-		// AllowedDomains is the active domain restriction (read-only, from env).
-		// Empty means sign-in is unrestricted and the per-email list is unused.
+		// AllowedDomains is the configured domain restriction (read-only, from env).
+		// Restricted is true when that list is non-empty or the table holds a
+		// live entry of any kind; with neither, sign-in is unrestricted.
 		AllowedDomains []string       `json:"allowedDomains"`
 		Restricted     bool           `json:"restricted"`
 		Emails         []AllowedEmail `json:"emails"`
@@ -61,19 +62,23 @@ type DeleteAllowedEmailOutput struct{}
 
 func ListAllowedEmails(deps Deps) func(context.Context, *ListAllowedEmailsInput) (*ListAllowedEmailsOutput, error) {
 	return func(ctx context.Context, _ *ListAllowedEmailsInput) (*ListAllowedEmailsOutput, error) {
-		rows, err := deps.Queries.ListAllowedEmails(ctx)
+		rows, err := deps.Queries.ListOauthSigninAllowlistEmails(ctx)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		entries, err := deps.Queries.CountEnabledOauthSigninAllowlistEntries(ctx)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		out := &ListAllowedEmailsOutput{}
 		out.Body.AllowedDomains = deps.AllowedDomains
-		out.Body.Restricted = len(deps.AllowedDomains) > 0
+		out.Body.Restricted = len(deps.AllowedDomains) > 0 || entries > 0
 		out.Body.Emails = make([]AllowedEmail, 0, len(rows))
 		for _, r := range rows {
 			out.Body.Emails = append(out.Body.Emails, AllowedEmail{
 				ID:        calresolve.PublicIDString(r.PublicID),
-				Email:     r.Email,
-				Reason:    r.Reason,
+				Email:     r.EntryValue,
+				Reason:    r.Notes.String,
 				CreatedAt: r.CreatedAt,
 			})
 		}
@@ -93,12 +98,14 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			return nil, apierrors.ToHuma(apierrors.AuthEmailUnsupported)
 		}
 
-		exists, err := deps.Queries.IsEmailAllowed(ctx, email)
-		if err != nil {
+		// A withdrawn row keeps its claim on the address and is revived by the
+		// write below; only a live one is a conflict.
+		if held, err := deps.Queries.GetOauthSigninAllowlistEmail(ctx, email); err == nil {
+			if held.Enabled {
+				return nil, apierrors.ToHuma(apierrors.Conflict)
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if exists {
-			return nil, apierrors.ToHuma(apierrors.Conflict)
 		}
 
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -108,43 +115,37 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		reason := strings.TrimSpace(in.Body.Reason)
-		// A withdrawn address is re-enabled in place and keeps its public id,
+		// A withdrawn address is re-enabled in place under the new public id,
 		// so the answer is read back rather than built from what was sent.
-		var stored generated.OauthAllowedEmail
+		var stored generated.GetOauthSigninAllowlistEmailRow
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := q.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
-				PublicID:        pubID[:],
-				Email:           email,
-				Reason:          reason,
-				CreatedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
+			if err := q.UpsertOauthSigninAllowlistEmail(ctx, generated.UpsertOauthSigninAllowlistEmailParams{
+				PublicID:      pubID[:],
+				AddedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
+				EntryValue:    email,
+				Notes:         sql.NullString{String: reason, Valid: reason != ""},
 			}); err != nil {
 				return err
 			}
-			rows, err := q.ListAllowedEmails(ctx)
+			stored, err = q.GetOauthSigninAllowlistEmail(ctx, email)
 			if err != nil {
 				return err
 			}
-			for _, r := range rows {
-				if r.Email == email {
-					stored = r
-					return appendAudit(ctx, q, auditEntry{
-						ActorUserID:      userID,
-						Action:           auditAllowedEmailCreate,
-						ResourceType:     "allowed_email",
-						ResourcePublicID: r.PublicID,
-						Payload:          map[string]any{"email": email},
-					})
-				}
-			}
-			return sql.ErrNoRows
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      userID,
+				Action:           auditAllowedEmailCreate,
+				ResourceType:     "allowed_email",
+				ResourcePublicID: stored.PublicID,
+				Payload:          map[string]any{"email": email},
+			})
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &CreateAllowedEmailOutput{Body: AllowedEmail{
 			ID:        calresolve.PublicIDString(stored.PublicID),
-			Email:     stored.Email,
-			Reason:    stored.Reason,
+			Email:     stored.EntryValue,
+			Reason:    stored.Notes.String,
 			CreatedAt: stored.CreatedAt,
 		}}, nil
 	}
@@ -158,7 +159,7 @@ func DeleteAllowedEmail(deps Deps) func(context.Context, *DeleteAllowedEmailInpu
 		}
 		actorID, _ := middleware.ActorFromContext(ctx)
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			res, err := q.WithdrawAllowedEmail(ctx, pub[:])
+			res, err := q.WithdrawOauthSigninAllowlistEmail(ctx, pub[:])
 			if err != nil {
 				return err
 			}

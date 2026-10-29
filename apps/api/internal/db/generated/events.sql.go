@@ -14,18 +14,19 @@ import (
 
 const appendEvent = `-- name: AppendEvent :execresult
 
-INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, type, payload_json, occurred_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, subject_public_id, type, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type AppendEventParams struct {
-	PublicID    []byte          `json:"publicId"`
-	WorkspaceID uint32          `json:"workspaceId"`
-	CalendarID  sql.NullInt32   `json:"calendarId"`
-	ActorUserID sql.NullInt32   `json:"actorUserId"`
-	Type        string          `json:"type"`
-	PayloadJSON json.RawMessage `json:"payloadJson"`
-	OccurredAt  time.Time       `json:"occurredAt"`
+	PublicID        []byte          `json:"publicId"`
+	WorkspaceID     uint32          `json:"workspaceId"`
+	CalendarID      sql.NullInt32   `json:"calendarId"`
+	ActorUserID     sql.NullInt32   `json:"actorUserId"`
+	SubjectPublicID []byte          `json:"subjectPublicId"`
+	Type            string          `json:"type"`
+	PayloadJSON     json.RawMessage `json:"payloadJson"`
+	OccurredAt      time.Time       `json:"occurredAt"`
 }
 
 // The append-only event log.
@@ -42,6 +43,7 @@ func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (sql.R
 		arg.WorkspaceID,
 		arg.CalendarID,
 		arg.ActorUserID,
+		arg.SubjectPublicID,
 		arg.Type,
 		arg.PayloadJSON,
 		arg.OccurredAt,
@@ -179,10 +181,10 @@ LIMIT ?
 `
 
 type ListEventsBySubjectParams struct {
-	WorkspaceID uint32         `json:"workspaceId"`
-	CalendarID  sql.NullInt32  `json:"calendarId"`
-	SubjectID   sql.NullString `json:"subjectId"`
-	Limit       int32          `json:"limit"`
+	WorkspaceID uint32        `json:"workspaceId"`
+	CalendarID  sql.NullInt32 `json:"calendarId"`
+	SubjectID   []byte        `json:"subjectId"`
+	Limit       int32         `json:"limit"`
 }
 
 type ListEventsBySubjectRow struct {
@@ -202,10 +204,10 @@ type ListEventsBySubjectRow struct {
 // records of who changed what eventually disagree, and then neither can be
 // trusted.
 //
-// Matched on subject_public_id, the stored generated column that lifts the
-// subject out of payload_json. Reading the JSON directly is not indexable,
-// so the same question used to scan every row the calendar had ever
-// produced -- and LIMIT applies after the scan, not to it.
+// Matched on subject_public_id, the column the writer fills with the public id
+// of the entity a kind is about (the registries' subject). Reading the JSON
+// directly is not indexable, so the same question would scan every row the
+// calendar had ever produced -- and LIMIT applies after the scan, not to it.
 func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubjectParams) ([]ListEventsBySubjectRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventsBySubject,
 		arg.WorkspaceID,
@@ -245,7 +247,7 @@ func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubje
 }
 
 const listEventsSince = `-- name: ListEventsSince :many
-SELECT id, public_id, workspace_id, task_id, calendar_id, triggered_by_signal_id, actor_user_id, actor_agent_id, actor_system_source, reverses_event_id, type, payload_json, occurred_at, sort_weight, notes, enabled, updated_at, created_at, subject_public_id FROM events
+SELECT id, public_id, workspace_id, task_id, calendar_id, triggered_by_signal_id, actor_user_id, actor_agent_id, actor_system_source, reverses_event_id, subject_public_id, type, payload_json, occurred_at, sort_weight, notes, enabled, updated_at, created_at FROM events
 WHERE id > ?
 ORDER BY id
 LIMIT ?
@@ -276,6 +278,7 @@ func (q *Queries) ListEventsSince(ctx context.Context, arg ListEventsSinceParams
 			&i.ActorAgentID,
 			&i.ActorSystemSource,
 			&i.ReversesEventID,
+			&i.SubjectPublicID,
 			&i.Type,
 			&i.PayloadJSON,
 			&i.OccurredAt,
@@ -284,7 +287,6 @@ func (q *Queries) ListEventsSince(ctx context.Context, arg ListEventsSinceParams
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
-			&i.SubjectPublicID,
 		); err != nil {
 			return nil, err
 		}
