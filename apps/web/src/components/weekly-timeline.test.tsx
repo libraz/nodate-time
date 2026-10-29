@@ -1,4 +1,12 @@
-import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
@@ -137,6 +145,45 @@ describe('WeeklyTimeline across a daylight-saving transition', () => {
   });
 });
 
+describe('WeeklyTimeline range create', () => {
+  // jsdom has no pointer capture; the browser keeps the drag on the slot.
+  const proto = HTMLElement.prototype as { setPointerCapture?: ((id: number) => void) | undefined };
+  const original = proto.setPointerCapture;
+  afterEach(() => {
+    proto.setPointerCapture = original;
+  });
+
+  it('opens a new event over the wall-clock range dragged across empty time', () => {
+    proto.setPointerCapture = () => {};
+    render(<WeeklyTimeline />);
+    const slot = screen.getByLabelText(`${DAY} event.createEvent`);
+
+    // From inside 01:00-01:30 to inside 03:30-04:00, on the day New York skips 02:00.
+    fireEvent.pointerDown(slot, { ...mouse(50, HOUR_HEIGHT + 5), pointerId: 1 });
+    fireEvent.pointerMove(slot, mouse(50, 3 * HOUR_HEIGHT + 40));
+    fireEvent.pointerUp(slot, mouse(50, 3 * HOUR_HEIGHT + 40));
+    // The click that ends the gesture must not open a second, one-hour event.
+    fireEvent.click(slot);
+
+    expect(openEventModal).toHaveBeenCalledTimes(1);
+    const [, start, end] = openEventModal.mock.calls[0] as [unknown, DateTime, DateTime];
+    expect(start.toFormat('yyyy-MM-dd HH:mm')).toBe(`${DAY} 01:00`);
+    expect(end.toFormat('yyyy-MM-dd HH:mm')).toBe(`${DAY} 04:00`);
+  });
+
+  it('leaves a press that stays inside one slot to the click', () => {
+    proto.setPointerCapture = () => {};
+    render(<WeeklyTimeline />);
+    const slot = screen.getByLabelText(`${DAY} event.createEvent`);
+
+    fireEvent.pointerDown(slot, { ...mouse(50, HOUR_HEIGHT + 5), pointerId: 1 });
+    fireEvent.pointerMove(slot, mouse(50, HOUR_HEIGHT + 9));
+    fireEvent.pointerUp(slot, mouse(50, HOUR_HEIGHT + 9));
+
+    expect(openEventModal).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * An event whose end equals its start is a marker at a moment. The API returns
  * one and attributes it to the day it opens; this view discarded it before
@@ -174,8 +221,10 @@ describe('WeeklyTimeline markers', () => {
 
     render(<WeeklyTimeline />);
 
-    expect(screen.getByText('5:00')).toBeInTheDocument();
-    expect(screen.queryByText('5:00 - 5:00')).toBeNull();
+    // Scoped to the block: the hour gutter carries a "5:00" label of its own.
+    const block = within(screen.getByText('Deploy').closest('button') as HTMLElement);
+    expect(block.getByText('5:00')).toBeInTheDocument();
+    expect(block.queryByText('5:00 - 5:00')).toBeNull();
   });
 
   /**

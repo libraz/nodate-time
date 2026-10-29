@@ -840,6 +840,7 @@ export function EventModal() {
   const closeEventModal = useUiStore((s) => s.closeEventModal);
   const selectedDate = useUiStore((s) => s.selectedDate);
   const eventDraftStart = useUiStore((s) => s.eventDraftStart);
+  const eventDraftEnd = useUiStore((s) => s.eventDraftEnd);
 
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
@@ -1078,7 +1079,8 @@ export function EventModal() {
       const start = timed
         ? base.set({ second: 0, millisecond: 0 })
         : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
-      const end = start.plus({ hours: 1 });
+      const draftEnd = eventDraftEnd?.setZone(timezone, { keepLocalTime: true });
+      const end = timed && draftEnd && draftEnd > start ? draftEnd : start.plus({ hours: 1 });
       setShowCustomRecurrence(false);
       setForm({
         title: '',
@@ -1105,6 +1107,7 @@ export function EventModal() {
     showEventModal,
     selectedDate,
     eventDraftStart,
+    eventDraftEnd,
     defaultCalendarId,
     timezone,
     anchorZone,
