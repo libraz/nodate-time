@@ -381,7 +381,14 @@ func seedMembers(t *testing.T, tenant *helpers.TestTenant, total int) {
 	}
 	bulkInsert(t, `INSERT INTO users (public_id, email, display_name)`, "(?, ?, ?)", rows)
 
+	// Calendar access requires workspace membership, so a seeded member holds both.
 	_, err := testDB.Exec(
+		`INSERT INTO workspace_members (public_id, workspace_id, user_id, role, joined_at)
+		 SELECT UUID_TO_BIN(UUID()), ?, id, 'member', NOW(3) FROM users WHERE email LIKE ?`,
+		workspaceID, batch+"-%")
+	require.NoError(t, err)
+
+	_, err = testDB.Exec(
 		`INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color)
 		 SELECT UUID_TO_BIN(UUID()), ?, ?, id, 'viewer', '#42A5F5' FROM users WHERE email LIKE ?`,
 		workspaceID, calendarID, batch+"-%")
