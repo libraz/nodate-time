@@ -9,10 +9,10 @@ export type ActivityVerb =
   | 'created'
   | 'updated'
   | 'deleted'
-  | 'joined'
-  | 'left'
   | 'roleChanged'
   | 'revoked'
+  | 'completed'
+  | 'reminded'
   | 'unknown';
 
 /**
@@ -29,44 +29,36 @@ export function activityVerb(action: string): ActivityVerb {
     case 'created':
     case 'added':
     case 'uploaded':
+    case 'subscribed':
       return 'created';
     case 'updated':
     case 'edited':
+    case 'rotated':
       return 'updated';
     case 'deleted':
     case 'removed':
       return 'deleted';
-    case 'joined':
-      return 'joined';
-    case 'left':
-      return 'left';
     case 'role_changed':
       return 'roleChanged';
     case 'revoked':
       return 'revoked';
+    case 'completed':
+      return 'completed';
+    case 'reminder':
+      return 'reminded';
     default:
       return 'unknown';
   }
-}
-
-/**
- * Reads the entity out of the same name. `calendar.event.created` is about an
- * event; a two-segment `calendar.created` is about the calendar itself.
- */
-export function activityEntity(action: string): string {
-  const parts = action.split('.');
-  if (parts.length >= 3) return parts[1] ?? '';
-  return parts[0] ?? '';
 }
 
 const VERB_LABEL: Record<ActivityVerb, TranslationKey> = {
   created: 'history.created',
   updated: 'history.updated',
   deleted: 'history.deleted',
-  joined: 'activity.joined',
-  left: 'activity.left',
   roleChanged: 'activity.roleChanged',
   revoked: 'activity.revoked',
+  completed: 'activity.completed',
+  reminded: 'activity.reminded',
   unknown: 'activity.changed',
 };
 
@@ -79,7 +71,6 @@ export function activityLabelKey(action: string): TranslationKey {
 export function activityColor(action: string): string {
   switch (activityVerb(action)) {
     case 'created':
-    case 'joined':
       return 'var(--color-accent)';
     case 'deleted':
     case 'revoked':

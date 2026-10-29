@@ -27,6 +27,10 @@ export function oauthErrorMessageKey(code: string | undefined): TranslationKey |
       return 'auth.oauthNotAllowed';
     case 'oauth_email_unsupported':
       return 'auth.oauthEmailUnsupported';
+    case 'AUTH.MFA_REQUIRED':
+      return 'apiError.AUTH.MFA_REQUIRED';
+    case 'AUTH.LINK_REFUSED':
+      return 'apiError.AUTH.LINK_REFUSED';
     default:
       return 'auth.oauthFailed';
   }

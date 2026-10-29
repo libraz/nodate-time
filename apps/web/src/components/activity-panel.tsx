@@ -34,6 +34,8 @@ const ENTITY_LABEL: Record<string, TranslationKey> = {
   attachment: 'activity.entityAttachment',
   photo: 'activity.entityPhoto',
   calendar: 'activity.entityCalendar',
+  rsvp: 'activity.entityRsvp',
+  subscription: 'activity.entitySubscription',
 };
 
 /** An unrecognised entity still names something, so it renders as itself. */

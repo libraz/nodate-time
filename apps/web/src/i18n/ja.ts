@@ -76,6 +76,8 @@ export const ja = {
   'event.recurrenceMonthlyNth': '毎月 第{n}{day}',
   'event.recurrenceMonthlyDate': '毎月 {date}日',
   'event.recurrenceYearly': '毎年',
+  'event.taskOwnedNote':
+    'この予定はタスクで管理されています。タイトル、日時、繰り返しはタスク側で変更してください。',
   'event.recurrenceCustom': 'カスタム設定',
   'event.recurrenceInterval': '繰り返し間隔',
   'event.recurrenceEndNever': 'なし',
@@ -516,10 +518,12 @@ export const ja = {
   'activity.entityCalendar': 'カレンダー',
   'activity.changed': '変更',
   'activity.entityInvite': '招待',
-  'activity.joined': '参加',
-  'activity.left': '退出',
   'activity.roleChanged': 'ロール変更',
   'activity.revoked': '失効',
+  'activity.completed': '完了',
+  'activity.reminded': 'リマインダー',
+  'activity.entityRsvp': '出欠',
+  'activity.entitySubscription': '購読',
   'activity.published': '公開',
   'activity.loadMore': 'さらに読み込む',
 

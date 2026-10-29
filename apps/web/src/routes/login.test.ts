@@ -14,6 +14,13 @@ describe('oauthErrorMessageKey', () => {
     expect(oauthErrorMessageKey('oauth_email_unsupported')).toBe('auth.oauthEmailUnsupported');
   });
 
+  // These two arrive as API error codes rather than oauth_* slugs; the generic
+  // message would tell a user to try again at something that cannot succeed.
+  it('maps the identity refusals to their own messages', () => {
+    expect(oauthErrorMessageKey('AUTH.MFA_REQUIRED')).toBe('apiError.AUTH.MFA_REQUIRED');
+    expect(oauthErrorMessageKey('AUTH.LINK_REFUSED')).toBe('apiError.AUTH.LINK_REFUSED');
+  });
+
   // The fallback is why an unmapped code is easy to miss: it reads as an
   // ordinary sign-in failure rather than as a missing case, so a reason the
   // server took trouble to distinguish arrives as "try again".

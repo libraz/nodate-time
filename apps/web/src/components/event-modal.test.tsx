@@ -304,7 +304,7 @@ describe('EventModal custom recurrence weekdays', () => {
   }
 
   const weekly = { freq: 'weekly', interval: 2, byDay: ['MO', 'WE'] } as const;
-  const monthlyNth = { freq: 'monthly', interval: 2, bySetPos: 3, byDay: ['TU'] } as const;
+  const monthlyNth = { freq: 'monthly', interval: 2, bySetPos: [3], byDay: ['TU'] } as const;
 
   it('labels the day toggles in the reader’s language', async () => {
     openWith(weekly);
@@ -725,7 +725,7 @@ describe('EventModal monthly weekday position', () => {
       ...event,
       startAt: '2026-07-31T00:00:00Z',
       endAt: '2026-07-31T01:00:00Z',
-      recurrenceRule: { freq: 'monthly', interval: 2, bySetPos: 5, byDay: ['FR'] },
+      recurrenceRule: { freq: 'monthly', interval: 2, bySetPos: [5], byDay: ['FR'] },
     };
     calendarState.events = [fifthFriday];
     mockApi.getWithRevision.mockResolvedValue({ data: fifthFriday, revision: 'rev-1' });
@@ -782,5 +782,126 @@ describe('EventModal recurrence presets across zones', () => {
     await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
     const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
     expect(payload.recurrenceRule).toMatchObject({ freq: 'weekly', byDay: ['MO'] });
+  });
+});
+
+describe('EventModal canonical recurrence rules', () => {
+  async function openAndPick(label: string, evt: CalendarEvent = event) {
+    calendarState.events = [evt];
+    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNone/ }));
+    fireEvent.click(screen.getByRole('option', { name: label }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    return calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+  }
+
+  it('saves a monthly date as a byMonthDay array', async () => {
+    const payload = await openAndPick('event.recurrenceMonthlyDate');
+    expect(payload.recurrenceRule).toEqual({ freq: 'monthly', interval: 1, byMonthDay: [7] });
+  });
+
+  it('saves a weekly preset with the Sunday week start', async () => {
+    const payload = await openAndPick('event.recurrenceWeekly');
+    expect(payload.recurrenceRule).toEqual({
+      freq: 'weekly',
+      interval: 1,
+      byDay: ['FR'],
+      wkst: 'SU',
+    });
+  });
+
+  it('saves the nth weekday with a bySetPos array', async () => {
+    const payload = await openAndPick('event.recurrenceMonthlyNth');
+    expect(payload.recurrenceRule).toEqual({
+      freq: 'monthly',
+      interval: 1,
+      bySetPos: [1],
+      byDay: ['FR'],
+    });
+  });
+
+  it('shows and keeps the day of a stored byMonthDay array', async () => {
+    const stored: CalendarEvent = {
+      ...event,
+      recurrenceRule: { freq: 'monthly', interval: 2, byMonthDay: [15] },
+    };
+    calendarState.events = [stored];
+    mockApi.getWithRevision.mockResolvedValue({ data: stored, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.getByDisplayValue('15')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload.recurrenceRule).toMatchObject({ byMonthDay: [15] });
+  });
+
+  it('keeps the week start a stored weekly rule carries', async () => {
+    const stored: CalendarEvent = {
+      ...event,
+      recurrenceRule: { freq: 'weekly', interval: 2, byDay: ['MO', 'WE'], wkst: 'MO' },
+    };
+    calendarState.events = [stored];
+    mockApi.getWithRevision.mockResolvedValue({ data: stored, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload.recurrenceRule).toMatchObject({ byDay: ['MO', 'WE'], wkst: 'MO' });
+  });
+});
+
+describe('EventModal task-derived event', () => {
+  const taskEvent: CalendarEvent = { ...event, taskOwned: true };
+
+  async function openEvent(evt: CalendarEvent) {
+    calendarState.events = [evt];
+    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+  }
+
+  it('explains why the synced fields cannot be changed here', async () => {
+    await openEvent(taskEvent);
+
+    expect(screen.getByText('event.taskOwnedNote')).toBeInTheDocument();
+  });
+
+  it('locks the title, the dates, the all-day toggle and the recurrence', async () => {
+    await openEvent(taskEvent);
+
+    expect(titleField()).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /event\.recurrenceNone/ })).toBeDisabled();
+    for (const date of screen.getAllByRole('button', { name: '2026年8月7日(金)' })) {
+      expect(date).toBeDisabled();
+    }
+  });
+
+  it('offers no delete, since the event goes with its task', async () => {
+    await openEvent(taskEvent);
+
+    expect(screen.queryByRole('button', { name: 'event.deleteEvent' })).toBeNull();
+  });
+
+  it('still saves the fields that have no task-side counterpart', async () => {
+    await openEvent(taskEvent);
+
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeEnabled();
+  });
+
+  it('leaves an ordinary event fully editable', async () => {
+    await openEvent(event);
+
+    expect(screen.queryByText('event.taskOwnedNote')).toBeNull();
+    expect(titleField()).not.toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'event.deleteEvent' })).toBeInTheDocument();
   });
 });

@@ -27,6 +27,7 @@ import {
   getNthWeekday,
   rebuildPresetRule,
   ruleToPreset,
+  UI_WEEK_START,
   WEEKDAY_CODES,
 } from '@/lib/recurrence-preset';
 import { toast } from '@/lib/toast';
@@ -93,7 +94,7 @@ function weekdayName(dayIndex: number, locale: Locale): string {
 function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): RecurrenceRule | null {
   if (!rule) return null;
   const next: RecurrenceRule = { ...rule };
-  if (next.freq === 'monthly' && next.byDay && !next.bySetPos) {
+  if (next.freq === 'monthly' && next.byDay && !next.bySetPos?.length) {
     next.byDay = undefined;
   }
   if (next.until && next.until.length === 10) {
@@ -985,6 +986,9 @@ export function EventModal() {
   const formCalendarId = form.calendarId || (editingEvent?.calendarId ?? '');
   const myRole = roleOnCalendar(calendars, formCalendarId);
   const editable = editingEvent ? canEditEvent(editingEvent, myRole, me?.id) : canEdit(myRole);
+  // A task projects this event's title, dates and recurrence; the server refuses
+  // changes to them, so the form shows them without offering to edit.
+  const taskOwned = editingEvent?.taskOwned === true;
 
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
@@ -1296,6 +1300,7 @@ export function EventModal() {
           ref={titleRef}
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          readOnly={taskOwned}
           placeholder={t('event.titlePlaceholder')}
           rows={1}
           className="w-full resize-none border-b-2 border-transparent bg-transparent text-display font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
@@ -1393,448 +1398,343 @@ export function EventModal() {
 
       {/* Date & Time card */}
       <div className="px-6">
+        {taskOwned && (
+          <p className="pb-2 text-footnote text-[var(--color-text-tertiary)]">
+            {t('event.taskOwnedNote')}
+          </p>
+        )}
         <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-          <DateTimeField
-            label={t('event.start')}
-            dateValue={DateTime.fromISO(form.startAt, { zone: timezone })}
-            timeValue={form.startAt.split('T')[1]?.slice(0, 5) ?? '09:00'}
-            showTime={!form.allDay}
-            onDateChange={(date) => {
-              setForm((f) => {
-                const moved = shiftStartKeepingDuration(f, date, timezone);
-                return withPresetRule({ ...f, startAt: moved.startAt, endAt: moved.endAt });
-              });
-            }}
-            onTimeChange={(time) => {
-              const datePart = form.startAt.split('T')[0] ?? '';
-              setForm((f) => {
-                const newStart = `${datePart}T${time}`;
-                // If end is now before start on same day, push end forward by 1 hour
-                const startDt = DateTime.fromISO(newStart, { zone: timezone });
-                const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
-                if (endDt <= startDt) {
-                  const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
-                  return withPresetRule({ ...f, startAt: newStart, endAt: newEnd });
-                }
-                return withPresetRule({ ...f, startAt: newStart });
-              });
-            }}
-          />
-          <DateTimeField
-            label={t('event.end')}
-            dateValue={DateTime.fromISO(form.endAt, { zone: timezone })}
-            timeValue={form.endAt.split('T')[1]?.slice(0, 5) ?? '10:00'}
-            showTime={!form.allDay}
-            onDateChange={(date) => {
-              const time = form.endAt.split('T')[1] ?? '10:00';
-              setForm((f) => {
-                const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
-                // If end is before start, clamp to start date
-                const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
-                const endDt = DateTime.fromISO(newEnd, { zone: timezone });
-                if (endDt < startDt) {
-                  const startTime = f.startAt.split('T')[1] ?? '09:00';
-                  return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
-                }
-                return { ...f, endAt: newEnd };
-              });
-            }}
-            onTimeChange={(time) => {
-              const datePart = form.endAt.split('T')[0] ?? '';
-              setForm((f) => {
-                const newEnd = `${datePart}T${time}`;
-                // If end is before start, don't allow it — keep old value
-                const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
-                const endDt = DateTime.fromISO(newEnd, { zone: timezone });
-                if (endDt <= startDt) return f;
-                return { ...f, endAt: newEnd };
-              });
-            }}
-            minDate={DateTime.fromISO(form.startAt, { zone: timezone })}
-          />
-
-          <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-
-          {/* All day toggle */}
-          <div className="flex items-center justify-between py-2.5">
-            <span className="text-default text-[var(--color-text-primary)]">
-              {t('calendar.allDay')}
-            </span>
-            <LabelledButton
-              label={t('calendar.allDay')}
-              pressed={form.allDay}
-              onClick={() => setForm((f) => withPresetRule({ ...f, allDay: !f.allDay }))}
-              className="toggle-track relative h-7 w-12"
-              style={{
-                backgroundColor: form.allDay ? 'var(--color-accent)' : 'var(--color-surface-inset)',
+          <fieldset disabled={taskOwned} className="contents">
+            <DateTimeField
+              label={t('event.start')}
+              dateValue={DateTime.fromISO(form.startAt, { zone: timezone })}
+              timeValue={form.startAt.split('T')[1]?.slice(0, 5) ?? '09:00'}
+              showTime={!form.allDay}
+              onDateChange={(date) => {
+                setForm((f) => {
+                  const moved = shiftStartKeepingDuration(f, date, timezone);
+                  return withPresetRule({ ...f, startAt: moved.startAt, endAt: moved.endAt });
+                });
               }}
-            >
-              <span
-                className="toggle-knob absolute top-0.5 h-6 w-6"
-                style={{ left: form.allDay ? '22px' : '2px' }}
-              />
-            </LabelledButton>
-          </div>
-
-          {/* Recurrence */}
-          <div className="flex items-center justify-between py-2.5">
-            <span className="text-default text-[var(--color-text-primary)]">
-              {t('event.recurrence')}
-            </span>
-            <CustomSelect
-              value={form.recurrencePreset}
-              options={(() => {
-                const startDt = recurrenceStart(form);
-                const dayLabel = weekdayName(jsDayOfWeek(startDt), locale);
-                const nth = getNthWeekday(startDt);
-                return [
-                  { value: 'none', label: t('event.recurrenceNone') },
-                  { value: 'daily', label: t('event.recurrenceDaily') },
-                  { value: 'weekly', label: t('event.recurrenceWeekly', { day: dayLabel }) },
-                  { value: 'weekdays', label: t('event.recurrenceWeekdays') },
-                  {
-                    value: 'monthly_nth',
-                    label: t('event.recurrenceMonthlyNth', { n: nth, day: dayLabel }),
-                  },
-                  {
-                    value: 'monthly_date',
-                    label: t('event.recurrenceMonthlyDate', { date: startDt.day }),
-                  },
-                  { value: 'yearly', label: t('event.recurrenceYearly') },
-                  { value: 'custom', label: t('event.recurrenceCustom') },
-                ];
-              })()}
-              onChange={(val) => {
-                const preset = val as RecurrencePreset;
-                if (preset === 'custom') {
-                  setShowCustomRecurrence(true);
-                  setForm((f) => ({
-                    ...f,
-                    recurrencePreset: 'custom',
-                    recurrenceRule: f.recurrenceRule ?? { freq: 'daily', interval: 1 },
-                  }));
-                  return;
-                }
-                setShowCustomRecurrence(false);
-                const startDt = recurrenceStart(form);
-                setForm((f) => ({
-                  ...f,
-                  recurrencePreset: preset,
-                  recurrenceRule: rebuildPresetRule(preset, startDt, f.recurrenceRule),
-                }));
+              onTimeChange={(time) => {
+                const datePart = form.startAt.split('T')[0] ?? '';
+                setForm((f) => {
+                  const newStart = `${datePart}T${time}`;
+                  // If end is now before start on same day, push end forward by 1 hour
+                  const startDt = DateTime.fromISO(newStart, { zone: timezone });
+                  const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
+                  if (endDt <= startDt) {
+                    const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
+                    return withPresetRule({ ...f, startAt: newStart, endAt: newEnd });
+                  }
+                  return withPresetRule({ ...f, startAt: newStart });
+                });
               }}
             />
-          </div>
+            <DateTimeField
+              label={t('event.end')}
+              dateValue={DateTime.fromISO(form.endAt, { zone: timezone })}
+              timeValue={form.endAt.split('T')[1]?.slice(0, 5) ?? '10:00'}
+              showTime={!form.allDay}
+              onDateChange={(date) => {
+                const time = form.endAt.split('T')[1] ?? '10:00';
+                setForm((f) => {
+                  const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
+                  // If end is before start, clamp to start date
+                  const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
+                  const endDt = DateTime.fromISO(newEnd, { zone: timezone });
+                  if (endDt < startDt) {
+                    const startTime = f.startAt.split('T')[1] ?? '09:00';
+                    return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
+                  }
+                  return { ...f, endAt: newEnd };
+                });
+              }}
+              onTimeChange={(time) => {
+                const datePart = form.endAt.split('T')[0] ?? '';
+                setForm((f) => {
+                  const newEnd = `${datePart}T${time}`;
+                  // If end is before start, don't allow it — keep old value
+                  const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
+                  const endDt = DateTime.fromISO(newEnd, { zone: timezone });
+                  if (endDt <= startDt) return f;
+                  return { ...f, endAt: newEnd };
+                });
+              }}
+              minDate={DateTime.fromISO(form.startAt, { zone: timezone })}
+            />
 
-          {/* Custom recurrence dialog */}
-          {showCustomRecurrence && form.recurrenceRule && (
-            <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
-              <div className="space-y-1.5">
-                <span className="block text-body text-[var(--color-text-secondary)]">
-                  {t('event.recurrenceInterval')}
-                </span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    value={form.recurrenceRule.interval}
-                    onChange={(e) => {
-                      const val = Math.max(1, Math.min(99, Number(e.target.value)));
-                      setForm((f) => ({
-                        ...f,
-                        recurrenceRule: f.recurrenceRule
-                          ? { ...f.recurrenceRule, interval: val }
-                          : null,
-                      }));
-                    }}
-                    style={{ width: '4rem' }}
-                    className="input-modern shrink-0 text-center text-body"
-                  />
-                  <CustomSelect
-                    value={form.recurrenceRule.freq}
-                    options={[
-                      { value: 'daily', label: t('event.unitDay') },
-                      { value: 'weekly', label: t('event.unitWeek') },
-                      { value: 'monthly', label: t('event.unitMonth') },
-                      { value: 'yearly', label: t('event.unitYear') },
-                    ]}
-                    onChange={(val) => {
-                      const freq = val as RecurrenceRule['freq'];
-                      const startDt = recurrenceStart(form);
-                      const dayCode = WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU';
-                      setForm((f) => {
-                        if (!f.recurrenceRule) return f;
-                        // Seed defaults so the rule stays valid for its frequency.
-                        const base = {
-                          ...f.recurrenceRule,
-                          freq,
-                          byDay: undefined as string[] | undefined,
-                          byMonthDay: undefined as number | undefined,
-                          bySetPos: undefined as number | undefined,
-                        };
-                        if (freq === 'weekly') base.byDay = [dayCode];
-                        if (freq === 'monthly') base.byMonthDay = startDt.day;
-                        return { ...f, recurrenceRule: base };
-                      });
-                    }}
-                  />
-                </div>
-              </div>
+            <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
-              {/* Weekly: pick one or more weekdays */}
-              {form.recurrenceRule.freq === 'weekly' && (
+            {/* All day toggle */}
+            <div className="flex items-center justify-between py-2.5">
+              <span className="text-default text-[var(--color-text-primary)]">
+                {t('calendar.allDay')}
+              </span>
+              <LabelledButton
+                label={t('calendar.allDay')}
+                pressed={form.allDay}
+                onClick={() => setForm((f) => withPresetRule({ ...f, allDay: !f.allDay }))}
+                className="toggle-track relative h-7 w-12"
+                style={{
+                  backgroundColor: form.allDay
+                    ? 'var(--color-accent)'
+                    : 'var(--color-surface-inset)',
+                }}
+              >
+                <span
+                  className="toggle-knob absolute top-0.5 h-6 w-6"
+                  style={{ left: form.allDay ? '22px' : '2px' }}
+                />
+              </LabelledButton>
+            </div>
+
+            {/* Recurrence */}
+            <div className="flex items-center justify-between py-2.5">
+              <span className="text-default text-[var(--color-text-primary)]">
+                {t('event.recurrence')}
+              </span>
+              <CustomSelect
+                value={form.recurrencePreset}
+                options={(() => {
+                  const startDt = recurrenceStart(form);
+                  const dayLabel = weekdayName(jsDayOfWeek(startDt), locale);
+                  const nth = getNthWeekday(startDt);
+                  return [
+                    { value: 'none', label: t('event.recurrenceNone') },
+                    { value: 'daily', label: t('event.recurrenceDaily') },
+                    { value: 'weekly', label: t('event.recurrenceWeekly', { day: dayLabel }) },
+                    { value: 'weekdays', label: t('event.recurrenceWeekdays') },
+                    {
+                      value: 'monthly_nth',
+                      label: t('event.recurrenceMonthlyNth', { n: nth, day: dayLabel }),
+                    },
+                    {
+                      value: 'monthly_date',
+                      label: t('event.recurrenceMonthlyDate', { date: startDt.day }),
+                    },
+                    { value: 'yearly', label: t('event.recurrenceYearly') },
+                    { value: 'custom', label: t('event.recurrenceCustom') },
+                  ];
+                })()}
+                onChange={(val) => {
+                  const preset = val as RecurrencePreset;
+                  if (preset === 'custom') {
+                    setShowCustomRecurrence(true);
+                    setForm((f) => ({
+                      ...f,
+                      recurrencePreset: 'custom',
+                      recurrenceRule: f.recurrenceRule ?? { freq: 'daily', interval: 1 },
+                    }));
+                    return;
+                  }
+                  setShowCustomRecurrence(false);
+                  const startDt = recurrenceStart(form);
+                  setForm((f) => ({
+                    ...f,
+                    recurrencePreset: preset,
+                    recurrenceRule: rebuildPresetRule(preset, startDt, f.recurrenceRule),
+                  }));
+                }}
+              />
+            </div>
+
+            {/* Custom recurrence dialog */}
+            {showCustomRecurrence && form.recurrenceRule && (
+              <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
                 <div className="space-y-1.5">
                   <span className="block text-body text-[var(--color-text-secondary)]">
-                    {t('event.recurrenceWeekdaysLabel')}
+                    {t('event.recurrenceInterval')}
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {WEEKDAY_CODES.map((code, idx) => {
-                      const selected = form.recurrenceRule?.byDay?.includes(code) ?? false;
-                      return (
-                        <button
-                          key={code}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() =>
-                            setForm((f) => {
-                              if (!f.recurrenceRule) return f;
-                              const cur = f.recurrenceRule.byDay ?? [];
-                              const next = cur.includes(code)
-                                ? cur.filter((d) => d !== code)
-                                : [...cur, code];
-                              // Keep at least one weekday selected.
-                              return {
-                                ...f,
-                                recurrenceRule: {
-                                  ...f.recurrenceRule,
-                                  byDay: next.length > 0 ? next : cur,
-                                },
-                              };
-                            })
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold transition-colors"
-                          style={{
-                            backgroundColor: selected
-                              ? 'var(--color-accent)'
-                              : 'var(--color-surface-secondary)',
-                            color: selected ? '#fff' : 'var(--color-text-secondary)',
-                          }}
-                        >
-                          {getWeekdayLabel(idx, locale)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Monthly: by day-of-month or by nth weekday */}
-              {form.recurrenceRule.freq === 'monthly' && (
-                <div className="space-y-1.5">
-                  <span className="block text-body text-[var(--color-text-secondary)]">
-                    {t('event.recurrenceMonthlyMode')}
-                  </span>
-                  <CustomSelect
-                    value={form.recurrenceRule.bySetPos ? 'weekday' : 'date'}
-                    options={[
-                      { value: 'date', label: t('event.recurrenceMonthlyByDate') },
-                      { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
-                    ]}
-                    onChange={(mode) => {
-                      const startDt = recurrenceStart(form);
-                      setForm((f) => {
-                        if (!f.recurrenceRule) return f;
-                        if (mode === 'weekday') {
-                          return {
-                            ...f,
-                            recurrenceRule: {
-                              ...f.recurrenceRule,
-                              bySetPos: getNthWeekday(startDt),
-                              byDay: [WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU'],
-                              byMonthDay: undefined,
-                            },
-                          };
-                        }
-                        return {
-                          ...f,
-                          recurrenceRule: {
-                            ...f.recurrenceRule,
-                            byMonthDay: startDt.day,
-                            bySetPos: undefined,
-                            byDay: undefined,
-                          },
-                        };
-                      });
-                    }}
-                  />
-                  {form.recurrenceRule.bySetPos ? (
-                    <div className="flex items-center gap-2">
-                      <CustomSelect
-                        value={String(form.recurrenceRule.bySetPos)}
-                        options={[
-                          { value: '1', label: t('event.recurrenceNthFirst') },
-                          { value: '2', label: t('event.recurrenceNthSecond') },
-                          { value: '3', label: t('event.recurrenceNthThird') },
-                          { value: '4', label: t('event.recurrenceNthFourth') },
-                          // The fifth is what a start on the 29th-31st makes; the server
-                          // counts 1-5 from the start of the month and has no "last".
-                          { value: '5', label: t('event.recurrenceNthFifth') },
-                        ]}
-                        onChange={(pos) =>
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, bySetPos: Number(pos) }
-                              : null,
-                          }))
-                        }
-                      />
-                      <CustomSelect
-                        value={form.recurrenceRule.byDay?.[0] ?? 'SU'}
-                        options={WEEKDAY_CODES.map((code, idx) => ({
-                          value: code,
-                          label: weekdayName(idx, locale) || code,
-                        }))}
-                        onChange={(day) =>
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, byDay: [day] }
-                              : null,
-                          }))
-                        }
-                      />
-                    </div>
-                  ) : (
+                  <div className="flex items-center gap-2">
                     <input
                       type="number"
                       min={1}
-                      max={31}
-                      value={form.recurrenceRule.byMonthDay ?? recurrenceStart(form).day}
+                      max={99}
+                      value={form.recurrenceRule.interval}
                       onChange={(e) => {
-                        const val = Math.max(1, Math.min(31, Number(e.target.value)));
+                        const val = Math.max(1, Math.min(99, Number(e.target.value)));
                         setForm((f) => ({
                           ...f,
                           recurrenceRule: f.recurrenceRule
-                            ? { ...f.recurrenceRule, byMonthDay: val }
+                            ? { ...f.recurrenceRule, interval: val }
                             : null,
                         }));
                       }}
                       style={{ width: '4rem' }}
                       className="input-modern shrink-0 text-center text-body"
                     />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Any repeating rule may carry an end, whichever preset it reads as,
-              so the end condition is never tucked behind the custom editor. */}
-          {form.recurrenceRule && (
-            <div className="card-section mt-2 bg-[var(--color-surface-inset)] p-4">
-              <div className="space-y-1.5">
-                <span className="text-body text-[var(--color-text-secondary)]">
-                  {t('event.recurrenceEndLabel')}
-                </span>
-                <div className="flex flex-col gap-1.5">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="recEnd"
-                      checked={!form.recurrenceRule.until && !form.recurrenceRule.count}
-                      onChange={() =>
-                        setForm((f) => ({
-                          ...f,
-                          recurrenceRule: f.recurrenceRule
-                            ? { ...f.recurrenceRule, until: undefined, count: undefined }
-                            : null,
-                        }))
-                      }
-                      className="accent-[var(--color-accent)]"
-                    />
-                    <span className="text-body text-[var(--color-text-primary)]">
-                      {t('event.recurrenceEndNever')}
-                    </span>
-                  </label>
-                  <label className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="radio"
-                      name="recEnd"
-                      checked={!!form.recurrenceRule.until}
-                      onChange={() => {
-                        const defaultEnd = recurrenceStart(form)
-                          .plus({ months: 1 })
-                          .toFormat('yyyy-MM-dd');
-                        setForm((f) => ({
-                          ...f,
-                          recurrenceRule: f.recurrenceRule
-                            ? { ...f.recurrenceRule, until: defaultEnd, count: undefined }
-                            : null,
-                        }));
+                    <CustomSelect
+                      value={form.recurrenceRule.freq}
+                      options={[
+                        { value: 'daily', label: t('event.unitDay') },
+                        { value: 'weekly', label: t('event.unitWeek') },
+                        { value: 'monthly', label: t('event.unitMonth') },
+                        { value: 'yearly', label: t('event.unitYear') },
+                      ]}
+                      onChange={(val) => {
+                        const freq = val as RecurrenceRule['freq'];
+                        const startDt = recurrenceStart(form);
+                        const dayCode = WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU';
+                        setForm((f) => {
+                          if (!f.recurrenceRule) return f;
+                          // Seed defaults so the rule stays valid for its frequency.
+                          const base = {
+                            ...f.recurrenceRule,
+                            freq,
+                            byDay: undefined as string[] | undefined,
+                            byMonthDay: undefined as number[] | undefined,
+                            bySetPos: undefined as number[] | undefined,
+                            wkst: undefined as RecurrenceRule['wkst'],
+                          };
+                          if (freq === 'weekly') {
+                            base.byDay = [dayCode];
+                            base.wkst = UI_WEEK_START;
+                          }
+                          if (freq === 'monthly') base.byMonthDay = [startDt.day];
+                          return { ...f, recurrenceRule: base };
+                        });
                       }}
-                      className="accent-[var(--color-accent)]"
                     />
-                    <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
-                      {t('event.recurrenceEndDate')}:
+                  </div>
+                </div>
+
+                {/* Weekly: pick one or more weekdays */}
+                {form.recurrenceRule.freq === 'weekly' && (
+                  <div className="space-y-1.5">
+                    <span className="block text-body text-[var(--color-text-secondary)]">
+                      {t('event.recurrenceWeekdaysLabel')}
                     </span>
-                    {form.recurrenceRule.until && (
-                      <DateTimeField
-                        label=""
-                        dateValue={recurrenceUntilDateValue(form.recurrenceRule.until, anchorZone)}
-                        timeValue="00:00"
-                        showTime={false}
-                        onDateChange={(date) =>
-                          setForm((f) => {
-                            const clamped = clampRecurrenceUntilDate(
-                              date,
-                              recurrenceStart(f).toISO() ?? f.startAt,
-                              anchorZone,
-                            );
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEEKDAY_CODES.map((code, idx) => {
+                        const selected = form.recurrenceRule?.byDay?.includes(code) ?? false;
+                        return (
+                          <button
+                            key={code}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() =>
+                              setForm((f) => {
+                                if (!f.recurrenceRule) return f;
+                                const cur = f.recurrenceRule.byDay ?? [];
+                                const next = cur.includes(code)
+                                  ? cur.filter((d) => d !== code)
+                                  : [...cur, code];
+                                // Keep at least one weekday selected.
+                                return {
+                                  ...f,
+                                  recurrenceRule: {
+                                    ...f.recurrenceRule,
+                                    byDay: next.length > 0 ? next : cur,
+                                  },
+                                };
+                              })
+                            }
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold transition-colors"
+                            style={{
+                              backgroundColor: selected
+                                ? 'var(--color-accent)'
+                                : 'var(--color-surface-secondary)',
+                              color: selected ? '#fff' : 'var(--color-text-secondary)',
+                            }}
+                          >
+                            {getWeekdayLabel(idx, locale)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Monthly: by day-of-month or by nth weekday */}
+                {form.recurrenceRule.freq === 'monthly' && (
+                  <div className="space-y-1.5">
+                    <span className="block text-body text-[var(--color-text-secondary)]">
+                      {t('event.recurrenceMonthlyMode')}
+                    </span>
+                    <CustomSelect
+                      value={form.recurrenceRule.bySetPos?.length ? 'weekday' : 'date'}
+                      options={[
+                        { value: 'date', label: t('event.recurrenceMonthlyByDate') },
+                        { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
+                      ]}
+                      onChange={(mode) => {
+                        const startDt = recurrenceStart(form);
+                        setForm((f) => {
+                          if (!f.recurrenceRule) return f;
+                          if (mode === 'weekday') {
                             return {
                               ...f,
-                              recurrenceRule: f.recurrenceRule
-                                ? { ...f.recurrenceRule, until: clamped.toFormat('yyyy-MM-dd') }
-                                : null,
+                              recurrenceRule: {
+                                ...f.recurrenceRule,
+                                bySetPos: [getNthWeekday(startDt)],
+                                byDay: [WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU'],
+                                byMonthDay: undefined,
+                              },
                             };
-                          })
-                        }
-                        onTimeChange={() => {}}
-                        minDate={recurrenceStart(form).startOf('day')}
-                      />
-                    )}
-                  </label>
-                  <label className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="radio"
-                      name="recEnd"
-                      checked={!!form.recurrenceRule.count}
-                      onChange={() =>
-                        setForm((f) => ({
-                          ...f,
-                          recurrenceRule: f.recurrenceRule
-                            ? { ...f.recurrenceRule, count: 10, until: undefined }
-                            : null,
-                        }))
-                      }
-                      className="accent-[var(--color-accent)]"
+                          }
+                          return {
+                            ...f,
+                            recurrenceRule: {
+                              ...f.recurrenceRule,
+                              byMonthDay: [startDt.day],
+                              bySetPos: undefined,
+                              byDay: undefined,
+                            },
+                          };
+                        });
+                      }}
                     />
-                    <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
-                      {t('event.recurrenceEndCount')}:
-                    </span>
-                    {form.recurrenceRule.count && (
+                    {form.recurrenceRule.bySetPos?.length ? (
+                      <div className="flex items-center gap-2">
+                        <CustomSelect
+                          value={String(form.recurrenceRule.bySetPos[0])}
+                          options={[
+                            { value: '1', label: t('event.recurrenceNthFirst') },
+                            { value: '2', label: t('event.recurrenceNthSecond') },
+                            { value: '3', label: t('event.recurrenceNthThird') },
+                            { value: '4', label: t('event.recurrenceNthFourth') },
+                            // The fifth is what a start on the 29th-31st makes; the server
+                            // counts 1-5 from the start of the month and has no "last".
+                            { value: '5', label: t('event.recurrenceNthFifth') },
+                          ]}
+                          onChange={(pos) =>
+                            setForm((f) => ({
+                              ...f,
+                              recurrenceRule: f.recurrenceRule
+                                ? { ...f.recurrenceRule, bySetPos: [Number(pos)] }
+                                : null,
+                            }))
+                          }
+                        />
+                        <CustomSelect
+                          value={form.recurrenceRule.byDay?.[0] ?? 'SU'}
+                          options={WEEKDAY_CODES.map((code, idx) => ({
+                            value: code,
+                            label: weekdayName(idx, locale) || code,
+                          }))}
+                          onChange={(day) =>
+                            setForm((f) => ({
+                              ...f,
+                              recurrenceRule: f.recurrenceRule
+                                ? { ...f.recurrenceRule, byDay: [day] }
+                                : null,
+                            }))
+                          }
+                        />
+                      </div>
+                    ) : (
                       <input
                         type="number"
                         min={1}
-                        max={365}
-                        value={form.recurrenceRule.count}
+                        max={31}
+                        value={form.recurrenceRule.byMonthDay?.[0] ?? recurrenceStart(form).day}
                         onChange={(e) => {
-                          const val = Math.max(1, Math.min(365, Number(e.target.value)));
+                          const val = Math.max(1, Math.min(31, Number(e.target.value)));
                           setForm((f) => ({
                             ...f,
                             recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, count: val }
+                              ? { ...f.recurrenceRule, byMonthDay: [val] }
                               : null,
                           }));
                         }}
@@ -1842,18 +1742,139 @@ export function EventModal() {
                         className="input-modern shrink-0 text-center text-body"
                       />
                     )}
-                  </label>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Any repeating rule may carry an end, whichever preset it reads as,
+              so the end condition is never tucked behind the custom editor. */}
+            {form.recurrenceRule && (
+              <div className="card-section mt-2 bg-[var(--color-surface-inset)] p-4">
+                <div className="space-y-1.5">
+                  <span className="text-body text-[var(--color-text-secondary)]">
+                    {t('event.recurrenceEndLabel')}
+                  </span>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="recEnd"
+                        checked={!form.recurrenceRule.until && !form.recurrenceRule.count}
+                        onChange={() =>
+                          setForm((f) => ({
+                            ...f,
+                            recurrenceRule: f.recurrenceRule
+                              ? { ...f.recurrenceRule, until: undefined, count: undefined }
+                              : null,
+                          }))
+                        }
+                        className="accent-[var(--color-accent)]"
+                      />
+                      <span className="text-body text-[var(--color-text-primary)]">
+                        {t('event.recurrenceEndNever')}
+                      </span>
+                    </label>
+                    <label className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="radio"
+                        name="recEnd"
+                        checked={!!form.recurrenceRule.until}
+                        onChange={() => {
+                          const defaultEnd = recurrenceStart(form)
+                            .plus({ months: 1 })
+                            .toFormat('yyyy-MM-dd');
+                          setForm((f) => ({
+                            ...f,
+                            recurrenceRule: f.recurrenceRule
+                              ? { ...f.recurrenceRule, until: defaultEnd, count: undefined }
+                              : null,
+                          }));
+                        }}
+                        className="accent-[var(--color-accent)]"
+                      />
+                      <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
+                        {t('event.recurrenceEndDate')}:
+                      </span>
+                      {form.recurrenceRule.until && (
+                        <DateTimeField
+                          label=""
+                          dateValue={recurrenceUntilDateValue(
+                            form.recurrenceRule.until,
+                            anchorZone,
+                          )}
+                          timeValue="00:00"
+                          showTime={false}
+                          onDateChange={(date) =>
+                            setForm((f) => {
+                              const clamped = clampRecurrenceUntilDate(
+                                date,
+                                recurrenceStart(f).toISO() ?? f.startAt,
+                                anchorZone,
+                              );
+                              return {
+                                ...f,
+                                recurrenceRule: f.recurrenceRule
+                                  ? { ...f.recurrenceRule, until: clamped.toFormat('yyyy-MM-dd') }
+                                  : null,
+                              };
+                            })
+                          }
+                          onTimeChange={() => {}}
+                          minDate={recurrenceStart(form).startOf('day')}
+                        />
+                      )}
+                    </label>
+                    <label className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="radio"
+                        name="recEnd"
+                        checked={!!form.recurrenceRule.count}
+                        onChange={() =>
+                          setForm((f) => ({
+                            ...f,
+                            recurrenceRule: f.recurrenceRule
+                              ? { ...f.recurrenceRule, count: 10, until: undefined }
+                              : null,
+                          }))
+                        }
+                        className="accent-[var(--color-accent)]"
+                      />
+                      <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
+                        {t('event.recurrenceEndCount')}:
+                      </span>
+                      {form.recurrenceRule.count && (
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={form.recurrenceRule.count}
+                          onChange={(e) => {
+                            const val = Math.max(1, Math.min(365, Number(e.target.value)));
+                            setForm((f) => ({
+                              ...f,
+                              recurrenceRule: f.recurrenceRule
+                                ? { ...f.recurrenceRule, count: val }
+                                : null,
+                            }));
+                          }}
+                          style={{ width: '4rem' }}
+                          className="input-modern shrink-0 text-center text-body"
+                        />
+                      )}
+                    </label>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Recurrence label for editing recurring events */}
-          {editingEvent?.isRecurrence && form.recurrenceRule && (
-            <p className="mt-1 text-footnote text-[var(--color-text-tertiary)]">
-              {recurrenceLabel(form.recurrenceRule, recurrenceStart(form), t, locale)}
-            </p>
-          )}
+            {/* Recurrence label for editing recurring events */}
+            {editingEvent?.isRecurrence && form.recurrenceRule && (
+              <p className="mt-1 text-footnote text-[var(--color-text-tertiary)]">
+                {recurrenceLabel(form.recurrenceRule, recurrenceStart(form), t, locale)}
+              </p>
+            )}
+          </fieldset>
         </div>
       </div>
 
@@ -2217,8 +2238,8 @@ export function EventModal() {
         </div>
       )}
 
-      {/* Delete (edit mode, editors only) */}
-      {editingEvent && editable && (
+      {/* Delete (edit mode, editors only; a task's event goes with the task) */}
+      {editingEvent && editable && !taskOwned && (
         <div className="px-6 pt-4">
           <button
             type="button"
