@@ -14,15 +14,22 @@ vi.mock('@/lib/api', () => ({
 }));
 
 const toastError = vi.hoisted(() => vi.fn());
-vi.mock('@/lib/toast', () => ({ toast: { error: toastError } }));
+const toastInfo = vi.hoisted(() => vi.fn());
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/toast', () => ({
+  toast: { error: toastError, info: toastInfo, success: toastSuccess },
+}));
 
 const store = vi.hoisted(() => ({
   updateEvent: vi.fn(),
   fetchEvents: vi.fn(),
   visibleRange: () => ({ start: '2026-08-01', end: '2026-08-31' }),
+  events: [] as CalendarEvent[],
 }));
 vi.mock('@/stores/calendar-store', () => ({
-  useCalendarStore: (selector: (s: typeof store) => unknown) => selector(store),
+  useCalendarStore: Object.assign((selector: (s: typeof store) => unknown) => selector(store), {
+    getState: () => store,
+  }),
 }));
 
 import { useScopedUpdate } from './use-scoped-update';
@@ -59,6 +66,9 @@ beforeEach(() => {
   store.updateEvent.mockReset().mockResolvedValue(undefined);
   store.fetchEvents.mockReset();
   toastError.mockReset();
+  toastInfo.mockReset();
+  toastSuccess.mockReset();
+  store.events = [];
   getWithRevision.mockReset().mockResolvedValue({ data: { updatedAt: UPDATED }, revision: '"r1"' });
 });
 
@@ -96,6 +106,39 @@ describe('a drag or resize commit', () => {
   });
 });
 
+describe('undoing a drag', () => {
+  it('puts the event back as it was, checked against the moved copy', async () => {
+    const original = makeEvent();
+    const MOVED = '2026-08-01T01:00:00.000Z';
+    render(<Host />);
+    act(() => request(original, payload));
+    await waitFor(() => expect(toastInfo).toHaveBeenCalled());
+
+    store.events = [makeEvent({ startAt: 'a', endAt: 'b', updatedAt: MOVED })];
+    getWithRevision.mockResolvedValue({ data: { updatedAt: MOVED }, revision: '"r2"' });
+    const [, action] = toastInfo.mock.calls[0] ?? [];
+    act(() => action.run());
+
+    await waitFor(() => expect(store.updateEvent).toHaveBeenCalledTimes(2));
+    const [, , restored, scope, revision] = store.updateEvent.mock.calls[1] ?? [];
+    expect(restored).toMatchObject({ startAt: original.startAt, endAt: original.endAt });
+    expect(scope).toBeUndefined();
+    expect(revision).toBe('"r2"');
+    // The undo itself is not undoable: one offer, not an endless chain.
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('event.changeUndone'));
+    expect(toastInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered for a write that failed', async () => {
+    store.updateEvent.mockRejectedValue({ status: 500 });
+    render(<Host />);
+    act(() => request(makeEvent(), payload));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+});
+
 describe('a drag of a recurring occurrence', () => {
   const mondayWeekly = makeEvent({
     id: 'evt-1_20260803',
@@ -114,6 +157,8 @@ describe('a drag of a recurring occurrence', () => {
     const [, , sent, scope] = store.updateEvent.mock.calls[0] ?? [];
     expect(scope).toBe('all');
     expect(sent.recurrenceRule).toMatchObject({ freq: 'weekly', byDay: ['TU'] });
+    // A series edit rewrites more than the copy an undo could restore.
+    expect(toastInfo).not.toHaveBeenCalled();
   });
 
   it('leaves the rule alone when only this occurrence moves', async () => {

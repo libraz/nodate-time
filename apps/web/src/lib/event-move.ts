@@ -89,6 +89,11 @@ export function buildResizedEvent(evt: CalendarEvent, newEnd: DateTime): EventIn
   };
 }
 
+/** The update that puts an event back exactly as this copy of it reads. */
+export function restoreInput(evt: CalendarEvent): EventInput {
+  return { ...buildResizedEvent(evt, DateTime.fromISO(evt.endAt)), endAt: evt.endAt };
+}
+
 /**
  * The id of the series an event belongs to. An expanded occurrence carries
  * `{seriesId}_{date}`; anything stored against the event -- history, a photo
