@@ -20,7 +20,7 @@ import (
 // neither reach nor slow any other test's backfill.
 func TestBackfillGetsPastUnreadablePhotosAheadOfAReadableOne(t *testing.T) {
 	if os.Getenv("TC_TEST_INTEGRATION") == "" || !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_INTEGRATION=1 and TC_TEST_MINIO=1 to run")
+		t.Skip("set TC_TEST_INTEGRATION=1 and TC_TEST_STORAGE=1 to run")
 	}
 	ctx := context.Background()
 	db := helpers.OpenTestDB(t)

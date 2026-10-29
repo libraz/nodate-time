@@ -41,7 +41,7 @@
 | --- | --- |
 | API | Go 1.26 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
 | DB | MySQL 8.4（Docker Compose） |
-| オブジェクトストレージ | S3 互換（ローカルは MinIO） |
+| オブジェクトストレージ | S3 互換（ローカルは Versity S3 Gateway） |
 | Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
 | Lint / Format | Biome（Web）/ gofmt（Go） |
 | パッケージマネージャ | Bun |
@@ -78,8 +78,8 @@ sql/
   queries/             sqlc クエリ定義
   schema.sql           build-schema.sh で生成される結合スキーマ
   sqlc.yaml            sqlc 設定
-compose.yml            MySQL + MinIO のローカルスタック
-compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + Web）
+compose.yml            MySQL + オブジェクトストレージのローカルスタック
+compose.prod.yml       自己ホスト用スタック（MySQL + オブジェクトストレージ + API + Web）
 ```
 
 ## セットアップ
@@ -88,7 +88,7 @@ compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + We
 
 - [Bun](https://bun.sh) 1.4 以上（それより古い版は lockfile の形式を読めない）
 - Go 1.26+
-- Docker（MySQL / MinIO 用）
+- Docker（MySQL / オブジェクトストレージ用）
 - [sqlc](https://sqlc.dev)（コード生成する場合）
 
 ### 起動
@@ -96,7 +96,7 @@ compose.prod.yml       自己ホスト用スタック（MySQL + MinIO + API + We
 ```bash
 bun install            # 依存インストール（Bun 必須）
 make db-up             # MySQL 起動（compose.yml）
-make minio-up          # MinIO 起動（添付・アルバム・アバターに必要）
+make storage-up        # オブジェクトストレージ起動（添付・アルバム・アバターに必要）
 make db-apply          # スキーマ生成・適用
 make db-seed-users     # demo@example.com / admin@example.com を作成
 make dev               # DB + API + Web を一括起動
@@ -105,7 +105,7 @@ make dev               # DB + API + Web を一括起動
 - API: <http://localhost:8080>（`/health`, OpenAPI は Huma が生成）
 - Web: <http://localhost:5173>
 
-`make dev` が起動するのは MySQL だけなので、`make minio-up` をしないと添付・アルバム・アバターのエンドポイントは 503 を返す。
+`make dev` が起動するのは MySQL だけなので、`make storage-up` をしないと添付・アルバム・アバターのエンドポイントは 503 を返す。
 
 開発環境（`TC_ENV=development`）では `/auth/dev-login` でシードユーザーにパスワードレスログインできる。
 
@@ -116,7 +116,7 @@ make dev               # DB + API + Web を並列起動
 make db-up / db-down   # MySQL の起動 / 停止
 make db-apply          # スキーマ適用（build-schema.sh → schema.sql）
 make db-seed           # スキーマ適用 + ユーザー + サンプルデータ
-make minio-up          # MinIO（S3 互換ストレージ）起動
+make storage-up        # オブジェクトストレージ（S3 互換）起動
 make sqlc              # sqlc コード生成
 make api / make web    # 個別起動
 make build-api         # API バイナリビルド（bin/api）
@@ -125,7 +125,7 @@ make format            # gofmt + Biome 自動修正
 make lint              # gofmt チェック + Biome（書き込みなし）
 make test-api          # Go ユニットテスト
 make test-e2e          # E2E（要 MySQL + TC_TEST_INTEGRATION=1）
-make test-e2e-storage  # MinIO を使うストレージ系も含めた E2E
+make test-e2e-storage  # オブジェクトストレージを使うテストも含めた E2E
 
 bun run check          # Biome チェック
 bun run typecheck      # TypeScript 型チェック（tsc -b）
@@ -151,8 +151,8 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_AUTH_RATE_LIMIT` | サインイン・登録・パスワード再設定・OAuth の IP あたり req/min | `60` |
 | `TC_SHARE_RATE_LIMIT` | 公開共有リンクの IP あたり req/min（サインインとは別枠） | `600` |
 | `TC_WEB_URL` / `TC_API_PUBLIC_URL` | フロント / API の公開 URL。`TC_API_PUBLIC_URL` は blob URL が指し戻す先でもあるため、API を置いたパスまで含める必要がある | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない。`minioadmin` の認証情報は `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` がない限り拒否される | MinIO デフォルト |
-| `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | 公開済みの MinIO 認証情報を許可する（ローカルのオブジェクトストア用） | `false`（`make dev` は `true`） |
+| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない。`minioadmin` の認証情報は `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` がない限り拒否される | ローカルストレージの既定値 |
+| `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | 広く知られた `minioadmin` 認証情報を許可する（ローカルのオブジェクトストア用） | `false`（`make dev` は `true`） |
 | `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信。ホスト未設定だと `TC_ALLOW_CONSOLE_MAILER` がない限り API は起動を拒否する | 未設定 |
 | `TC_ALLOW_CONSOLE_MAILER` | SMTP リレーなしで動かす。メールは配送されずログに書かれる。開発環境以外ではログに残るのは件名だけで、宛先も本文も出ない | `false`（`make dev` は `true`） |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | 空 |
@@ -162,9 +162,9 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_METRICS_ADDR` | 管理用リスナーの待ち受けアドレス。空で無効化 | `127.0.0.1:9464` |
 | `TC_METRICS_ALLOWED_CIDRS` | 管理用リスナーに到達できるネットワーク。直接の TCP ピアと照合する。空はすべて拒否 | loopback + プライベート帯 |
 
-> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・デフォルトの MinIO 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、MinIO 認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV=development` が足すのは `/auth/dev-login` と、コンソールメーラーがメール全文（宛先も本文も）をログに書くことだけ。
+> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・既定の `minioadmin` 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、ストレージの認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV=development` が足すのは `/auth/dev-login` と、コンソールメーラーがメール全文（宛先も本文も）をログに書くことだけ。
 
-DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_MINIO_API_PORT`, `TC_MINIO_CONSOLE_PORT`。
+DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_S3_PORT`（既定 9000、ループバックのみ）。
 
 ## API 概要
 
@@ -266,7 +266,7 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 
 スキーマは MySQL のボリュームを最初に作ったときに適用される。`sql/schema.sql` は全テーブルを DROP してから作り直すので、データの入った DB には流し直さない。スキーマの変更を既存の DB に当てる方法は「[既存環境の更新](#既存環境の更新)」を参照。
 
-永続データは `mysql_data` と `minio_data` の 2 つのボリュームに入っている。バックアップは必ず両方を揃えて取る——添付ファイルは片方の行がもう片方のオブジェクトを指す形で成立している。
+永続データは `mysql_data` と `storage_data` の 2 つのボリュームに入っている。バックアップは必ず両方を揃えて取る——添付ファイルは片方の行がもう片方のオブジェクトを指す形で成立している。オブジェクトは普通のファイルで、content type と ETag は拡張属性に入っている。ファイル単位でコピーするなら拡張属性も残すこと（GNU `tar --xattrs --xattrs-include='user.*'`。busybox の tar は落とす）。
 
 ### 既存環境の更新
 
@@ -288,14 +288,41 @@ v0.1.0 から上げる場合は、配備の形も変わっている。
 - 証明書を発行するホスト名 `TC_PUBLIC_HOST` が必須になった。
 - Compose は `TC_SMTP_HOST` を必須にしなくなった。ただし API は、`TC_ALLOW_CONSOLE_MAILER=true` が無い限り、これが無いと起動しない。
 - `TC_TRUSTED_PROXIES` の既定値が、Docker が compose のネットワークに割り当てる範囲 `172.16.0.0/12` になった。
+- オブジェクトストレージが MinIO（`minio` サービス、`minio_data` ボリューム）から Versity S3 Gateway（`storage` サービス、`storage_data` ボリューム）に変わった。保存形式が違うのでボリュームは流用できず、S3 経由でオブジェクトを移す。手順は「[MinIO からの移行](#minio-からの移行)」を参照。
 
 ### オブジェクトストレージ
 
-同梱のストレージは単一ノード・単一ドライブで動く。erasure coding もバージョニングもレプリケーションもない。耐久性は下のボリュームと上記のバックアップに依存する——データベースと同じ足場の上にある。
+同梱のストレージは、普通のディレクトリの上で動く Versity S3 Gateway である。単一ノードで、erasure coding もバージョニングもレプリケーションもない。耐久性は下のボリュームと上記のバックアップに依存する——データベースと同じ足場の上にある。プライベートネットワークにしか応答しない。`TC_S3_*` を任意の S3 互換エンドポイントに向ければ差し替えられ、設定より上は何も変わらない——どちらにせよストレージに触るのは API で、ブラウザではない。
 
-上流のリポジトリは 2026 年 4 月にアーカイブされた。`compose.prod.yml` が固定しているのは最後に公開されたイメージ `RELEASE.2025-09-07T16-13-09Z` である。最後の**ソース**リリースはその 1 か月後だが、対応するイメージはついに公開されなかったので、そちらのタグを指定するとスタックが起動しない。
+#### MinIO からの移行
 
-メンテナンスの止まったストレージを使い続けるのは見落としではなく判断による。プライベートネットワークにしか応答しないので、もう修正されないコードは認証を持たない呼び出し元が到達できるコードではない。加えて、イメージ化されなかった最終リリースの修正はサービスアカウントと STS に関するもので、このデプロイはどちらも使っていない。この釣り合いが受け入れられないなら、`TC_S3_*` を任意の S3 互換エンドポイントに向ければよく、設定より上は何も変わらない——どちらにせよストレージに触るのは API で、ブラウザではない。
+切り替え前のデプロイは、オブジェクトを MinIO 独自の形式で `minio_data` に持っているので、S3 経由でコピーする。新しい compose ファイルに `minio` サービスはもう無いが、旧コンテナは動き続けるので、その中の `mc` を使う。上記のとおり API を止めて `sql/upgrades/from-v0.1.0.sql` を当て、再ビルドはオブジェクトを移し終えるまで待つ。
+
+```sh
+B=nodate-time   # TC_S3_BUCKET
+docker compose -f compose.prod.yml up -d --wait storage
+OLD=$(docker ps -q --filter label=com.docker.compose.service=minio)
+docker exec -e B="$B" "$OLD" sh -c '
+  mc alias set old http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+  mc alias set new http://storage:7070 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+  mc mb --ignore-existing "new/$B" &&
+  mc mirror --preserve "old/$B" "new/$B"'
+echo "SELECT storage_key, content_type FROM storage_objects WHERE storage_key LIKE 'albums/%.thumb'" |
+  docker compose -f compose.prod.yml exec -T mysql \
+    sh -c 'exec mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' |
+  while read -r key type; do
+    docker exec -e B="$B" -e P="${key%.thumb}" -e T="$type" "$OLD" sh -c '
+      mc cat "old/$B/$P/thumb" > /tmp/thumb &&
+      curl -sf --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" \
+        -H "Content-Type: $T" -T /tmp/thumb "http://storage:7070/$B/$P.thumb"' </dev/null ||
+      echo "not copied: $key"
+  done
+docker compose -f compose.prod.yml up -d --build --remove-orphans
+```
+
+サムネイルには 2 段目が要る。v0.1.0 はサムネイルを写真の下（`<photo>/thumb`）に置いていた。新しいストレージは写真本体と並べてこのキーを持てず、MinIO は別のオブジェクトの下にあるキーを一覧に出さないので、`mc mirror` からは見えない。更新用の SQL がその行をすでに `<photo>.thumb` に書き換えているので、ループはその一覧を読み、1 件ずつ新しいキーへコピーする。`not copied` と出たものは、旧ストレージに中身が無かったサムネイルである。
+
+どちらのストレージも同じ `TC_S3_*` 認証情報を受け取るので、旧コンテナ自身の環境変数がそのまま両方に使える。`minio_data` ボリュームは、稼働中のアプリで添付・アルバム写真・アバターを確かめるまで残し、そのあと `docker volume rm` で消す。
 
 ```sh
 docker compose -f compose.prod.yml exec -T mysql \

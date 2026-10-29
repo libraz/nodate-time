@@ -60,25 +60,24 @@ services:
   # the internet -- and does not get one. Do not add `ports:` to "make it
   # work"; a blob that will not load is an API or reverse-proxy problem.
   #
-  # Pinned to the last image the upstream project published. Its final source
-  # release, a month later, never got one, and the repository was archived in
-  # April 2026 -- there will be no further official builds of either kind. See
-  # the README's Deployment section for what that means for this service.
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+  # An S3 gateway over plain files: object metadata lives in extended
+  # attributes, so a file-level copy of the volume has to carry them.
+  storage:
+    image: versity/versitygw:v1.10.0
     restart: unless-stopped
-    command: ["server", "/data"]
+    command: ["posix", "/data"]
     environment:
-      MINIO_ROOT_USER: ${TC_S3_ACCESS_KEY:?set an object storage access key}
-      MINIO_ROOT_PASSWORD: ${TC_S3_SECRET_KEY:?set an object storage secret key}
+      ROOT_ACCESS_KEY: ${TC_S3_ACCESS_KEY:?set an object storage access key}
+      ROOT_SECRET_KEY: ${TC_S3_SECRET_KEY:?set an object storage secret key}
+      VGW_HEALTH: /health
     volumes:
-      - minio_data:/data
+      - storage_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:7070/health"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 20s
+      start_period: 5s
 
   api:
     build:
@@ -91,7 +90,7 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      minio:
+      storage:
         condition: service_healthy
     environment:
       TC_ENV: production
@@ -130,7 +129,7 @@ services:
       # Reached over the compose network. This is not an address the browser
       # ever sees: it names where the API fetches and stores bytes, not where
       # a client is sent.
-      TC_S3_ENDPOINT: ${TC_S3_ENDPOINT:-minio:9000}
+      TC_S3_ENDPOINT: ${TC_S3_ENDPOINT:-storage:7070}
       TC_S3_ACCESS_KEY: ${TC_S3_ACCESS_KEY}
       TC_S3_SECRET_KEY: ${TC_S3_SECRET_KEY}
       TC_S3_BUCKET: ${TC_S3_BUCKET:-nodate-time}
@@ -214,4 +213,4 @@ services:
 
 volumes:
   mysql_data:
-  minio_data:
+  storage_data:

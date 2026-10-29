@@ -31,11 +31,11 @@ const (
 	TestWorkspaceSlug = "test"
 )
 
-// MinIO defaults — must match compose.yml.
+// Object storage defaults — must match compose.yml.
 const (
-	testMinioEndpoint = "127.0.0.1:9000"
-	testMinioAccess   = "minioadmin"
-	testMinioSecret   = "minioadmin"
+	testStorageEndpoint = "127.0.0.1:9000"
+	testStorageAccess   = "minioadmin"
+	testStorageSecret   = "minioadmin"
 )
 
 var testBucketSeq atomic.Int64
@@ -49,28 +49,28 @@ type TestServer struct {
 	Bucket  string
 }
 
-// StorageEnabled reports whether E2E tests should exercise MinIO.
+// StorageEnabled reports whether E2E tests should exercise object storage.
 func StorageEnabled() bool {
-	return os.Getenv("TC_TEST_MINIO") != ""
+	return os.Getenv("TC_TEST_STORAGE") != ""
 }
 
-// newTestStorage builds a storage client against the local MinIO if enabled,
-// using a unique bucket per server so parallel tests do not collide.
+// newTestStorage builds a storage client against the local object storage if
+// enabled, using a unique bucket per server so parallel tests do not collide.
 func newTestStorage(ctx context.Context, signer *storage.Signer) (*storage.Client, string, error) {
 	if !StorageEnabled() {
 		return nil, "", nil
 	}
 	endpoint := os.Getenv("TC_S3_ENDPOINT")
 	if endpoint == "" {
-		endpoint = testMinioEndpoint
+		endpoint = testStorageEndpoint
 	}
 	access := os.Getenv("TC_S3_ACCESS_KEY")
 	if access == "" {
-		access = testMinioAccess
+		access = testStorageAccess
 	}
 	secret := os.Getenv("TC_S3_SECRET_KEY")
 	if secret == "" {
-		secret = testMinioSecret
+		secret = testStorageSecret
 	}
 	bucket := fmt.Sprintf("nodate-test-%d-%d", time.Now().UnixNano(), testBucketSeq.Add(1))
 	c, err := storage.NewClient(endpoint, access, secret, bucket, false, signer)
@@ -294,8 +294,8 @@ func NewTestServerForMain(db *sql.DB) *TestServer {
 	sc, bucket, err := newTestStorage(context.Background(), signer)
 	if err != nil {
 		// We deliberately do not abort the process, so the tests that need no
-		// storage still run. Storage tests gate on TC_TEST_MINIO alone, so with
-		// it set and MinIO unreachable they run and fail rather than skip.
+		// storage still run. Storage tests gate on TC_TEST_STORAGE alone, so with
+		// it set and storage unreachable they run and fail rather than skip.
 		fmt.Fprintf(os.Stderr, "warn: test storage unavailable: %v\n", err)
 	}
 	deps := buildHandler(db, mc, sc, signer)

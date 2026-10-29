@@ -156,7 +156,7 @@ type Config struct {
 	// edits are rejected so secrets are never written in plaintext.
 	SecretsKey string `env:"TC_SECRETS_KEY" envDefault:""`
 
-	// AllowDefaultObjectStorageCredentials permits the published MinIO
+	// AllowDefaultObjectStorageCredentials permits the well-known minioadmin
 	// credentials. The local object store ships with them and a developer
 	// running the compose stack has no other pair to offer, so this is a real
 	// need rather than a relaxed rule; anywhere else they are a username and

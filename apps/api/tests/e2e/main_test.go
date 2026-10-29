@@ -58,7 +58,7 @@ func bootstrap(t *testing.T) {
 // getTestStorage returns the package-wide storage client (may be nil).
 func getTestStorage() *storage.Client { return testStorage }
 
-// getTestBucket returns the per-run MinIO bucket the test server uploads into.
+// getTestBucket returns the per-run storage bucket the test server uploads into.
 func getTestBucket() string { return testBucket }
 
 // testCtx returns a fresh context for ad-hoc storage assertions in tests.

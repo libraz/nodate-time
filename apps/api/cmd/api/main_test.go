@@ -24,7 +24,7 @@ func TestHealthReportsConfiguredStorageEvenWithoutAClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	cfg := &config.Config{S3Endpoint: "minio:9000"}
+	cfg := &config.Config{S3Endpoint: "storage:7070"}
 	_, results := healthReporter(db, nil, errors.New("bad endpoint"), cfg).Run(context.Background())
 	for _, r := range results {
 		if r.Name == "object_storage" {
