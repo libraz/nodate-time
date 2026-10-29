@@ -88,18 +88,33 @@ function feedItem(overrides: Partial<ServerFeedItem> = {}): ServerFeedItem {
 const ENTITIES: { action: string; entityType: string; label: TranslationKey }[] = [
   { action: 'calendar.event.created', entityType: 'event', label: 'activity.entityEvent' },
   { action: 'calendar.memo.updated', entityType: 'memo', label: 'activity.entityMemo' },
-  { action: 'calendar.member.joined', entityType: 'member', label: 'activity.entityMember' },
+  { action: 'calendar.member.added', entityType: 'member', label: 'activity.entityMember' },
   { action: 'calendar.invite.revoked', entityType: 'invite', label: 'activity.entityInvite' },
-  { action: 'calendar.comment.added', entityType: 'comment', label: 'activity.entityComment' },
   {
-    action: 'calendar.checklist.updated',
+    action: 'calendar.event.comment.created',
+    entityType: 'comment',
+    label: 'activity.entityComment',
+  },
+  {
+    action: 'calendar.event.checklist.updated',
     entityType: 'checklist',
     label: 'activity.entityChecklist',
   },
   {
-    action: 'calendar.attachment.added',
+    action: 'calendar.event.attachment.created',
     entityType: 'attachment',
     label: 'activity.entityAttachment',
+  },
+  {
+    action: 'calendar.event.attendee.added',
+    entityType: 'attendee',
+    label: 'activity.entityAttendee',
+  },
+  { action: 'calendar.event.rsvp.updated', entityType: 'rsvp', label: 'activity.entityRsvp' },
+  {
+    action: 'calendar.subscription.updated',
+    entityType: 'subscription',
+    label: 'activity.entitySubscription',
   },
   { action: 'calendar.photo.uploaded', entityType: 'photo', label: 'activity.entityPhoto' },
   { action: 'calendar.updated', entityType: 'calendar', label: 'activity.entityCalendar' },

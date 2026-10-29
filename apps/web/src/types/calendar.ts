@@ -29,9 +29,12 @@ export interface Member {
 export interface RecurrenceRule {
   freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
   interval: number;
+  /** Uppercase weekday codes, MO..SU. */
   byDay?: string[] | undefined;
-  byMonthDay?: number | undefined;
-  bySetPos?: number | undefined;
+  byMonthDay?: number[] | undefined;
+  bySetPos?: number[] | undefined;
+  /** First day of the week; absent reads as MO. Matters for weekly rules with interval > 1. */
+  wkst?: 'MO' | 'SU' | undefined;
   until?: string | undefined;
   count?: number | undefined;
 }
@@ -150,6 +153,9 @@ export interface CalendarEvent {
    *  them to change the event. Absent on events read from a public share. */
   attendees?: Attendee[];
   recurrenceRule: RecurrenceRule | null;
+  /** True when a task projects this event; its title, dates and recurrence
+   *  then belong to the task and the server refuses to change them here. */
+  taskOwned?: boolean;
   isRecurrence: boolean;
   recurrenceDate: string | null;
   createdBy?: string;

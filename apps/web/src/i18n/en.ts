@@ -73,6 +73,8 @@ export const en: Record<TranslationKey, string> = {
   'event.recurrenceMonthlyNth': 'Monthly on {n}th {day}',
   'event.recurrenceMonthlyDate': 'Monthly on day {date}',
   'event.recurrenceYearly': 'Every year',
+  'event.taskOwnedNote':
+    'This event is managed by a task. Its title, date and repeat settings can be changed on the task.',
   'event.recurrenceCustom': 'Custom...',
   'event.recurrenceInterval': 'Repeat every',
   'event.recurrenceEndNever': 'Never',
@@ -498,10 +500,12 @@ export const en: Record<TranslationKey, string> = {
   'activity.entityCalendar': 'Calendar',
   'activity.changed': 'Changed',
   'activity.entityInvite': 'Invite',
-  'activity.joined': 'Joined',
-  'activity.left': 'Left',
   'activity.roleChanged': 'Role changed',
   'activity.revoked': 'Revoked',
+  'activity.completed': 'Completed',
+  'activity.reminded': 'Reminder',
+  'activity.entityRsvp': 'RSVP',
+  'activity.entitySubscription': 'Subscription',
   'activity.published': 'Published',
   'activity.loadMore': 'Load more',
 
