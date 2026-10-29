@@ -39,7 +39,7 @@ func TestExpirySweepsAreFoundByIndexNotByReadingTheTable(t *testing.T) {
 
 	cutoff := time.Now()
 
-	const sessionSweep = `DELETE FROM sessions WHERE expires_at < ? ORDER BY expires_at LIMIT 500`
+	const sessionSweep = `DELETE FROM sessions WHERE audience = 'time' AND expires_at < ? ORDER BY expires_at LIMIT 500`
 	key, rows, _ := explainOne(t, sessionSweep, cutoff)
 	require.Contains(t, key, "expires",
 		"the session sweep must enter an expiry index, got key=%q", key)
@@ -82,12 +82,14 @@ func TestExpirySweepDrainsPastOneBatch(t *testing.T) {
 	// whole answer.
 	const expired = 620
 	bulkInsert(t,
-		`INSERT INTO sessions (public_id, user_id, refresh_hash, expires_at)`,
-		"(?, ?, ?, ?)", futureExpiringRows(userID, expired))
+		`INSERT INTO sessions (public_id, user_id, audience, refresh_hash, expires_at)`,
+		"(?, ?, 'time', ?, ?)", futureExpiringRows(userID, expired))
 
 	var statements atomic.Int64
 	db := &execInterceptDB{DB: testDB}
-	db.rewrite = scopeSweep("sessions", "DELETE FROM sessions WHERE expires_at < ?", userID, &statements)
+	// The sweep purges this application's own sessions only (sql/core/PROTOCOL.md,
+	// Identity rule 5), so the statement it issues names the audience.
+	db.rewrite = scopeSweep("sessions", "DELETE FROM sessions WHERE audience = 'time' AND expires_at < ?", userID, &statements)
 
 	cleanup.RunOnce(testCtx(), db, getTestStorage())
 
@@ -159,8 +161,8 @@ func countRows(t *testing.T, table string) int64 {
 func seedSessions(t *testing.T, userID uint32, total, expired int) {
 	t.Helper()
 	bulkInsert(t,
-		`INSERT INTO sessions (public_id, user_id, refresh_hash, expires_at)`,
-		"(?, ?, ?, ?)", expiringRows(userID, total, expired))
+		`INSERT INTO sessions (public_id, user_id, audience, refresh_hash, expires_at)`,
+		"(?, ?, 'time', ?, ?)", expiringRows(userID, total, expired))
 	analyze(t, "sessions")
 }
 

@@ -15,8 +15,8 @@ import (
 // TestOneEventsHistoryIsFoundByIndexNotByReadingTheLog checks the plan, not
 // the clock.
 //
-// Opening an event shows its own history: every log row whose payload points
-// at it. Asked of the JSON directly that question is not indexable, so it
+// Opening an event shows its own history: every log row whose subject is
+// that event. Asked of the JSON directly that question is not indexable, so it
 // read every row the calendar had ever produced -- and LIMIT bounds the
 // result, not the scan. The cost of the most frequent action in the product
 // grew with how much the calendar had been used, which is exactly backwards.
@@ -43,7 +43,8 @@ func TestOneEventsHistoryIsFoundByIndexNotByReadingTheLog(t *testing.T) {
 		WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.subject_public_id = ?
 		ORDER BY e.id DESC LIMIT 200`
 
-	keyUsed, rowsRead, _ := explainOne(t, query, workspaceID, calendarID, subject)
+	subjectID := uuid.MustParse(subject)
+	keyUsed, rowsRead, _ := explainOne(t, query, workspaceID, calendarID, subjectID[:])
 	require.True(t, strings.Contains(keyUsed, "subject"),
 		"the subject history must be found through an index, got key=%q", keyUsed)
 	require.Less(t, rowsRead, int64(1000),
@@ -68,8 +69,8 @@ func internalCalendarID(t *testing.T, publicID string) uint32 {
 func seedSubjectHistory(t *testing.T, workspaceID, calendarID uint32, subject string, total int) {
 	t.Helper()
 	stmt, err := testDB.Prepare(
-		`INSERT INTO events (public_id, workspace_id, calendar_id, type, payload_json, occurred_at)
-		 VALUES (?, ?, ?, 'event.updated', JSON_OBJECT('id', ?), NOW(3))`)
+		`INSERT INTO events (public_id, workspace_id, calendar_id, subject_public_id, type, payload_json, occurred_at)
+		 VALUES (?, ?, ?, ?, 'calendar.event.updated', JSON_OBJECT('eventId', ?, 'title', 'seed'), NOW(3))`)
 	require.NoError(t, err)
 	defer stmt.Close()
 
@@ -79,7 +80,8 @@ func seedSubjectHistory(t *testing.T, workspaceID, calendarID uint32, subject st
 			id = subject
 		}
 		publicID := uuid.New()
-		_, err := stmt.Exec(publicID[:], workspaceID, calendarID, id)
+		subjectID := uuid.MustParse(id)
+		_, err := stmt.Exec(publicID[:], workspaceID, calendarID, subjectID[:], id)
 		require.NoError(t, err)
 	}
 }

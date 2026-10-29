@@ -1,10 +1,25 @@
+-- GetCalendarMember is the access check. A grant counts only while the
+-- member still belongs to the calendar's workspace: removing someone from the
+-- workspace is done elsewhere and must end their calendar access here too
+-- (sql/core/PROTOCOL.md, Identity rule 8).
 -- name: GetCalendarMember :one
 SELECT * FROM calendar_members
-WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE;
+WHERE calendar_members.calendar_id = ? AND calendar_members.user_id = ?
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE);
 
 -- name: GetCalendarMemberForUpdate :one
 SELECT * FROM calendar_members
-WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE FOR UPDATE;
+WHERE calendar_members.calendar_id = ? AND calendar_members.user_id = ?
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
+FOR UPDATE;
 
 -- The LIMIT is a cap rather than a page. Membership is a list of people, and
 -- every caller of this -- the member sheet, the participant picker, the

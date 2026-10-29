@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
@@ -27,21 +28,36 @@ func emailDomainAllowed(email string, allowedDomains []string) bool {
 }
 
 // emailAllowedToSignIn is the one admission decision every session-issuing
-// path makes: registration, password login and each provider sign-in. The
-// domain allowlist applies first; if the domain is not allowed, the
-// individually allow-listed addresses (managed in the admin panel) are
-// consulted as a fallback. An empty domain allowlist means unrestricted.
+// path makes: registration, password login and each provider sign-in.
+//
+// The restriction is on when the configured domain list is non-empty or the
+// oauth_signin_allowlist table holds a live row of any kind. When on, an
+// address is admitted if its domain is in the configured list or a live table
+// entry matches it, as an email or as its domain. When off, everyone is.
 //
 // verifiedEmail must be an address the caller has evidence the user owns.
 // A path with no such address passes "", which a restricted deployment
 // refuses: an unproven address satisfying either list would let anyone claim
 // an allowed domain.
 func emailAllowedToSignIn(ctx context.Context, q *generated.Queries, allowedDomains []string, verifiedEmail string) (bool, error) {
-	if emailDomainAllowed(verifiedEmail, allowedDomains) {
+	if len(allowedDomains) > 0 && emailDomainAllowed(verifiedEmail, allowedDomains) {
 		return true, nil
 	}
-	if verifiedEmail == "" {
+	entries, err := q.CountEnabledOauthSigninAllowlistEntries(ctx)
+	if err != nil {
+		return false, err
+	}
+	if len(allowedDomains) == 0 && entries == 0 {
+		return true, nil
+	}
+	email := strings.ToLower(strings.TrimSpace(verifiedEmail))
+	at := strings.LastIndexByte(email, '@')
+	// The entry column holds ASCII only; an address outside it cannot match.
+	if entries == 0 || at < 0 || at == len(email)-1 || !auth.StorableEmail(email) {
 		return false, nil
 	}
-	return q.IsEmailAllowed(ctx, strings.ToLower(strings.TrimSpace(verifiedEmail)))
+	return q.IsSigninAdmittedByAllowlist(ctx, generated.IsSigninAdmittedByAllowlistParams{
+		Email:  email,
+		Domain: email[at+1:],
+	})
 }

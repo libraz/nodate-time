@@ -236,6 +236,7 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 				Type:        eventlog.TypeMemoCreated,
 				Summary:     in.Body.Title,
 				Subject:     pubID[:],
+				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},
 			})
 		})
 		if err != nil {
@@ -308,6 +309,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 				Type:        eventlog.TypeMemoUpdated,
 				Summary:     title,
 				Subject:     memo.PublicID,
+				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},
 			})
 		})
 		if err != nil {
@@ -351,6 +353,7 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 				Type:        eventlog.TypeMemoDeleted,
 				Summary:     memo.Title,
 				Subject:     memo.PublicID,
+				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},
 			})
 		})
 		if err != nil {

@@ -8,8 +8,23 @@ package generated
 import (
 	"context"
 	"database/sql"
-	"time"
 )
+
+const countConfirmedStorageObjectsByKey = `-- name: CountConfirmedStorageObjectsByKey :one
+SELECT COUNT(*) FROM storage_objects WHERE storage_key = ? AND uploaded_at IS NOT NULL
+`
+
+// CountConfirmedStorageObjectsByKey answers whether verified bytes at a key
+// belong to a live object. A queued removal for such a key is stale -- the
+// key was claimed again after it was queued -- and the drainer drops it
+// without touching the blob. An unconfirmed claim does not protect the key:
+// nothing has vouched for the bytes there.
+func (q *Queries) CountConfirmedStorageObjectsByKey(ctx context.Context, storageKey string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countConfirmedStorageObjectsByKey, storageKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const countStorageObjectsByKey = `-- name: CountStorageObjectsByKey :one
 SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?
@@ -46,8 +61,9 @@ type CreateStorageObjectParams struct {
 // index, and ref_count is what decides when an object may be swept.
 // CreateStorageObject is content-addressed: the unique key is (scope, sha256),
 // so re-uploading identical bytes finds the existing row instead of writing a
-// second copy. ref_count stays at whatever it was; the caller increments it
-// when it attaches the object to something.
+// second copy. ref_count stays at whatever it was; the transaction that
+// inserts the row pointing at the object increments it (PROTOCOL.md section
+// Storage).
 func (q *Queries) CreateStorageObject(ctx context.Context, arg CreateStorageObjectParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createStorageObject,
 		arg.PublicID,
@@ -72,6 +88,26 @@ func (q *Queries) DecrementStorageObjectRefs(ctx context.Context, id uint32) err
 	return err
 }
 
+const deleteStorageBlobRemoval = `-- name: DeleteStorageBlobRemoval :exec
+DELETE FROM storage_blob_removals WHERE id = ?
+`
+
+func (q *Queries) DeleteStorageBlobRemoval(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, deleteStorageBlobRemoval, id)
+	return err
+}
+
+const deleteStorageBlobRemovalByKey = `-- name: DeleteStorageBlobRemovalByKey :exec
+DELETE FROM storage_blob_removals WHERE storage_key = ?
+`
+
+// DeleteStorageBlobRemovalByKey drops the queued removal of a key whose blob
+// the request that queued it has just removed itself.
+func (q *Queries) DeleteStorageBlobRemovalByKey(ctx context.Context, storageKey string) error {
+	_, err := q.db.ExecContext(ctx, deleteStorageBlobRemovalByKey, storageKey)
+	return err
+}
+
 const deleteStorageObject = `-- name: DeleteStorageObject :execresult
 DELETE so FROM storage_objects so
 INNER JOIN storage_objects_unreferenced u ON u.id = so.id
@@ -82,6 +118,18 @@ WHERE so.id = ?
 // so an object that gained a referrer since it was listed is left alone.
 func (q *Queries) DeleteStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteStorageObject, id)
+}
+
+const deleteUnconfirmedStorageObject = `-- name: DeleteUnconfirmedStorageObject :execresult
+DELETE FROM storage_objects WHERE id = ? AND uploaded_at IS NULL
+`
+
+// DeleteUnconfirmedStorageObject removes a reservation whose referrers in this
+// layer were deleted in the same transaction, guarded on the predicate that
+// listed it so a confirm landing in between wins. ref_count is not consulted:
+// the object goes with every row that counted towards it.
+func (q *Queries) DeleteUnconfirmedStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteUnconfirmedStorageObject, id)
 }
 
 const deleteUnreferencedStorageObject = `-- name: DeleteUnreferencedStorageObject :execresult
@@ -98,6 +146,21 @@ WHERE so.id = ?
 // cannot be one.
 func (q *Queries) DeleteUnreferencedStorageObject(ctx context.Context, id uint32) (sql.Result, error) {
 	return q.db.ExecContext(ctx, deleteUnreferencedStorageObject, id)
+}
+
+const getStorageLocation = `-- name: GetStorageLocation :one
+SELECT setting_value FROM instance_settings
+WHERE setting_key = 'storage.location'
+LIMIT 1
+`
+
+// GetStorageLocation reads the recorded bucket regardless of enabled, so a
+// disabled row still blocks a drainer pointed elsewhere.
+func (q *Queries) GetStorageLocation(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getStorageLocation)
+	var setting_value string
+	err := row.Scan(&setting_value)
+	return setting_value, err
 }
 
 const getStorageObjectByID = `-- name: GetStorageObjectByID :one
@@ -213,27 +276,132 @@ func (q *Queries) IncrementStorageObjectRefs(ctx context.Context, id uint32) err
 	return err
 }
 
+const insertStorageLocationIfAbsent = `-- name: InsertStorageLocationIfAbsent :exec
+INSERT INTO instance_settings (public_id, setting_key, setting_value)
+VALUES (?, 'storage.location', ?)
+ON DUPLICATE KEY UPDATE setting_key = setting_key
+`
+
+type InsertStorageLocationIfAbsentParams struct {
+	PublicID []byte `json:"publicId"`
+	Location string `json:"location"`
+}
+
+// InsertStorageLocationIfAbsent records the bucket this database's blobs live
+// in, unless a drainer of either product already did. The unique key on
+// setting_key makes the first writer win.
+func (q *Queries) InsertStorageLocationIfAbsent(ctx context.Context, arg InsertStorageLocationIfAbsentParams) error {
+	_, err := q.db.ExecContext(ctx, insertStorageLocationIfAbsent, arg.PublicID, arg.Location)
+	return err
+}
+
+const listStorageBlobRemovals = `-- name: ListStorageBlobRemovals :many
+SELECT id, storage_key FROM storage_blob_removals
+WHERE id > ?
+ORDER BY id
+LIMIT ?
+`
+
+type ListStorageBlobRemovalsParams struct {
+	ID    uint32 `json:"id"`
+	Limit int32  `json:"limit"`
+}
+
+type ListStorageBlobRemovalsRow struct {
+	ID         uint32 `json:"id"`
+	StorageKey string `json:"storageKey"`
+}
+
+func (q *Queries) ListStorageBlobRemovals(ctx context.Context, arg ListStorageBlobRemovalsParams) ([]ListStorageBlobRemovalsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStorageBlobRemovals, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStorageBlobRemovalsRow
+	for rows.Next() {
+		var i ListStorageBlobRemovalsRow
+		if err := rows.Scan(&i.ID, &i.StorageKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnconfirmedStorageObjects = `-- name: ListUnconfirmedStorageObjects :many
+SELECT id, storage_key FROM storage_objects
+WHERE uploaded_at IS NULL AND updated_at < ? AND id > ?
+ORDER BY id
+LIMIT ?
+`
+
+type ListUnconfirmedStorageObjectsParams struct {
+	Cutoff  sql.NullTime `json:"cutoff"`
+	AfterID uint32       `json:"afterId"`
+	Limit   int32        `json:"limit"`
+}
+
+type ListUnconfirmedStorageObjectsRow struct {
+	ID         uint32 `json:"id"`
+	StorageKey string `json:"storageKey"`
+}
+
+// ListUnconfirmedStorageObjects walks reservations whose upload never
+// arrived, in any layer. Aged by updated_at: taking a reference restamps it,
+// and a reference is taken each time an upload URL is handed out for the row,
+// so the age is measured from the newest URL. Paged by id so objects another
+// layer still holds, skipped on every pass, cannot fill every page.
+func (q *Queries) ListUnconfirmedStorageObjects(ctx context.Context, arg ListUnconfirmedStorageObjectsParams) ([]ListUnconfirmedStorageObjectsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUnconfirmedStorageObjects, arg.Cutoff, arg.AfterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnconfirmedStorageObjectsRow
+	for rows.Next() {
+		var i ListUnconfirmedStorageObjectsRow
+		if err := rows.Scan(&i.ID, &i.StorageKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnreferencedStorageObjects = `-- name: ListUnreferencedStorageObjects :many
 SELECT so.id, so.public_id, so.workspace_id, so.owner_user_id, so.sha256, so.byte_size, so.content_type, so.storage_key, so.ref_count, so.uploaded_at, so.sort_weight, so.notes, so.enabled, so.updated_at, so.created_at FROM storage_objects so
 INNER JOIN storage_objects_unreferenced u ON u.id = so.id
-WHERE so.created_at < ?
-  AND so.id > ?
+WHERE so.id > ?
 ORDER BY so.id
 LIMIT ?
 `
 
 type ListUnreferencedStorageObjectsParams struct {
-	CreatedAt time.Time `json:"createdAt"`
-	ID        uint32    `json:"id"`
-	Limit     int32     `json:"limit"`
+	ID    uint32 `json:"id"`
+	Limit int32  `json:"limit"`
 }
 
 // The cursor matters more than the limit: an object that refuses to delete
 // would otherwise head every page and spend the whole batch budget. Which
 // objects are unreferenced is decided by storage_objects_unreferenced, the
-// same view every delete below reads.
+// same view every delete below reads. It lists confirmed objects only, so no
+// age condition is needed: a reservation is reclaimed by the unconfirmed
+// sweep alone.
 func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUnreferencedStorageObjectsParams) ([]StorageObject, error) {
-	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.CreatedAt, arg.ID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listUnreferencedStorageObjects, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -273,27 +441,37 @@ func (q *Queries) ListUnreferencedStorageObjects(ctx context.Context, arg ListUn
 
 const markStorageObjectUploaded = `-- name: MarkStorageObjectUploaded :exec
 UPDATE storage_objects
-SET storage_key = ?, byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
+SET byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
 WHERE id = ? AND uploaded_at IS NULL
 `
 
 type MarkStorageObjectUploadedParams struct {
-	StorageKey  string `json:"storageKey"`
 	ByteSize    uint64 `json:"byteSize"`
 	ContentType string `json:"contentType"`
 	ID          uint32 `json:"id"`
 }
 
-// MarkStorageObjectUploaded records that the bytes behind a row were read back
-// and matched its digest, which is what makes the row something another
-// referrer may reuse. The verified size, type and key replace what the
-// reservation declared; a row already verified is left as it is.
+// MarkStorageObjectUploaded records that the bytes at the row's own key were
+// read back and matched its digest, which is what makes the row something
+// another referrer may reuse. The verified size and type replace what the
+// reservation declared. storage_key is never rewritten: another product may
+// have handed out an upload URL for it. A row already verified is left as it
+// is.
 func (q *Queries) MarkStorageObjectUploaded(ctx context.Context, arg MarkStorageObjectUploadedParams) error {
-	_, err := q.db.ExecContext(ctx, markStorageObjectUploaded,
-		arg.StorageKey,
-		arg.ByteSize,
-		arg.ContentType,
-		arg.ID,
-	)
+	_, err := q.db.ExecContext(ctx, markStorageObjectUploaded, arg.ByteSize, arg.ContentType, arg.ID)
+	return err
+}
+
+const queueStorageBlobRemoval = `-- name: QueueStorageBlobRemoval :exec
+INSERT INTO storage_blob_removals (storage_key)
+VALUES (?)
+ON DUPLICATE KEY UPDATE storage_key = VALUES(storage_key)
+`
+
+// QueueStorageBlobRemoval records a key whose blob is to be removed, in the
+// transaction that deletes the rows naming it. A key already queued stays one
+// row.
+func (q *Queries) QueueStorageBlobRemoval(ctx context.Context, storageKey string) error {
+	_, err := q.db.ExecContext(ctx, queueStorageBlobRemoval, storageKey)
 	return err
 }

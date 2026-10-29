@@ -66,16 +66,18 @@ func TestAdminOAuthWritesAppendOneAuditRowWithoutTheSecret(t *testing.T) {
 
 func TestAdminAllowedEmailWritesAppendOneAuditRow(t *testing.T) {
 	bootstrap(t)
-	t.Parallel()
+	// A live allow-list row restricts the whole instance: serial phase only.
 
 	admin := helpers.NewTenant(t, testServerURL)
 	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
 
+	address := fmt.Sprintf("audited-%d@example.com", time.Now().UnixNano())
+	t.Cleanup(func() { withdrawAllowedEmail(t, address) })
 	var created struct {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/admin/allowed-emails", admin.AccessToken,
-		map[string]any{"email": fmt.Sprintf("audited-%d@example.com", time.Now().UnixNano()), "reason": "audit"}, &created)
+		map[string]any{"email": address, "reason": "audit"}, &created)
 	count, _ := auditRows(t, testDB, "allowed_email.create", admin.UserID)
 	require.Equal(t, 1, count)
 

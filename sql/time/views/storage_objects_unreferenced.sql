@@ -1,10 +1,14 @@
 -- ====================================
 -- storage_objects_unreferenced — the objects nothing holds
 --
--- The one statement of when an object may be deleted: its count is zero and
--- no column that can point at an object does. Both the sweep's listing and
--- every delete read it, so a referring column added later is added once here
--- rather than to each of them.
+-- The one statement of when an object may be deleted: it is confirmed, its
+-- count is zero, and no column that can point at an object does. Both the
+-- sweep's listing and every delete read it, so a referring column added
+-- later is added once here rather than to each of them.
+--
+-- A reservation (uploaded_at IS NULL) is never listed here: only the
+-- unconfirmed sweep reclaims one, and only by age (PROTOCOL.md section
+-- Storage), so an upload in progress in another layer is never taken.
 --
 -- Attachments and album photos refer through RESTRICT foreign keys, which
 -- would refuse the delete anyway; checking them here keeps a refusal from
@@ -16,6 +20,7 @@ CREATE VIEW storage_objects_unreferenced AS
 SELECT so.id
 FROM storage_objects so
 WHERE so.ref_count = 0
+  AND so.uploaded_at IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM calendar_event_attachments a WHERE a.storage_object_id = so.id
   )

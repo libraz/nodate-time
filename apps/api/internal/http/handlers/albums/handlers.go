@@ -766,25 +766,31 @@ func attachThumbnail(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
 	}
 }
 
-// deleteMismatchedPhoto removes an uploaded object (and its pending row) that
-// failed the Confirm-time size check, so a mismatched upload does not linger
-// as an orphan until the 7-day abandoned-upload sweep. Best-effort: errors are
-// logged, not surfaced, since the caller is already returning the mismatch
-// error to the client.
+// deleteMismatchedPhoto removes the pending row of an upload that failed the
+// Confirm-time size check, queues its bytes for removal in the same
+// transaction and removes them right after, so a mismatched upload does not
+// linger as an orphan until the 7-day abandoned-upload sweep. Best-effort: errors are logged, not surfaced,
+// since the caller is already returning the mismatch error to the client.
 //
-// Deleting the bytes is still safe here, unlike on the delete path: a
+// Removing the bytes is still safe here, unlike on the delete path: a
 // reservation is not attached to a storage object until its digest has been
 // read, so these bytes sit at a key belonging to this photo alone and no
 // other row can be resolving to them.
 func deleteMismatchedPhoto(ctx context.Context, deps Deps, p generated.AlbumPhoto) {
-	if err := deps.Storage.DeleteObject(ctx, p.StorageKey); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched album photo object", "key", p.StorageKey, "error", err)
-	}
-	if err := deps.Queries.DeletePendingAlbumPhoto(ctx, generated.DeletePendingAlbumPhotoParams{
-		ID:               p.ID,
-		UploadedByUserID: p.UploadedByUserID,
+	if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		if err := q.DeletePendingAlbumPhoto(ctx, generated.DeletePendingAlbumPhotoParams{
+			ID:               p.ID,
+			UploadedByUserID: p.UploadedByUserID,
+		}); err != nil {
+			return err
+		}
+		return blobref.QueueRemoval(ctx, q, p.StorageKey)
 	}); err != nil {
-		slog.WarnContext(ctx, "failed to delete mismatched album photo row", "photoID", p.ID, "error", err)
+		slog.WarnContext(ctx, "failed to discard mismatched album photo", "photoID", p.ID, "error", err)
+		return
+	}
+	if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, p.StorageKey); err != nil {
+		slog.WarnContext(ctx, "failed to remove mismatched album photo object; left to the drainer", "key", p.StorageKey, "error", err)
 	}
 }
 

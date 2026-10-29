@@ -536,6 +536,48 @@ func (ns NullOauthProviderConfigsProvider) Value() (driver.Value, error) {
 	return string(ns.OauthProviderConfigsProvider), nil
 }
 
+type OauthSigninAllowlistEntryKind string
+
+const (
+	OauthSigninAllowlistEntryKindDomain OauthSigninAllowlistEntryKind = "domain"
+	OauthSigninAllowlistEntryKindEmail  OauthSigninAllowlistEntryKind = "email"
+)
+
+func (e *OauthSigninAllowlistEntryKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OauthSigninAllowlistEntryKind(s)
+	case string:
+		*e = OauthSigninAllowlistEntryKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OauthSigninAllowlistEntryKind: %T", src)
+	}
+	return nil
+}
+
+type NullOauthSigninAllowlistEntryKind struct {
+	OauthSigninAllowlistEntryKind OauthSigninAllowlistEntryKind `json:"oauthSigninAllowlistEntryKind"`
+	Valid                         bool                          `json:"valid"` // Valid is true if OauthSigninAllowlistEntryKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOauthSigninAllowlistEntryKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.OauthSigninAllowlistEntryKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OauthSigninAllowlistEntryKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOauthSigninAllowlistEntryKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OauthSigninAllowlistEntryKind), nil
+}
+
 type OauthStatesProvider string
 
 const (
@@ -915,6 +957,10 @@ type AlbumPhoto struct {
 	Height sql.NullInt32 `json:"height"`
 	// Object key in the blob store
 	StorageKey string `json:"storageKey"`
+	// Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.
+	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
+	// Internal FK to storage_objects.id for the grid-sized rendering. NULL when the photo has none; reads fall back to the photo itself.
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
 	// EXIF capture time, falling back to upload time; the album orders by this rather than by upload order
 	TakenAt time.Time `json:"takenAt"`
 	// Display order
@@ -927,10 +973,6 @@ type AlbumPhoto struct {
 	RetiredAt sql.NullTime `json:"retiredAt"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.
-	StorageObjectID sql.NullInt32 `json:"storageObjectId"`
-	// Internal FK to storage_objects.id for the grid-sized rendering. NULL when the photo has none; reads fall back to the photo itself.
-	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
 }
 
 // Workspace audit log
@@ -1061,13 +1103,19 @@ type CalendarEvent struct {
 	Location sql.NullString `json:"location"`
 	// Free-form notes (markdown)
 	Memo sql.NullString `json:"memo"`
+	// Meeting link or related URL. utf8mb4 rather than latin1: an internationalised address (RFC 3987) carries non-ASCII directly, and latin1 refuses the whole value.
+	URL sql.NullString `json:"url"`
+	// UID of the VEVENT this event was imported from, as the file gave it. NULL when the event was created here, when it is a recurrence override, or when the file UID exceeded the column.
+	SourceUid sql.NullString `json:"sourceUid"`
+	// source_uid while the row is live, NULL once it is soft-deleted. Exists solely to scope uniq_calendar_events_source_uid to rows the calendar still shows. Generated: never written directly.
+	SourceUidKey sql.NullString `json:"sourceUidKey"`
 	// Event owner (whose color/layer). Only owner, managers, or can_edit attendees may edit
 	OwnerUserID uint32 `json:"ownerUserId"`
 	// Actual creator (may differ from owner for manager delegation)
 	CreatedByUserID uint32 `json:"createdByUserId"`
 	// Label for block-kind events (e.g., Working, Focus Time, Out of Office)
 	BlockLabel sql.NullString `json:"blockLabel"`
-	// Recurrence rule: {freq, interval, byDay, byMonthDay, bySetPos, until, count}
+	// Recurrence rule: {freq, interval, byDay[], byMonthDay[], bySetPos[], wkst, until, count}. The shape is enforced by chk_calendar_events_recurrence_shape; the semantics are PROTOCOL.md §Recurrence.
 	RecurrenceRule *json.RawMessage `json:"recurrenceRule"`
 	// Computed end date for recurrence expansion queries
 	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
@@ -1095,12 +1143,6 @@ type CalendarEvent struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// UID of the VEVENT this event was imported from, as the file gave it. NULL when the event was created here, when it is a recurrence override, or when the file UID exceeded the column.
-	SourceUid sql.NullString `json:"sourceUid"`
-	// source_uid while the row is live, NULL once it is soft-deleted. Exists solely to scope uniq_calendar_events_source_uid to rows the calendar still shows. Generated: never written directly.
-	SourceUidKey sql.NullString `json:"sourceUidKey"`
-	// Meeting link or related URL. utf8mb4 rather than latin1: an internationalised address (RFC 3987) carries non-ASCII directly.
-	URL sql.NullString `json:"url"`
 }
 
 // Calendar event file attachments
@@ -1124,11 +1166,11 @@ type CalendarEventAttachment struct {
 	// Admin notes
 	Notes sql.NullString `json:"notes"`
 	// Enabled flag (soft delete)
-	Enabled   bool         `json:"enabled"`
-	UpdatedAt sql.NullTime `json:"updatedAt"`
-	CreatedAt time.Time    `json:"createdAt"`
+	Enabled bool `json:"enabled"`
 	// When a confirmed attachment was deleted. NULL on a live row and on a reservation that was never confirmed.
 	RetiredAt sql.NullTime `json:"retiredAt"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
 }
 
 // Calendar event attendees with RSVP and edit permission
@@ -1483,6 +1525,8 @@ type Event struct {
 	ActorSystemSource sql.NullString `json:"actorSystemSource"`
 	// Internal FK to events.id. Non-NULL means this event is a compensating reverse of another event (e.g., user undoing an auto-completion). A projection reading the log cancels both events out. The log is immutable: a reversal is a new row, never an UPDATE or DELETE of the original.
 	ReversesEventID sql.NullInt64 `json:"reversesEventId"`
+	// public_id of the entity this event is about, so one entity history is an index range. Set for every kind whose event-kinds registry entry names a subject table, NULL for the rest. Written by the appender alongside the payload; never derived from it.
+	SubjectPublicID []byte `json:"subjectPublicId"`
 	// Event type (e.g., task.created, signal.attached, signal.judged)
 	Type string `json:"type"`
 	// Event payload
@@ -1497,8 +1541,6 @@ type Event struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// Public id of the entity this event is about, lifted out of the payload so one entity history can be indexed. Generated: never written directly.
-	SubjectPublicID sql.NullString `json:"subjectPublicId"`
 }
 
 // User authentication identities
@@ -1509,6 +1551,8 @@ type Identity struct {
 	PublicID []byte `json:"publicId"`
 	// Internal FK to users.id
 	UserID uint32 `json:"userId"`
+	// Identity provider kind
+	Provider IdentitiesProvider `json:"provider"`
 	// Provider subject / external ID (ASCII)
 	Subject string `json:"subject"`
 	// Argon2id encoded hash, only for provider=local
@@ -1533,8 +1577,6 @@ type Identity struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// Identity provider kind
-	Provider IdentitiesProvider `json:"provider"`
 }
 
 // Instance-wide admin grants
@@ -1643,28 +1685,6 @@ type MagicLinkToken struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
-// Per-address exceptions to the OAuth domain restriction
-type OauthAllowedEmail struct {
-	// Internal PK, never exposed
-	ID uint32 `json:"id"`
-	// UUID v7, the only externally visible ID
-	PublicID []byte `json:"publicId"`
-	// Allowed address, ASCII only to match users.email
-	Email string `json:"email"`
-	// Why this address is excepted; the list is unreadable a year later without it
-	Reason string `json:"reason"`
-	// Operator who added it
-	CreatedByUserID sql.NullInt32 `json:"createdByUserId"`
-	// Display order
-	SortWeight int32 `json:"sortWeight"`
-	// Admin notes
-	Notes sql.NullString `json:"notes"`
-	// Enabled flag; FALSE withdraws the exception without losing the record of it
-	Enabled   bool         `json:"enabled"`
-	UpdatedAt sql.NullTime `json:"updatedAt"`
-	CreatedAt time.Time    `json:"createdAt"`
-}
-
 // Per-provider OAuth client configuration
 type OauthProviderConfig struct {
 	// Internal PK, never exposed
@@ -1689,13 +1709,35 @@ type OauthProviderConfig struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Instance-level OAuth/OIDC sign-in allowlist
+type OauthSigninAllowlist struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to users.id (who added the entry, null once that account is gone)
+	AddedByUserID sql.NullInt32 `json:"addedByUserId"`
+	// What entry_value names: domain matches the part after the final '@', email matches the whole address
+	EntryKind OauthSigninAllowlistEntryKind `json:"entryKind"`
+	// The domain or address this entry admits, normalized to lower case before it is written; latin1_bin keeps every comparison byte-exact, so cafe.example and café.example are distinct entries rather than one
+	EntryValue string `json:"entryValue"`
+	// Display order
+	SortWeight int32 `json:"sortWeight"`
+	// Admin notes
+	Notes sql.NullString `json:"notes"`
+	// Enabled flag — FALSE withdraws the entry without releasing its (entry_kind, entry_value) claim, so re-adding it revives this row via ON DUPLICATE KEY UPDATE
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
 // Short-lived OAuth CSRF state tokens for personal integrations
 type OauthState struct {
 	// Random 32-byte token, hex-encoded
 	State string `json:"state"`
 	// Internal FK to users.id — the user who started the connect flow
 	UserID uint32 `json:"userId"`
-	// Which provider this state belongs to. 'discord' is required for the personal Discord presence-binding flow (Phase 8 presence-discord gateway).
+	// Which provider this state belongs to. 'discord' is required for the personal Discord presence-binding flow (presence-discord gateway).
 	Provider OauthStatesProvider `json:"provider"`
 	// Optional client-supplied return URL to send the user to after the callback completes
 	RedirectTo sql.NullString `json:"redirectTo"`
@@ -1771,6 +1813,8 @@ type Session struct {
 	PublicID []byte `json:"publicId"`
 	// Internal FK to users.id
 	UserID uint32 `json:"userId"`
+	// Name of the application that issued the session (flow, time), written as a SQL literal. An application refreshes, looks up and purges only its own rows; revoking every session of a user ignores it. Empty only on a row no conforming writer produced.
+	Audience string `json:"audience"`
 	// SHA-256 hex of refresh token
 	RefreshHash string `json:"refreshHash"`
 	// Client user agent at issue time
@@ -1783,6 +1827,8 @@ type Session struct {
 	RevokedAt sql.NullTime `json:"revokedAt"`
 	// SHA-256 hex of the refresh token this session last replaced. Rotation overwrites refresh_hash, so without this the superseded token leaves no trace and a replay of it is indistinguishable from a token that was never issued. Presenting a token that matches this column is the signal that a rotated token was replayed.
 	RotatedFromHash sql.NullString `json:"rotatedFromHash"`
+	// When the refresh token was last exchanged. Lets an application tell a replay of rotated_from_hash from one client asking twice within a grace window.
+	RotatedAt sql.NullTime `json:"rotatedAt"`
 	// Last refresh time
 	LastUsedAt sql.NullTime `json:"lastUsedAt"`
 	// Display order
@@ -1793,8 +1839,6 @@ type Session struct {
 	Enabled   bool         `json:"enabled"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
-	// When the refresh token was last exchanged
-	RotatedAt sql.NullTime `json:"rotatedAt"`
 }
 
 // In-flight OAuth sign-in state
@@ -1825,6 +1869,16 @@ type SigninState struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Pending object-storage blob removals whose referencing rows are already deleted
+type StorageBlobRemoval struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// Object key whose blob is still to be removed from object storage
+	StorageKey string       `json:"storageKey"`
+	UpdatedAt  sql.NullTime `json:"updatedAt"`
+	CreatedAt  time.Time    `json:"createdAt"`
+}
+
 // Content-addressed object storage references; rows shared across attachments via storage_object_id with ref_count GC.
 type StorageObject struct {
 	// Internal PK, never exposed
@@ -1845,7 +1899,7 @@ type StorageObject struct {
 	StorageKey string `json:"storageKey"`
 	// Number of referencing rows (attachments / users.avatar_storage_object_id); GC eligible when 0
 	RefCount uint32 `json:"refCount"`
-	// When the upload behind this row was confirmed present in object storage. NULL means the row was created to hand out an upload URL and the bytes have not been seen since: the size the client declared is unverified, so the row is not a dedup candidate and the sweeper reclaims it once the URL it was minted for has expired.
+	// When the upload behind this row was confirmed present in object storage. NULL means the row was created to hand out an upload URL and the bytes have not been seen since, so the only size anyone has for it is the one the client declared. The dedup lookup is keyed on (workspace_id, sha256) and does return such a row, because that key admits no second row for the same content; what keeps an unfinished upload from being inherited is the presign handler, which refuses to answer a dedup hit with an unstamped row and mints an upload URL for the same key instead, filling this row in rather than duplicating it. The sweeper reclaims the row once the URL it was minted for has expired.
 	UploadedAt sql.NullTime `json:"uploadedAt"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`

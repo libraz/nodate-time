@@ -21,7 +21,7 @@ const devAccountEmailSuffix = "@example.com"
 // itself to @example.com accounts as defense in depth.
 func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput, error) {
 	return func(ctx context.Context, in *DevLoginInput) (*DevLoginOutput, error) {
-		email := strings.ToLower(strings.TrimSpace(in.Body.Email))
+		email := auth.NormalizeEmail(in.Body.Email)
 		if !strings.HasSuffix(email, devAccountEmailSuffix) || !auth.StorableEmail(email) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
@@ -31,6 +31,16 @@ func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput,
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		// The password is skipped, never the rest of what a sign-in checks.
+		if required, err := userRequiresSecondFactor(ctx, deps.Queries, user.ID); err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		} else if required {
+			return nil, apierrors.ToHuma(apierrors.AuthMFARequired)
+		}
+		if err := joinWorkspace(ctx, deps.DB, deps.WorkspaceID, user.ID); err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 

@@ -338,6 +338,19 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				return err
 			}
 
+			// A join link grants a calendar, never the workspace around it. A
+			// member the workspace removed stays removed, so the link has
+			// nothing it may grant them (sql/core/PROTOCOL.md, Identity rule 8).
+			if _, err := q.GetWorkspaceMember(ctx, generated.GetWorkspaceMemberParams{
+				WorkspaceID: cal.WorkspaceID,
+				UserID:      userID,
+			}); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.CalendarAccessDenied
+				}
+				return err
+			}
+
 			// A link that has run out is a different answer from one that never
 			// existed, and the holder is entitled to it: they have the token, so
 			// nothing is disclosed, and "expired" is what prompts asking for
@@ -393,9 +406,13 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
 				ActorUserID: userID,
-				Type:        eventlog.TypeMemberJoined,
+				Type:        eventlog.TypeMemberAdded,
 				Summary:     summary,
-				Subject:     user.PublicID,
+				Extra: map[string]any{
+					"calendarId": eventlog.UUID(cal.PublicID),
+					"userId":     eventlog.UUID(user.PublicID),
+					"role":       string(locked.Role),
+				},
 			})
 		})
 		if err != nil {

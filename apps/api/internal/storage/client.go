@@ -19,9 +19,10 @@ import (
 // address this API rather than the object store: the store is reachable only
 // from the private network, so every transfer is relayed. See Signer.
 type Client struct {
-	mc     *minio.Client
-	bucket string
-	signer *Signer
+	mc       *minio.Client
+	endpoint string
+	bucket   string
+	signer   *Signer
 }
 
 // NewClient creates a new S3 storage client. signer mints the browser-facing
@@ -35,7 +36,14 @@ func NewClient(endpoint, accessKey, secretKey, bucket string, useSSL bool, signe
 	if err != nil {
 		return nil, err
 	}
-	return &Client{mc: mc, bucket: bucket, signer: signer}, nil
+	return &Client{mc: mc, endpoint: endpoint, bucket: bucket, signer: signer}, nil
+}
+
+// Location names the bucket this client writes to as "<endpoint>/<bucket>",
+// the form every product records in instance_settings 'storage.location'
+// (sql/core/PROTOCOL.md section Storage).
+func (c *Client) Location() string {
+	return c.endpoint + "/" + c.bucket
 }
 
 // EnsureBucket creates the bucket if it does not exist.

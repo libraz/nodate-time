@@ -1,0 +1,28 @@
+# Time-layer event kinds — every `events.type` this product appends that
+# core's sql/core/event-kinds.yaml does not already list. Same format and
+# rules as that file; conformance accepts the union of the registries.
+
+kinds:
+  # Join-by-link calendar invitations.
+  - kind: calendar.invite.created
+    family: calendar
+    subject: calendar_invites
+    required_payload_keys: [inviteId]
+  - kind: calendar.invite.revoked
+    family: calendar
+    subject: calendar_invites
+    required_payload_keys: [inviteId]
+
+  # Shared photo album.
+  - kind: calendar.photo.uploaded
+    family: calendar
+    subject: album_photos
+    required_payload_keys: [photoId]
+  - kind: calendar.photo.updated
+    family: calendar
+    subject: album_photos
+    required_payload_keys: [photoId]
+  - kind: calendar.photo.deleted
+    family: calendar
+    subject: album_photos
+    required_payload_keys: [photoId]

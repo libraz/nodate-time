@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
@@ -77,8 +78,9 @@ func objectRefCount(t *testing.T, storageKey string) int {
 
 // Blobs are content-addressed and shared across the whole deployment, so the
 // same file attached in two calendars is one object with two references.
-// Releasing more than was taken drives that object to zero and hands a blob a
-// live attachment still needs to the sweep.
+// Deleting an event retires its attachment, and a retired row keeps its
+// reference until the retention sweep removes it; only then is it given back,
+// and only its own.
 func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
@@ -102,8 +104,10 @@ func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 		deleterCal+"/events/"+victimEvent, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
 
-	require.Equal(t, 1, objectRefCount(t, storageKey),
-		"only the deleted event's own reference may be released")
+	requireRefCountIsReferrers(t, storageKey, 2, "the retired attachment still points at the object")
+
+	sweepRetiredAttachments(t, storageKey)
+	requireRefCountIsReferrers(t, storageKey, 1, "only the deleted event's own reference may be released")
 
 	_, exists, err := getTestStorage().StatObject(testCtx(), storageKey)
 	require.NoError(t, err)
@@ -111,7 +115,7 @@ func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 }
 
 // Deleting the attachment and then the event that held it releases one
-// reference, not two: the row released its own when it was removed.
+// reference, not two, and only when the retired row is removed.
 func TestDeletingAnAttachmentThenItsEventReleasesOneReference(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
@@ -132,19 +136,22 @@ func TestDeletingAnAttachmentThenItsEventReleasesOneReference(t *testing.T) {
 	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
 		deleterCal+"/events/"+victimEvent+"/attachments/"+victimAttachment, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete attachment: %s", string(raw))
-	require.Equal(t, 1, objectRefCount(t, storageKey))
+	requireRefCountIsReferrers(t, storageKey, 2, "a soft delete leaves the count alone")
 
 	status, raw = helpers.DoJSONStatus(t, http.MethodDelete,
 		deleterCal+"/events/"+victimEvent, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
+	requireRefCountIsReferrers(t, storageKey, 2, "deleting the event retires nothing a second time")
 
-	require.Equal(t, 1, objectRefCount(t, storageKey),
-		"an attachment already removed must not release its reference a second time")
+	sweepRetiredAttachments(t, storageKey)
+	requireRefCountIsReferrers(t, storageKey, 1,
+		"an attachment removed once releases its reference once")
 }
 
-// A reservation whose upload never landed never took a reference, so deleting
-// the event it was reserved on must not release one.
-func TestDeletingAnEventWithAnUnconfirmedReservationTakesNoReference(t *testing.T) {
+// A reservation holds a reference from the moment it is created. Deleting the
+// event it was reserved on leaves it, and the abandoned-upload sweep that
+// removes it gives the reference back.
+func TestDeletingAnEventWithAnUnconfirmedReservationReleasesOnlyItsOwn(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
 		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
@@ -157,7 +164,7 @@ func TestDeletingAnEventWithAnUnconfirmedReservationTakesNoReference(t *testing.
 	keeper := helpers.NewTenant(t, testServerURL)
 	reserver := helpers.NewTenant(t, testServerURL)
 	attachEvent(t, keeper, "Keeps the file", body)
-	require.Equal(t, 1, objectRefCount(t, storageKey))
+	requireRefCountIsReferrers(t, storageKey, 1, "the keeper's attachment")
 
 	reserverCal := testServerURL + "/calendars/" + reserver.CalendarID
 	var evt struct {
@@ -168,21 +175,29 @@ func TestDeletingAnEventWithAnUnconfirmedReservationTakesNoReference(t *testing.
 			"title": "Reserved but never uploaded", "allDay": false,
 			"startAt": "2026-05-12T09:00:00+09:00", "endAt": "2026-05-12T10:00:00+09:00",
 		}, &evt)
+	var pres presignResp
 	helpers.DoJSON(t, http.MethodPost, reserverCal+"/events/"+evt.ID+"/attachments/presign",
 		reserver.AccessToken, map[string]any{
 			"filename": "contract.pdf", "contentType": "application/pdf",
 			"byteSize": len(body), "sha256": helpers.SHA256Hex(body),
-		}, nil)
+		}, &pres)
+	requireRefCountIsReferrers(t, storageKey, 2, "the reservation counts from the moment it exists")
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
 		reserverCal+"/events/"+evt.ID, reserver.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
+	requireRefCountIsReferrers(t, storageKey, 2, "deleting the event leaves the reservation in place")
 
-	require.Equal(t, 1, objectRefCount(t, storageKey),
-		"an unconfirmed reservation never incremented, so it must not decrement")
+	_, err := testDB.Exec(
+		"UPDATE calendar_event_attachments SET created_at = ? WHERE public_id = UUID_TO_BIN(?)",
+		time.Now().Add(-8*24*time.Hour), pres.AttachmentID)
+	require.NoError(t, err)
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
+	requireRefCountIsReferrers(t, storageKey, 1, "the swept reservation gives back its own reference only")
 }
 
-// Deleting a calendar releases what its own attachments hold, and nothing more.
+// Deleting a calendar retires its attachments; removing them releases what they
+// hold, and nothing more.
 func TestDeletingACalendarLeavesSharedBlobsAlone(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
@@ -202,8 +217,10 @@ func TestDeletingACalendarLeavesSharedBlobsAlone(t *testing.T) {
 	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
 		testServerURL+"/calendars/"+deleter.CalendarID, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete calendar: %s", string(raw))
+	requireRefCountIsReferrers(t, storageKey, 2, "the retired attachment still points at the object")
 
-	require.Equal(t, 1, objectRefCount(t, storageKey))
+	sweepRetiredAttachments(t, storageKey)
+	requireRefCountIsReferrers(t, storageKey, 1, "only the deleted calendar's attachment is released")
 
 	_, exists, err := getTestStorage().StatObject(testCtx(), storageKey)
 	require.NoError(t, err)

@@ -521,6 +521,10 @@ export const en: Record<TranslationKey, string> = {
     'This email address is not permitted to sign up. Contact an administrator.',
   'apiError.AUTH.ADMIN_REQUIRED': 'Admin privileges required',
   'apiError.AUTH.SESSION_NOT_FOUND': 'Session not found',
+  'apiError.AUTH.MFA_REQUIRED':
+    'This account has two-factor authentication turned on, which this app cannot verify, so it cannot sign in here',
+  'apiError.AUTH.LINK_REFUSED':
+    'This email address belongs to an existing account and cannot be linked automatically',
   'apiError.SECRETS.UNAVAILABLE': 'Secret encryption is not configured (set TC_SECRETS_KEY)',
   'apiError.CALENDAR.NOT_FOUND': 'Calendar not found',
   'apiError.CALENDAR.ACCESS_DENIED': 'You do not have access to this calendar',
@@ -530,6 +534,8 @@ export const en: Record<TranslationKey, string> = {
   'apiError.EVENT.NOT_ATTENDEE': 'You are not a participant of this event',
   'apiError.EVENT.STALE': 'Someone else changed this event while you had it open. Reload it first',
   'apiError.EVENT.NOTIFICATION_OFFSET_INVALID': 'That reminder time is not one this app supports',
+  'apiError.EVENT.TASK_OWNED':
+    'This event comes from a task. Change its title and times on the task instead',
   'apiError.COMMENT.NOT_FOUND': 'Comment not found',
   'apiError.COMMENT.ACCESS_DENIED': 'You can only edit your own comments',
   'apiError.CHECKLIST.NOT_FOUND': 'Checklist item not found',

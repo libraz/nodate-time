@@ -14,15 +14,15 @@ func TestCalendarLifecycle(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 
-	// List calendars — should have 1 (created by NewTenant)
-	var cals []struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
-	}
+	// Joining the workspace gives every member a personal calendar
+	// (sql/core/PROTOCOL.md, Identity rule 9), so the list holds that one and
+	// the one NewTenant created.
+	var cals []calendarBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", tt.AccessToken, nil, &cals)
-	require.Len(t, cals, 1)
-	require.Equal(t, "テストカレンダー", cals[0].Name)
+	require.Len(t, cals, 2)
+	created, ok := findCalendar(cals, tt.CalendarID)
+	require.True(t, ok)
+	require.Equal(t, "テストカレンダー", created.Name)
 
 	// Get single calendar
 	var cal struct {
@@ -52,19 +52,21 @@ func TestCalendarLifecycle(t *testing.T) {
 		&cal2)
 	require.NotEmpty(t, cal2.ID)
 
-	// List should have 2
-	var cals2 []struct{ ID string }
+	// List should have one more
+	var cals2 []calendarBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", tt.AccessToken, nil, &cals2)
-	require.Len(t, cals2, 2)
+	require.Len(t, cals2, 3)
 
 	// Delete second calendar
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/calendars/"+cal2.ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
-	// List should have 1
-	var cals3 []struct{ ID string }
+	// Back to the personal calendar and the first one
+	var cals3 []calendarBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", tt.AccessToken, nil, &cals3)
-	require.Len(t, cals3, 1)
+	require.Len(t, cals3, 2)
+	_, ok = findCalendar(cals3, cal2.ID)
+	require.False(t, ok, "the deleted calendar is gone from the list")
 }
 
 // calendarBody is the shape every calendar response is read through here: the
@@ -97,10 +99,12 @@ func TestCalendarListReportsTheCallersOwnRole(t *testing.T) {
 	// The same calendar, listed by two people, reports two different roles.
 	var ownerList []calendarBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", owner.AccessToken, nil, &ownerList)
-	require.Len(t, ownerList, 1)
-	require.Equal(t, owner.CalendarID, ownerList[0].ID)
-	require.Equal(t, "owner", ownerList[0].Role)
-	require.Equal(t, owner.CalendarColor, ownerList[0].MemberColor)
+	// The owner's personal calendar and the one they share.
+	require.Len(t, ownerList, 2)
+	ownCal, ok := findCalendar(ownerList, owner.CalendarID)
+	require.True(t, ok)
+	require.Equal(t, "owner", ownCal.Role)
+	require.Equal(t, owner.CalendarColor, ownCal.MemberColor)
 
 	var viewerList []calendarBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", viewer.AccessToken, nil, &viewerList)

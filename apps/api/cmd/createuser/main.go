@@ -186,32 +186,34 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 			return fmt.Errorf("create identity: %w", err)
 		}
 
-		memberPubID, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-		if err := q.AddWorkspaceMember(ctx, generated.AddWorkspaceMemberParams{
-			PublicID:    memberPubID[:],
-			WorkspaceID: ws.ID,
-			UserID:      userID,
-			Role:        generated.WorkspaceMembersRoleMember,
-		}); err != nil {
+		if _, err := workspace.Join(ctx, q, ws.ID, userID); err != nil {
 			return fmt.Errorf("add workspace member: %w", err)
 		}
 
-		// An account the operator created by hand is a deliberate exception to
-		// any domain restriction, so it is admitted on the same terms as an
-		// address an administrator allow-lists: every sign-in checks the list.
-		allowPubID, err := uuid.NewV7()
-		if err != nil {
-			return err
+		// Under a restriction, an account the operator created by hand is a
+		// deliberate exception to it, so its address joins the allowlist. On
+		// an open deployment a row would itself switch the restriction on and
+		// close sign-in to everyone else, so none is written.
+		restricted := len(cfg.GoogleAllowedDomainList()) > 0
+		if !restricted {
+			entries, err := q.CountEnabledOauthSigninAllowlistEntries(ctx)
+			if err != nil {
+				return fmt.Errorf("read allow-list: %w", err)
+			}
+			restricted = entries > 0
 		}
-		if _, err := q.CreateAllowedEmail(ctx, generated.CreateAllowedEmailParams{
-			PublicID: allowPubID[:],
-			Email:    strings.ToLower(strings.TrimSpace(email)),
-			Reason:   "created with createuser",
-		}); err != nil {
-			return fmt.Errorf("allow-list address: %w", err)
+		if restricted {
+			allowPubID, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			if err := q.UpsertOauthSigninAllowlistEmail(ctx, generated.UpsertOauthSigninAllowlistEmailParams{
+				PublicID:   allowPubID[:],
+				EntryValue: strings.ToLower(strings.TrimSpace(email)),
+				Notes:      sql.NullString{String: "created with createuser", Valid: true},
+			}); err != nil {
+				return fmt.Errorf("allow-list address: %w", err)
+			}
 		}
 
 		if admin {

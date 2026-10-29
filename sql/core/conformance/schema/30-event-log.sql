@@ -5,12 +5,16 @@
 -- not of the schema, and is checked by the data mode. What is checked here
 -- is that the log can carry the guarantees the protocol promises.
 
+-- The two kinds below are deliberately outside the registry: what is
+-- asserted is that two appends order and read back, so the rows counted
+-- have to be nobody else's. A declared kind would make the assertions
+-- true only until a handler started emitting the same word.
 INSERT INTO events (public_id, workspace_id, type, payload_json, occurred_at, actor_user_id)
-VALUES (UUID_TO_BIN(UUID(), 0), @ws, 'conformance.first', JSON_OBJECT('n', 1), NOW(3), @usr);
+VALUES (UUID_TO_BIN(UUID(), 0), @ws, 'conformance.first', JSON_OBJECT('n', 1), NOW(3), @usr); -- kindscan:undeclared
 SET @first_event := LAST_INSERT_ID();
 
 INSERT INTO events (public_id, workspace_id, type, payload_json, occurred_at, actor_user_id)
-VALUES (UUID_TO_BIN(UUID(), 0), @ws, 'conformance.second', JSON_OBJECT('n', 2), NOW(3), NULL);
+VALUES (UUID_TO_BIN(UUID(), 0), @ws, 'conformance.second', JSON_OBJECT('n', 2), NOW(3), NULL); -- kindscan:undeclared
 SET @second_event := LAST_INSERT_ID();
 
 -- Monotonic ids are the whole basis of `WHERE id > last_seen`. Without

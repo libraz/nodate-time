@@ -1,10 +1,13 @@
 package auth
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // StorableEmail reports whether an address fits the columns that hold it.
 //
-// users.email and oauth_allowed_emails.email are latin1 and documented as
+// users.email and oauth_signin_allowlist.entry_value are latin1 and documented as
 // ASCII only, so an address outside ASCII cannot be stored, cannot be
 // allow-listed, and cannot be matched against either. Passing one to the
 // database produces a charset error the caller reads as a server fault.
@@ -28,4 +31,12 @@ func StorableEmail(email string) bool {
 		}
 	}
 	return true
+}
+
+// NormalizeEmail is the form an address is stored and compared in: trimmed and
+// lower-cased, whichever application wrote it (sql/core/PROTOCOL.md, Identity
+// rule 6). Comparing any other form leans on a column collation that not every
+// column holding an address shares.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }

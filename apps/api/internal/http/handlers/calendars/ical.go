@@ -289,7 +289,11 @@ func loadExportEvents(
 
 		entry := exportEvent{event: e, startAt: e.StartAt.Time, endAt: e.EndAt.Time}
 		if !expand && e.RecurrenceRule != nil {
-			entry.rule = recurrence.ParseRule(*e.RecurrenceRule)
+			rule, err := recurrence.ParseRule(*e.RecurrenceRule)
+			if err != nil {
+				return nil, false, err
+			}
+			entry.rule = rule
 			entry.exceptions = recurrence.ParseExceptions(e.RecurrenceExceptions)
 		}
 		if !add(entry) {
@@ -1764,8 +1768,12 @@ func importSeriesHead(
 			return importedSeries{}, importSkipped, nil
 		}
 		ruleData = converted
+		rule, err := recurrence.ParseRule(*ruleData)
+		if err != nil {
+			return importedSeries{}, importFailed, nil
+		}
 		recEnd = sql.NullTime{
-			Time:  recurrence.ComputeEndInZone(recurrence.ParseRule(*ruleData), e.start, endAt, tz),
+			Time:  recurrence.ComputeEndInZone(rule, e.start, endAt, tz),
 			Valid: true,
 		}
 		// EXDATE says which occurrences the series does not have. Dropping it
@@ -1854,7 +1862,7 @@ func importSeriesHead(
 		CalendarID:  cal.ID,
 		ActorUserID: userID,
 		Type:        eventlog.TypeEventCreated,
-		Summary:     e.summary,
+		Title:       e.summary,
 		Subject:     pubID[:],
 		Extra:       map[string]any{"source": "ics-import"},
 	}); err != nil {
@@ -1885,8 +1893,12 @@ func importChangedOccurrence(
 	if !ok {
 		return outcome, nil
 	}
+	parentRule, err := recurrence.ParseRule(*parent.rule)
+	if err != nil {
+		return importFailed, nil
+	}
 	if parent.exceptions.Contains(e.recurrenceID) ||
-		!recurrence.OccursAt(recurrence.ParseRule(*parent.rule), parent.start, parent.end,
+		!recurrence.OccursAt(parentRule, parent.start, parent.end,
 			parent.timezone, e.recurrenceID) {
 		return importSkipped, nil
 	}
@@ -1944,7 +1956,7 @@ func importChangedOccurrence(
 		CalendarID:  cal.ID,
 		ActorUserID: userID,
 		Type:        eventlog.TypeEventUpdated,
-		Summary:     e.summary,
+		Title:       e.summary,
 		Subject:     parent.publicID,
 		Extra: map[string]any{
 			"scope":         "occurrence",

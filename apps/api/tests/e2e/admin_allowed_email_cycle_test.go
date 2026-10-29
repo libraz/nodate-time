@@ -15,11 +15,14 @@ import (
 // shows one id and deleting by the other reports it missing.
 func TestAllowedEmailCanBeWithdrawnReallowedAndDeleted(t *testing.T) {
 	bootstrap(t)
-	t.Parallel()
+	// A live allow-list row restricts sign-in for the whole instance, so this
+	// test runs in the serial phase, while parallel tests are still paused,
+	// and withdraws its row before it ends.
 
 	admin := helpers.NewTenant(t, testServerURL)
 	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
 	address := fmt.Sprintf("cycle-%d@example.com", time.Now().UnixNano())
+	t.Cleanup(func() { withdrawAllowedEmail(t, address) })
 
 	type allowed struct {
 		ID    string `json:"id"`

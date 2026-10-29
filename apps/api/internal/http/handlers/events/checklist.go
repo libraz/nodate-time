@@ -92,7 +92,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 				return err
 			}
 			if err := logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
-				eventlog.TypeChecklistAdded, in.Body.Title, pubID[:]); err != nil {
+				eventlog.TypeChecklistCreated, "itemId", in.Body.Title, pubID[:]); err != nil {
 				return err
 			}
 			item, err = q.GetChecklistItemByPublicID(ctx, pubID[:])
@@ -163,7 +163,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 				return err
 			}
 			if err := logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
-				eventlog.TypeChecklistSet, title, item.PublicID); err != nil {
+				eventlog.TypeChecklistUpdated, "itemId", title, item.PublicID); err != nil {
 				return err
 			}
 			updated, err = q.GetChecklistItemByPublicID(ctx, item.PublicID)
@@ -208,7 +208,7 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 				return apierrors.ChecklistItemNotFound
 			}
 			return logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
-				eventlog.TypeChecklistGone, item.Title, item.PublicID)
+				eventlog.TypeChecklistDeleted, "itemId", item.Title, item.PublicID)
 		}); err != nil {
 			return nil, toAPIError(err)
 		}

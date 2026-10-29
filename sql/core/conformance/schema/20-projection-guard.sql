@@ -22,9 +22,10 @@ CALL nf_conformance_expect_rejected(
   'clearing task_role while task_id remains set must be rejected');
 
 -- Obligation 1: a projected event cannot also be recurring. One row cannot
--- stand for both a single task date and an open-ended series.
+-- stand for both a single task date and an open-ended series. The rule is
+-- well-formed, so the refusal can only come from the guard.
 CALL nf_conformance_expect_rejected(
-  CONCAT('UPDATE calendar_events SET recurrence_rule = ''{"freq":"WEEKLY"}'' WHERE id = ',
+  CONCAT('UPDATE calendar_events SET recurrence_rule = ''{"freq":"weekly"}'' WHERE id = ',
          @projected_event),
   'giving a task-projected event a recurrence rule must be rejected');
 

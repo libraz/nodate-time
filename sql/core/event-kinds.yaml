@@ -1,0 +1,172 @@
+# Core event kinds — every `events.type` a writer may append for a change
+# to a core table. A product layer lists its own kinds in
+# sql/<layer>/event-kinds.yaml; the union of the registries present in a
+# deployment is the set conformance accepts for calendar.* and workspace.*.
+#
+# Fields:
+#   kind                   the dotted string written to events.type
+#   family                 the namespace a reader routes the kind by
+#   subject                table whose public_id the writer puts in
+#                          events.subject_public_id; empty means the column
+#                          stays NULL
+#   required_payload_keys  keys every writer includes in payload_json;
+#                          further keys are allowed and must be preserved
+#
+# Tools read the `- kind:` lines only, so keep one kind per entry and the
+# `kind` key first.
+
+kinds:
+  # Calendar lifecycle and display preferences.
+  - kind: calendar.created
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId]
+  - kind: calendar.updated
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId]
+  - kind: calendar.deleted
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId]
+  - kind: calendar.subscribed
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId]
+  - kind: calendar.subscription.updated
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId]
+
+  # Calendar membership. calendar.member.removed carries reason "left"
+  # when the member removed themselves.
+  - kind: calendar.member.added
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId, userId, role]
+  - kind: calendar.member.removed
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId, userId]
+  - kind: calendar.member.role_changed
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId, userId, newRole]
+  - kind: calendar.member.updated
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarId, userId]
+
+  # Calendar events.
+  - kind: calendar.event.created
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title]
+  - kind: calendar.event.updated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title]
+  - kind: calendar.event.deleted
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title]
+
+  # Details hanging off one calendar event. The subject is the event.
+  - kind: calendar.event.comment.created
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, commentId]
+  - kind: calendar.event.comment.updated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, commentId]
+  - kind: calendar.event.comment.deleted
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, commentId]
+  - kind: calendar.event.checklist.created
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, itemId]
+  - kind: calendar.event.checklist.updated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, itemId]
+  - kind: calendar.event.checklist.deleted
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, itemId]
+  - kind: calendar.event.attachment.created
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, attachmentId]
+  - kind: calendar.event.attachment.deleted
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, attachmentId]
+  - kind: calendar.event.attendee.added
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title]
+  - kind: calendar.event.attendee.removed
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, userId]
+  - kind: calendar.event.attendee.updated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, userId]
+  - kind: calendar.event.rsvp.updated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, rsvp]
+  - kind: calendar.event.invite.created
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, invitePublicId]
+  - kind: calendar.event.invite.rotated
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, invitePublicId]
+  - kind: calendar.event.invite.revoked
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title, invitePublicId]
+
+  # Calendar memos.
+  - kind: calendar.memo.created
+    family: calendar
+    subject: calendar_memos
+    required_payload_keys: [memoId, calendarId]
+  - kind: calendar.memo.updated
+    family: calendar
+    subject: calendar_memos
+    required_payload_keys: [memoId, calendarId]
+  - kind: calendar.memo.completed
+    family: calendar
+    subject: calendar_memos
+    required_payload_keys: [memoId, calendarId]
+  - kind: calendar.memo.deleted
+    family: calendar
+    subject: calendar_memos
+    required_payload_keys: [memoId, calendarId]
+
+  # Time-driven: one row per occurrence whose reminder window opened.
+  - kind: calendar.reminder
+    family: calendar
+    subject: ""
+    required_payload_keys: [calendarEventId, occurrenceStartAt]
+
+  # Workspace membership.
+  - kind: workspace.member.added
+    family: workspace.member
+    subject: ""
+    required_payload_keys: [userId, role]
+  - kind: workspace.member.removed
+    family: workspace.member
+    subject: ""
+    required_payload_keys: [userId]
+  - kind: workspace.member.role_changed
+    family: workspace.member
+    subject: ""
+    required_payload_keys: [userId, newRole]

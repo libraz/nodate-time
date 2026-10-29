@@ -32,9 +32,7 @@ func TestPasswordLoginAppliesTheSignInRestriction(t *testing.T) {
 	srv := newRestrictedOAuthServer(t, users.OAuthConfig{}, []string{"allowed.test"})
 	email := fmt.Sprintf("admission-%d@outside.test", time.Now().UnixNano())
 	const password = "correcthorsebattery"
-	_, err := testDB.Exec(
-		`INSERT INTO oauth_allowed_emails (public_id, email) VALUES (UUID_TO_BIN(UUID()), ?)`, email)
-	require.NoError(t, err)
+	allowSignInEmail(t, email)
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost, srv.URL+"/auth/register", "",
 		map[string]any{"name": "Admission", "email": email, "password": password})
@@ -43,8 +41,7 @@ func TestPasswordLoginAppliesTheSignInRestriction(t *testing.T) {
 		map[string]any{"email": email, "password": password})
 	require.Equal(t, http.StatusOK, status, "and signs in while listed: %s", string(raw))
 
-	_, err = testDB.Exec(`UPDATE oauth_allowed_emails SET enabled = FALSE WHERE email = ?`, email)
-	require.NoError(t, err)
+	withdrawAllowedEmail(t, email)
 
 	status, refused := helpers.DoJSONStatus(t, http.MethodPost, srv.URL+"/auth/login", "",
 		map[string]any{"email": email, "password": password})
@@ -114,29 +111,40 @@ func TestLINESignInIsRefusedUnderARestriction(t *testing.T) {
 	require.Zero(t, identities, "a refused sign-in must create no account")
 }
 
-// The bootstrap administrator signs in with Google on a deployment whose
-// domain restriction does not cover the administrator's own address: the
-// account the CLI wrote is admitted, links to the Google identity, and keeps
-// its rights.
-func TestBootstrapAdminSignsInOutsideTheAllowedDomains(t *testing.T) {
+// The bootstrap administrator signs in on a deployment whose domain
+// restriction does not cover the administrator's own address: the CLI put the
+// address on the allow-list, so the account is admitted and keeps its rights.
+//
+// A Google sign-in for the same address is admitted too, but it cannot link
+// onto this account: the CLI wrote a password and no confirmed address, and a
+// provider may not take over such an account (sql/core/PROTOCOL.md, Identity
+// rule 2). The refusal is the link rule's, not the allow-list's.
+func TestBootstrapAdminIsAdmittedOutsideTheAllowedDomains(t *testing.T) {
 	bootstrap(t)
 
 	seq := time.Now().UnixNano()
 	email := fmt.Sprintf("bootstrap-admin-%d@outside.test", seq)
-	out, code := runCreateUser(t, "-email", email, "-password", "correcthorsebattery", "-admin")
+	const password = "correcthorsebattery"
+	// createuser adds its address to the allow-list only when the deployment is
+	// already restricted; a live placeholder row makes it so.
+	allowSignInEmail(t, fmt.Sprintf("placeholder-%d@outside.test", seq))
+	t.Cleanup(func() { withdrawAllowedEmail(t, email) })
+	out, code := runCreateUser(t, "-email", email, "-password", password, "-admin")
 	require.Zero(t, code, "output: %s", out)
 
 	provider := fakeGoogle(t, fmt.Sprintf("google-admin-%d", seq), email)
 	srv := newRestrictedOAuthServer(t, googleConfig(provider.URL), []string{"allowed.test"})
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, srv.URL+"/auth/login", "",
+		map[string]any{"email": email, "password": password})
+	require.Equal(t, http.StatusOK, status, "the bootstrap admin must be admitted: %s", raw)
+	require.True(t, isInstanceAdmin(t, email))
+
 	state, cookie := startOAuth(t, srv.URL, "/")
 	resp := requestNoRedirect(t, http.MethodGet,
 		srv.URL+"/auth/oauth/google/callback?code=provider-code&state="+url.QueryEscape(state), cookie.String())
 	defer resp.Body.Close()
-
-	location := resp.Header.Get("Location")
-	require.True(t, strings.HasPrefix(location, helpers.TestWebURL+"/oauth-complete?redirect="),
-		"the bootstrap admin must be admitted: %s", location)
-	require.True(t, isInstanceAdmin(t, email))
+	require.Equal(t, helpers.TestWebURL+"/login?error=AUTH.LINK_REFUSED", resp.Header.Get("Location"))
 }
 
 // failingAllowListDB breaks the allow-list lookup and nothing else, so a
@@ -144,7 +152,7 @@ func TestBootstrapAdminSignsInOutsideTheAllowedDomains(t *testing.T) {
 type failingAllowListDB struct{ generated.DBTX }
 
 func (d failingAllowListDB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
-	if strings.Contains(q, "name: IsEmailAllowed") {
+	if strings.Contains(q, "name: CountEnabledOauthSigninAllowlistEntries") {
 		q = "SELECT 1 FROM allow_list_lookup_failure WHERE ? IS NOT NULL"
 	}
 	return d.DBTX.QueryRowContext(ctx, q, args...)
@@ -183,4 +191,15 @@ func TestOAuthAllowListFailureRedirectsToLogin(t *testing.T) {
 	cleared := firstCookie(resp, "oauth_state")
 	require.NotNil(t, cleared, "the state cookie must be cleared")
 	require.Negative(t, cleared.MaxAge)
+}
+
+// allowSignInEmail adds a live email row to the sign-in allowlist and withdraws
+// it when the test ends. A live row restricts the whole instance, so callers
+// must not run in parallel.
+func allowSignInEmail(t *testing.T, email string) {
+	t.Helper()
+	_, err := testDB.Exec(
+		`INSERT INTO oauth_signin_allowlist (public_id, entry_kind, entry_value) VALUES (UUID_TO_BIN(UUID()), 'email', ?)`, email)
+	require.NoError(t, err)
+	t.Cleanup(func() { withdrawAllowedEmail(t, email) })
 }

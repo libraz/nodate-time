@@ -216,7 +216,7 @@ func expireLock(t *testing.T, email string) {
 	require.NoError(t, err)
 }
 
-func TestLoginLocksAnIdentityAfterTenWrongPasswords(t *testing.T) {
+func TestLoginLocksAnIdentityAfterFiveWrongPasswords(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -224,7 +224,7 @@ func TestLoginLocksAnIdentityAfterTenWrongPasswords(t *testing.T) {
 	const password = "correcthorsebattery"
 	registerFor(t, email, password)
 
-	for i := range 9 {
+	for i := range lockoutGuesses - 1 {
 		status, _ := loginStatus(t, email, "definitely-not-it")
 		require.Equal(t, http.StatusUnauthorized, status, "guess %d", i+1)
 		_, locked := identityLockState(t, email)
@@ -234,8 +234,8 @@ func TestLoginLocksAnIdentityAfterTenWrongPasswords(t *testing.T) {
 	status, _ := loginStatus(t, email, "definitely-not-it")
 	require.Equal(t, http.StatusUnauthorized, status)
 	attempts, locked := identityLockState(t, email)
-	require.Equal(t, 10, attempts)
-	require.True(t, locked.Valid, "the tenth wrong password locks the identity")
+	require.Equal(t, lockoutGuesses, attempts)
+	require.True(t, locked.Valid, "the fifth wrong password locks the identity")
 
 	status, _ = loginStatus(t, email, password)
 	require.Equal(t, http.StatusUnauthorized, status,

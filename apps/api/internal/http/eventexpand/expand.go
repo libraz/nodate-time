@@ -193,8 +193,8 @@ func expand(
 	windowStart time.Time,
 	windowEnd time.Time,
 ) []Instance {
-	rule := recurrence.ParseRule(*event.RecurrenceRule)
-	if rule == nil {
+	rule, err := recurrence.ParseRule(*event.RecurrenceRule)
+	if err != nil || rule == nil {
 		return nil
 	}
 

@@ -39,7 +39,7 @@ func commentLogRows(t *testing.T, eventType, commentID string) int {
 	var n int
 	require.NoError(t, testDB.QueryRow(`
 		SELECT COUNT(*) FROM events
-		 WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.subject')) = ?`,
+		 WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.commentId')) = ?`,
 		eventType, commentID).Scan(&n))
 	return n
 }
@@ -74,7 +74,7 @@ func TestEditedAndRemovedCommentTextIsNotInHistoryOrActivity(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, "%s: %s", name, raw)
 		require.NotContains(t, string(raw), "door code", "%s still carries comment text", name)
 	}
-	require.Equal(t, 1, commentLogRows(t, "calendar.comment.removed", id), "the removal itself is still recorded")
+	require.Equal(t, 1, commentLogRows(t, "calendar.event.comment.deleted", id), "the removal itself is still recorded")
 }
 
 // The cursor names a position in the thread. The comment it was taken from
@@ -124,7 +124,7 @@ func TestConcurrentRemovalsOfOneCommentRecordOne(t *testing.T) {
 	statuses := concurrently(t, 6, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken)
 	require.Equal(t, 1, countStatus(statuses, http.StatusNoContent), "statuses %v", statuses)
 	require.Equal(t, len(statuses)-1, countStatus(statuses, http.StatusNotFound), "statuses %v", statuses)
-	require.Equal(t, 1, commentLogRows(t, "calendar.comment.removed", id))
+	require.Equal(t, 1, commentLogRows(t, "calendar.event.comment.deleted", id))
 }
 
 // An edit racing the removal of the same comment either lands before it or is
@@ -155,14 +155,14 @@ func TestAnEditRacingARemovalNeverLandsAfterIt(t *testing.T) {
 		require.NoError(t, testDB.QueryRow(`
 			SELECT COUNT(*) FROM events edited
 			  JOIN events removed
-			    ON JSON_UNQUOTE(JSON_EXTRACT(removed.payload_json, '$.subject')) = ?
-			   AND removed.type = 'calendar.comment.removed'
-			 WHERE edited.type = 'calendar.comment.edited'
-			   AND JSON_UNQUOTE(JSON_EXTRACT(edited.payload_json, '$.subject')) = ?
+			    ON JSON_UNQUOTE(JSON_EXTRACT(removed.payload_json, '$.commentId')) = ?
+			   AND removed.type = 'calendar.event.comment.deleted'
+			 WHERE edited.type = 'calendar.event.comment.updated'
+			   AND JSON_UNQUOTE(JSON_EXTRACT(edited.payload_json, '$.commentId')) = ?
 			   AND edited.id > removed.id`, id, id).Scan(&editedAfterRemoval))
 		require.Zero(t, editedAfterRemoval, "round %d: an edit was recorded after the removal", round)
 		if statuses[1] == http.StatusNotFound {
-			require.Zero(t, commentLogRows(t, "calendar.comment.edited", id), "round %d", round)
+			require.Zero(t, commentLogRows(t, "calendar.event.comment.updated", id), "round %d", round)
 		}
 	}
 }

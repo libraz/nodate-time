@@ -1,30 +1,36 @@
 package recurrence
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"time"
 )
 
-// Rule represents a recurrence pattern for calendar events. The bounds and
-// field combinations stated here are the ones Validate enforces; every field
-// of a rule that passes it changes what Expand produces.
+// Rule represents a recurrence pattern for calendar events, in the canonical
+// shape sql/core/PROTOCOL.md §Recurrence defines. The bounds and field
+// combinations stated here are the ones Validate enforces; every field of a
+// rule that passes it changes what Expand produces.
 type Rule struct {
 	Freq       string   `json:"freq"`                 // daily, weekly, monthly, yearly
-	Interval   int      `json:"interval"`             // repeat every N freq units (1-999; below 1 reads as 1)
-	ByDay      []string `json:"byDay,omitempty"`      // weekly: any of MO..SU (weeks start on Sunday: WKST=SU); monthly: exactly one, with bySetPos
-	ByMonthDay int      `json:"byMonthDay,omitempty"` // monthly only: 1-31, clamped to the month's last day
-	BySetPos   int      `json:"bySetPos,omitempty"`   // monthly only: Nth weekday of month (1-5), with one byDay
+	Interval   int      `json:"interval"`             // repeat every N freq units (1-999)
+	ByDay      []string `json:"byDay,omitempty"`      // weekly: set of MO..SU; monthly: exactly one, with bySetPos
+	ByMonthDay []int    `json:"byMonthDay,omitempty"` // monthly only: days 1-31, each clamped to the month's last day
+	BySetPos   []int    `json:"bySetPos,omitempty"`   // monthly only: one position (1-5 or -1) of byDay within the month
+	Wkst       string   `json:"wkst,omitempty"`       // week start, MO or SU; absent reads as MO. Matters for weekly with interval > 1
 	Until      *string  `json:"until,omitempty"`      // RFC 3339 instant, or a date meaning the end of that day in the event's zone; not with count
-	Count      int      `json:"count,omitempty"`      // max occurrences (1-1000; 0 means unbounded); not with until
+	Count      int      `json:"count,omitempty"`      // max occurrences, the first included (1-1000; 0 means unbounded); not with until
 }
 
 // ErrInvalidRule is a rule the expander would not honour as written.
 var ErrInvalidRule = errors.New("recurrence: invalid rule")
 
-// Validate reports whether every field of the rule is one Expand honours, and
-// whether the series it describes has at least one occurrence. eventStart is
-// the series' first occurrence, in the event's own location.
+// Validate reports whether every field of the rule is one Expand honours.
+// eventStart is the series' first occurrence, in the event's own location: it
+// is always occurrence #1, so the only series-level refusal is an until that
+// ends before it.
 func (r *Rule) Validate(eventStart time.Time) error {
 	switch r.Freq {
 	case "daily", "weekly", "monthly", "yearly":
@@ -34,7 +40,10 @@ func (r *Rule) Validate(eventStart time.Time) error {
 	if r.Interval < 1 || r.Interval > 999 || r.Count < 0 || r.Count > 1000 {
 		return ErrInvalidRule
 	}
-	if r.ByMonthDay < 0 || r.ByMonthDay > 31 || r.BySetPos < 0 || r.BySetPos > 5 {
+	if len(r.ByDay) > 7 || len(r.ByMonthDay) > 31 || len(r.BySetPos) > 1 {
+		return ErrInvalidRule
+	}
+	if hasRepeat(r.ByDay) || hasRepeat(r.ByMonthDay) {
 		return ErrInvalidRule
 	}
 	for _, d := range r.ByDay {
@@ -42,21 +51,34 @@ func (r *Rule) Validate(eventStart time.Time) error {
 			return ErrInvalidRule
 		}
 	}
+	for _, d := range r.ByMonthDay {
+		if d < 1 || d > 31 {
+			return ErrInvalidRule
+		}
+	}
+	for _, p := range r.BySetPos {
+		if p != -1 && (p < 1 || p > 5) {
+			return ErrInvalidRule
+		}
+	}
+	if r.Wkst != "" && r.Wkst != "MO" && r.Wkst != "SU" {
+		return ErrInvalidRule
+	}
+	if len(r.BySetPos) > 0 && len(r.ByDay) == 0 {
+		return ErrInvalidRule
+	}
 	switch r.Freq {
 	case "daily", "yearly":
-		if len(r.ByDay) > 0 || r.ByMonthDay != 0 || r.BySetPos != 0 {
+		if len(r.ByDay) > 0 || len(r.ByMonthDay) > 0 || len(r.BySetPos) > 0 {
 			return ErrInvalidRule
 		}
 	case "weekly":
-		if r.ByMonthDay != 0 || r.BySetPos != 0 {
+		if len(r.ByMonthDay) > 0 || len(r.BySetPos) > 0 {
 			return ErrInvalidRule
 		}
 	case "monthly":
-		// Either the Nth weekday (one byDay with bySetPos) or a day of the
-		// month; the iterator reads only the first byDay and ignores
-		// byMonthDay once bySetPos is set.
-		nth := r.BySetPos > 0 || len(r.ByDay) > 0
-		if nth && (r.BySetPos == 0 || len(r.ByDay) != 1 || r.ByMonthDay != 0) {
+		// Either the Nth weekday (one byDay with bySetPos) or days of the month.
+		if len(r.ByDay) > 0 && (len(r.BySetPos) == 0 || len(r.ByDay) != 1 || len(r.ByMonthDay) > 0) {
 			return ErrInvalidRule
 		}
 	}
@@ -65,36 +87,24 @@ func (r *Rule) Validate(eventStart time.Time) error {
 	if r.Count > 0 && r.Until != nil {
 		return ErrInvalidRule
 	}
-	first, ok := firstOccurrence(r, eventStart)
-	if !ok {
-		return ErrInvalidRule
-	}
 	if r.Until != nil {
 		until, ok := untilInstant(*r.Until, eventStart.Location())
-		if !ok || first.After(until) {
+		if !ok || eventStart.After(until) {
 			return ErrInvalidRule
 		}
 	}
 	return nil
 }
 
-// firstOccurrence is the first start Expand produces for the rule, which is
-// later than eventStart when the start itself is off the rule's grid.
-func firstOccurrence(rule *Rule, eventStart time.Time) (time.Time, bool) {
-	r := *rule
-	r.Count = 0
-	r.Until = nil
-	it := newIterator(&r, eventStart)
-	for scanned := 0; scanned < maxExpansionIterations; scanned++ {
-		t := it.next()
-		if t.IsZero() {
-			return time.Time{}, false
+func hasRepeat[T comparable](values []T) bool {
+	seen := make(map[T]bool, len(values))
+	for _, v := range values {
+		if seen[v] {
+			return true
 		}
-		if !t.Before(eventStart) {
-			return t, true
-		}
+		seen[v] = true
 	}
-	return time.Time{}, false
+	return false
 }
 
 // untilInstant reads an until as the last instant the series may start at.
@@ -127,19 +137,34 @@ type Occurrence struct {
 	EndAt   time.Time
 }
 
-// ParseRule parses a JSON recurrence rule. Returns nil if data is nil or null.
-func ParseRule(data json.RawMessage) *Rule {
+// ParseRule parses a JSON recurrence rule. It returns (nil, nil) if data is
+// empty or null, and an error for anything that is not a canonical rule
+// object: a key outside the grammar, a null value, a scalar where an array
+// belongs, or a type mismatch. An absent interval reads as 1; an interval
+// that is present is kept as written so Validate can refuse a bad one.
+func ParseRule(data json.RawMessage) (*Rule, error) {
 	if len(data) == 0 || string(data) == "null" {
-		return nil
+		return nil, nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return nil, fmt.Errorf("recurrence: rule is not an object: %w", err)
+	}
+	for key, value := range members {
+		if string(value) == "null" {
+			return nil, fmt.Errorf("recurrence: %s must not be null", key)
+		}
 	}
 	var r Rule
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&r); err != nil {
+		return nil, fmt.Errorf("recurrence: decode rule: %w", err)
 	}
-	if r.Interval < 1 {
+	if _, ok := members["interval"]; !ok {
 		r.Interval = 1
 	}
-	return &r
+	return &r, nil
 }
 
 // ComputeEnd calculates the effective end date for a recurrence rule,
@@ -285,16 +310,6 @@ func Expand(rule *Rule, eventStart, eventEnd, windowStart, windowEnd time.Time) 
 		if candidate.IsZero() {
 			break
 		}
-		// A series never begins before its own start. A rule naming a day the
-		// anchor is already past — byMonthDay 5 on a start of the 25th, or the
-		// first Monday of a month that began mid-month — walks the anchor's own
-		// month first, and that candidate is not an occurrence: emitting it
-		// invents an instance the user never scheduled and, worse, counts
-		// against a `count` limit so the real last occurrence is dropped.
-		if candidate.Before(eventStart) {
-			beforeWindow++
-			continue
-		}
 		occurrenceOrdinal++
 
 		// Check until boundary
@@ -366,56 +381,30 @@ func fastForward(rule *Rule, it *iterator, eventStart time.Time, duration time.D
 	// Nothing starting before this can reach the window, whatever a DST
 	// transition or an all-day span does to the duration.
 	horizon := windowStart.Add(-duration - 48*time.Hour)
-	if rule.Freq == "weekly" && len(rule.ByDay) > 0 {
-		fastForwardWeeklyByDay(it, horizon)
-	} else {
-		fastForwardSteps(it, horizon)
-	}
+	fastForwardPeriods(it, horizon)
 	return 0
 }
 
-// maxPeriodDays is the longest a step of each frequency can be, so a step
+// maxPeriodDays is the longest a period of each frequency can be, so a step
 // count estimated from it never overshoots.
 var maxPeriodDays = map[string]int{"weekly": 7, "monthly": 31, "yearly": 366}
 
-// fastForwardSteps skips the steps of a step-indexed iterator whose
-// candidates all start before horizon.
-func fastForwardSteps(it *iterator, horizon time.Time) {
-	period := maxPeriodDays[it.rule.Freq] * it.rule.Interval
-	if period <= 0 {
+// fastForwardPeriods skips the periods that lie wholly before horizon: the
+// iterator resumes at the last period whose start is not after it.
+func fastForwardPeriods(it *iterator, horizon time.Time) {
+	interval := it.interval()
+	span := maxPeriodDays[it.rule.Freq] * interval
+	if span <= 0 {
 		return
 	}
-	before := func(step int) bool {
-		probe := *it
-		probe.step = step
-		c := probe.next()
-		return !c.IsZero() && c.Before(horizon)
+	step := int(horizon.Sub(it.x.periodStart(0)).Hours()/24) / span
+	if step < 0 {
+		step = 0
 	}
-	step := int(horizon.Sub(it.start).Hours()/24) / period
-	for step > 0 && !before(step) {
-		step--
-	}
-	for before(step + 1) {
+	for !it.x.periodStart((step + 1) * interval).After(horizon) {
 		step++
 	}
 	it.step = step
-}
-
-// fastForwardWeeklyByDay moves a weekly byDay iterator to the end of the last
-// active week that lies wholly before horizon, so its next step lands on the
-// following active week exactly as walking there would.
-func fastForwardWeeklyByDay(it *iterator, horizon time.Time) {
-	weekStart := it.start.AddDate(0, 0, -int(it.start.Weekday()))
-	stride := 7 * it.rule.Interval
-	k := int(horizon.Sub(weekStart).Hours()/24) / stride
-	for k > 0 && weekStart.AddDate(0, 0, k*stride).After(horizon) {
-		k--
-	}
-	if k < 1 {
-		return
-	}
-	it.started = true
-	it.current = weekStart.AddDate(0, 0, (k-1)*stride+6)
 }
 
 func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Duration, windowStart time.Time) int {
@@ -453,183 +442,250 @@ func fastForwardInitialStep(rule *Rule, eventStart time.Time, duration time.Dura
 	return step
 }
 
+// iterator yields a rule's occurrences in order, one period of the rule's
+// frequency at a time. The start is always the first occurrence, whether or
+// not the rule would produce it.
 type iterator struct {
-	rule    *Rule
-	start   time.Time
-	current time.Time
-	step    int
-	started bool
+	rule *Rule
+	x    expansion
+	step int // index of the next period to read, in units of interval
+	buf  []time.Time
+	pos  int
 }
 
 func newIterator(rule *Rule, start time.Time) *iterator {
-	return &iterator{rule: rule, start: start, current: start, step: 0}
+	return &iterator{rule: rule, x: newExpansion(rule, start)}
 }
 
+func (it *iterator) interval() int {
+	if it.rule.Interval < 1 {
+		return 1
+	}
+	return it.rule.Interval
+}
+
+// next returns the next occurrence start, or the zero time when the rule
+// yields no more within the scan bound.
 func (it *iterator) next() time.Time {
-	for {
-		var candidate time.Time
-
-		switch it.rule.Freq {
-		case "daily":
-			candidate = it.start.AddDate(0, 0, it.step*it.rule.Interval)
-			it.step++
-
-		case "weekly":
-			if len(it.rule.ByDay) == 0 {
-				candidate = it.start.AddDate(0, 0, it.step*7*it.rule.Interval)
-				it.step++
-			} else {
-				candidate = it.nextWeeklyByDay()
-				if candidate.IsZero() {
-					return time.Time{}
-				}
-			}
-
-		case "monthly":
-			if it.rule.BySetPos > 0 && len(it.rule.ByDay) > 0 {
-				candidate = it.nextMonthlyBySetPos()
-			} else if it.rule.ByMonthDay > 0 {
-				candidate = it.nextMonthlyByDay()
-			} else {
-				candidate = it.nextMonthlyByDay()
-			}
-			if candidate.IsZero() {
-				return time.Time{}
-			}
-
-		case "yearly":
-			candidate = addYearsClamped(it.start, it.step*it.rule.Interval)
-			it.step++
-
-		default:
+	for empty := 0; it.pos >= len(it.buf); empty++ {
+		if empty >= maxExpansionIterations {
 			return time.Time{}
 		}
-
-		return candidate
+		candidates := it.x.period(it.step * it.interval())
+		if it.step == 0 {
+			// The start is occurrence #1 and counts toward count; the rule's
+			// own candidates in its first period only count if they follow it.
+			kept := []time.Time{it.x.anchor}
+			for _, c := range candidates {
+				if c.After(it.x.anchor) {
+					kept = append(kept, c)
+				}
+			}
+			candidates = kept
+		}
+		it.step++
+		it.buf, it.pos = candidates, 0
 	}
-}
-
-// addYearsClamped advances t by the given number of years, clamping the day to
-// the last day of the month so a Feb 29 anchor lands on Feb 28 in non-leap
-// years instead of rolling over to Mar 1 (mirrors the monthly clamping).
-func addYearsClamped(t time.Time, years int) time.Time {
-	year := t.Year() + years
-	day := t.Day()
-	lastDay := time.Date(year, t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
-	if day > lastDay {
-		day = lastDay
-	}
-	return time.Date(year, t.Month(), day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+	t := it.buf[it.pos]
+	it.pos++
+	return t
 }
 
 // weekdayByCode maps the two-letter day codes a rule carries onto weekdays.
-// It is fixed, so it is built once rather than per candidate: the iterators
-// below are called once for every date the expander steps through, and a
-// window of a year over a daily series steps through a few hundred.
 var weekdayByCode = map[string]time.Weekday{
 	"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday,
 	"WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday,
 }
 
-// nextWeeklyByDay iterates weekly byDay occurrences. The week starts on Sunday
-// (WKST=SU): with interval > 1, the skipped weeks are counted from each Sunday
-// boundary. This intentionally diverges from the RFC 5545 default of WKST=MO
-// and is part of the documented API contract for recurrence rules.
-func (it *iterator) nextWeeklyByDay() time.Time {
-	targetDays := make(map[time.Weekday]bool)
-	for _, d := range it.rule.ByDay {
-		if wd, ok := weekdayByCode[d]; ok {
-			targetDays[wd] = true
+// expansion is a rule resolved against its anchor: the weekday codes decoded
+// and the anchor's week located under wkst.
+type expansion struct {
+	freq       string
+	anchor     time.Time
+	byDay      []time.Weekday
+	byMonthDay []int
+	bySetPos   []int
+	// weekStart is local midnight on the first day of the anchor's week, the
+	// week counted from wkst (MO when absent).
+	weekStart time.Time
+}
+
+func newExpansion(r *Rule, anchor time.Time) expansion {
+	wkst := time.Monday
+	if r.Wkst == "SU" {
+		wkst = time.Sunday
+	}
+	var byDay []time.Weekday
+	for _, code := range r.ByDay {
+		if d, ok := weekdayByCode[code]; ok {
+			byDay = append(byDay, d)
 		}
 	}
-	if len(targetDays) == 0 {
-		return time.Time{}
+	back := (int(anchor.Weekday()) - int(wkst) + 7) % 7
+	y, m, d := anchor.Date()
+	return expansion{
+		freq:       r.Freq,
+		anchor:     anchor,
+		byDay:      byDay,
+		byMonthDay: r.ByMonthDay,
+		bySetPos:   r.BySetPos,
+		weekStart:  time.Date(y, m, d-back, 0, 0, 0, 0, anchor.Location()),
 	}
+}
 
-	if !it.started {
-		it.started = true
-		it.current = it.start
-		if targetDays[it.current.Weekday()] {
-			return it.current
-		}
+// period holds the occurrences of the period `offset` freq-units after the
+// anchor's, in order. Every occurrence is computed from the anchor, never
+// from the previous one, so each clamps independently: Jan 31, Feb 28,
+// Mar 31 rather than a series pinned to the 28th.
+func (x expansion) period(offset int) []time.Time {
+	switch {
+	case x.freq == "weekly" && len(x.byDay) > 0:
+		return x.weekPeriod(offset)
+	case x.freq == "monthly" && (len(x.byMonthDay) > 0 || len(x.byDay) > 0):
+		return x.monthPeriod(offset)
 	}
+	return []time.Time{x.stepFromAnchor(offset)}
+}
 
-	// Find the week start (Sunday) of the current position
-	for i := 0; i < 1000; i++ {
-		it.current = it.current.AddDate(0, 0, 1)
+// periodStart is the earliest instant the period `offset` units after the
+// anchor's can hold, and increases with offset.
+func (x expansion) periodStart(offset int) time.Time {
+	switch {
+	case x.freq == "weekly" && len(x.byDay) > 0:
+		y, m, d := x.weekStart.Date()
+		return time.Date(y, m, d+offset*7, 0, 0, 0, 0, x.weekStart.Location())
+	case x.freq == "monthly" && (len(x.byMonthDay) > 0 || len(x.byDay) > 0):
+		year, month := monthAt(x.anchor, offset)
+		return time.Date(year, month, 1, 0, 0, 0, 0, x.anchor.Location())
+	}
+	return x.stepFromAnchor(offset)
+}
 
-		// When we cross into a new week (Sunday), apply the interval
-		if it.current.Weekday() == time.Sunday {
-			if it.rule.Interval > 1 {
-				it.current = it.current.AddDate(0, 0, (it.rule.Interval-1)*7)
+func (x expansion) stepFromAnchor(offset int) time.Time {
+	switch x.freq {
+	case "daily":
+		return addDaysWallClock(x.anchor, offset)
+	case "weekly":
+		return addDaysWallClock(x.anchor, offset*7)
+	case "monthly":
+		return addMonthsClamped(x.anchor, offset)
+	}
+	return addMonthsClamped(x.anchor, offset*12)
+}
+
+// weekPeriod holds the listed weekdays of the week `offset` weeks after the
+// anchor's, in the order wkst puts them.
+func (x expansion) weekPeriod(offset int) []time.Time {
+	y, m, d := x.weekStart.Date()
+	var out []time.Time
+	for i := range 7 {
+		day := atAnchorClock(x.anchor, y, m, d+offset*7+i)
+		for _, wd := range x.byDay {
+			if day.Weekday() == wd {
+				out = append(out, day)
+				break
 			}
 		}
+	}
+	return out
+}
 
-		if targetDays[it.current.Weekday()] {
-			return it.current
+// monthPeriod holds the days of the month `offset` months after the anchor's
+// that the rule selects. A byMonthDay the month does not have is clamped to
+// its last day; a bySetPos position it does not have selects nothing.
+func (x expansion) monthPeriod(offset int) []time.Time {
+	year, month := monthAt(x.anchor, offset)
+	last := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+
+	var days []int
+	if len(x.byMonthDay) > 0 {
+		seen := map[int]bool{}
+		for _, md := range x.byMonthDay {
+			day := min(md, last)
+			if !seen[day] {
+				seen[day] = true
+				days = append(days, day)
+			}
+		}
+		sort.Ints(days)
+	} else {
+		for day := 1; day <= last; day++ {
+			days = append(days, day)
 		}
 	}
-	return time.Time{}
-}
-
-func (it *iterator) nextMonthlyByDay() time.Time {
-	day := it.rule.ByMonthDay
-	if day == 0 {
-		day = it.start.Day()
-	}
-
-	base := it.start
-	candidate := time.Date(base.Year(), base.Month(), 1, base.Hour(), base.Minute(), base.Second(), 0, base.Location())
-	candidate = candidate.AddDate(0, it.step*it.rule.Interval, 0)
-	it.step++
-
-	// Clamp to last day of month
-	lastDay := time.Date(candidate.Year(), candidate.Month()+1, 0, 0, 0, 0, 0, candidate.Location()).Day()
-	d := day
-	if d > lastDay {
-		d = lastDay
-	}
-	return time.Date(candidate.Year(), candidate.Month(), d, base.Hour(), base.Minute(), base.Second(), 0, base.Location())
-}
-
-func (it *iterator) nextMonthlyBySetPos() time.Time {
-	targetDay, ok := weekdayByCode[it.rule.ByDay[0]]
-	if !ok {
-		return time.Time{}
-	}
-
-	base := it.start
-	for skipped := 0; skipped < maxExpansionIterations; skipped++ {
-		monthStart := time.Date(base.Year(), base.Month(), 1, base.Hour(), base.Minute(), base.Second(), 0, base.Location())
-		monthStart = monthStart.AddDate(0, it.step*it.rule.Interval, 0)
-		it.step++
-
-		candidate := nthWeekdayOfMonth(monthStart.Year(), monthStart.Month(), targetDay, it.rule.BySetPos, base.Location(), base.Hour(), base.Minute(), base.Second())
-		if !candidate.IsZero() {
-			return candidate
+	if len(x.byDay) > 0 {
+		kept := days[:0:0]
+		for _, day := range days {
+			wd := time.Date(year, month, day, 0, 0, 0, 0, time.UTC).Weekday()
+			for _, want := range x.byDay {
+				if wd == want {
+					kept = append(kept, day)
+					break
+				}
+			}
 		}
+		days = kept
 	}
-	return time.Time{}
+	if len(x.bySetPos) > 0 {
+		days = selectPosition(days, x.bySetPos[0])
+	}
+
+	out := make([]time.Time, 0, len(days))
+	for _, day := range days {
+		out = append(out, atAnchorClock(x.anchor, year, month, day))
+	}
+	return out
 }
 
-func nthWeekdayOfMonth(year int, month time.Month, weekday time.Weekday, n int, loc *time.Location, hour, min, sec int) time.Time {
-	first := time.Date(year, month, 1, hour, min, sec, 0, loc)
-	// Find the first occurrence of the target weekday
-	offset := int(weekday) - int(first.Weekday())
-	if offset < 0 {
-		offset += 7
+// selectPosition picks the 1-based position from the start of set, or from
+// its end when negative. A position the set does not reach selects nothing.
+func selectPosition(set []int, pos int) []int {
+	i := pos - 1
+	if pos < 0 {
+		i = len(set) + pos
 	}
-	firstOccurrence := first.AddDate(0, 0, offset)
-
-	// Get the Nth occurrence
-	result := firstOccurrence.AddDate(0, 0, (n-1)*7)
-
-	// Verify it's still in the same month
-	if result.Month() != month {
-		return time.Time{}
+	if i < 0 || i >= len(set) {
+		return nil
 	}
-	return result
+	return []int{set[i]}
 }
+
+// monthAt is the calendar month `offset` months after t's.
+func monthAt(t time.Time, offset int) (int, time.Month) {
+	total := int(t.Month()) - 1 + offset
+	return t.Year() + floorDiv(total, 12), time.Month(floorMod(total, 12) + 1)
+}
+
+// atAnchorClock is the given local day at the anchor's wall-clock time.
+func atAnchorClock(anchor time.Time, year int, month time.Month, day int) time.Time {
+	return time.Date(year, month, day, anchor.Hour(), anchor.Minute(), anchor.Second(), anchor.Nanosecond(), anchor.Location())
+}
+
+// addDaysWallClock advances the wall clock by whole days in the event's own
+// location, so a 09:00 meeting stays at 09:00 across a DST change.
+func addDaysWallClock(t time.Time, days int) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d+days, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
+// addMonthsClamped advances by whole months, clamping the day to the length
+// of the target month. AddDate would roll Jan 31 plus one month over to
+// Mar 3 and skip February.
+func addMonthsClamped(t time.Time, months int) time.Time {
+	year, month := monthAt(t, months)
+	d := min(t.Day(), time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day())
+	return time.Date(year, month, d, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
+func floorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+func floorMod(a, b int) int { return a - floorDiv(a, b)*b }
 
 // computeNthOccurrence returns the start of the nth occurrence; callers add the
 // event duration to obtain the series end boundary.
@@ -639,20 +695,12 @@ func computeNthOccurrence(rule *Rule, start time.Time, n int) time.Time {
 	r.Count = 0
 	r.Until = nil
 	it := newIterator(&r, start)
-	found := 0
-	for scanned := 0; found < n && scanned < maxExpansionIterations; scanned++ {
+	for found := 0; found < n; found++ {
 		t := it.next()
 		if t.IsZero() {
 			break
 		}
-		// Skip the same pre-start candidates Expand skips, or the boundary
-		// this computes lands one occurrence short of where the series
-		// actually ends and range queries stop returning it.
-		if t.Before(start) {
-			continue
-		}
 		last = t
-		found++
 	}
 	return last
 }

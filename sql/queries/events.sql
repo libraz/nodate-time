@@ -8,8 +8,8 @@
 -- Nothing updates or deletes a row. A correction is a new row.
 
 -- name: AppendEvent :execresult
-INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, type, payload_json, occurred_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, subject_public_id, type, payload_json, occurred_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
 -- id alone: id is strictly monotonic in insertion order, so it already
@@ -58,10 +58,10 @@ WHERE workspace_id = ? AND calendar_id = ? AND public_id = ?;
 -- records of who changed what eventually disagree, and then neither can be
 -- trusted.
 --
--- Matched on subject_public_id, the stored generated column that lifts the
--- subject out of payload_json. Reading the JSON directly is not indexable,
--- so the same question used to scan every row the calendar had ever
--- produced -- and LIMIT applies after the scan, not to it.
+-- Matched on subject_public_id, the column the writer fills with the public id
+-- of the entity a kind is about (the registries' subject). Reading the JSON
+-- directly is not indexable, so the same question would scan every row the
+-- calendar had ever produced -- and LIMIT applies after the scan, not to it.
 -- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,

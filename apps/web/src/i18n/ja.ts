@@ -540,6 +540,10 @@ export const ja = {
     'このメールアドレスでは登録できません。管理者にお問い合わせください',
   'apiError.AUTH.ADMIN_REQUIRED': '管理者権限が必要です',
   'apiError.AUTH.SESSION_NOT_FOUND': '対象のセッションが見つかりません',
+  'apiError.AUTH.MFA_REQUIRED':
+    'このアカウントは二要素認証が有効です。このアプリでは二要素認証に対応していないため、ログインできません',
+  'apiError.AUTH.LINK_REFUSED':
+    'このメールアドレスは既存のアカウントで使われており、自動では連携できません',
   'apiError.SECRETS.UNAVAILABLE': 'サーバの暗号鍵が設定されていないため、この操作は実行できません',
   'apiError.CALENDAR.NOT_FOUND': 'カレンダーが見つかりません',
   'apiError.CALENDAR.ACCESS_DENIED': 'このカレンダーにアクセスする権限がありません',
@@ -549,6 +553,8 @@ export const ja = {
   'apiError.EVENT.NOT_ATTENDEE': 'この予定の参加者ではありません',
   'apiError.EVENT.STALE': '開いている間に他の人がこの予定を変更しました。読み込み直してください',
   'apiError.EVENT.NOTIFICATION_OFFSET_INVALID': 'この通知タイミングには対応していません',
+  'apiError.EVENT.TASK_OWNED':
+    'この予定はタスクから作られています。タイトルや日時などはタスク側で変更してください',
   'apiError.COMMENT.NOT_FOUND': 'コメントが見つかりません',
   'apiError.COMMENT.ACCESS_DENIED': '編集できるのは自分のコメントだけです',
   'apiError.CHECKLIST.NOT_FOUND': 'チェックリストの項目が見つかりません',

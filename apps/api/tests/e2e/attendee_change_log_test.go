@@ -4,21 +4,28 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
 )
 
 // attendeeLogRows counts the attendee changes recorded for one person on one
-// event.
+// event: an answer is rsvp.updated, an edit grant attendee.updated. Both read
+// the same payload keys, the registry's eventId and userId.
 func attendeeLogRows(t *testing.T, eventID, userID string) int {
+	t.Helper()
+	return attendeeLogRowsOfKind(t, eventID, userID, eventlog.TypeRSVPUpdated, eventlog.TypeAttendeeUpdated)
+}
+
+func attendeeLogRowsOfKind(t *testing.T, eventID, userID string, kinds ...string) int {
 	t.Helper()
 	var n int
 	require.NoError(t, testDB.QueryRow(`
 		SELECT COUNT(*) FROM events
-		 WHERE type = 'calendar.attendee.updated'
-		   AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.event')) = ?
-		   AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.user')) = ?`,
-		eventID, userID).Scan(&n))
+		 WHERE type IN (?, ?)
+		   AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.eventId')) = ?
+		   AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.userId')) = ?`,
+		kinds[0], kinds[len(kinds)-1], eventID, userID).Scan(&n))
 	return n
 }
 
@@ -52,7 +59,8 @@ func TestAttendeeGrantAndAnswerAreRecordedAndReported(t *testing.T) {
 		map[string]any{"canEdit": true}, nil)
 	afterGrant := etagOf()
 	require.NotEqual(t, before, afterGrant, "the grant gives the event a new revision")
-	require.Equal(t, 1, attendeeLogRows(t, evt.ID, guest.UserID), "the grant is recorded")
+	require.Equal(t, 1, attendeeLogRowsOfKind(t, evt.ID, guest.UserID, eventlog.TypeAttendeeUpdated),
+		"the grant is recorded as an attendee change")
 
 	var answer struct {
 		Rsvp    string `json:"rsvp"`
@@ -62,7 +70,9 @@ func TestAttendeeGrantAndAnswerAreRecordedAndReported(t *testing.T) {
 	require.Equal(t, "accepted", answer.Rsvp)
 	require.True(t, answer.CanEdit, "the answer reports the grant the attendee holds")
 	require.NotEqual(t, afterGrant, etagOf(), "the answer gives the event a new revision")
-	require.Equal(t, 2, attendeeLogRows(t, evt.ID, guest.UserID), "the answer is recorded")
+	require.Equal(t, 1, attendeeLogRowsOfKind(t, evt.ID, guest.UserID, eventlog.TypeRSVPUpdated),
+		"the answer is recorded as an rsvp change")
+	require.Equal(t, 2, attendeeLogRows(t, evt.ID, guest.UserID))
 }
 
 // A grant racing the attendee's removal from the event either lands before

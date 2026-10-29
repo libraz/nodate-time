@@ -22,8 +22,8 @@ const abandonedUploadAge = 7 * 24 * time.Hour
 
 // retiredAttachmentRetention is how long a soft-deleted attachment row is kept
 // after the event or calendar it belonged to went away. The row carries the
-// filename and uploader the activity history reads, and it pins the blob
-// through a RESTRICT foreign key, so this is also the delay before the bytes
+// filename and uploader the activity history reads, and it holds its reference
+// on the blob until it is removed, so this is also the delay before the bytes
 // can be reclaimed.
 const retiredAttachmentRetention = 30 * 24 * time.Hour
 
@@ -33,6 +33,12 @@ const avatarUploadListBatchSize = 500
 
 // storageSweepBatchSize bounds one pass over unreferenced blobs.
 const storageSweepBatchSize = 500
+
+// reservationTTL is how long an object may sit unconfirmed before the
+// unconfirmed sweep reclaims it: the 15-minute upload URL plus room for a
+// transfer in flight, at the 45-minute floor PROTOCOL.md section Storage sets
+// so no product's sweep takes another's upload in progress.
+const reservationTTL = 45 * time.Minute
 
 // tokenSweepBatchSize bounds one DELETE over a table of expiring credentials.
 // These tables grow with traffic rather than with content -- every sign-in
@@ -53,6 +59,11 @@ type DB interface {
 
 // Run starts a goroutine that periodically deletes expired tokens.
 // It returns immediately and runs until ctx is canceled.
+//
+// Blobs are removed only once the configured bucket matches the one the
+// database records (blobref.LocationAllowsRemoval, decided once per process).
+// On a mismatch the removal queue is left alone and the error logged on every
+// tick; the row sweeps still run, since they only queue keys.
 func Run(ctx context.Context, db DB, storageClient *storage.Client, interval time.Duration) {
 	if interval <= 0 {
 		interval = 15 * time.Minute
@@ -63,15 +74,25 @@ func Run(ctx context.Context, db DB, storageClient *storage.Client, interval tim
 		// The cursor outlives the tick so the backfill resumes past rows it
 		// could not process instead of re-reading them first every time.
 		var albumCursor uint32
+		drain := func(ctx context.Context, q *generated.Queries) bool {
+			if storageClient == nil {
+				return false
+			}
+			if err := blobref.LocationAllowsRemoval(ctx, q, storageClient.Location()); err != nil {
+				slog.Error("cleanup: storage location check failed; blob removal stopped", "error", err)
+				return false
+			}
+			return true
+		}
 		// Run once on startup so a long-running process eventually cleans up
 		// even if it is restarted before the first tick.
-		runOnce(ctx, db, storageClient, &albumCursor)
+		runOnce(ctx, db, storageClient, &albumCursor, drain)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runOnce(ctx, db, storageClient, &albumCursor)
+				runOnce(ctx, db, storageClient, &albumCursor, drain)
 			}
 		}
 	}()
@@ -79,13 +100,14 @@ func Run(ctx context.Context, db DB, storageClient *storage.Client, interval tim
 
 // RunOnce performs a single cleanup pass. Run calls it on a ticker; it is
 // exported so a test can drive one pass and observe what it collected instead
-// of waiting on a timer.
+// of waiting on a timer. The caller vouches for storageClient's bucket: the
+// pass drains the removal queue without checking the recorded location.
 func RunOnce(ctx context.Context, db DB, storageClient *storage.Client) {
 	var albumCursor uint32
-	runOnce(ctx, db, storageClient, &albumCursor)
+	runOnce(ctx, db, storageClient, &albumCursor, func(context.Context, *generated.Queries) bool { return true })
 }
 
-func runOnce(ctx context.Context, db DB, storageClient *storage.Client, albumCursor *uint32) {
+func runOnce(ctx context.Context, db DB, storageClient *storage.Client, albumCursor *uint32, drain func(context.Context, *generated.Queries) bool) {
 	q := generated.New(db)
 	now := time.Now()
 	drainExpired(ctx, "expired password resets", func(ctx context.Context) (sql.Result, error) {
@@ -116,8 +138,15 @@ func runOnce(ctx context.Context, db DB, storageClient *storage.Client, albumCur
 		})
 	})
 	cleanupAbandonedUploads(ctx, db, q, storageClient, now.Add(-abandonedUploadAge))
+	// Reservations go before the backfill: a photo is left unattached while a
+	// reservation of its digest waits at another key, and reclaiming that
+	// reservation is what lets the backfill attach it.
+	sweepUnconfirmedObjects(ctx, db, q, storageClient, now.Add(-reservationTTL))
 	backfillAlbumPhotoObjects(ctx, db, q, storageClient, albumCursor)
-	sweepUnreferencedObjects(ctx, q, storageClient, now.Add(-abandonedUploadAge))
+	sweepUnreferencedObjects(ctx, db, q, storageClient)
+	if drain(ctx, q) {
+		drainBlobRemovals(ctx, q, storageClient)
+	}
 }
 
 // drainExpired runs a bounded DELETE until it comes back short, which is what
@@ -146,11 +175,11 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 		return
 	}
 
-	// An attachment reservation never took a reference on its blob -- the
-	// reference is taken when the upload is confirmed. So dropping the row
-	// is all that happens here; the blob it pointed at falls to ref_count
-	// zero and the object sweep below collects it along with every other
-	// unreferenced one.
+	// An attachment reservation holds a reference on its object from the
+	// moment it is created, so dropping it gives the reference back in the
+	// same transaction. The object itself is left to the sweeps below: an
+	// unconfirmed one to the unconfirmed sweep, a confirmed one nothing else
+	// holds to the unreferenced sweep.
 	//
 	// The cursor is what keeps a row the delete cannot remove from heading
 	// every page: without it the sweep re-reads the same failing rows until
@@ -168,27 +197,38 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 		}
 		for _, row := range rows {
 			attachmentCursor = row.ID
-			if err := q.DeleteAbandonedAttachment(ctx, row.ID); err != nil {
+			if err := dbtx.Run(ctx, db, func(tq *generated.Queries) error {
+				res, err := tq.DeleteAbandonedAttachment(ctx, row.ID)
+				if err != nil {
+					return err
+				}
+				if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+					return err
+				}
+				if err := blobref.Release(ctx, tq, row.StorageObjectID); err != nil {
+					return err
+				}
+				// A reservation may have uploaded its own copy of the bytes to a
+				// key only it names. The row is gone, so nothing else can reach
+				// them.
+				return blobref.QueueRemoval(ctx, tq, attachmentUploadKey(row.WorkspacePublicID, row.PublicID))
+			}); err != nil {
 				slog.Warn("cleanup: delete abandoned attachment failed", "id", row.ID, "error", err)
-				continue
 			}
-			// A reservation may have uploaded its own copy of the bytes to a key
-			// only it names. The row is gone, so nothing else can reach them.
-			deleteUnclaimedKey(ctx, q, storageClient, attachmentUploadKey(row.WorkspacePublicID, row.PublicID))
 		}
 		if len(rows) < storageSweepBatchSize {
 			break
 		}
 	}
 
-	// Attachment rows retired with their event or calendar released their
-	// reference then, but the row itself still pins the object. Removing it
-	// once the history no longer needs it is what lets the object sweep below
-	// actually reclaim the bytes.
+	// Attachment rows retired with their event or calendar keep their
+	// reference for as long as they exist. Removing one once the history no
+	// longer needs it gives the reference back, which is what lets the
+	// unreferenced sweep below reclaim the bytes.
 	var retiredCursor uint32
 	retiredBefore := olderThan.Add(abandonedUploadAge).Add(-retiredAttachmentRetention)
 	for range maxBatches {
-		ids, err := q.ListRetiredAttachments(ctx, generated.ListRetiredAttachmentsParams{
+		rows, err := q.ListRetiredAttachments(ctx, generated.ListRetiredAttachmentsParams{
 			UpdatedAt: sql.NullTime{Time: retiredBefore, Valid: true},
 			ID:        retiredCursor,
 			Limit:     storageSweepBatchSize,
@@ -197,22 +237,28 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 			slog.Warn("cleanup: list retired attachments failed", "error", err)
 			break
 		}
-		for _, id := range ids {
-			retiredCursor = id
-			if err := q.DeleteRetiredAttachment(ctx, id); err != nil {
-				slog.Warn("cleanup: delete retired attachment failed", "id", id, "error", err)
+		for _, row := range rows {
+			retiredCursor = row.ID
+			if err := dbtx.Run(ctx, db, func(tq *generated.Queries) error {
+				res, err := tq.DeleteRetiredAttachment(ctx, row.ID)
+				if err != nil {
+					return err
+				}
+				if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+					return err
+				}
+				return blobref.Release(ctx, tq, row.StorageObjectID)
+			}); err != nil {
+				slog.Warn("cleanup: delete retired attachment failed", "id", row.ID, "error", err)
 			}
 		}
-		if len(ids) < storageSweepBatchSize {
+		if len(rows) < storageSweepBatchSize {
 			break
 		}
 	}
 
 	// Album photos that went out of use -- an upload that never landed, a photo
-	// the user deleted, or one that went with its calendar. The row is dropped
-	// first and the bytes only after, the same order the object sweep uses: a
-	// key can be claimed by a storage object that other photos resolve
-	// through, and taking the bytes out from under it would blank theirs.
+	// the user deleted, or one that went with its calendar.
 	var photoCursor uint32
 	for range maxBatches {
 		photos, err := q.ListAbandonedAlbumPhotoStorageKeys(ctx, generated.ListAbandonedAlbumPhotoStorageKeysParams{
@@ -239,54 +285,34 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 			// rendering. Releasing only the first would leave the thumbnail's
 			// object at a count nothing will ever give back, pinning bytes no
 			// row can reach.
-			var reclaimed []string
-			removed := false
 			err := dbtx.Run(ctx, db, func(tq *generated.Queries) error {
 				res, err := tq.DeleteAbandonedAlbumPhoto(ctx, photo.ID)
 				if err != nil {
 					return err
 				}
-				if affected, err := res.RowsAffected(); err != nil || affected == 0 {
+				if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
 					return err
 				}
-				removed = true
 				for _, id := range []sql.NullInt32{photo.StorageObjectID, photo.ThumbnailObjectID} {
 					if !id.Valid {
 						continue
 					}
-					key, err := releaseStorageObject(ctx, tq, uint32(id.Int32))
-					if err != nil {
+					if err := releaseStorageObject(ctx, tq, uint32(id.Int32)); err != nil {
 						return err
 					}
-					if key != "" {
-						reclaimed = append(reclaimed, key)
-					}
 				}
-				return nil
+				// The photo's own keys are queued too. The drainer leaves a key
+				// a confirmed object still claims, which covers the second copy
+				// of bytes that deduplicated onto another photo's object: the
+				// row was shared, the bytes were not.
+				if photo.StorageKey == "" {
+					return nil
+				}
+				return blobref.QueueRemoval(ctx, tq, photo.StorageKey, albumblob.ThumbnailKey(photo.StorageKey))
 			})
 			if err != nil {
 				slog.Warn("cleanup: delete abandoned album photo failed", "id", photo.ID, "error", err)
-				continue
 			}
-			if !removed {
-				continue
-			}
-			// Bytes go only after the rows that named them are committed away.
-			for _, key := range reclaimed {
-				if err := storageClient.DeleteObject(ctx, key); err != nil {
-					slog.Warn("cleanup: delete released object failed", "key", key, "error", err)
-				}
-			}
-			// The photo's own keys are still checked, and still only deleted
-			// when no object claims them. That covers a photo the backfill never
-			// reached, a thumbnail whose upload was never confirmed onto an
-			// object, and the second copy of bytes that deduplicated onto
-			// another photo's object: the row shared, the bytes did not.
-			if photo.StorageKey == "" {
-				continue
-			}
-			deleteUnclaimedKey(ctx, q, storageClient, photo.StorageKey)
-			deleteUnclaimedKey(ctx, q, storageClient, albumblob.ThumbnailKey(photo.StorageKey))
 		}
 		if len(photos) < storageSweepBatchSize {
 			break
@@ -294,11 +320,9 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 	}
 
 	// ListExpiredAvatarUploads caps each call at avatarUploadListBatchSize rows;
-	// loop until a short batch confirms the backlog is drained, rather than
-	// leaving anything beyond the first page for expensive objects (their
-	// 7-day storage) to sit around until the next tick. maxBatches bounds one
-	// cleanup run in case rows are somehow never removed (e.g. a persistent
-	// delete failure), so this cannot spin forever.
+	// loop until a short batch confirms the backlog is drained. maxBatches
+	// bounds one cleanup run in case rows are somehow never removed (e.g. a
+	// persistent delete failure), so this cannot spin forever.
 	expiresBefore := olderThan.Add(abandonedUploadAge)
 	var avatarCursor uint32
 	for range maxBatches {
@@ -312,30 +336,25 @@ func cleanupAbandonedUploads(ctx context.Context, db DB, q *generated.Queries, s
 		}
 		for _, upload := range expiredUploads {
 			avatarCursor = upload.ID
-			res, err := q.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
-				ID:        upload.ID,
-				ExpiresAt: expiresBefore,
-			})
-			if err != nil {
-				slog.Warn("cleanup: delete expired avatar upload failed", "id", upload.ID, "error", err)
-				continue
-			}
-			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
-				continue
-			}
 			// The key is derived from the user and the digest of the bytes, so
 			// a second upload of the same picture reserves the same key as the
-			// confirmed avatar already on display. Abandoning that second
-			// reservation must not take the first one's bytes with it, which is
-			// what deleting the blob unconditionally used to do.
-			if used, err := q.CountStorageObjectsByKey(ctx, upload.StorageKey); err != nil {
-				slog.Warn("cleanup: count objects for avatar key failed", "key", upload.StorageKey, "error", err)
-				continue
-			} else if used > 0 {
-				continue
-			}
-			if err := storageClient.DeleteObject(ctx, upload.StorageKey); err != nil {
-				slog.Warn("cleanup: delete abandoned avatar object failed", "key", upload.StorageKey, "error", err)
+			// confirmed avatar already on display. The drainer leaves a key a
+			// confirmed object claims, so abandoning that second reservation
+			// does not take the first one's bytes with it.
+			if err := dbtx.Run(ctx, db, func(tq *generated.Queries) error {
+				res, err := tq.DeleteExpiredAvatarUpload(ctx, generated.DeleteExpiredAvatarUploadParams{
+					ID:        upload.ID,
+					ExpiresAt: expiresBefore,
+				})
+				if err != nil {
+					return err
+				}
+				if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+					return err
+				}
+				return blobref.QueueRemoval(ctx, tq, upload.StorageKey)
+			}); err != nil {
+				slog.Warn("cleanup: delete expired avatar upload failed", "id", upload.ID, "error", err)
 			}
 		}
 		if len(expiredUploads) < avatarUploadListBatchSize {
@@ -358,61 +377,40 @@ func publicIDString(b []byte) string {
 	return u.String()
 }
 
-// deleteUnclaimedKey removes bytes that no storage object names.
-//
-// The check is what separates a key from the bytes at it: the same picture
-// uploaded twice is one object, whose key belongs to whichever photo stored it
-// first, so a photo going away can leave a key another row is still resolving
-// through. Deleting unconditionally would blank that one.
-func deleteUnclaimedKey(ctx context.Context, q *generated.Queries, storageClient *storage.Client, key string) {
-	used, err := q.CountStorageObjectsByKey(ctx, key)
-	if err != nil {
-		slog.Warn("cleanup: count objects for key failed", "key", key, "error", err)
-		return
-	}
-	if used > 0 {
-		return
-	}
-	if err := storageClient.DeleteObject(ctx, key); err != nil {
-		slog.Warn("cleanup: delete unclaimed object failed", "key", key, "error", err)
-	}
-}
-
 // releaseStorageObject gives back one reference and, if it was the last one,
-// removes the object's row in the same transaction. It returns the key whose
-// bytes the caller deletes once that transaction commits, or "" when the
-// object is still held.
+// removes the object's row and queues its blob in the same transaction.
 //
-// Waiting for sweepUnreferencedObjects instead would put the bytes behind its
-// age gate, which is counted from when the object row was created -- so a
-// photo deleted today would wait out the album's own retention and then that
-// gate again. The gate is there to protect an object between being reserved
-// and being confirmed; one whose last referring row was just deleted is not
-// in that state, and DeleteUnreferencedStorageObject re-checks every column
-// that can point at an object before removing anything.
-func releaseStorageObject(ctx context.Context, q *generated.Queries, objectID uint32) (string, error) {
+// Waiting for sweepUnreferencedObjects instead would leave the row to the next
+// pass for no reason: DeleteUnreferencedStorageObject re-checks every column
+// that can point at an object before removing anything. A RESTRICT refusal
+// means a layer this product does not own still holds the object, and it
+// stays.
+func releaseStorageObject(ctx context.Context, q *generated.Queries, objectID uint32) error {
 	if err := blobref.Release(ctx, q, objectID); err != nil {
-		return "", err
+		return err
 	}
 	object, err := q.GetStorageObjectByID(ctx, objectID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Already collected, so there is no key left to act on.
-			return "", nil
+			return nil
 		}
-		return "", err
+		return err
 	}
 	res, err := q.DeleteUnreferencedStorageObject(ctx, objectID)
+	if blobref.IsForeignKeyRestrict(err) {
+		return nil
+	}
 	if err != nil {
-		return "", err
+		return err
 	}
 	// Anything else still holding it -- another photo, an attachment, a
 	// reference taken since the count was read -- and the row stays, which is
 	// what keeps the blob under it.
-	if changed, err := blobref.ChangedOne(res); err != nil || !changed {
-		return "", err
+	if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+		return err
 	}
-	return object.StorageKey, nil
+	return blobref.QueueRemoval(ctx, q, object.StorageKey)
 }
 
 // albumBackfillBatchSize and albumBackfillBatches bound one tick of the
@@ -489,49 +487,182 @@ func backfillAlbumPhotoObjects(ctx context.Context, db DB, q *generated.Queries,
 	}
 }
 
-// sweepUnreferencedObjects removes blobs nothing points at any more.
+// candidate is one object a sweep listed for reclaiming.
+type candidate struct {
+	id  uint32
+	key string
+}
+
+// pageByID hands every listed candidate to reclaim, a page at a time in id
+// order, until a page comes back short. Each page starts after the last id
+// seen, whatever reclaim did with it: an object that refuses to go -- one
+// another layer still holds, a delete that failed -- would otherwise head a
+// page read from the start every time, and the sweep would spend its whole
+// budget on it without reaching the backlog behind.
+func pageByID(ctx context.Context, what string, list func(afterID uint32) ([]candidate, error), reclaim func(candidate)) {
+	var cursor uint32
+	for range maxBatches {
+		page, err := list(cursor)
+		if err != nil {
+			slog.Warn("cleanup: list "+what+" failed", "error", err)
+			return
+		}
+		for _, c := range page {
+			if ctx.Err() != nil {
+				return
+			}
+			cursor = c.id
+			reclaim(c)
+		}
+		if len(page) < storageSweepBatchSize {
+			return
+		}
+	}
+}
+
+// logReclaim reports what a reclaim transaction ended with. A RESTRICT refusal
+// is a layer this product does not own still holding the object: skipped, not
+// a failure of the pass.
+func logReclaim(what string, id uint32, err error) {
+	switch {
+	case err == nil, errors.Is(err, errNoLongerCollectable):
+	case blobref.IsForeignKeyRestrict(err):
+		slog.Debug("cleanup: "+what+" still referenced from another layer; skipped", "id", id)
+	default:
+		slog.Warn("cleanup: reclaim "+what+" failed", "id", id, "error", err)
+	}
+}
+
+// errNoLongerCollectable rolls back a reclaim whose object stopped matching
+// the predicate that listed it.
+var errNoLongerCollectable = errors.New("cleanup: object no longer collectable")
+
+// sweepUnconfirmedObjects reclaims reservations whose upload never arrived, in
+// any layer: the reservations this product owns go with the object in one
+// transaction, and the object's key and their upload keys are queued for
+// removal.
 //
-// The age cutoff is what makes this safe against a reservation in flight:
-// a freshly created object legitimately sits at ref_count zero between
-// being reserved and being confirmed, and deleting it in that window would
-// break an upload that was about to succeed.
-func sweepUnreferencedObjects(ctx context.Context, q *generated.Queries, storageClient *storage.Client, olderThan time.Time) {
+// The cutoff is at least the 45 minutes PROTOCOL.md section Storage sets, so
+// an upload URL another product handed out for the row has expired.
+func sweepUnconfirmedObjects(ctx context.Context, db DB, q *generated.Queries, storageClient *storage.Client, olderThan time.Time) {
 	if storageClient == nil {
 		return
 	}
-	// Objects are walked by id. An object an attachment row still points at
-	// cannot be deleted (the foreign key is RESTRICT), and re-reading from the
-	// head would put that same object at the front of every page.
+	list := func(afterID uint32) ([]candidate, error) {
+		rows, err := q.ListUnconfirmedStorageObjects(ctx, generated.ListUnconfirmedStorageObjectsParams{
+			Cutoff:  sql.NullTime{Time: olderThan, Valid: true},
+			AfterID: afterID,
+			Limit:   storageSweepBatchSize,
+		})
+		out := make([]candidate, len(rows))
+		for i, r := range rows {
+			out[i] = candidate{id: r.ID, key: r.StorageKey}
+		}
+		return out, err
+	}
+	pageByID(ctx, "unconfirmed storage objects", list, func(obj candidate) {
+		logReclaim("unconfirmed storage object", obj.id, dbtx.Run(ctx, db, func(tq *generated.Queries) error {
+			reservations, err := tq.ListReservationsOfObject(ctx, obj.id)
+			if err != nil {
+				return err
+			}
+			if err := tq.DeleteReservationsOfObject(ctx, obj.id); err != nil {
+				return err
+			}
+			res, err := tq.DeleteUnconfirmedStorageObject(ctx, obj.id)
+			if err != nil {
+				return err
+			}
+			// A confirm landed since the listing: roll the reservations back.
+			if deleted, err := blobref.ChangedOne(res); err != nil {
+				return err
+			} else if !deleted {
+				return errNoLongerCollectable
+			}
+			keys := []string{obj.key}
+			for _, r := range reservations {
+				keys = append(keys, attachmentUploadKey(r.WorkspacePublicID, r.PublicID))
+			}
+			return blobref.QueueRemoval(ctx, tq, keys...)
+		}))
+	})
+}
+
+// sweepUnreferencedObjects removes confirmed objects nothing points at any
+// more, and queues their blobs. No age condition is needed: the view lists
+// confirmed objects only, so a reservation in flight is never taken here.
+//
+// The delete re-checks through the view, so an object that gained a referrer
+// since it was listed is left alone.
+func sweepUnreferencedObjects(ctx context.Context, db DB, q *generated.Queries, storageClient *storage.Client) {
+	if storageClient == nil {
+		return
+	}
+	list := func(afterID uint32) ([]candidate, error) {
+		rows, err := q.ListUnreferencedStorageObjects(ctx, generated.ListUnreferencedStorageObjectsParams{
+			ID:    afterID,
+			Limit: storageSweepBatchSize,
+		})
+		out := make([]candidate, len(rows))
+		for i, r := range rows {
+			out[i] = candidate{id: r.ID, key: r.StorageKey}
+		}
+		return out, err
+	}
+	pageByID(ctx, "unreferenced storage objects", list, func(obj candidate) {
+		logReclaim("unreferenced storage object", obj.id, dbtx.Run(ctx, db, func(tq *generated.Queries) error {
+			res, err := tq.DeleteStorageObject(ctx, obj.id)
+			if err != nil {
+				return err
+			}
+			if deleted, err := blobref.ChangedOne(res); err != nil || !deleted {
+				return err
+			}
+			return blobref.QueueRemoval(ctx, tq, obj.key)
+		}))
+	})
+}
+
+// drainBlobRemovals removes the blobs queued in storage_blob_removals: the
+// blob first, the queue row second, so a failed removal is retried on the
+// next pass. Removing a key that is already gone is not an error. A key a
+// confirmed object claims again since it was queued is dropped without
+// touching the blob.
+//
+// Both products drain the same queue, which is safe only while they write to
+// the same bucket; Run checks that before letting this run.
+func drainBlobRemovals(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
+	if storageClient == nil {
+		return
+	}
 	var cursor uint32
 	for range maxBatches {
-		objects, err := q.ListUnreferencedStorageObjects(ctx, generated.ListUnreferencedStorageObjectsParams{
-			CreatedAt: olderThan,
-			ID:        cursor,
-			Limit:     storageSweepBatchSize,
+		rows, err := q.ListStorageBlobRemovals(ctx, generated.ListStorageBlobRemovalsParams{
+			ID:    cursor,
+			Limit: storageSweepBatchSize,
 		})
 		if err != nil {
-			slog.Warn("cleanup: list unreferenced storage objects failed", "error", err)
+			slog.Warn("cleanup: list queued blob removals failed", "error", err)
 			return
 		}
-		for _, obj := range objects {
-			cursor = obj.ID
-			// Drop the row first. DeleteStorageObject re-checks ref_count = 0,
-			// so an object that gained a reference since it was listed reports
-			// no affected rows and its blob is left alone. Deleting the blob
-			// first would leave that winner pointing at nothing.
-			res, err := q.DeleteStorageObject(ctx, obj.ID)
+		for _, row := range rows {
+			cursor = row.ID
+			claimed, err := q.CountConfirmedStorageObjectsByKey(ctx, row.StorageKey)
 			if err != nil {
-				slog.Warn("cleanup: delete storage object row failed", "id", obj.ID, "error", err)
+				slog.Warn("cleanup: count objects for queued key failed", "key", row.StorageKey, "error", err)
 				continue
 			}
-			if affected, err := res.RowsAffected(); err != nil || affected == 0 {
-				continue
+			if claimed == 0 {
+				if err := storageClient.DeleteObject(ctx, row.StorageKey); err != nil {
+					slog.Warn("cleanup: queued blob removal failed; kept for retry", "key", row.StorageKey, "error", err)
+					continue
+				}
 			}
-			if err := storageClient.DeleteObject(ctx, obj.StorageKey); err != nil {
-				slog.Warn("cleanup: delete unreferenced object failed", "key", obj.StorageKey, "error", err)
+			if err := q.DeleteStorageBlobRemoval(ctx, row.ID); err != nil {
+				slog.Warn("cleanup: drop queued blob removal failed", "id", row.ID, "error", err)
 			}
 		}
-		if len(objects) < storageSweepBatchSize {
+		if len(rows) < storageSweepBatchSize {
 			return
 		}
 	}

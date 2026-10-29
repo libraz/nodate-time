@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"bytes"
+	"database/sql"
+	"errors"
 	"image"
 	"image/png"
 	"net/http"
@@ -290,14 +292,23 @@ func TestAvatarReplaceServesTheNewImageAndReleasesTheOld(t *testing.T) {
 	assert.Equal(t, second, helpers.FetchURL(t, me.AvatarURL), "the account must serve the new picture")
 
 	// And the old object is nobody's now, which is what makes it collectable.
-	assert.Equal(t, 0, storageObjectRefCount(t, firstKey), "replacing an avatar must release the old object")
+	// A sweep running alongside may already have taken it: a confirmed object
+	// nothing points at needs no age to be collected.
 	assert.Equal(t, 1, storageObjectRefCount(t, secondKey))
 
 	// Its bytes stay put until the sweep judges them; dropping them here would
-	// break every other account holding the same picture.
+	// break every other account holding the same picture. So bytes that are
+	// gone mean the sweep took the row first.
 	if testStorageClient := getTestStorage(); testStorageClient != nil {
 		_, exists, err := testStorageClient.StatObject(testCtx(), firstKey)
 		require.NoError(t, err)
+		var oldRefs int
+		err = testDB.QueryRow("SELECT ref_count FROM storage_objects WHERE storage_key = ?", firstKey).Scan(&oldRefs)
+		if errors.Is(err, sql.ErrNoRows) {
+			return
+		}
+		require.NoError(t, err)
+		assert.Equal(t, 0, oldRefs, "replacing an avatar must release the old object")
 		assert.True(t, exists, "the released blob is the sweep's to collect, not the handler's")
 	}
 }

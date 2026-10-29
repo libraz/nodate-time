@@ -100,10 +100,10 @@ fi
 
 # build-schema.sh writes to stdout; sql/schema.sql is the committed result of
 # redirecting it. Comparing the two costs nothing and needs no generator.
-if ! diff -u "$ROOT_DIR/sql/schema.sql" <(bash "$ROOT_DIR/sql/build-schema.sh") >/dev/null; then
+if ! diff -u "$ROOT_DIR/sql/schema.sql" <(bash "$ROOT_DIR/sql/core/tools/build-schema.sh" core time) >/dev/null; then
   echo "sql/schema.sql is out of date with sql/core/ and sql/time/."
   echo ""
-  diff -u "$ROOT_DIR/sql/schema.sql" <(bash "$ROOT_DIR/sql/build-schema.sh") | head -n 40 || true
+  diff -u "$ROOT_DIR/sql/schema.sql" <(bash "$ROOT_DIR/sql/core/tools/build-schema.sh" core time) | head -n 40 || true
   echo ""
   echo "Rebuild it alongside the change that moved the layers:"
   echo "  make db-schema"
@@ -287,11 +287,9 @@ ALLOWED = {
 
     # This deployment is single-tenant: the workspace is resolved once at
     # startup by slug, and every handler carries the id it got. Reading a
-    # workspace by id, or checking workspace membership, are the shapes a
-    # multi-tenant writer on this schema needs; neither has a question to
-    # answer here.
+    # workspace by id is the shape a multi-tenant writer on this schema
+    # needs; it has no question to answer here.
     "GetWorkspaceByID",
-    "GetWorkspaceMember",
 
     # The tail side of the append-only log, which another process on this
     # database reads. This application is the writer; the query is here

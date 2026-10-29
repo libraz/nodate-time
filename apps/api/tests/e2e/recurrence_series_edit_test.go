@@ -208,12 +208,16 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
 
 		after := listApril(calURL)
-		require.Len(t, after, 4, "Thursdays 9, 16, 23 and 30: %+v", after)
-		for _, e := range after {
+		require.Len(t, after, 5, "the start (Friday 3), then Thursdays 9, 16, 23 and 30: %+v", after)
+		for i, e := range after {
 			require.NotEqual(t, "edited", e.Title, "an edit of a Friday no longer stands for any occurrence")
 			start, err := time.Parse(time.RFC3339, e.StartAt)
 			require.NoError(t, err)
-			require.Equal(t, time.Thursday, start.Add(9*time.Hour).Weekday(), "%s", e.StartAt)
+			want := time.Thursday
+			if i == 0 {
+				want = time.Friday // the event's start is always its first occurrence
+			}
+			require.Equal(t, want, start.Add(9*time.Hour).Weekday(), "%s", e.StartAt)
 		}
 
 		// Back to Fridays: the dropped edit and cancellation stay dropped

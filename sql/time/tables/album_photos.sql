@@ -18,6 +18,8 @@ CREATE TABLE album_photos (
   width INT UNSIGNED NULL COMMENT 'Pixel width when known',
   height INT UNSIGNED NULL COMMENT 'Pixel height when known',
   storage_key VARCHAR(1000) NOT NULL COMMENT 'Object key in the blob store',
+  storage_object_id INT UNSIGNED NULL COMMENT 'Internal FK to storage_objects.id. NULL until the photo is backfilled; reads fall back to storage_key while it is.',
+  thumbnail_object_id INT UNSIGNED NULL COMMENT 'Internal FK to storage_objects.id for the grid-sized rendering. NULL when the photo has none; reads fall back to the photo itself.',
   taken_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT 'EXIF capture time, falling back to upload time; the album orders by this rather than by upload order',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
@@ -38,5 +40,9 @@ CREATE TABLE album_photos (
   CONSTRAINT fk_album_photos_uploader FOREIGN KEY (uploaded_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
   -- SET NULL: deleting the event a photo was attached to must not delete
   -- the photo. The album outlives the occasion.
-  CONSTRAINT fk_album_photos_event FOREIGN KEY (calendar_event_id) REFERENCES calendar_events(id) ON DELETE SET NULL
+  CONSTRAINT fk_album_photos_event FOREIGN KEY (calendar_event_id) REFERENCES calendar_events(id) ON DELETE SET NULL,
+  -- RESTRICT: an object a photo still points at must not be deleted out from
+  -- under it.
+  CONSTRAINT fk_album_photos_storage_object FOREIGN KEY (storage_object_id) REFERENCES storage_objects(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_album_photos_thumbnail_object FOREIGN KEY (thumbnail_object_id) REFERENCES storage_objects(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Shared calendar photo album';

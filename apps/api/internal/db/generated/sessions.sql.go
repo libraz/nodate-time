@@ -13,8 +13,8 @@ import (
 
 const createSession = `-- name: CreateSession :execresult
 
-INSERT INTO sessions (public_id, user_id, refresh_hash, user_agent, ip_address, expires_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO sessions (public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at)
+VALUES (?, ?, 'time', ?, ?, ?, ?)
 `
 
 type CreateSessionParams struct {
@@ -28,6 +28,11 @@ type CreateSessionParams struct {
 
 // Refresh-token sessions. Only the hash is stored, so a database read
 // cannot yield a usable token.
+//
+// The table is shared with every other application on the database. This
+// one writes 'time' to audience as a literal and refreshes, looks up and
+// purges only those rows; revoking all of a user's sessions ignores the
+// audience (sql/core/PROTOCOL.md, Identity rule 5).
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createSession,
 		arg.PublicID,
@@ -40,7 +45,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (s
 }
 
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execresult
-DELETE FROM sessions WHERE expires_at < ? ORDER BY expires_at LIMIT ?
+DELETE FROM sessions WHERE audience = 'time' AND expires_at < ? ORDER BY expires_at LIMIT ?
 `
 
 type DeleteExpiredSessionsParams struct {
@@ -62,8 +67,9 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSe
 }
 
 const getLiveSession = `-- name: GetLiveSession :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+SELECT id, public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, rotated_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
 WHERE sessions.public_id = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
@@ -88,26 +94,28 @@ func (q *Queries) GetLiveSession(ctx context.Context, publicID []byte) (Session,
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
+		&i.Audience,
 		&i.RefreshHash,
 		&i.UserAgent,
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.RotatedFromHash,
+		&i.RotatedAt,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+SELECT id, public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, rotated_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
 WHERE sessions.refresh_hash = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
@@ -121,26 +129,28 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash strin
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
+		&i.Audience,
 		&i.RefreshHash,
 		&i.UserAgent,
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.RotatedFromHash,
+		&i.RotatedAt,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const getSessionByRotatedFromHash = `-- name: GetSessionByRotatedFromHash :one
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
+SELECT id, public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, rotated_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
 WHERE rotated_from_hash = ?
+  AND audience = 'time'
   AND revoked_at IS NULL
   AND enabled = TRUE
 `
@@ -155,26 +165,27 @@ func (q *Queries) GetSessionByRotatedFromHash(ctx context.Context, rotatedFromHa
 		&i.ID,
 		&i.PublicID,
 		&i.UserID,
+		&i.Audience,
 		&i.RefreshHash,
 		&i.UserAgent,
 		&i.IpAddress,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.RotatedFromHash,
+		&i.RotatedAt,
 		&i.LastUsedAt,
 		&i.SortWeight,
 		&i.Notes,
 		&i.Enabled,
 		&i.UpdatedAt,
 		&i.CreatedAt,
-		&i.RotatedAt,
 	)
 	return i, err
 }
 
 const listSessionsForUser = `-- name: ListSessionsForUser :many
-SELECT id, public_id, user_id, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, last_used_at, sort_weight, notes, enabled, updated_at, created_at, rotated_at FROM sessions
-WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)
+SELECT id, public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, rotated_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
+WHERE user_id = ? AND audience = 'time' AND revoked_at IS NULL AND expires_at > NOW(3)
 ORDER BY created_at DESC
 `
 
@@ -191,19 +202,20 @@ func (q *Queries) ListSessionsForUser(ctx context.Context, userID uint32) ([]Ses
 			&i.ID,
 			&i.PublicID,
 			&i.UserID,
+			&i.Audience,
 			&i.RefreshHash,
 			&i.UserAgent,
 			&i.IpAddress,
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.RotatedFromHash,
+			&i.RotatedAt,
 			&i.LastUsedAt,
 			&i.SortWeight,
 			&i.Notes,
 			&i.Enabled,
 			&i.UpdatedAt,
 			&i.CreatedAt,
-			&i.RotatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -224,7 +236,8 @@ UPDATE sessions SET revoked_at = NOW(3) WHERE user_id = ? AND revoked_at IS NULL
 
 // RevokeAllUserSessions is what a password change calls. Replacing the
 // credential has to invalidate every session opened with the old one, or
-// whoever knew it keeps their access.
+// whoever knew it keeps their access -- including the sessions another
+// application opened, so this one alone ignores the audience.
 func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID uint32) error {
 	_, err := q.db.ExecContext(ctx, revokeAllUserSessions, userID)
 	return err
@@ -269,7 +282,7 @@ func (q *Queries) RevokeSession(ctx context.Context, id uint32) error {
 
 const revokeSessionByPublicID = `-- name: RevokeSessionByPublicID :execresult
 UPDATE sessions SET revoked_at = NOW(3)
-WHERE public_id = ? AND user_id = ? AND revoked_at IS NULL
+WHERE public_id = ? AND user_id = ? AND audience = 'time' AND revoked_at IS NULL
 `
 
 type RevokeSessionByPublicIDParams struct {
@@ -292,10 +305,15 @@ SET rotated_from_hash = refresh_hash,
     rotated_at = NOW(3),
     last_used_at = NOW(3)
 WHERE sessions.refresh_hash = ?
+  AND sessions.audience = 'time'
   AND sessions.revoked_at IS NULL
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
   AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
+  AND NOT EXISTS (
+    SELECT 1 FROM identities i
+    WHERE i.user_id = sessions.user_id AND i.provider = 'local'
+      AND i.enabled = TRUE AND i.mfa_confirmed_at IS NOT NULL)
 `
 
 type RotateSessionByHashParams struct {
@@ -316,7 +334,9 @@ type RotateSessionByHashParams struct {
 // refresh_hash is overwritten.
 //
 // A disabled user's session matches nothing, as in GetLiveSession, so it
-// cannot be kept alive by refreshing.
+// cannot be kept alive by refreshing. Nor does the session of a user whose
+// local identity has confirmed a second factor: this application cannot ask
+// for one, so a factor enrolled elsewhere ends its sessions here.
 func (q *Queries) RotateSessionByHash(ctx context.Context, arg RotateSessionByHashParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, rotateSessionByHash, arg.RefreshHash, arg.ExpiresAt, arg.RefreshHash_2)
 }

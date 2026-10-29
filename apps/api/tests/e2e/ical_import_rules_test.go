@@ -41,10 +41,10 @@ func TestImportRefusesAnExdateFlood(t *testing.T) {
 	require.Zero(t, report.Imported)
 }
 
-// Without WKST a rule's weeks start on Monday. A biweekly weekend rule then
-// pairs Saturday with the following Sunday, which the expander cannot do, so
-// it is skipped rather than imported on other dates.
-func TestImportSkipsARuleThatNeedsAMondayWeekStart(t *testing.T) {
+// Without WKST a rule's weeks start on Monday, and a biweekly weekend rule then
+// pairs Saturday with the following Sunday. Both week starts are stored, so
+// each rule imports and keeps the week start it was written with.
+func TestImportKeepsTheWeekStartOfABiweeklyWeekendRule(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -59,8 +59,8 @@ func TestImportSkipsARuleThatNeedsAMondayWeekStart(t *testing.T) {
 		"DTSTART:20260110T090000Z", "DTEND:20260110T100000Z",
 		"RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU;WKST=SU", "END:VEVENT",
 	))
-	require.Equal(t, 1, report.Skipped, "the rule without WKST")
-	require.Equal(t, 1, report.Imported, "the same rule with WKST=SU")
+	require.Zero(t, report.Skipped)
+	require.Equal(t, 2, report.Imported, "the rule without WKST (Monday) and the one with WKST=SU")
 }
 
 // DURATION is the other way to say how long an event is.

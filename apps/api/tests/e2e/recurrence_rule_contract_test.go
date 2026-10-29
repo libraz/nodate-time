@@ -23,11 +23,11 @@ func TestRulesTheExpanderWouldNotHonourAreRefused(t *testing.T) {
 
 	refused := map[string]map[string]any{
 		"daily with byDay":                {"freq": "daily", "interval": 1, "byDay": []string{"MO"}},
-		"yearly with byMonthDay":          {"freq": "yearly", "interval": 1, "byMonthDay": 3},
-		"weekly with bySetPos":            {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "bySetPos": 2},
-		"monthly bySetPos without byDay":  {"freq": "monthly", "interval": 1, "bySetPos": 2},
-		"monthly bySetPos with two days":  {"freq": "monthly", "interval": 1, "byDay": []string{"MO", "FR"}, "bySetPos": 2},
-		"monthly bySetPos and byMonthDay": {"freq": "monthly", "interval": 1, "byDay": []string{"FR"}, "bySetPos": 1, "byMonthDay": 3},
+		"yearly with byMonthDay":          {"freq": "yearly", "interval": 1, "byMonthDay": []int{3}},
+		"weekly with bySetPos":            {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "bySetPos": []int{2}},
+		"monthly bySetPos without byDay":  {"freq": "monthly", "interval": 1, "bySetPos": []int{2}},
+		"monthly bySetPos with two days":  {"freq": "monthly", "interval": 1, "byDay": []string{"MO", "FR"}, "bySetPos": []int{2}},
+		"monthly bySetPos and byMonthDay": {"freq": "monthly", "interval": 1, "byDay": []string{"FR"}, "bySetPos": []int{1}, "byMonthDay": []int{3}},
 		"until the day before the start":  {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "until": "2026-04-02"},
 		"until earlier the same day":      {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "until": "2026-04-03T14:00:00+09:00"},
 	}

@@ -60,6 +60,14 @@ var (
 	AuthAdminRequired    = &Spec{Status: 403, Code: "AUTH.ADMIN_REQUIRED", Message: "Admin privileges required"}
 	AuthSessionNotFound  = &Spec{Status: 404, Code: "AUTH.SESSION_NOT_FOUND", Message: "Session not found"}
 	SecretsUnavailable   = &Spec{Status: 503, Code: "SECRETS.UNAVAILABLE", Message: "Secret encryption is not configured (set TC_SECRETS_KEY)"}
+	// AuthMFARequired refuses a sign-in for an account that has confirmed a
+	// second factor. This product has no way to ask for one, and letting the
+	// password alone through would defeat the factor the account chose.
+	AuthMFARequired = &Spec{Status: 403, Code: "AUTH.MFA_REQUIRED", Message: "This account requires a second factor that this app cannot verify"}
+	// AuthLinkRefused refuses attaching an external identity to an existing
+	// account by email alone, when that would let whoever controls the external
+	// account take over one whose owner never proved the address.
+	AuthLinkRefused = &Spec{Status: 409, Code: "AUTH.LINK_REFUSED", Message: "This email address belongs to an existing account that cannot be linked automatically"}
 )
 
 // --- Calendar errors ---
@@ -87,6 +95,10 @@ var (
 	// the clients can display, rather than storing one the event modal would
 	// read back as no reminder at all.
 	EventNotificationOffsetInvalid = &Spec{Status: 400, Code: "EVENT.NOTIFICATION_OFFSET_INVALID", Message: "Notification offset must be 0, 5, 10, 15, 30, 60, 120, 1440, or 2880 minutes"}
+	// EventTaskOwned refuses a change to the synced columns of an event that a
+	// task projects onto the calendar: the task owns them, and an edit made
+	// here would be overwritten on the next sync.
+	EventTaskOwned = &Spec{Status: 409, Code: "EVENT.TASK_OWNED", Message: "This event is managed by a task; change it there"}
 )
 
 // --- Comment errors ---

@@ -75,7 +75,12 @@ func (q *Queries) CountCalendarOwnersForUpdate(ctx context.Context, calendarID u
 
 const getCalendarMember = `-- name: GetCalendarMember :one
 SELECT id, public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM calendar_members
-WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE
+WHERE calendar_members.calendar_id = ? AND calendar_members.user_id = ?
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
 `
 
 type GetCalendarMemberParams struct {
@@ -83,6 +88,10 @@ type GetCalendarMemberParams struct {
 	UserID     uint32 `json:"userId"`
 }
 
+// GetCalendarMember is the access check. A grant counts only while the
+// member still belongs to the calendar's workspace: removing someone from the
+// workspace is done elsewhere and must end their calendar access here too
+// (sql/core/PROTOCOL.md, Identity rule 8).
 func (q *Queries) GetCalendarMember(ctx context.Context, arg GetCalendarMemberParams) (CalendarMember, error) {
 	row := q.db.QueryRowContext(ctx, getCalendarMember, arg.CalendarID, arg.UserID)
 	var i CalendarMember
@@ -106,7 +115,13 @@ func (q *Queries) GetCalendarMember(ctx context.Context, arg GetCalendarMemberPa
 
 const getCalendarMemberForUpdate = `-- name: GetCalendarMemberForUpdate :one
 SELECT id, public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM calendar_members
-WHERE calendar_id = ? AND user_id = ? AND enabled = TRUE FOR UPDATE
+WHERE calendar_members.calendar_id = ? AND calendar_members.user_id = ?
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
+FOR UPDATE
 `
 
 type GetCalendarMemberForUpdateParams struct {

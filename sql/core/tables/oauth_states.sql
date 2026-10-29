@@ -11,7 +11,7 @@ CREATE TABLE oauth_states (
   state CHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL PRIMARY KEY COMMENT 'Random 32-byte token, hex-encoded',
 
   user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id — the user who started the connect flow',
-  provider ENUM('github','slack','google_calendar','discord') NOT NULL COMMENT 'Which provider this state belongs to. ''discord'' is required for the personal Discord presence-binding flow (Phase 8 presence-discord gateway).',
+  provider ENUM('github','slack','google_calendar','discord') NOT NULL COMMENT 'Which provider this state belongs to. ''discord'' is required for the personal Discord presence-binding flow (presence-discord gateway).',
   redirect_to VARCHAR(512) NULL COMMENT 'Optional client-supplied return URL to send the user to after the callback completes',
 
   expires_at DATETIME(3) NOT NULL COMMENT 'Hard expiry; callback handler rejects rows past this timestamp',

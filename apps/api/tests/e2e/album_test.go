@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -343,11 +344,12 @@ func TestAlbumPresignRejectsMismatchedContentTypeParams(t *testing.T) {
 	assert.Contains(t, string(raw), "ALBUM.INVALID_CONTENT_TYPE")
 }
 
-// TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt verifies the
+// TestAlbumConfirmRejectsMismatchedObjectAndQueuesItsRemoval verifies the
 // Confirm-time defense-in-depth: an object at the presigned key that
-// disagrees with the declared size is rejected and removed rather than left
-// as an orphan.
-func TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
+// disagrees with the declared size is rejected, its pending row deleted at
+// once and its key queued, and the drainer removes the blob rather than
+// leaving it as an orphan.
+func TestAlbumConfirmRejectsMismatchedObjectAndQueuesItsRemoval(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
 	t.Parallel()
@@ -367,11 +369,24 @@ func TestAlbumConfirmRejectsMismatchedObjectAndDeletesIt(t *testing.T) {
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
 	assert.Equal(t, http.StatusBadRequest, status)
 
-	if storageClient := getTestStorage(); storageClient != nil {
-		_, exists, err := storageClient.StatObject(testCtx(), storageKey)
-		require.NoError(t, err)
-		assert.False(t, exists, "mismatched album photo object should be removed")
+	var rows int
+	require.NoError(t, testDB.QueryRow(
+		"SELECT COUNT(*) FROM album_photos WHERE public_id = UUID_TO_BIN(?)", pres.PhotoID).Scan(&rows))
+	require.Zero(t, rows, "the pending row goes at once")
+	// A pass another test runs in parallel may already have drained the key;
+	// then the blob is gone too.
+	_, exists, err := getTestStorage().StatObject(testCtx(), storageKey)
+	require.NoError(t, err)
+	if exists {
+		require.Equal(t, 1, queuedRemovals(t, storageKey), "the rejected object's key is queued for removal")
 	}
+
+	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
+	_, exists, err = getTestStorage().StatObject(testCtx(), storageKey)
+	require.NoError(t, err)
+	assert.False(t, exists, "the drainer removes the mismatched album photo object")
+	require.Zero(t, queuedRemovals(t, storageKey))
+
 	status, _ = helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
 	assert.Equal(t, http.StatusNotFound, status, "the pending row should have been deleted, not just disabled")

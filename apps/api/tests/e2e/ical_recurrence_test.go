@@ -155,7 +155,8 @@ func TestICalExportWritesTheSeriesAndItsDepartures(t *testing.T) {
 	// The series is one VEVENT anchored on its first occurrence, carrying the
 	// rule rather than a copy of every date it produces.
 	assert.Contains(t, ics, "DTSTART:20260403T060000Z")
-	assert.Contains(t, ics, "RRULE:FREQ=WEEKLY;BYDAY=FR;WKST=SU")
+	// The rule names no week start, which means Monday, and the export says so.
+	assert.Contains(t, ics, "RRULE:FREQ=WEEKLY;BYDAY=FR;WKST=MO")
 
 	// The cancelled occurrence (2026-04-10 06:00 UTC) leaves as an exclusion,
 	// not as a missing date the reader has to infer.
@@ -173,6 +174,12 @@ func TestICalExportWritesTheSeriesAndItsDepartures(t *testing.T) {
 	uid := strings.Split(strings.Split(ics, "UID:")[1], "\r\n")[0]
 	assert.Equal(t, 2, strings.Count(ics, "UID:"+uid),
 		"a changed occurrence belongs to its series, so it shares the UID")
+
+	// A rule that stores wkst SU leaves with WKST=SU.
+	body := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
+	body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "wkst": "SU"}
+	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+strings.Split(evts[0].ID, "_")[0], tt.AccessToken, body, nil)
+	assert.Contains(t, fetchICS(t, calURL, tt.AccessToken), "RRULE:FREQ=WEEKLY;BYDAY=FR;WKST=SU")
 }
 
 // The window is the caller's to choose, and whatever it was is stated in the

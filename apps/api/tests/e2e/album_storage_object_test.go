@@ -124,11 +124,8 @@ func TestTwoCalendarsHoldingTheSamePictureShareItSafely(t *testing.T) {
 // Bytes come back in one pass, not two.
 //
 // The sweep that removes a retired photo's row is what releases its last
-// reference, and it reclaims the object there rather than leaving it to the
-// object sweep -- whose age gate is counted from when the object row was
-// created, and exists to protect a reservation waiting to be confirmed. An
-// object whose last referring row was just deleted is not one of those, and
-// making it wait would put the album's retention and that gate end to end.
+// reference. It collects the object in the same transaction and queues the
+// key, and the drainer at the end of the same pass removes the blob.
 func TestADeletedPhotoGivesItsBytesBackInOneSweep(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -193,17 +190,24 @@ func TestAPhotoWithNoStorageObjectIsStillServed(t *testing.T) {
 
 // detachPhoto puts a photo back the way one uploaded before this migration
 // looks: pointing at no object, reachable only through its own key. The
-// reference it held is given back, since the row no longer holds it.
+// reference it held is given back, and an object nothing else holds is
+// removed without its bytes -- the bytes are the photo's, and an object left at
+// zero would be collected by the next sweep, bytes and all.
 func detachPhoto(t *testing.T, photoID string) {
 	t.Helper()
+	var objectID uint32
+	require.NoError(t, testDB.QueryRow(
+		`SELECT storage_object_id FROM album_photos WHERE public_id = UUID_TO_BIN(?)`, photoID).Scan(&objectID))
 	_, err := testDB.Exec(
-		`UPDATE storage_objects so
-		   JOIN album_photos ap ON ap.storage_object_id = so.id
-		    SET so.ref_count = GREATEST(so.ref_count, 1) - 1
-		  WHERE ap.public_id = UUID_TO_BIN(?)`, photoID)
+		`UPDATE album_photos SET storage_object_id = NULL WHERE public_id = UUID_TO_BIN(?)`, photoID)
 	require.NoError(t, err)
 	_, err = testDB.Exec(
-		`UPDATE album_photos SET storage_object_id = NULL WHERE public_id = UUID_TO_BIN(?)`, photoID)
+		`UPDATE storage_objects SET ref_count = GREATEST(ref_count, 1) - 1 WHERE id = ?`, objectID)
+	require.NoError(t, err)
+	_, err = testDB.Exec(
+		`DELETE so FROM storage_objects so
+		  INNER JOIN storage_objects_unreferenced u ON u.id = so.id
+		  WHERE so.id = ?`, objectID)
 	require.NoError(t, err)
 }
 

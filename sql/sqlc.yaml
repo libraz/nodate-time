@@ -9,9 +9,6 @@ sql:
     schema:
       - "core/tables/"
       - "time/tables/"
-      # Product-layer widenings of core columns. Listed last so the ALTERs
-      # apply to the tables above, matching the order build-schema.sh emits.
-      - "time/alters/"
       # Views read the tables in their final shape, so they come after.
       - "time/views/"
     gen:
@@ -43,6 +40,14 @@ sql:
           # NullString, which invites writing the dotted/colon form and
           # overflowing the column for anything but a short IPv4.
           - column: "sessions.ip_address"
+            go_type:
+              type: "byte"
+              slice: true
+          # A nullable BINARY(16) otherwise arrives as sql.NullString, which writes
+          # the 36-char text form into a 16-byte column. []byte keeps the bytes,
+          # and a nil slice is NULL for a kind with no subject.
+          - column: "events.subject_public_id"
+            nullable: true
             go_type:
               type: "byte"
               slice: true

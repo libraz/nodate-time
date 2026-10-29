@@ -101,7 +101,7 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			return out, nil
 		}
 
-		user, err := deps.Queries.GetUserByEmail(ctx, in.Body.Email)
+		user, err := deps.Queries.GetUserByEmail(ctx, auth.NormalizeEmail(in.Body.Email))
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, nil

@@ -11,6 +11,7 @@
       "!**/node_modules",
       "!**/dist",
       "!**/build",
+      "!sql/core",
       "!**/apps/web/src/routeTree.gen.ts"
     ]
   },

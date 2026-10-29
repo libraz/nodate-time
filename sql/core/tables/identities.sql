@@ -8,7 +8,7 @@ CREATE TABLE identities (
   public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible ID',
   user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id',
 
-  provider ENUM('local','google','github','microsoft','generic_oidc') NOT NULL COMMENT 'Identity provider kind',
+  provider ENUM('local','google','github','microsoft','generic_oidc','line') NOT NULL COMMENT 'Identity provider kind',
   subject VARCHAR(255) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL COMMENT 'Provider subject / external ID (ASCII)',
   password_hash CHAR(97) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'Argon2id encoded hash, only for provider=local', -- argon2id encoded form (97 chars)
   mfa_secret_ciphertext VARBINARY(512) NULL COMMENT 'Encrypted TOTP secret (AES-256-GCM)',

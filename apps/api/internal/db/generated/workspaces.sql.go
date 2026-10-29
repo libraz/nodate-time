@@ -10,27 +10,81 @@ import (
 	"database/sql"
 )
 
-const addWorkspaceMember = `-- name: AddWorkspaceMember :exec
-INSERT INTO workspace_members (public_id, workspace_id, user_id, role, joined_at)
-VALUES (?, ?, ?, ?, NOW(3))
-ON DUPLICATE KEY UPDATE enabled = TRUE, role = VALUES(role)
+const countWorkspaceOwners = `-- name: CountWorkspaceOwners :one
+SELECT COUNT(*) FROM workspace_members
+WHERE workspace_id = ? AND role = 'owner' AND enabled = TRUE
 `
 
-type AddWorkspaceMemberParams struct {
-	PublicID    []byte               `json:"publicId"`
-	WorkspaceID uint32               `json:"workspaceId"`
-	UserID      uint32               `json:"userId"`
-	Role        WorkspaceMembersRole `json:"role"`
+// CountWorkspaceOwners decides whether a joining user becomes the owner: the
+// first to join a workspace nobody owns does.
+func (q *Queries) CountWorkspaceOwners(ctx context.Context, workspaceID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countWorkspaceOwners, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
-func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMemberParams) error {
-	_, err := q.db.ExecContext(ctx, addWorkspaceMember,
+const countWorkspaceOwnersForUpdate = `-- name: CountWorkspaceOwnersForUpdate :one
+SELECT COUNT(*) FROM workspace_members
+WHERE workspace_id = ? AND role = 'owner' AND enabled = TRUE
+FOR UPDATE
+`
+
+// CountWorkspaceOwnersForUpdate re-asks under lock, after LockWorkspace, so
+// two first joins cannot both see an ownerless workspace.
+func (q *Queries) CountWorkspaceOwnersForUpdate(ctx context.Context, workspaceID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countWorkspaceOwnersForUpdate, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createCalendarSubscription = `-- name: CreateCalendarSubscription :exec
+INSERT INTO calendar_subscriptions (public_id, workspace_id, calendar_id, user_id, display_color)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE enabled = TRUE, display_color = VALUES(display_color)
+`
+
+type CreateCalendarSubscriptionParams struct {
+	PublicID     []byte `json:"publicId"`
+	WorkspaceID  uint32 `json:"workspaceId"`
+	CalendarID   uint32 `json:"calendarId"`
+	UserID       uint32 `json:"userId"`
+	DisplayColor string `json:"displayColor"`
+}
+
+func (q *Queries) CreateCalendarSubscription(ctx context.Context, arg CreateCalendarSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, createCalendarSubscription,
 		arg.PublicID,
 		arg.WorkspaceID,
+		arg.CalendarID,
 		arg.UserID,
-		arg.Role,
+		arg.DisplayColor,
 	)
 	return err
+}
+
+const createPersonalCalendar = `-- name: CreatePersonalCalendar :execresult
+INSERT INTO calendars (public_id, workspace_id, kind, name, color, owner_user_id)
+VALUES (?, ?, 'personal', ?, ?, ?)
+`
+
+type CreatePersonalCalendarParams struct {
+	PublicID    []byte        `json:"publicId"`
+	WorkspaceID uint32        `json:"workspaceId"`
+	Name        string        `json:"name"`
+	Color       string        `json:"color"`
+	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+}
+
+func (q *Queries) CreatePersonalCalendar(ctx context.Context, arg CreatePersonalCalendarParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, createPersonalCalendar,
+		arg.PublicID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Color,
+		arg.OwnerUserID,
+	)
 }
 
 const ensureWorkspace = `-- name: EnsureWorkspace :execresult
@@ -57,6 +111,26 @@ func (q *Queries) EnsureWorkspace(ctx context.Context, arg EnsureWorkspaceParams
 		arg.Timezone,
 		arg.Country,
 	)
+}
+
+const getPersonalCalendar = `-- name: GetPersonalCalendar :one
+SELECT id FROM calendars
+WHERE workspace_id = ? AND kind = 'personal' AND owner_user_id = ? AND enabled = TRUE
+ORDER BY id
+LIMIT 1
+`
+
+type GetPersonalCalendarParams struct {
+	WorkspaceID uint32        `json:"workspaceId"`
+	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
+}
+
+// GetPersonalCalendar finds the calendar a member is given on joining.
+func (q *Queries) GetPersonalCalendar(ctx context.Context, arg GetPersonalCalendarParams) (uint32, error) {
+	row := q.db.QueryRowContext(ctx, getPersonalCalendar, arg.WorkspaceID, arg.OwnerUserID)
+	var id uint32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getWorkspaceByID = `-- name: GetWorkspaceByID :one
@@ -151,4 +225,91 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getWorkspaceMembership = `-- name: GetWorkspaceMembership :one
+SELECT id, enabled FROM workspace_members
+WHERE workspace_id = ? AND user_id = ?
+`
+
+type GetWorkspaceMembershipParams struct {
+	WorkspaceID uint32 `json:"workspaceId"`
+	UserID      uint32 `json:"userId"`
+}
+
+type GetWorkspaceMembershipRow struct {
+	ID      uint32 `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+// GetWorkspaceMembership finds the user's membership row whether or not it
+// is enabled. A disabled row is a removal some administrator made, and
+// joining must see it to leave it alone (sql/core/PROTOCOL.md, Identity
+// rule 8).
+func (q *Queries) GetWorkspaceMembership(ctx context.Context, arg GetWorkspaceMembershipParams) (GetWorkspaceMembershipRow, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceMembership, arg.WorkspaceID, arg.UserID)
+	var i GetWorkspaceMembershipRow
+	err := row.Scan(&i.ID, &i.Enabled)
+	return i, err
+}
+
+const grantPersonalCalendarOwnership = `-- name: GrantPersonalCalendarOwnership :exec
+INSERT INTO calendar_members (public_id, workspace_id, calendar_id, user_id, role, member_color)
+VALUES (?, ?, ?, ?, 'owner', ?)
+ON DUPLICATE KEY UPDATE enabled = TRUE
+`
+
+type GrantPersonalCalendarOwnershipParams struct {
+	PublicID    []byte `json:"publicId"`
+	WorkspaceID uint32 `json:"workspaceId"`
+	CalendarID  uint32 `json:"calendarId"`
+	UserID      uint32 `json:"userId"`
+	MemberColor string `json:"memberColor"`
+}
+
+// GrantPersonalCalendarOwnership is the grant that makes a personal calendar
+// reachable at all. A row that exists keeps its role and colour.
+func (q *Queries) GrantPersonalCalendarOwnership(ctx context.Context, arg GrantPersonalCalendarOwnershipParams) error {
+	_, err := q.db.ExecContext(ctx, grantPersonalCalendarOwnership,
+		arg.PublicID,
+		arg.WorkspaceID,
+		arg.CalendarID,
+		arg.UserID,
+		arg.MemberColor,
+	)
+	return err
+}
+
+const insertWorkspaceMember = `-- name: InsertWorkspaceMember :exec
+INSERT INTO workspace_members (public_id, workspace_id, user_id, role, invited_at, joined_at)
+VALUES (?, ?, ?, ?, NOW(3), NOW(3))
+`
+
+type InsertWorkspaceMemberParams struct {
+	PublicID    []byte               `json:"publicId"`
+	WorkspaceID uint32               `json:"workspaceId"`
+	UserID      uint32               `json:"userId"`
+	Role        WorkspaceMembersRole `json:"role"`
+}
+
+// InsertWorkspaceMember never revives a row: a removed member comes back
+// only through an explicit addition, which this is not.
+func (q *Queries) InsertWorkspaceMember(ctx context.Context, arg InsertWorkspaceMemberParams) error {
+	_, err := q.db.ExecContext(ctx, insertWorkspaceMember,
+		arg.PublicID,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.Role,
+	)
+	return err
+}
+
+const lockWorkspace = `-- name: LockWorkspace :one
+SELECT id FROM workspaces WHERE id = ? FOR UPDATE
+`
+
+func (q *Queries) LockWorkspace(ctx context.Context, id uint32) (uint32, error) {
+	row := q.db.QueryRowContext(ctx, lockWorkspace, id)
+	err := row.Scan(&id)
+	return id, err
 }

@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/blobref"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -240,7 +239,7 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 				ActorUserID: userID,
 				Type:        eventlog.TypeCalendarSetUp,
 				Summary:     in.Body.Name,
-				Subject:     pubID[:],
+				Extra:       map[string]any{"calendarId": eventlog.UUID(pubID[:])},
 			})
 		})
 		if err != nil {
@@ -315,7 +314,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 				ActorUserID: userID,
 				Type:        eventlog.TypeCalendarEdited,
 				Summary:     name,
-				Subject:     cal.PublicID,
+				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},
 			})
 		})
 		if err != nil {
@@ -353,23 +352,9 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			if !calresolve.CanOwn(owner.Role) {
 				return apierrors.CalendarRoleRequired
 			}
-			// Release the blobs this calendar's attachments were holding.
-			// The objects are content-addressed and may be shared, so they
-			// are not deleted here -- dropping the reference is what lets the
-			// sweep collect the ones nothing else points at.
-			//
-			// The listing locks the live rows and they are retired in the same
-			// transaction, so the release happens once: a concurrent delete of
-			// the calendar waits on those locks and then finds them retired.
-			objectIDs, err := q.ListAttachmentObjectIDsByCalendar(ctx, cal.ID)
-			if err != nil {
-				return err
-			}
-			for _, objectID := range objectIDs {
-				if err := blobref.Release(ctx, q, objectID); err != nil {
-					return err
-				}
-			}
+			// Retire this calendar's attachments. A retired row keeps its
+			// reference on the blob until the cleanup sweep removes it, so the
+			// counts do not change here.
 			if err := q.SoftDeleteAttachmentsByCalendar(ctx, cal.ID); err != nil {
 				return err
 			}
@@ -389,7 +374,7 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 				ActorUserID: userID,
 				Type:        eventlog.TypeCalendarGone,
 				Summary:     cal.Name,
-				Subject:     cal.PublicID,
+				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},
 			})
 		})
 		if err != nil {
@@ -517,7 +502,11 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 				ActorUserID: actorID,
 				Type:        eventlog.TypeMemberRoleSet,
 				Summary:     target.DisplayName + " -> " + in.Body.Role,
-				Subject:     target.PublicID,
+				Extra: map[string]any{
+					"calendarId": eventlog.UUID(cal.PublicID),
+					"userId":     eventlog.UUID(target.PublicID),
+					"newRole":    in.Body.Role,
+				},
 			})
 		})
 		if err != nil {
@@ -590,7 +579,10 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 				ActorUserID: actorID,
 				Type:        eventlog.TypeMemberColorSet,
 				Summary:     target.DisplayName,
-				Subject:     target.PublicID,
+				Extra: map[string]any{
+					"calendarId": eventlog.UUID(cal.PublicID),
+					"userId":     eventlog.UUID(target.PublicID),
+				},
 			})
 		})
 		if err != nil {
@@ -642,12 +634,15 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
 		}
 
-		// Leaving and being removed are different events, not one event with
-		// a flag: a feed that cannot tell them apart reads the same either
-		// way, and only one of the two is something the member chose.
-		eventType := eventlog.TypeMemberRemoved
+		// Leaving and being removed share one kind; a member who chose to go
+		// is told apart by reason "left", since only one of the two is
+		// something the member chose.
+		removedExtra := map[string]any{
+			"calendarId": eventlog.UUID(cal.PublicID),
+			"userId":     eventlog.UUID(target.PublicID),
+		}
 		if isSelfLeave {
-			eventType = eventlog.TypeMemberLeft
+			removedExtra["reason"] = "left"
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -701,9 +696,9 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
 				ActorUserID: actorID,
-				Type:        eventType,
+				Type:        eventlog.TypeMemberRemoved,
 				Summary:     target.DisplayName,
-				Subject:     target.PublicID,
+				Extra:       removedExtra,
 			})
 		})
 		if err != nil {

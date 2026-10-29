@@ -1,9 +1,10 @@
 package e2e
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/cleanup"
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
@@ -43,7 +44,14 @@ func TestReconfirmingTheSameAvatarHoldsOneReference(t *testing.T) {
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/user/avatar", tt.AccessToken, nil)
 	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, 0, storageObjectRefCount(t, key), "and clearing it releases the only one")
+	// A sweep running alongside may already have collected the released
+	// object; a confirmed object nothing points at needs no age to go.
+	var refs int
+	err := testDB.QueryRow("SELECT ref_count FROM storage_objects WHERE storage_key = ?", key).Scan(&refs)
+	if !errors.Is(err, sql.ErrNoRows) {
+		require.NoError(t, err)
+		require.Equal(t, 0, refs, "and clearing it releases the only one")
+	}
 }
 
 // The avatar column is ON DELETE SET NULL, so a foreign key does not stop the
@@ -57,10 +65,13 @@ func TestTheSweepLeavesAnObjectAnAvatarPointsAt(t *testing.T) {
 	setAvatar(t, tt, helpers.TinyPNG())
 	key := avatarObjectKey(t, tt.Email)
 
-	_, err := testDB.Exec(
-		"UPDATE storage_objects SET ref_count = 0, created_at = ? WHERE storage_key = ?",
-		time.Now().Add(-30*24*time.Hour), key)
+	_, err := testDB.Exec("UPDATE storage_objects SET ref_count = 0 WHERE storage_key = ?", key)
 	require.NoError(t, err)
+	// Restore the count the user row holds, so the drift arranged here does
+	// not outlive the test in the shared database.
+	t.Cleanup(func() {
+		_, _ = testDB.Exec("UPDATE storage_objects SET ref_count = 1 WHERE storage_key = ?", key)
+	})
 
 	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 

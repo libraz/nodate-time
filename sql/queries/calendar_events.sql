@@ -262,13 +262,27 @@ INSERT INTO calendar_events (
 SELECT * FROM calendar_events
 WHERE calendar_id = ? AND source_uid_key = sqlc.arg(source_uid);
 
+-- UpdateCalendarEvent and SoftDeleteCalendarEvent never touch a row a task
+-- projects (PROTOCOL.md obligation 3): its synced columns belong to the
+-- projection engine, and the handler refuses with EVENT.TASK_OWNED before
+-- reaching here. The filter keeps a missed check from tripping the trigger.
 -- name: UpdateCalendarEvent :exec
 UPDATE calendar_events
 SET kind = ?, visibility = ?, show_as = ?, flexibility = ?,
     title = ?, all_day = ?, start_at = ?, end_at = ?, timezone = ?,
     location = ?, memo = ?, url = ?, owner_user_id = ?, block_label = ?,
     notification_offset = ?, recurrence_rule = ?, recurrence_end = ?
-WHERE id = ?;
+WHERE id = ? AND task_id IS NULL;
+
+-- UpdateProjectedEventDetails edits the columns of a task-projected row that
+-- have no task-side counterpart, leaving the synced ones to the projection
+-- engine.
+-- name: UpdateProjectedEventDetails :exec
+UPDATE calendar_events
+SET visibility = ?, show_as = ?, flexibility = ?,
+    location = ?, memo = ?, url = ?, owner_user_id = ?,
+    notification_offset = ?
+WHERE id = ? AND task_id IS NOT NULL;
 
 -- SetRecurrenceExceptions replaces the whole exclusion list. Cancelling one
 -- occurrence is a read-modify-write of this column inside the caller's
@@ -277,7 +291,7 @@ WHERE id = ?;
 UPDATE calendar_events SET recurrence_exceptions = ? WHERE id = ?;
 
 -- name: SoftDeleteCalendarEvent :exec
-UPDATE calendar_events SET enabled = FALSE WHERE id = ?;
+UPDATE calendar_events SET enabled = FALSE WHERE id = ? AND task_id IS NULL;
 
 -- A reminder is delivered by whatever client holds the calendar, as the
 -- iCalendar alarm the export writes. Nothing here dispatches one, so the

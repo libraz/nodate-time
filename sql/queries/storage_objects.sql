@@ -3,8 +3,9 @@
 
 -- CreateStorageObject is content-addressed: the unique key is (scope, sha256),
 -- so re-uploading identical bytes finds the existing row instead of writing a
--- second copy. ref_count stays at whatever it was; the caller increments it
--- when it attaches the object to something.
+-- second copy. ref_count stays at whatever it was; the transaction that
+-- inserts the row pointing at the object increments it (PROTOCOL.md section
+-- Storage).
 -- name: CreateStorageObject :execresult
 INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count)
 VALUES (?, ?, ?, ?, ?, ?, ?, 0)
@@ -32,13 +33,15 @@ SELECT * FROM storage_objects
 WHERE owner_user_id = ? AND sha256 = ? AND enabled = TRUE
 FOR UPDATE;
 
--- MarkStorageObjectUploaded records that the bytes behind a row were read back
--- and matched its digest, which is what makes the row something another
--- referrer may reuse. The verified size, type and key replace what the
--- reservation declared; a row already verified is left as it is.
+-- MarkStorageObjectUploaded records that the bytes at the row's own key were
+-- read back and matched its digest, which is what makes the row something
+-- another referrer may reuse. The verified size and type replace what the
+-- reservation declared. storage_key is never rewritten: another product may
+-- have handed out an upload URL for it. A row already verified is left as it
+-- is.
 -- name: MarkStorageObjectUploaded :exec
 UPDATE storage_objects
-SET storage_key = ?, byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
+SET byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
 WHERE id = ? AND uploaded_at IS NULL;
 
 -- name: IncrementStorageObjectRefs :exec
@@ -53,12 +56,13 @@ UPDATE storage_objects SET ref_count = GREATEST(ref_count, 1) - 1 WHERE id = ?;
 -- The cursor matters more than the limit: an object that refuses to delete
 -- would otherwise head every page and spend the whole batch budget. Which
 -- objects are unreferenced is decided by storage_objects_unreferenced, the
--- same view every delete below reads.
+-- same view every delete below reads. It lists confirmed objects only, so no
+-- age condition is needed: a reservation is reclaimed by the unconfirmed
+-- sweep alone.
 -- name: ListUnreferencedStorageObjects :many
 SELECT so.* FROM storage_objects so
 INNER JOIN storage_objects_unreferenced u ON u.id = so.id
-WHERE so.created_at < ?
-  AND so.id > ?
+WHERE so.id > ?
 ORDER BY so.id
 LIMIT ?;
 
@@ -80,8 +84,71 @@ DELETE so FROM storage_objects so
 INNER JOIN storage_objects_unreferenced u ON u.id = so.id
 WHERE so.id = ?;
 
+-- ListUnconfirmedStorageObjects walks reservations whose upload never
+-- arrived, in any layer. Aged by updated_at: taking a reference restamps it,
+-- and a reference is taken each time an upload URL is handed out for the row,
+-- so the age is measured from the newest URL. Paged by id so objects another
+-- layer still holds, skipped on every pass, cannot fill every page.
+-- name: ListUnconfirmedStorageObjects :many
+SELECT id, storage_key FROM storage_objects
+WHERE uploaded_at IS NULL AND updated_at < sqlc.arg(cutoff) AND id > sqlc.arg(after_id)
+ORDER BY id
+LIMIT ?;
+
+-- DeleteUnconfirmedStorageObject removes a reservation whose referrers in this
+-- layer were deleted in the same transaction, guarded on the predicate that
+-- listed it so a confirm landing in between wins. ref_count is not consulted:
+-- the object goes with every row that counted towards it.
+-- name: DeleteUnconfirmedStorageObject :execresult
+DELETE FROM storage_objects WHERE id = ? AND uploaded_at IS NULL;
+
 -- CountStorageObjectsByKey answers whether any object claims a storage key,
 -- ignoring enabled: a disabled row still describes bytes this table is the
 -- index for, and deleting them would leave it pointing at nothing.
 -- name: CountStorageObjectsByKey :one
 SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?;
+
+-- CountConfirmedStorageObjectsByKey answers whether verified bytes at a key
+-- belong to a live object. A queued removal for such a key is stale -- the
+-- key was claimed again after it was queued -- and the drainer drops it
+-- without touching the blob. An unconfirmed claim does not protect the key:
+-- nothing has vouched for the bytes there.
+-- name: CountConfirmedStorageObjectsByKey :one
+SELECT COUNT(*) FROM storage_objects WHERE storage_key = ? AND uploaded_at IS NOT NULL;
+
+-- QueueStorageBlobRemoval records a key whose blob is to be removed, in the
+-- transaction that deletes the rows naming it. A key already queued stays one
+-- row.
+-- name: QueueStorageBlobRemoval :exec
+INSERT INTO storage_blob_removals (storage_key)
+VALUES (?)
+ON DUPLICATE KEY UPDATE storage_key = VALUES(storage_key);
+
+-- name: ListStorageBlobRemovals :many
+SELECT id, storage_key FROM storage_blob_removals
+WHERE id > ?
+ORDER BY id
+LIMIT ?;
+
+-- name: DeleteStorageBlobRemoval :exec
+DELETE FROM storage_blob_removals WHERE id = ?;
+
+-- DeleteStorageBlobRemovalByKey drops the queued removal of a key whose blob
+-- the request that queued it has just removed itself.
+-- name: DeleteStorageBlobRemovalByKey :exec
+DELETE FROM storage_blob_removals WHERE storage_key = ?;
+
+-- InsertStorageLocationIfAbsent records the bucket this database's blobs live
+-- in, unless a drainer of either product already did. The unique key on
+-- setting_key makes the first writer win.
+-- name: InsertStorageLocationIfAbsent :exec
+INSERT INTO instance_settings (public_id, setting_key, setting_value)
+VALUES (sqlc.arg(public_id), 'storage.location', sqlc.arg(location))
+ON DUPLICATE KEY UPDATE setting_key = setting_key;
+
+-- GetStorageLocation reads the recorded bucket regardless of enabled, so a
+-- disabled row still blocks a drainer pointed elsewhere.
+-- name: GetStorageLocation :one
+SELECT setting_value FROM instance_settings
+WHERE setting_key = 'storage.location'
+LIMIT 1;

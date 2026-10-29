@@ -89,12 +89,12 @@ func TestADigestAloneDoesNotAttachAnotherCalendarsFile(t *testing.T) {
 	var listed []map[string]any
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+eventID+"/attachments", other.AccessToken, nil, &listed)
 	require.Empty(t, listed, "nothing of the other calendar's file is reachable")
-	require.Equal(t, 1, objectRefCount(t, storageKey))
+	requireRefCountIsReferrers(t, storageKey, 2, "the owner's attachment and the other's reservation")
 
 	helpers.UploadToSignedURL(t, pres.UploadURL, "application/pdf", body)
 	status, raw = helpers.DoJSONStatus(t, http.MethodPost, confirmURL, other.AccessToken, nil)
 	require.Equal(t, http.StatusOK, status, "confirm after sending the bytes: %s", raw)
-	require.Equal(t, 2, objectRefCount(t, storageKey), "both attachments stand behind the one object")
+	requireRefCountIsReferrers(t, storageKey, 2, "both attachments stand behind the one object")
 }
 
 // Somebody who can already read the stored file -- here, because they attached
