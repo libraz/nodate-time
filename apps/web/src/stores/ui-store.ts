@@ -21,6 +21,8 @@ interface UiState {
   editingEventId: string | null;
   /** Preselected start for a new timed event (e.g. a clicked weekly slot). */
   eventDraftStart: DateTime | null;
+  /** End of a range picked on the timeline; absent, a draft runs one hour. */
+  eventDraftEnd: DateTime | null;
   showDayDetail: boolean;
   rightPanel: RightPanelId;
   showSearch: boolean;
@@ -42,11 +44,15 @@ interface UiState {
   setCalendarView: (view: CalendarView) => void;
   setSelectedDate: (date: DateTime) => void;
   setCurrentMonth: (date: DateTime) => void;
-  openEventModal: (eventId?: string, draftStart?: DateTime) => void;
+  openEventModal: (eventId?: string, draftStart?: DateTime, draftEnd?: DateTime) => void;
   closeEventModal: () => void;
   openDayDetail: (date: DateTime) => void;
   closeDayDetail: () => void;
   navigateMonth: (delta: number) => void;
+  /** Steps by the unit the active view shows: a week, a year, otherwise a month. */
+  stepView: (dir: number) => void;
+  /** Selects today and brings it on screen, including in the mobile month scroller. */
+  goToToday: () => void;
   toggleRightPanel: (panel: RightPanelId) => void;
   toggleSearch: () => void;
   setSearchQuery: (query: string) => void;
@@ -83,6 +89,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   showEventModal: false,
   editingEventId: null,
   eventDraftStart: null,
+  eventDraftEnd: null,
   showDayDetail: false,
   rightPanel: null,
   showSearch: false,
@@ -103,15 +110,21 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSelectedDate: (date) => set({ selectedDate: date }),
   setCurrentMonth: (date) => set({ currentMonth: date }),
 
-  openEventModal: (eventId, draftStart) =>
+  openEventModal: (eventId, draftStart, draftEnd) =>
     set({
       showEventModal: true,
       editingEventId: eventId ?? null,
       eventDraftStart: draftStart ?? null,
+      eventDraftEnd: draftEnd ?? null,
     }),
 
   closeEventModal: () =>
-    set({ showEventModal: false, editingEventId: null, eventDraftStart: null }),
+    set({
+      showEventModal: false,
+      editingEventId: null,
+      eventDraftStart: null,
+      eventDraftEnd: null,
+    }),
 
   openDayDetail: (date) => set({ selectedDate: date, showDayDetail: true }),
 
@@ -120,6 +133,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   navigateMonth: (delta) =>
     set((s) => ({
       currentMonth: s.currentMonth.plus({ months: delta }),
+    })),
+
+  stepView: (dir) => {
+    const { calendarView, selectedDate, currentMonth } = get();
+    if (calendarView === 'week') {
+      const next = selectedDate.plus({ weeks: dir });
+      set({ selectedDate: next, currentMonth: next.startOf('month') });
+    } else if (calendarView === 'year') {
+      set({ currentMonth: currentMonth.plus({ years: dir }) });
+    } else {
+      set({ currentMonth: currentMonth.plus({ months: dir }) });
+    }
+  },
+
+  goToToday: () =>
+    set((s) => ({
+      ...openingDates(s.timezone),
+      scrollToTodaySignal: s.scrollToTodaySignal + 1,
     })),
 
   toggleRightPanel: (panel) =>
@@ -177,6 +208,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       showEventModal: false,
       editingEventId: null,
       eventDraftStart: null,
+      eventDraftEnd: null,
       showDayDetail: false,
       rightPanel: null,
       showSearch: false,

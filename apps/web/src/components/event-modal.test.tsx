@@ -78,7 +78,8 @@ const uiState = {
   editingEventId: 'ev-1' as string | null,
   closeEventModal: vi.fn(),
   selectedDate: DateTime.fromISO('2026-08-07T00:00:00', { zone: 'Asia/Tokyo' }),
-  eventDraftStart: null,
+  eventDraftStart: null as DateTime | null,
+  eventDraftEnd: null as DateTime | null,
 };
 
 vi.mock('@/stores/ui-store', () => ({
@@ -147,6 +148,8 @@ function titleField(): HTMLElement {
 beforeEach(() => {
   uiState.showEventModal = true;
   uiState.editingEventId = 'ev-1';
+  uiState.eventDraftStart = null;
+  uiState.eventDraftEnd = null;
   uiState.locale = 'ja';
   uiState.timezone = 'Asia/Tokyo';
   calendarState.events = [event];
@@ -585,6 +588,26 @@ describe('EventModal save payload', () => {
   // The other half of the same rule: a new event has no zone of its own, so it
   // takes the one its author is working in. A fix that always sent the event's
   // zone would leave creation with nothing to send.
+  // A range dragged out on the timeline is the event's span, not just its start.
+  it('creates a new event over the range it was opened on', async () => {
+    uiState.editingEventId = null;
+    uiState.eventDraftStart = DateTime.fromISO('2026-08-07T10:00', { zone: 'Asia/Tokyo' });
+    uiState.eventDraftEnd = DateTime.fromISO('2026-08-07T12:30', { zone: 'Asia/Tokyo' });
+
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Workshop' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    const payload = calendarState.addEvent.mock.calls[0]?.[1] as Record<string, string>;
+    expect(DateTime.fromISO(payload.startAt as string).toISO()).toBe(
+      DateTime.fromISO('2026-08-07T10:00:00+09:00').toISO(),
+    );
+    expect(DateTime.fromISO(payload.endAt as string).toISO()).toBe(
+      DateTime.fromISO('2026-08-07T12:30:00+09:00').toISO(),
+    );
+  });
+
   it('sends a new event in the viewer’s timezone', async () => {
     uiState.editingEventId = null;
     uiState.timezone = 'America/New_York';

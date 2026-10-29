@@ -1,8 +1,10 @@
 import { DateTime } from 'luxon';
 import {
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,6 +36,10 @@ import type { CalendarEvent } from '@/types/calendar';
 
 const HOUR_HEIGHT = 48;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+/** Where a week without "now" in it opens: the start of a working day. */
+const DEFAULT_SCROLL_HOUR = 8;
+/** How much of the past stays above the now line when a week opens on it. */
+const NOW_LEAD_MINUTES = 90;
 
 /** The day segment a resize was started on, resolved at the press. */
 interface ResizeSegment {
@@ -160,6 +166,54 @@ export function WeeklyTimeline() {
     openEventModal(undefined, start);
   };
 
+  // Press-and-drag on empty time picks a range and opens the new event on it.
+  // Mouse only: on touch the same gesture is the scroll.
+  const rangeRef = useRef<{ dayKey: string; colTop: number; anchor: number } | null>(null);
+  const rangeMadeRef = useRef(false);
+  const [range, setRange] = useState<{ dayKey: string; from: number; to: number } | null>(null);
+
+  const minutesAtY = (colTop: number, clientY: number) =>
+    Math.min(Math.max(((clientY - colTop) / HOUR_HEIGHT) * 60, 0), 24 * 60);
+  /** Whole slots the pointer has covered, at least one. */
+  const rangeSlots = (a: number, b: number) => {
+    const from = Math.floor(Math.min(a, b) / SNAP_MINUTES) * SNAP_MINUTES;
+    const to = Math.max(
+      Math.ceil(Math.max(a, b) / SNAP_MINUTES) * SNAP_MINUTES,
+      from + SNAP_MINUTES,
+    );
+    return { from, to: Math.min(to, 24 * 60) };
+  };
+
+  const handleSlotPointerDown = (dayKey: string, e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    const col = e.currentTarget.closest('[data-daycol]') as HTMLElement | null;
+    if (!col) return;
+    const colTop = col.getBoundingClientRect().top;
+    rangeRef.current = { dayKey, colTop, anchor: minutesAtY(colTop, e.clientY) };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleSlotPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const r = rangeRef.current;
+    if (!r) return;
+    const at = minutesAtY(r.colTop, e.clientY);
+    // A jitter inside one slot is still a click.
+    if (!range && Math.abs(at - r.anchor) < SNAP_MINUTES / 2) return;
+    setRange({ dayKey: r.dayKey, ...rangeSlots(r.anchor, at) });
+  };
+
+  const handleSlotPointerUp = () => {
+    rangeRef.current = null;
+    if (!range) return;
+    const dayStart = DateTime.fromFormat(range.dayKey, 'yyyy-MM-dd', { zone: timezone });
+    const start = atMinutesIntoDay(dayStart, range.from);
+    const end = atMinutesIntoDay(dayStart, range.to);
+    rangeMadeRef.current = true;
+    setRange(null);
+    setSelectedDate(start);
+    openEventModal(undefined, start, end);
+  };
+
   // The one week this view draws: its columns, in the viewer's zone. The
   // fetch window follows currentMonth, so that is re-anchored to this week
   // below rather than left to whichever path led into the view.
@@ -170,6 +224,29 @@ export function WeeklyTimeline() {
       setCurrentMonth(selectedDate.startOf('month'));
     }
   }, [selectedDate, currentMonth, setCurrentMonth]);
+
+  // Each week opens where the day is -- on now when it is this week, otherwise
+  // at the start of a working day -- rather than at midnight. Keyed on the
+  // week, so picking another day inside it leaves the scroll alone.
+  const weekKey = days[0]?.toFormat('yyyy-MM-dd') ?? '';
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !weekKey) return;
+    const weekStart = DateTime.fromFormat(weekKey, 'yyyy-MM-dd', { zone: timezone });
+    const current = nowInZone(timezone);
+    const showsNow = current >= weekStart && current < weekStart.plus({ days: 7 });
+    const minutes = showsNow
+      ? current.hour * 60 + current.minute - NOW_LEAD_MINUTES
+      : DEFAULT_SCROLL_HOUR * 60;
+    el.scrollTop = Math.max(0, (minutes / 60) * HOUR_HEIGHT);
+  }, [weekKey, timezone]);
+
+  // The now line moves with the clock; a minute is its resolution.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setClockTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // All-day events by the dates they occupy in their own zone, as the month
   // grid draws them; timed events go to the layout, which owns the rule for
@@ -207,6 +284,7 @@ export function WeeklyTimeline() {
   const now = nowInZone(timezone);
   const nowMinutes = now.hour * 60 + now.minute;
   const currentTimeY = (nowMinutes / 60) * HOUR_HEIGHT;
+  const weekShowsNow = days.some((d) => isToday(d, timezone));
 
   return (
     <div className="flex h-full flex-col">
@@ -263,11 +341,8 @@ export function WeeklyTimeline() {
                     key={evt.id}
                     type="button"
                     onClick={() => openEventModal(evt.id)}
-                    className="truncate rounded-full px-2 text-caption font-semibold leading-[18px]"
-                    style={{
-                      backgroundColor: `${evt.color}20`,
-                      color: evt.color,
-                    }}
+                    className="event-chip truncate rounded-full px-2 text-caption font-semibold leading-[18px]"
+                    style={{ '--evt': evt.color } as CSSProperties}
                   >
                     {evt.title}
                   </button>
@@ -283,15 +358,27 @@ export function WeeklyTimeline() {
         <div className="relative flex" style={{ height: 24 * HOUR_HEIGHT }}>
           {/* Time labels gutter */}
           <div className="relative w-14 shrink-0">
-            {HOURS.map((h) => (
+            {/* Midnight has no label: it would sit clipped against the top edge.
+                An hour the now label would overlap gives way to it. */}
+            {HOURS.slice(1).map((h) =>
+              weekShowsNow && Math.abs(h * 60 - nowMinutes) < 15 ? null : (
+                <div
+                  key={h}
+                  className="absolute right-2 text-caption font-medium tabular-nums text-[var(--color-text-tertiary)]"
+                  style={{ top: h * HOUR_HEIGHT - 7 }}
+                >
+                  {h}:00
+                </div>
+              ),
+            )}
+            {weekShowsNow && (
               <div
-                key={h}
-                className="absolute right-2 text-caption font-medium tabular-nums text-[var(--color-text-tertiary)]"
-                style={{ top: h * HOUR_HEIGHT - 6 }}
+                className="absolute right-1 z-10 rounded-full bg-[var(--color-accent)] px-1.5 text-micro font-semibold leading-[16px] tabular-nums text-[var(--color-text-on-accent)]"
+                style={{ top: currentTimeY - 8 }}
               >
-                {h}
+                {now.toFormat('H:mm')}
               </div>
-            ))}
+            )}
           </div>
 
           {/* Day columns */}
@@ -311,7 +398,21 @@ export function WeeklyTimeline() {
                     that time. Sits below event blocks and the time indicator. */}
                 <button
                   type="button"
-                  onClick={(e) => handleSlotClick(day, e)}
+                  onPointerDown={(e) => handleSlotPointerDown(key, e)}
+                  onPointerMove={handleSlotPointerMove}
+                  onPointerUp={handleSlotPointerUp}
+                  onPointerCancel={() => {
+                    rangeRef.current = null;
+                    setRange(null);
+                  }}
+                  onClick={(e) => {
+                    // The drag that just ended already opened the event.
+                    if (rangeMadeRef.current) {
+                      rangeMadeRef.current = false;
+                      return;
+                    }
+                    handleSlotClick(day, e);
+                  }}
                   className="absolute inset-0 z-0 touch-manipulation"
                   aria-label={`${key} ${t('event.createEvent')}`}
                 />
@@ -325,8 +426,9 @@ export function WeeklyTimeline() {
                   />
                 ))}
 
-                {/* Current time indicator */}
-                {today && (
+                {/* Current time indicator: full on today, a faint guide across
+                    the rest of the week so the hour reads from any column. */}
+                {today ? (
                   <div
                     className="pointer-events-none absolute left-0 right-0 z-10"
                     style={{ top: currentTimeY }}
@@ -335,6 +437,32 @@ export function WeeklyTimeline() {
                       <div className="now-dot -ml-1 -mt-[3px] h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]" />
                       <div className="h-[2px] w-full bg-[var(--color-accent)]" />
                     </div>
+                  </div>
+                ) : (
+                  weekShowsNow && (
+                    <div
+                      className="pointer-events-none absolute left-0 right-0 z-10 h-px bg-[var(--color-accent)] opacity-30"
+                      style={{ top: currentTimeY }}
+                    />
+                  )
+                )}
+
+                {/* Range being picked for a new event */}
+                {range?.dayKey === key && (
+                  <div
+                    className="event-block pointer-events-none absolute inset-x-0.5 z-[6] rounded-md px-1.5 pt-1"
+                    style={
+                      {
+                        '--evt': 'var(--color-accent)',
+                        top: minutesToY(range.from),
+                        height: minutesToY(range.to - range.from),
+                      } as CSSProperties
+                    }
+                  >
+                    <p className="event-block-title text-caption font-semibold tabular-nums">
+                      {atMinutesIntoDay(dayStart, range.from).toFormat('H:mm')} –{' '}
+                      {atMinutesIntoDay(dayStart, range.to).toFormat('H:mm')}
+                    </p>
                   </div>
                 )}
 
@@ -381,19 +509,20 @@ export function WeeklyTimeline() {
                         if (consumeClick() || consumeResizeClick()) return;
                         openEventModal(evt.id);
                       }}
-                      className={`absolute z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
+                      className={`event-block absolute z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
-                      style={{
-                        top,
-                        height,
-                        left: `calc(${leftPct}% + 2px)`,
-                        width: `calc(${widthPct}% - 4px)`,
-                        backgroundColor: `${evt.color}15`,
-                        border: `1px solid ${evt.color}40`,
-                      }}
+                      style={
+                        {
+                          '--evt': evt.color,
+                          top,
+                          height,
+                          left: `calc(${leftPct}% + 2px)`,
+                          width: `calc(${widthPct}% - 4px)`,
+                        } as CSSProperties
+                      }
                     >
-                      <p className="truncate text-body font-semibold text-[var(--color-text-primary)]">
+                      <p className="event-block-title truncate text-body font-semibold">
                         {evt.title}
                       </p>
                       <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
@@ -420,22 +549,18 @@ export function WeeklyTimeline() {
       {/* Drag ghost: a lifted copy of the event block, same frame and contents. */}
       {drag && (
         <div
-          className="pointer-events-none fixed z-50 overflow-hidden rounded-md px-1.5 pt-1 text-left opacity-90 shadow-lg"
-          style={{
-            left: drag.x - 8,
-            top: drag.y - 8,
-            width: dragGeom.current.width,
-            height: dragGeom.current.height,
-            // Surface base + color tint reproduces the on-grid block appearance,
-            // since the live block sits over the (surface-colored) day column.
-            backgroundColor: 'var(--color-surface)',
-            backgroundImage: `linear-gradient(${drag.event.color}15, ${drag.event.color}15)`,
-            border: `1px solid ${drag.event.color}40`,
-          }}
+          className="event-block event-block-lifted pointer-events-none fixed z-50 overflow-hidden rounded-md px-1.5 pt-1 text-left"
+          style={
+            {
+              '--evt': drag.event.color,
+              left: drag.x - 8,
+              top: drag.y - 8,
+              width: dragGeom.current.width,
+              height: dragGeom.current.height,
+            } as CSSProperties
+          }
         >
-          <p className="truncate text-body font-semibold text-[var(--color-text-primary)]">
-            {drag.event.title}
-          </p>
+          <p className="event-block-title truncate text-body font-semibold">{drag.event.title}</p>
           <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
             {fromISOInZone(drag.event.startAt, timezone).toFormat('H:mm')} -{' '}
             {fromISOInZone(drag.event.endAt, timezone).toFormat('H:mm')}
