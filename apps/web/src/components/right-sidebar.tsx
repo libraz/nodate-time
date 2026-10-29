@@ -98,9 +98,10 @@ export function RightSidebar() {
               'relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors sm:h-11 sm:w-11',
               active
                 ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
-                : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-secondary)]',
+                : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-primary)]',
             ].join(' ')}
             aria-label={t(item.labelKey)}
+            title={t(item.labelKey)}
           >
             {active && (
               <span className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--color-accent)]" />

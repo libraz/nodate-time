@@ -1,5 +1,5 @@
 import type { DateTime } from 'luxon';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { MonthWeekRow } from '@/components/month-week-row';
 import { getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
@@ -8,6 +8,11 @@ import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { bucketEventsByWeek, NO_EVENTS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
+
+/** Wheel travel (px) that turns the month; a mouse notch is ~100, a trackpad flick far more. */
+const WHEEL_STEP_PX = 60;
+/** Quiet time that ends a wheel gesture, so one flick's inertia turns one month. */
+const WHEEL_IDLE_MS = 220;
 
 export function CalendarGrid() {
   const locale = useUiStore((s) => s.locale);
@@ -30,6 +35,38 @@ export function CalendarGrid() {
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const touchStartRef = useRef({ x: 0, y: 0 });
+  const wheelRef = useRef({ travel: 0, spent: false, timer: 0 });
+
+  // Which way the month just turned, so the new one arrives from that side:
+  // later months come up from below, as they would in a scrolled list.
+  const monthIndex = currentMonth.year * 12 + currentMonth.month;
+  const [shownIndex, setShownIndex] = useState(monthIndex);
+  const [direction, setDirection] = useState(0);
+  if (shownIndex !== monthIndex) {
+    setDirection(Math.sign(monthIndex - shownIndex));
+    setShownIndex(monthIndex);
+  }
+
+  // The month view reads as a vertical strip of months: a wheel gesture turns
+  // one month, however long its inertia runs.
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      const w = wheelRef.current;
+      window.clearTimeout(w.timer);
+      w.timer = window.setTimeout(() => {
+        w.travel = 0;
+        w.spent = false;
+      }, WHEEL_IDLE_MS);
+      if (w.spent) return;
+      w.travel += e.deltaY;
+      if (Math.abs(w.travel) >= WHEEL_STEP_PX) {
+        navigateMonth(w.travel > 0 ? 1 : -1);
+        w.spent = true;
+      }
+    },
+    [navigateMonth],
+  );
 
   const {
     drag,
@@ -125,6 +162,7 @@ export function CalendarGrid() {
       className="flex h-full select-none flex-col"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onWheel={handleWheel}
     >
       <div className="grid shrink-0 grid-cols-7 border-b border-[var(--color-separator)]">
         {[0, 1, 2, 3, 4, 5, 6].map((i) => (
@@ -140,6 +178,7 @@ export function CalendarGrid() {
       <div
         key={`${currentMonth.year}-${currentMonth.month}`}
         className="calendar-enter grid flex-1"
+        data-dir={direction}
         style={{ gridTemplateRows: `repeat(${weekStarts.length}, minmax(0, 1fr))` }}
       >
         {weekStarts.map((weekStart) => {
@@ -160,6 +199,7 @@ export function CalendarGrid() {
               dragLanding={landingWeeks?.has(key) ? dragLanding : null}
               onDayClick={setSelectedDate}
               onDayDoubleClick={handleDayDoubleClick}
+              onCreateOnDay={handleDayDoubleClick}
               onOverflowClick={openDayDetail}
               onEventClick={handleEventClick}
               onEventPointerDown={handleEventPointerDown}

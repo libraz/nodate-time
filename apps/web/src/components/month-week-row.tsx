@@ -1,5 +1,5 @@
 import type { DateTime } from 'luxon';
-import { memo, type PointerEvent as ReactPointerEvent, useMemo } from 'react';
+import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, useMemo } from 'react';
 import { useT } from '@/i18n';
 import { fromISOInZone, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
@@ -66,6 +66,8 @@ interface DensityStyle {
   overflow: string;
   cursorMovable: string;
   cursorFixed: string;
+  /** Whether a timed chip leads with its start time; a phone cell is too narrow for both. */
+  chipTime: boolean;
 }
 
 const DENSITY: Record<WeekRowDensity, DensityStyle> = {
@@ -81,6 +83,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     overflow: 'text-caption',
     cursorMovable: 'cursor-grab active:cursor-grabbing',
     cursorFixed: 'cursor-pointer',
+    chipTime: true,
   },
   compact: {
     metrics: { padTop: 4, dateRowH: 24, slotH: 15, overflowH: 13 },
@@ -93,6 +96,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     overflow: 'text-micro',
     cursorMovable: 'active:cursor-grabbing',
     cursorFixed: '',
+    chipTime: false,
   },
 };
 
@@ -121,6 +125,8 @@ export interface MonthWeekRowProps {
   dragLanding?: DragLanding | null;
   onDayClick: (date: DateTime) => void;
   onDayDoubleClick?: (date: DateTime) => void;
+  /** Given, a hovered day shows a "+" that starts a new event on it. */
+  onCreateOnDay?: (date: DateTime) => void;
   /** Given, the "+N" is a button; otherwise it is a badge the cell tap covers. */
   onOverflowClick?: (date: DateTime) => void;
   onEventClick: (eventId: string) => void;
@@ -162,6 +168,7 @@ function MonthWeekRowImpl({
   dragLanding = null,
   onDayClick,
   onDayDoubleClick,
+  onCreateOnDay,
   onOverflowClick,
   onEventClick,
   onEventPointerDown,
@@ -258,10 +265,7 @@ function MonthWeekRowImpl({
 
             {/* Content passes pointer events through to the day button, except event chips. */}
             <div className="pointer-events-none relative z-10 flex w-full flex-col">
-              <div
-                className="flex w-full items-center justify-between pl-0.5"
-                style={{ height: metrics.dateRowH }}
-              >
+              <div className="flex w-full items-center pl-0.5" style={{ height: metrics.dateRowH }}>
                 {today ? (
                   <span
                     className={`today-badge flex items-center justify-center rounded-full bg-[var(--color-accent)] font-medium tabular-nums text-white ${style.dayNumber}`}
@@ -276,9 +280,34 @@ function MonthWeekRowImpl({
                     {dt.day}
                   </span>
                 )}
+                {onCreateOnDay && (
+                  <button
+                    type="button"
+                    onClick={() => onCreateOnDay(dt)}
+                    // Off the tab order: 42 extra stops per month. From the
+                    // keyboard, select the day and press the create shortcut.
+                    tabIndex={-1}
+                    aria-label={`${isoDate} ${t('event.createEvent')}`}
+                    title={t('event.createEvent')}
+                    className="reveal-on-hover day-create pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)] hover:bg-[var(--color-accent-bg)]"
+                  >
+                    <svg
+                      aria-hidden
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
+                )}
                 {showHolidayName && holiday && (
                   <span
-                    className="ml-1 truncate rounded-full bg-[var(--color-sunday-bg,rgba(244,67,54,0.12))] px-1.5 text-micro font-medium text-[var(--color-sunday)]"
+                    className="ml-auto min-w-0 truncate rounded-full bg-[var(--color-sunday-bg,rgba(244,67,54,0.12))] px-1.5 text-micro font-medium text-[var(--color-sunday)]"
                     title={holiday.name}
                   >
                     {holiday.name}
@@ -307,17 +336,18 @@ function MonthWeekRowImpl({
                       type="button"
                       onPointerDown={(e) => onEventPointerDown(evt, e)}
                       onClick={() => onEventClick(evt.id)}
-                      className={`pointer-events-auto mx-0.5 flex items-center text-left font-semibold tabular-nums ${style.chip} ${style.chipHover} ${
+                      className={`event-chip pointer-events-auto mx-0.5 flex items-center text-left font-semibold tabular-nums ${style.chip} ${
                         canMoveEvent(evt) ? style.cursorMovable : style.cursorFixed
                       }`}
-                      style={{
-                        height: barH,
-                        lineHeight: `${barH}px`,
-                        marginBottom: TRACK_GAP,
-                        backgroundColor: `${evt.color}1f`,
-                        color: evt.color,
-                        opacity: draggingEventId === evt.id ? 0.4 : undefined,
-                      }}
+                      style={
+                        {
+                          '--evt': evt.color,
+                          height: barH,
+                          lineHeight: `${barH}px`,
+                          marginBottom: TRACK_GAP,
+                          opacity: draggingEventId === evt.id ? 0.4 : undefined,
+                        } as CSSProperties
+                      }
                     >
                       <span
                         aria-hidden
@@ -325,7 +355,7 @@ function MonthWeekRowImpl({
                         style={{ backgroundColor: evt.color }}
                       />
                       <span className="truncate">
-                        {evt.allDay ? '' : `${start.toFormat('H:mm')} `}
+                        {evt.allDay || !style.chipTime ? '' : `${start.toFormat('H:mm')} `}
                         {evt.title}
                       </span>
                     </button>

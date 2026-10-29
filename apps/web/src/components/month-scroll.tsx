@@ -309,7 +309,7 @@ export function MonthScroll() {
             <div
               key={item.key}
               data-month={item.month.toFormat('yyyy-MM')}
-              className="glass-surface-heavy sticky top-0 z-10 flex items-center px-3 text-body font-bold text-[var(--color-text-primary)]"
+              className="month-sticky-header sticky top-0 z-10 flex items-center px-3 text-body font-bold tabular-nums text-[var(--color-text-primary)]"
               style={{ height: MONTH_HEADER_H }}
             >
               {formatMonthYear(item.month, locale)}

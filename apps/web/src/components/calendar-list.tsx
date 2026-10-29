@@ -135,7 +135,7 @@ export function CalendarList() {
           const confirming = pendingDeleteId === cal.id;
           return (
             <div key={cal.id}>
-              <div className="flex w-full items-center rounded-lg transition-colors hover:bg-[var(--color-hover)]">
+              <div className="group flex w-full items-center rounded-lg transition-colors hover:bg-[var(--color-hover)]">
                 <button
                   type="button"
                   onClick={() => toggleCalendarFilter(cal.id)}
@@ -196,7 +196,9 @@ export function CalendarList() {
                     aria-label={t('calendar.deleteCalendar')}
                     aria-expanded={confirming}
                     title={t('calendar.deleteCalendar')}
-                    className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                    className={`mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)] ${
+                      confirming ? '' : 'reveal-on-hover'
+                    }`}
                   >
                     <svg
                       width="14"
