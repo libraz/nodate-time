@@ -53,6 +53,7 @@ type EventResponse struct {
 	Attendees        []AttendeeResponse      `json:"attendees"`
 	OwnerID          string                  `json:"ownerId" doc:"public user ID of the member whose layer this event sits on"`
 	RecurrenceRule   *RecurrenceRuleResponse `json:"recurrenceRule"`
+	TaskOwned        bool                    `json:"taskOwned" doc:"true when a task projects this event; its title, dates and recurrence then change on the task"`
 	IsRecurrence     bool                    `json:"isRecurrence"`
 	RecurrenceDate   *string                 `json:"recurrenceDate,omitempty"`
 	CreatedBy        string                  `json:"createdBy" doc:"public user ID of the creator"`

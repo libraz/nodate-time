@@ -191,6 +191,7 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 		Participants:       []string{},
 		Attendees:          []AttendeeResponse{},
 		RecurrenceRule:     mapRecurrenceRule(e.RecurrenceRule),
+		TaskOwned:          e.TaskID.Valid,
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          nullTimeValue(e.UpdatedAt),
 	}
