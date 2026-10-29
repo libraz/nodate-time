@@ -13,7 +13,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// Client wraps the MinIO S3 client.
+// Client wraps the minio-go S3 client.
 //
 // It also mints the URLs a browser reads and writes blobs through. Those URLs
 // address this API rather than the object store: the store is reachable only
@@ -24,7 +24,7 @@ type Client struct {
 	signer *Signer
 }
 
-// NewClient creates a new MinIO storage client. signer mints the browser-facing
+// NewClient creates a new S3 storage client. signer mints the browser-facing
 // URLs; a nil signer leaves the deployment able to store and read blobs
 // server-side but unable to hand any of them to a client.
 func NewClient(endpoint, accessKey, secretKey, bucket string, useSSL bool, signer *Signer) (*Client, error) {

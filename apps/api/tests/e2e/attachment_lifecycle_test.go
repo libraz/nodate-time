@@ -82,7 +82,7 @@ func objectRefCount(t *testing.T, storageKey string) int {
 func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 	t.Parallel()
 
@@ -115,7 +115,7 @@ func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 func TestDeletingAnAttachmentThenItsEventReleasesOneReference(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 	t.Parallel()
 
@@ -147,7 +147,7 @@ func TestDeletingAnAttachmentThenItsEventReleasesOneReference(t *testing.T) {
 func TestDeletingAnEventWithAnUnconfirmedReservationTakesNoReference(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 	t.Parallel()
 
@@ -186,7 +186,7 @@ func TestDeletingAnEventWithAnUnconfirmedReservationTakesNoReference(t *testing.
 func TestDeletingACalendarLeavesSharedBlobsAlone(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 	t.Parallel()
 

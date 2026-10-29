@@ -26,7 +26,7 @@ import (
 func TestObjectSweepReachesCollectableRowsBehindAFullBatchItCannotDelete(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 
 	workspaceID := helpers.TestWorkspace(generated.New(testDB)).ID
@@ -108,7 +108,7 @@ func TestObjectSweepReachesCollectableRowsBehindAFullBatchItCannotDelete(t *test
 func TestSweepLeavesAnObjectARetiredAttachmentStillNames(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 
 	body := uniqueAttachmentBody("named by a retired row")
@@ -147,7 +147,7 @@ func TestSweepLeavesAnObjectARetiredAttachmentStillNames(t *testing.T) {
 func TestSweepReclaimsAnObjectOnceItsRetiredAttachmentAges(t *testing.T) {
 	bootstrap(t)
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 
 	body := uniqueAttachmentBody("reclaimed after retention")

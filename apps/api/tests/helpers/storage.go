@@ -71,10 +71,10 @@ func UploadToSignedURLStatus(t *testing.T, signedURL, contentType string, body [
 	return resp.StatusCode, respBody
 }
 
-// PutRawObject writes bytes directly into a bucket using the same test MinIO
-// credentials the API's storage client uses, bypassing the signed relay —
-// and so bypassing the Content-Type/Content-Length binding a signed PUT
-// enforces. Used to simulate an object landing in storage with metadata that
+// PutRawObject writes bytes directly into a bucket using the same test
+// object storage credentials the API's storage client uses, bypassing the
+// signed relay — and so bypassing the Content-Type/Content-Length binding a
+// signed PUT enforces. Used to simulate an object landing in storage with metadata that
 // disagrees with what was declared at presign time, to exercise the
 // Confirm-time mismatch cleanup as defense-in-depth independent of how such a
 // mismatch might occur.
@@ -82,15 +82,15 @@ func PutRawObject(t *testing.T, bucket, key, contentType string, body []byte) {
 	t.Helper()
 	endpoint := os.Getenv("TC_S3_ENDPOINT")
 	if endpoint == "" {
-		endpoint = testMinioEndpoint
+		endpoint = testStorageEndpoint
 	}
 	access := os.Getenv("TC_S3_ACCESS_KEY")
 	if access == "" {
-		access = testMinioAccess
+		access = testStorageAccess
 	}
 	secret := os.Getenv("TC_S3_SECRET_KEY")
 	if secret == "" {
-		secret = testMinioSecret
+		secret = testStorageSecret
 	}
 	mc, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(access, secret, ""), Secure: false})
 	if err != nil {

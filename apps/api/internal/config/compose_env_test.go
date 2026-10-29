@@ -24,7 +24,7 @@ var notForwarded = map[string]string{
 // deliberately differs from the one config.go applies when unset.
 var divergentDefaults = map[string]string{
 	"TC_TRUSTED_PROXIES": "every request arrives through the web service on the compose network",
-	"TC_S3_ENDPOINT":     "the object store is the minio service, not localhost",
+	"TC_S3_ENDPOINT":     "the object store is the storage service, not localhost",
 	"TC_METRICS_ADDR":    "a container cannot bind the host's loopback",
 }
 

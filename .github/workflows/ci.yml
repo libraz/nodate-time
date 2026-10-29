@@ -92,18 +92,18 @@ jobs:
             docker compose logs mysql; exit 1
           fi
 
-      - name: Start MinIO
+      - name: Start object storage
         run: |
-          docker compose up -d minio
+          docker compose up -d storage
           for i in $(seq 1 30); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q minio)" 2>/dev/null || echo starting)
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q storage)" 2>/dev/null || echo starting)
             if [ "$status" = "healthy" ]; then
-              echo "MinIO is healthy"; break
+              echo "Storage is healthy"; break
             fi
-            echo "Waiting for MinIO ($status)..."; sleep 3
+            echo "Waiting for storage ($status)..."; sleep 3
           done
           if [ "$status" != "healthy" ]; then
-            docker compose logs minio; exit 1
+            docker compose logs storage; exit 1
           fi
 
       - name: Build
@@ -126,7 +126,7 @@ jobs:
         working-directory: apps/api
         env:
           TC_TEST_INTEGRATION: '1'
-          TC_TEST_MINIO: '1'
+          TC_TEST_STORAGE: '1'
         run: go test ./... -count=1
 
       # The pass above has object storage for every test in it -- the test

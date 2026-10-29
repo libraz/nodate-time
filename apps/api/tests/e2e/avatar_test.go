@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// requireStorage skips the test if MinIO is not enabled.
+// requireStorage skips the test if object storage is not enabled.
 func requireStorage(t *testing.T) {
 	t.Helper()
 	if !helpers.StorageEnabled() {
-		t.Skip("set TC_TEST_MINIO=1 with MinIO running to enable storage tests")
+		t.Skip("set TC_TEST_STORAGE=1 with object storage running to enable storage tests")
 	}
 }
 
