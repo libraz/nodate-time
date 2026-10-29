@@ -1,7 +1,8 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n';
-import { formatMonthYear, nowInZone } from '@/lib/date-utils';
+import { formatMonthYear } from '@/lib/date-utils';
+import { shortcutProps } from '@/lib/shortcuts';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -9,16 +10,13 @@ export function CalendarHeader() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
-  const selectedDate = useUiStore((s) => s.selectedDate);
-  const navigateMonth = useUiStore((s) => s.navigateMonth);
+  const stepView = useUiStore((s) => s.stepView);
+  const goToToday = useUiStore((s) => s.goToToday);
   const calendarView = useUiStore((s) => s.calendarView);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
-  const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
-  const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setShowMobileMenu = useUiStore((s) => s.setShowMobileMenu);
-  const triggerScrollToToday = useUiStore((s) => s.triggerScrollToToday);
-  const timezone = useUiStore((s) => s.timezone);
   const openEventModal = useUiStore((s) => s.openEventModal);
+  const mobileTab = useUiStore((s) => s.mobileTab);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -74,28 +72,6 @@ export function CalendarHeader() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showViewMenu]);
-
-  const handleGoToToday = () => {
-    const today = nowInZone(timezone);
-    setCurrentMonth(today.startOf('month'));
-    setSelectedDate(today);
-    // Mobile month view is an infinite scroll; signal it to scroll back to today.
-    triggerScrollToToday();
-  };
-
-  // Prev/next navigation steps by the unit the active view shows: a week for the
-  // weekly timeline, a year for the year grid, otherwise a month.
-  const navigateByView = (dir: number) => {
-    if (calendarView === 'week') {
-      const next = selectedDate.plus({ weeks: dir });
-      setSelectedDate(next);
-      setCurrentMonth(next.startOf('month'));
-    } else if (calendarView === 'year') {
-      setCurrentMonth(currentMonth.plus({ years: dir }));
-    } else {
-      navigateMonth(dir);
-    }
-  };
 
   const ChevronLeft = () => (
     <svg
@@ -375,7 +351,7 @@ export function CalendarHeader() {
           <div className="flex shrink-0 items-center">
             <button
               type="button"
-              onClick={() => navigateByView(-1)}
+              onClick={() => stepView(-1)}
               className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
               aria-label={t('calendar.prevMonth')}
             >
@@ -383,7 +359,7 @@ export function CalendarHeader() {
             </button>
             <button
               type="button"
-              onClick={() => navigateByView(1)}
+              onClick={() => stepView(1)}
               className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
               aria-label={t('calendar.nextMonth')}
             >
@@ -396,39 +372,43 @@ export function CalendarHeader() {
         <div className="flex-1" />
 
         {/* Right: Today + create + avatar */}
-        <div className="flex items-center gap-0">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={handleGoToToday}
+            onClick={goToToday}
             className="flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent)]"
           >
             <span className="leading-none">{t('calendar.today')}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => openEventModal()}
-            className="flex h-8 w-8 items-center justify-center hover:opacity-80 active:scale-95 transition-all"
-            style={{
-              borderRadius: 'var(--radius-sm)',
-              background: 'var(--color-accent)',
-            }}
-            aria-label={t('event.createEvent')}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {/* The calendar tab has the thumb-reach FAB; a second create button
+              up here would be the same action twice on one screen. */}
+          {mobileTab !== 'calendar' && (
+            <button
+              type="button"
+              onClick={() => openEventModal()}
+              className="flex h-8 w-8 items-center justify-center hover:opacity-80 active:scale-95 transition-all"
+              style={{
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--color-accent)',
+              }}
+              aria-label={t('event.createEvent')}
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          )}
 
           <div className="relative" ref={mobileProfileMenuRef}>
             <AvatarButton size="sm" />
@@ -447,26 +427,29 @@ export function CalendarHeader() {
 
           <button
             type="button"
-            onClick={() => navigateByView(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            onClick={() => stepView(-1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
             aria-label={t('calendar.prevMonth')}
+            {...shortcutProps('prev', t('calendar.prevMonth'))}
           >
             <ChevronLeft />
           </button>
 
           <button
             type="button"
-            onClick={() => navigateByView(1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            onClick={() => stepView(1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
             aria-label={t('calendar.nextMonth')}
+            {...shortcutProps('next', t('calendar.nextMonth'))}
           >
             <ChevronRight />
           </button>
 
           <button
             type="button"
-            onClick={handleGoToToday}
-            className="flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-sm font-medium text-[var(--color-accent)]"
+            onClick={goToToday}
+            className="flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-sm font-medium text-[var(--color-accent)] transition-transform active:scale-95"
+            {...shortcutProps('today', t('calendar.today'))}
           >
             <span className="leading-none">{t('calendar.today')}</span>
           </button>
@@ -482,6 +465,7 @@ export function CalendarHeader() {
               data-active={calendarView === 'month'}
               type="button"
               onClick={() => setCalendarView('month')}
+              {...shortcutProps('month', t('calendar.monthly'))}
             >
               {t('calendar.monthly')}
             </button>
@@ -489,6 +473,7 @@ export function CalendarHeader() {
               data-active={calendarView === 'week'}
               type="button"
               onClick={() => setCalendarView('week')}
+              {...shortcutProps('week', t('calendar.weekly'))}
             >
               {t('calendar.weekly')}
             </button>
@@ -496,6 +481,7 @@ export function CalendarHeader() {
               data-active={calendarView === 'list'}
               type="button"
               onClick={() => setCalendarView('list')}
+              {...shortcutProps('list', t('calendar.list'))}
             >
               {t('calendar.list')}
             </button>
@@ -503,6 +489,7 @@ export function CalendarHeader() {
               data-active={calendarView === 'year'}
               type="button"
               onClick={() => setCalendarView('year')}
+              {...shortcutProps('year', t('calendar.year'))}
             >
               {t('calendar.year')}
             </button>
@@ -513,6 +500,7 @@ export function CalendarHeader() {
             onClick={toggleSearch}
             className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
             aria-label={t('search.searchEvents')}
+            {...shortcutProps('search', t('search.searchEvents'))}
           >
             <SearchIcon />
           </button>
@@ -527,6 +515,7 @@ export function CalendarHeader() {
               color: 'var(--color-text-on-accent, #fff)',
             }}
             aria-label={t('event.createEvent')}
+            {...shortcutProps('create', t('event.createEvent'))}
           >
             <svg
               width="16"

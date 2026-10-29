@@ -169,8 +169,11 @@ describe('App mobile search', () => {
     render(<App />);
     await user.type(screen.getByPlaceholderText('search.placeholder'), 'rehearsal');
 
-    expect(screen.getByText('Rehearsal at home')).toBeInTheDocument();
-    expect(screen.queryByText('Rehearsal at work')).toBeNull();
+    // Whole-line text: the match highlight splits a title across nodes.
+    const line = (text: string) => (_: string, el: Element | null) =>
+      el?.tagName === 'P' && el.textContent === text;
+    expect(screen.getByText(line('Rehearsal at home'))).toBeInTheDocument();
+    expect(screen.queryByText(line('Rehearsal at work'))).toBeNull();
   });
 });
 

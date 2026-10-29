@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Highlight, handleResultListKeys } from '@/components/search-results';
 import { useT } from '@/i18n';
 import {
   filterEventsForSearch,
@@ -77,8 +78,9 @@ export function SearchPanel() {
               <button
                 key={evt.id}
                 type="button"
+                data-search-result
                 onClick={() => handleSelect(evt)}
-                className="mx-2 flex w-[calc(100%-16px)] items-start gap-3 px-5 py-3.5 text-left hover:bg-[var(--color-hover)]"
+                className="search-result mx-2 flex w-[calc(100%-16px)] items-start gap-3 px-5 py-3.5 text-left hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)]"
                 style={{ borderRadius: 'var(--radius-sm)' }}
               >
                 <span
@@ -87,14 +89,14 @@ export function SearchPanel() {
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-callout font-medium text-[var(--color-text-primary)]">
-                    {evt.title}
+                    <Highlight text={evt.title} query={searchQuery} />
                   </p>
                   <p className="text-body tabular-nums text-[var(--color-text-secondary)]">
                     {dateLabel}
                   </p>
                   {evt.location && (
                     <p className="truncate text-body text-[var(--color-text-tertiary)]">
-                      {evt.location}
+                      <Highlight text={evt.location} query={searchQuery} />
                     </p>
                   )}
                 </div>
@@ -167,15 +169,27 @@ export function SearchPanel() {
         onClick={toggleSearch}
       />
 
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={t('search.searchEvents')}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('search.searchEvents')}
+        onKeyDown={handleResultListKeys}
+      >
         {/* SP: fullscreen overlay */}
-        <div className="glass-surface-heavy fixed inset-0 z-50 flex flex-col sm:hidden">
+        <div
+          data-search-layout
+          className="glass-surface-heavy fixed inset-0 z-50 flex flex-col sm:hidden"
+        >
           {searchInput}
           {resultsList}
         </div>
 
         {/* PC: dropdown panel */}
-        <div className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 hidden max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)] sm:flex">
+        <div
+          data-search-layout
+          className="glass-surface-heavy modal-panel absolute right-16 top-[60px] z-50 hidden max-h-[520px] w-[420px] flex-col overflow-hidden ring-1 ring-[var(--color-border)] sm:flex"
+        >
           {searchInput}
           {resultsList}
         </div>
