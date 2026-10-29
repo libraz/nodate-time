@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
-import { isRecurringEvent, moveSeriesRule } from '@/lib/event-move';
+import { isRecurringEvent, moveSeriesRule, restoreInput } from '@/lib/event-move';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
@@ -41,7 +41,12 @@ export function useScopedUpdate() {
   }, [fetchEvents, visibleRange]);
 
   const commit = useCallback(
-    async (event: CalendarEvent, payload: EventInput, scope?: 'this' | 'all') => {
+    async (
+      event: CalendarEvent,
+      payload: EventInput,
+      scope?: 'this' | 'all',
+      undoable = true,
+    ): Promise<boolean> => {
       try {
         const { data: current, revision } = await api.getWithRevision<CalendarEvent>(
           `/calendars/${event.calendarId}/events/${event.id}`,
@@ -51,12 +56,28 @@ export function useScopedUpdate() {
         if (current.updatedAt !== event.updatedAt) {
           toast.error(t('apiError.EVENT.STALE'));
           refetch();
-          return;
+          return false;
         }
         await updateEvent(event.calendarId, event.id, payload, scope, revision);
+        // A drag is quick to get wrong and slow to put back by hand. Only a
+        // single event offers it: a series edit rewrites more than this copy.
+        if (undoable && scope === undefined) {
+          toast.info(t('event.changed'), {
+            label: t('common.undo'),
+            run: () => {
+              const moved = useCalendarStore.getState().events.find((e) => e.id === event.id);
+              if (!moved) return;
+              void commit(moved, restoreInput(event), undefined, false).then((ok) => {
+                if (ok) toast.success(t('event.changeUndone'));
+              });
+            },
+          });
+        }
+        return true;
       } catch (e) {
         toast.error(errorMessage(e, t('error.saveFailed')));
         if (staleOrGone(e)) refetch();
+        return false;
       }
     },
     [updateEvent, refetch, t],
