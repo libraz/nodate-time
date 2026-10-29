@@ -236,7 +236,7 @@ func TestKeysSurviveTheURLRoundTrip(t *testing.T) {
 	s := testSigner()
 	for _, key := range []string{
 		"avatars/0191d1f0/da39a3ee",
-		"albums/0191d1f0/0191d200/thumb",
+		"albums/0191d1f0/0191d200.thumb",
 		"workspace/0191d1f0/e3b0c442",
 	} {
 		raw, err := s.GetURL(key, time.Hour)
