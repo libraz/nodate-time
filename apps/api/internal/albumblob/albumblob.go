@@ -21,8 +21,10 @@ func nullInt32(v uint32) sql.NullInt32 {
 	return sql.NullInt32{Int32: int32(v), Valid: true}
 }
 
-// ThumbnailKey puts a photo's grid-sized rendering underneath the photo's own
-// key, so it is derivable from the photo alone.
+// ThumbnailKey puts a photo's grid-sized rendering beside the photo's own key,
+// so it is derivable from the photo alone. Beside rather than underneath: a
+// store that keeps objects as files cannot hold a key that is also another
+// key's parent.
 //
 // It lives here rather than beside the handler that signs the upload because
 // the sweep needs it too, and for the case where nothing else can supply it: a
@@ -30,7 +32,7 @@ func nullInt32(v uint32) sql.NullInt32 {
 // after the photo's row is deleted the only thing that could still have named
 // those bytes is this rule.
 func ThumbnailKey(photoKey string) string {
-	return photoKey + "/thumb"
+	return photoKey + ".thumb"
 }
 
 // Photo is what attaching needs to know about the row being moved. It is

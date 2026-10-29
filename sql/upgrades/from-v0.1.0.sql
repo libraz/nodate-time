@@ -7,7 +7,9 @@
 -- awaiting confirmation. The only column dropped is sessions.prev_refresh_hash,
 -- after its values are carried into the contract's rotated_from_hash, and the
 -- only rows rewritten besides the deletion marking are comment log entries,
--- which lose their text.
+-- which lose their text, and thumbnail storage keys, which move from
+-- <photo>/thumb to <photo>.thumb. The objects themselves are renamed when they
+-- are copied to the new object store; see the README.
 --
 -- Every step checks what is already there, so a run that was interrupted can be
 -- run again, and so can one applied too early: run it once more after the old
@@ -124,6 +126,12 @@ BEGIN
   SET payload_json = JSON_REMOVE(payload_json, '$.summary'), updated_at = updated_at
   WHERE type LIKE 'calendar.comment.%'
     AND JSON_CONTAINS_PATH(payload_json, 'one', '$.summary');
+
+  -- A thumbnail is stored beside its photo rather than underneath it.
+  UPDATE storage_objects
+  SET storage_key = CONCAT(LEFT(storage_key, CHAR_LENGTH(storage_key) - 6), '.thumb'),
+      updated_at = updated_at
+  WHERE storage_key LIKE 'albums/%/thumb';
 
   -- The objects nothing refers to; the storage sweep deletes only these.
   CREATE OR REPLACE VIEW storage_objects_unreferenced AS
