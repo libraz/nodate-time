@@ -26,9 +26,10 @@ shared schema disagree with the schema itself, and that disagreement
 shows up as corrupt data rather than as a failed build.
 
 To change the contract, change it upstream and re-vendor.
-`bash sql/core/tools/check-vendored.sh sql/core` verifies both halves of
-that: that the copy is unedited, and that it still matches the pinned ref
-(`--local-only` checks the first half without reaching upstream).
+`bash sql/core/tools/check-vendored.sh sql/core --mode <mode>` verifies it:
+`local` checks the file hashes offline, `pin` adds a diff against the pinned
+commit, and `all` also checks that upstream has not moved on. CI runs `pin`
+on every build and `all` on a daily schedule.
 
 The time layer never changes the shape of a core table: it has no
 `alters/`, and `sql/core/tools/check-no-core-alters.sh sql` fails if one of
@@ -60,7 +61,7 @@ make sqlc        # schema + queries -> apps/api/internal/db/generated/
 `scripts/check-codegen-drift.sh` and `scripts/check-error-messages.sh`, and CI
 runs it. The pre-commit hook (`.githooks/pre-commit`) runs
 `check-codegen-drift.sh --staged`, plus
-`sql/core/tools/check-vendored.sh sql/core --local-only` when `sql/core/` is
+`sql/core/tools/check-vendored.sh sql/core --mode local` when `sql/core/` is
 staged; it does not run the error-message check. The hook is
 reached through `core.hooksPath`, so it only runs where that is configured.
 

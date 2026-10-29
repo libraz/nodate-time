@@ -1,0 +1,22 @@
+# Reports when the upstream has moved on without a re-vendor. This runs on a
+# schedule rather than on push because the answer changes whenever upstream
+# does; tying it to a push or PR would turn unrelated changes red. Integrity
+# and pin checks, which are deterministic, run in ci.yml.
+name: vendored-drift
+
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Vendored contract is current with upstream
+        run: make check-core-current

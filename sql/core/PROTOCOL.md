@@ -495,7 +495,8 @@ this way until its first stable release.
 
 This repository hosts the reference copy. An implementor vendors the
 directory with `tools/vendor.sh`, which pins it to a commit sha and records
-each file's hash in `UPSTREAM.json`. `tools/check-vendored.sh` runs in CI
-and fails when the vendored copy differs from that pin or the pin falls
-behind, so divergence fails a build instead of surfacing as corrupt data
-months later.
+each file's hash in `UPSTREAM.json`. `tools/check-vendored.sh` runs in every
+build and fails when the vendored copy was edited or differs from that pin,
+so divergence fails a build instead of surfacing as corrupt data months
+later. A scheduled job reports when the upstream has moved on without a
+re-vendor.
