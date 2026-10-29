@@ -684,7 +684,7 @@
   border: 1px solid var(--color-separator);
 }
 
-:root[data-theme="modern"] .segmented-control button[data-active="true"] {
+:root[data-theme="modern"] .segmented-control::before {
   background: var(--color-surface-elevated);
   box-shadow: var(--shadow-sm);
 }
@@ -772,7 +772,7 @@
 :root[data-theme="modern"][data-mode="dark"] .segmented-control {
   background: var(--color-surface-inset);
 }
-:root[data-theme="modern"][data-mode="dark"] .segmented-control button[data-active="true"] {
+:root[data-theme="modern"][data-mode="dark"] .segmented-control::before {
   background: var(--color-surface-elevated);
   box-shadow: var(--shadow-sm);
 }
@@ -1019,10 +1019,14 @@
   font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
 }
 
-:root[data-theme="nothing"] .segmented-control button[data-active="true"] {
+:root[data-theme="nothing"] .segmented-control::before {
+  border-radius: 0;
   background: var(--color-text-primary);
-  color: var(--color-surface);
   box-shadow: none;
+}
+
+:root[data-theme="nothing"] .segmented-control > button[data-active="true"] {
+  color: var(--color-surface);
 }
 
 /* Red glow on accent elements (dark mode) */
@@ -1140,7 +1144,7 @@ body,
   background: rgba(118, 118, 128, 0.24);
 }
 
-:root[data-mode="dark"] .segmented-control button[data-active="true"] {
+:root[data-mode="dark"] .segmented-control::before {
   background: rgba(99, 99, 102, 0.56);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
@@ -1172,6 +1176,14 @@ select {
 ::selection {
   background: var(--color-accent-subtle);
   color: var(--color-text-primary);
+}
+
+/* The part of a search result the query matched. */
+.search-mark {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
 }
 
 /* Keyboard focus rings on interactive controls. :where() keeps specificity
@@ -1267,28 +1279,100 @@ textarea,
    Segmented control — iOS UISegmentedControl
    ============================================ */
 .segmented-control {
-  display: inline-flex;
+  /* Equal-width segments sized to the longest label, with one thumb that
+     slides to the active segment. The count and index come from :has() below,
+     so every segmented control gets this without its markup knowing. */
+  --seg-n: 1;
+  --seg-i: 0;
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   border-radius: 8px;
   background: rgba(118, 118, 128, 0.12);
   padding: 2px;
   gap: 0;
 }
 
-.segmented-control button {
+.segmented-control::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--seg-n));
+  transform: translateX(calc(var(--seg-i) * 100%));
+  border-radius: 7px;
+  background: var(--color-surface);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0.5px 0 rgba(0, 0, 0, 0.04);
+  transition:
+    transform 0.34s cubic-bezier(0.3, 0.75, 0.2, 1),
+    opacity 0.2s ease;
+}
+.segmented-control:not(:has(> [data-active="true"]))::before {
+  opacity: 0;
+}
+.segmented-control:has(> :nth-child(2):last-child) {
+  --seg-n: 2;
+}
+.segmented-control:has(> :nth-child(3):last-child) {
+  --seg-n: 3;
+}
+.segmented-control:has(> :nth-child(4):last-child) {
+  --seg-n: 4;
+}
+.segmented-control:has(> :nth-child(5):last-child) {
+  --seg-n: 5;
+}
+.segmented-control:has(> :nth-child(6):last-child) {
+  --seg-n: 6;
+}
+.segmented-control:has(> :nth-child(2)[data-active="true"]) {
+  --seg-i: 1;
+}
+.segmented-control:has(> :nth-child(3)[data-active="true"]) {
+  --seg-i: 2;
+}
+.segmented-control:has(> :nth-child(4)[data-active="true"]) {
+  --seg-i: 3;
+}
+.segmented-control:has(> :nth-child(5)[data-active="true"]) {
+  --seg-i: 4;
+}
+.segmented-control:has(> :nth-child(6)[data-active="true"]) {
+  --seg-i: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-control::before {
+    transition: none;
+  }
+}
+
+.segmented-control > button {
+  position: relative;
+  z-index: 1;
   padding: 6px 14px;
   border-radius: 7px;
   font-size: 13px;
   font-weight: 500;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  white-space: nowrap;
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
+  color: var(--color-text-secondary);
+}
+
+.segmented-control > button:hover {
   color: var(--color-text-primary);
 }
 
-.segmented-control button[data-active="true"] {
-  background: var(--color-surface);
+.segmented-control > button[data-active="true"] {
   color: var(--color-text-primary);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.08),
-    0 0.5px 0 rgba(0, 0, 0, 0.04);
 }
 
 /* ============================================
@@ -1316,6 +1400,14 @@ textarea,
 
 .input-modern::placeholder {
   color: var(--color-text-tertiary);
+}
+
+/* A field set inside dense chrome (sidebars, toolbars), not a form. */
+.input-compact {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  border-radius: 8px;
 }
 
 /* Adornment padding — declared unlayered so they override the shorthand
@@ -1601,6 +1693,49 @@ textarea,
   box-shadow: inset 0 0 0 1.5px var(--color-accent);
 }
 
+/* Pinned month label in the phone scroller. Frosted like the header, but it
+   sits on the grid rather than floating over it: a hairline, not an elevation
+   shadow, which would smear across the week pinned beneath it. */
+.month-sticky-header {
+  background: var(--surface-glass-heavy);
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  border-bottom: 1px solid var(--color-separator);
+}
+
+/* Event chips and timed blocks take their colour from --evt. The tint is mixed
+   into an opaque-enough surface and the text toward the primary ink, so a light
+   label colour still reads on a translucent cell in both modes. */
+.event-chip {
+  background: color-mix(in srgb, var(--evt) 15%, var(--color-surface-elevated));
+  color: color-mix(in srgb, var(--evt) 68%, var(--color-text-primary));
+  transition: background-color 0.15s ease;
+}
+.event-block {
+  background: color-mix(in srgb, var(--evt) 14%, var(--color-surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--evt) 36%, transparent);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.2s ease;
+}
+.event-block-title {
+  color: color-mix(in srgb, var(--evt) 50%, var(--color-text-primary));
+}
+@media (hover: hover) and (pointer: fine) {
+  .event-chip:hover {
+    background: color-mix(in srgb, var(--evt) 24%, var(--color-surface-elevated));
+  }
+  .event-block:hover {
+    background: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
+    box-shadow: var(--shadow-md);
+  }
+}
+/* The block under the pointer during a move: lifted off the grid. */
+.event-block-lifted {
+  box-shadow: var(--shadow-elevated);
+  transform: scale(1.02);
+}
+
 /* Multi-day bars — glassy sheen on glass, clean flat fill elsewhere */
 .event-bar {
   box-shadow:
@@ -1624,6 +1759,33 @@ textarea,
   from {
     opacity: 0;
     transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A turned month arrives from the side it was scrolled from. */
+.calendar-enter[data-dir="1"] {
+  animation-name: calendar-enter-next;
+}
+.calendar-enter[data-dir="-1"] {
+  animation-name: calendar-enter-prev;
+}
+@keyframes calendar-enter-next {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes calendar-enter-prev {
+  from {
+    opacity: 0;
+    transform: translateY(-28px);
   }
   to {
     opacity: 1;
@@ -1803,6 +1965,9 @@ textarea,
   :root[data-theme="modern"] .calendar-enter {
     animation-duration: 0.24s;
   }
+  :root[data-theme="modern"] .segmented-control::before {
+    transition-duration: 0.22s;
+  }
   :root[data-theme="modern"] .btn-primary:active,
   :root[data-theme="modern"] .btn-secondary:active {
     transform: scale(0.97);
@@ -1833,6 +1998,10 @@ textarea,
   :root[data-theme="washi"] .modal-backdrop {
     animation-duration: 0.4s;
   }
+  :root[data-theme="washi"] .segmented-control::before {
+    transition-duration: 0.5s;
+    transition-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
   :root[data-theme="washi"] .btn-primary:active,
   :root[data-theme="washi"] .btn-secondary:active {
     transform: none;
@@ -1850,6 +2019,10 @@ textarea,
   }
   :root[data-theme="nothing"] .calendar-enter {
     animation-duration: 0.18s;
+  }
+  :root[data-theme="nothing"] .segmented-control::before {
+    transition-duration: 0.12s;
+    transition-timing-function: steps(3, end);
   }
 }
 
@@ -2073,11 +2246,22 @@ textarea,
     transform: translateY(0);
   }
 }
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+}
 .toast-item {
-  animation: toast-in 200ms ease-out;
+  animation: toast-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.toast-item[data-leaving] {
+  animation: toast-out 180ms ease-in forwards;
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .toast-item {
+  .toast-item,
+  .toast-item[data-leaving] {
     animation: none;
   }
 }

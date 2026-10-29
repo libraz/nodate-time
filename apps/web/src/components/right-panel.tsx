@@ -198,7 +198,7 @@ export function MemoSection() {
                 onChange={setTargetId}
                 ariaLabel={t('panel.postTo')}
                 className="min-w-0 flex-1"
-                triggerClassName="input-modern"
+                triggerClassName="input-modern input-compact"
                 options={postableCalendars.map((c) => ({
                   value: c.id,
                   label: c.name,
