@@ -81,11 +81,12 @@ sql/
     tables/             shared table definitions
     triggers/           shared triggers
     conformance/        contract conformance checks
+    tools/              schema build, vendoring and layer checks
+    upgrades/           bring an existing database's shared tables up to date
   time/                this application's own tables
     tables/             table definitions
-    alters/             changes to core tables this application makes
     views/              view definitions
-  upgrades/            bring an existing database up to the current schema
+    upgrades/           bring an existing database's own tables and rows up to date
   queries/             sqlc query definitions
   schema.sql           combined schema produced by build-schema.sh
   sqlc.yaml            sqlc config
@@ -281,8 +282,12 @@ CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
   lets more than one product write to the same database — it is not edited here and
   is pinned upstream in `sql/core/UPSTREAM.json`. `sql/time/` holds this
   application's own tables.
-- `sql/build-schema.sh` concatenates core then time into `sql/schema.sql`, which
-  `make db-apply` applies.
+- `sql/core/tools/build-schema.sh core time` concatenates core then time into
+  `sql/schema.sql` (`make db-schema`), which `make db-apply` applies to an empty
+  database.
+- An existing database is upgraded rather than rebuilt; see
+  [Upgrading](#upgrading). `bash scripts/check-upgrade-path.sh` checks that the
+  upgrades take a v0.1.0 database, with data, to the current schema.
 - `make test-conformance` checks the resulting schema against the contract.
   `make check-core` checks that the vendored copy is unedited and current.
 - Write queries in `sql/queries/*.sql` and run `make sqlc` to generate Go code into
@@ -378,25 +383,55 @@ attributes, so a file-level copy has to keep them (GNU `tar --xattrs
 
 ### Upgrading
 
-Back up both volumes first, as described above. Then, for each
-release between yours and the one you are moving to, apply
-`sql/upgrades/from-<that release>.sql` in order, and only then rebuild:
+Back up both volumes first, as described above. A database that holds data is
+never rebuilt: `sql/schema.sql` and `sql/core/tools/build-schema.sh` drop every
+table they create, so applying either to a live database wipes it. It is
+brought forward by upgrade files instead, in this order, with the API stopped:
+
+1. `sql/core/upgrades/*.sql`, every file, in number order. These change the
+   tables shared with other products and always come first; the next step
+   refuses to run until they have.
+2. `sql/time/upgrades/from-<release>.sql`, for each release between yours and
+   the one you are moving to, oldest first.
+3. The conformance check, which confirms the result matches the contract.
 
 ```sh
 docker compose -f compose.prod.yml stop api
-docker compose -f compose.prod.yml exec -T mysql \
-  sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
-  < sql/upgrades/from-v0.1.0.sql \
-  && docker compose -f compose.prod.yml up -d --build
+docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
+docker compose -f compose.prod.yml exec -T mysql bash -euc '
+  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+  for f in /tmp/upgrade-sql/core/upgrades/*.sql /tmp/upgrade-sql/time/upgrades/from-v0.1.0.sql; do
+    echo "applying ${f#/tmp/upgrade-sql/}"
+    mysql -uroot "$MYSQL_DATABASE" < "$f"
+  done
+  bash /tmp/upgrade-sql/core/conformance/run.sh \
+    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
+  rm -rf /tmp/upgrade-sql
+' && docker compose -f compose.prod.yml up -d --build
 ```
 
 The password and database name are read inside the container, from the values
-`.env` gave it, so nothing has to be exported on the host; the rebuild runs only
-if the upgrade succeeded. An upgrade file keeps the data. Stop the old API
-first: a row it deletes after the file has run would read as an upload still
-awaiting confirmation. Each step of a file checks what is already there, so one
-that stopped partway can be run again, as long as the new API has not yet
-served a request.
+`.env` gave it, so nothing has to be exported on the host. The loop stops at
+the first file that fails, and the rebuild runs only if every file and the
+check succeeded. Stop the old API first: a row it deletes after the upgrade has
+run would read as an upload still awaiting confirmation. Each step checks what
+is already there, so a run that stopped partway can be repeated, as long as the
+new API has not yet served a request.
+
+Allowed sign-in addresses turn the restriction on. The upgrade moves the
+admin panel's allowed e-mail addresses into the sign-in allowlist the database
+shares with other products, and any enabled entry there restricts OAuth
+sign-in to the listed addresses and domains, whether or not
+`TC_GOOGLE_ALLOWED_DOMAINS` is set. A deployment that left the domain list
+empty and listed a few addresses as exceptions let everyone sign in before the
+upgrade; after it, only those addresses can. Withdraw the entries in the admin
+panel if that is not what you want.
+
+The upgrade also rewrites some existing rows once: activity-log entries take
+the event names and payload keys shared with other products, e-mail addresses
+are stored lower-case, every session is marked as issued by this application,
+storage reference counts are recounted, and weekly repeats keep the Sunday week
+start they were shown with.
 
 Coming from v0.1.0, the deployment itself also changed:
 
@@ -428,8 +463,8 @@ changing: the API reaches the store, the browser never does, either way.
 A deployment from before the switch keeps its objects in `minio_data`, in
 MinIO's own on-disk format, so they are copied over S3 by the `mc` client inside
 the old container, which keeps running after the new compose file no longer
-defines it. Stop the API and apply `sql/upgrades/from-v0.1.0.sql` as above, but
-hold the rebuild until the objects have moved:
+defines it. Stop the API and apply the upgrades as above, but hold the rebuild
+until the objects have moved:
 
 ```sh
 B=nodate-time   # TC_S3_BUCKET

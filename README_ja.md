@@ -70,11 +70,12 @@ sql/
     tables/             共有テーブル定義
     triggers/           共有トリガ
     conformance/        契約適合チェック
+    tools/              スキーマの組み立て、vendor、層の検査
+    upgrades/           既存の DB の共有テーブルを今の形へ上げる SQL
   time/                本アプリ固有のテーブル
     tables/             テーブル定義
-    alters/             このアプリが core のテーブルに加える変更
     views/              ビュー定義
-  upgrades/            既存の DB を今のスキーマへ上げる SQL
+    upgrades/           既存の DB の本アプリのテーブルと行を今の形へ上げる SQL
   queries/             sqlc クエリ定義
   schema.sql           build-schema.sh で生成される結合スキーマ
   sqlc.yaml            sqlc 設定
@@ -220,7 +221,8 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 ## DB マイグレーション / コード生成
 
 - スキーマは 2 層構成。`sql/core/` は複数プロダクトが同じ DB に書き合うための共有スキーマ契約のコピー（編集不可、`sql/core/UPSTREAM.json` で上流に固定）、`sql/time/` が本アプリ固有のテーブル。
-- `sql/build-schema.sh` が core → time の順に結合して `sql/schema.sql` を生成し、`make db-apply` が適用する。
+- `sql/core/tools/build-schema.sh core time` が core → time の順に結合して `sql/schema.sql` を生成し（`make db-schema`）、`make db-apply` が空の DB に適用する。
+- 既存の DB は作り直さずに更新する。手順は「[既存環境の更新](#既存環境の更新)」を参照。`bash scripts/check-upgrade-path.sh` は、データの入った v0.1.0 の DB が更新で現在のスキーマになることを確かめる。
 - `make test-conformance` で、生成したスキーマが契約を満たしているかを検証する。`make check-core` は vendor したコピーが未編集かつ最新かを確認する。
 - クエリは `sql/queries/*.sql` に書き、`make sqlc` で `apps/api/internal/db/generated/` に Go コードを生成する。
 
@@ -270,17 +272,32 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 
 ### 既存環境の更新
 
-先に上記のとおり 2 つのボリュームをバックアップする。そのうえで、今のリリースから移行先までの各リリースについて `sql/upgrades/from-<そのリリース>.sql` を古い順に当て、それから再ビルドする。
+先に上記のとおり 2 つのボリュームをバックアップする。データの入った DB は作り直さない。`sql/schema.sql` も `sql/core/tools/build-schema.sh` も、作るテーブルをすべて DROP してから作り直すので、稼働中の DB に流すとデータが消える。既存の DB は更新用の SQL で上げる。API を止めたうえで、次の順に当てる。
+
+1. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てる。これが済むまで次の手順は実行を拒否する。
+2. `sql/time/upgrades/from-<リリース>.sql` を、今のリリースから移行先までの各リリースについて古い順に。
+3. 適合性検査。結果が契約どおりになっているかを確かめる。
 
 ```sh
 docker compose -f compose.prod.yml stop api
-docker compose -f compose.prod.yml exec -T mysql \
-  sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
-  < sql/upgrades/from-v0.1.0.sql \
-  && docker compose -f compose.prod.yml up -d --build
+docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
+docker compose -f compose.prod.yml exec -T mysql bash -euc '
+  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+  for f in /tmp/upgrade-sql/core/upgrades/*.sql /tmp/upgrade-sql/time/upgrades/from-v0.1.0.sql; do
+    echo "applying ${f#/tmp/upgrade-sql/}"
+    mysql -uroot "$MYSQL_DATABASE" < "$f"
+  done
+  bash /tmp/upgrade-sql/core/conformance/run.sh \
+    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
+  rm -rf /tmp/upgrade-sql
+' && docker compose -f compose.prod.yml up -d --build
 ```
 
-パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はない。再ビルドは更新が成功したときだけ走る。更新用の SQL はデータを残す。旧版の API は先に止めること。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまう。ファイルの各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せる。
+パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はない。ループは失敗したファイルで止まり、再ビルドはすべてのファイルと検査が成功したときだけ走る。旧版の API は先に止めること。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまう。各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せる。
+
+許可したメールアドレスがあると、サインインの制限が有効になる。更新では、管理画面で許可したメールアドレスを、DB が他のプロダクトと共有するサインイン許可リストへ移す。このリストに有効な行が 1 つでもあれば、`TC_GOOGLE_ALLOWED_DOMAINS` の設定の有無にかかわらず、OAuth でサインインできるのはリストにあるアドレスとドメインだけになる。ドメインのリストを空にしたまま例外としていくつかのアドレスを登録していたデプロイでは、更新前は誰でもサインインできたが、更新後はそのアドレスしか入れない。意図しない場合は管理画面で該当の行を取り下げる。
+
+既存の行のうち、次のものは更新時に一度だけ書き換わる。アクティビティログの記録は他のプロダクトと共通のイベント名と payload のキーになり、メールアドレスは小文字で保存され、すべてのセッションに本アプリが発行したという印が付き、ストレージの参照数は数え直され、毎週の繰り返しはこれまで表示していた日曜始まりの週のまま残る。
 
 v0.1.0 から上げる場合は、配備の形も変わっている。
 
@@ -296,7 +313,7 @@ v0.1.0 から上げる場合は、配備の形も変わっている。
 
 #### MinIO からの移行
 
-切り替え前のデプロイは、オブジェクトを MinIO 独自の形式で `minio_data` に持っているので、S3 経由でコピーする。新しい compose ファイルに `minio` サービスはもう無いが、旧コンテナは動き続けるので、その中の `mc` を使う。上記のとおり API を止めて `sql/upgrades/from-v0.1.0.sql` を当て、再ビルドはオブジェクトを移し終えるまで待つ。
+切り替え前のデプロイは、オブジェクトを MinIO 独自の形式で `minio_data` に持っているので、S3 経由でコピーする。新しい compose ファイルに `minio` サービスはもう無いが、旧コンテナは動き続けるので、その中の `mc` を使う。上記のとおり API を止めて更新用の SQL を当て、再ビルドはオブジェクトを移し終えるまで待つ。
 
 ```sh
 B=nodate-time   # TC_S3_BUCKET

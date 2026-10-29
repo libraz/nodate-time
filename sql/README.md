@@ -1,8 +1,9 @@
 # Schema layout
 
-The schema is composed from two layers by `build-schema.sh`, which
-writes the concatenation to stdout; `schema.sql` is the committed result
-of that redirection and is what the application runs on.
+The schema is composed from two layers by
+`core/tools/build-schema.sh core time`, which writes the concatenation to
+stdout; `schema.sql` is the committed result of that redirection and is
+what the application runs on.
 
 `core/` is a vendored copy of the shared schema contract: tables that
 more than one product may implement, so that two independently
@@ -25,14 +26,14 @@ shared schema disagree with the schema itself, and that disagreement
 shows up as corrupt data rather than as a failed build.
 
 To change the contract, change it upstream and re-vendor.
-`scripts/check-vendored-core.sh` verifies both halves of that: that the
-copy is unedited, and that it still matches the pinned ref.
+`bash sql/core/tools/check-vendored.sh sql/core` verifies both halves of
+that: that the copy is unedited, and that it still matches the pinned ref
+(`--local-only` checks the first half without reaching upstream).
 
-Because it is upstream's text verbatim, `core/PROTOCOL.md` describes the
-product layer as `sql/flow/` — that is upstream's own layer. Here the
-equivalent is `time/`. The obligations it states are the same either way;
-only the directory name differs, and it is left alone so the hash keeps
-matching.
+The time layer never changes the shape of a core table: it has no
+`alters/`, and `sql/core/tools/check-no-core-alters.sh sql` fails if one of
+its files alters or indexes a core table. A column this application needs
+on a shared table goes into core upstream.
 
 ## A schema change is not finished until the generated code follows
 
@@ -58,30 +59,41 @@ make sqlc        # schema + queries -> apps/api/internal/db/generated/
 `make verify-codegen` checks the pairing without writing anything: it runs
 `scripts/check-codegen-drift.sh` and `scripts/check-error-messages.sh`, and CI
 runs it. The pre-commit hook (`.githooks/pre-commit`) runs
-`check-codegen-drift.sh --staged`, plus `check-vendored-core.sh --local-only`
-when `sql/core/` is staged; it does not run the error-message check. The hook is
+`check-codegen-drift.sh --staged`, plus
+`sql/core/tools/check-vendored.sh sql/core --local-only` when `sql/core/` is
+staged; it does not run the error-message check. The hook is
 reached through `core.hooksPath`, so it only runs where that is configured.
 
 ## A schema change also ships its upgrade
 
-`schema.sql` creates a database from nothing, dropping every table first, so
-it is never run against one that holds data. A deployment created by an
-earlier release reaches the current schema through `upgrades/`:
-`from-<release>.sql` takes a database created by that release to the next one,
-keeping its data. The README's Upgrading section is the operator's side of it.
+`schema.sql` creates a database from nothing, dropping every table of its
+layers first, so it is never run against one that holds data. An existing
+database reaches the current schema through two sets of upgrades, applied
+in this order with every application stopped:
 
-So a change under `core/` or `time/` that has not been released yet also goes
-into the upgrade file from the latest tag, written as the statements an
-existing database needs rather than the definition a new one gets. When a
-change alters what an existing row means, the file says how to tell the old
-rows apart and sets them accordingly, the way `from-v0.1.0.sql` marks the rows
-v0.1.0 had already deleted. Each step checks what the database already has, so a
-run that stopped partway can be repeated.
+1. `core/upgrades/NNNN-<slug>.sql`, all of them in number order. They
+   reshape the shared tables and are vendored from upstream with the rest
+   of `core/`.
+2. `time/upgrades/from-<release>.sql`, the one for the release the
+   database was created by. It changes this layer's tables and rewrites the
+   rows this application wrote, and refuses to run before the core upgrades.
+3. `bash sql/core/conformance/run.sh --mode schema` against the database.
 
-To check one, apply the previous release's `schema.sql` and then the upgrade
-to one scratch database, the current `schema.sql` to another, and compare
-`information_schema` between them: columns, indexes, foreign keys, views and
-triggers should match exactly.
+A change under `time/` that has not been released yet goes into the upgrade
+file from the latest tag, written as the statements an existing database
+needs rather than the definition a new one gets. A change to a core table is
+made upstream and arrives as a new core upgrade. When a change alters what
+an existing row means, the file says how to tell the old rows apart and sets
+them accordingly, the way `from-v0.1.0.sql` marks the rows v0.1.0 had
+already deleted. Each step checks what the database already has, so a run
+that stopped partway can be repeated, and so can a whole run.
+
+`bash scripts/check-upgrade-path.sh` proves it. It loads the v0.1.0 schema,
+and the one main carried before the core upgrades existed, each with
+`scripts/fixtures/v0.1.0-data.sql`, applies both sets of upgrades twice,
+then checks the rewritten rows, runs the conformance suite and compares
+`information_schema` against a fresh `build-schema.sh core time`. A new
+rewrite adds rows for it to the fixture.
 
 ## Queries
 
