@@ -39,10 +39,10 @@ is additive DDL, never a migration.
 Each layer has one source repository; every other repository that needs it
 vendors a copy. A database is built from one of two sets:
 
-| Set      | Layers           | MySQL            | Build                                                |
-| -------- | ---------------- | ---------------- | ---------------------------------------------------- |
-| time-set | core, time       | 8.4 LTS or later | `bash sql/core/tools/build-schema.sh core time`      |
-| full-set | core, time, flow | 9.6              | `bash sql/core/tools/build-schema.sh core time flow` |
+| Set      | Layers           | MySQL   | Build                                                |
+| -------- | ---------------- | ------- | ---------------------------------------------------- |
+| time-set | core, time       | 9.7 LTS | `bash sql/core/tools/build-schema.sh core time`      |
+| full-set | core, time, flow | 9.7 LTS | `bash sql/core/tools/build-schema.sh core time flow` |
 
 An existing time-set becomes a full-set with
 `bash sql/core/tools/build-schema.sh flow`, which drops and recreates the
@@ -477,8 +477,8 @@ this way until its first stable release.
 
 ## Deployment
 
-- **MySQL.** The core and time layers work on 8.4 LTS and on 9.6. The flow
-  layer needs 9.6.
+- **MySQL.** Every layer targets 9.7 LTS, and the flow layer needs the 9
+  line for its `VECTOR` columns.
 - **One database, one bucket.** In a full-set, every application uses the
   same database, the same object-storage bucket and the same sign-in
   domain list. An application that bootstraps its workspace by slug is

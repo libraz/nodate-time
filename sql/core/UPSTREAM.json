@@ -1,11 +1,11 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "63ffc33283107250e9d9f90e39398937089b0c7a",
+  "ref": "f2d71c9e9d889c9d9310dc4d7857b8aeb3f554a8",
   "files": [
     {
       "path": "PROTOCOL.md",
-      "sha256": "990d4dfa424f2253404a5b7af999f340324e77e554fa2a7016048db28318dd90"
+      "sha256": "d4ee34f5fa773ac5144f9497fb45e75dd0a1ec5109cf4a41a57acaa4a35529a9"
     },
     {
       "path": "conformance/data/10-invariants.sql",
