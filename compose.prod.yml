@@ -24,7 +24,7 @@ name: nodate-time-prod
 
 services:
   mysql:
-    image: mysql:8.4
+    image: mysql:9.7
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:?set a MySQL root password}

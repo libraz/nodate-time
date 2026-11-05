@@ -11,7 +11,7 @@ A shared calendar app for running one calendar across multiple people — famili
 teams, talent agencies. It blends TimeTree's shared-calendar simplicity with a
 Google Calendar–style permission model. Monorepo: a Go REST API plus a React SPA.
 
-**Stack:** Go 1.26 · Huma v2 · MySQL 8.4 · React 19 · Bun
+**Stack:** Go 1.26 · Huma v2 · MySQL 9.7 · React 19 · Bun
 
 ---
 
@@ -51,7 +51,7 @@ Responsive mobile layout (vertical month scroll):
 | Area | Technology |
 | --- | --- |
 | API | Go 1.26 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
-| DB | MySQL 8.4 (Docker Compose) |
+| DB | MySQL 9.7 (Docker Compose) |
 | Object storage | S3-compatible (Versity S3 Gateway locally) |
 | Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
 | Lint / format | Biome (web) / gofmt (Go) |

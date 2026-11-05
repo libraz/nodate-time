@@ -40,7 +40,7 @@
 | 領域 | 採用技術 |
 | --- | --- |
 | API | Go 1.26 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
-| DB | MySQL 8.4（Docker Compose） |
+| DB | MySQL 9.7（Docker Compose） |
 | オブジェクトストレージ | S3 互換（ローカルは Versity S3 Gateway） |
 | Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
 | Lint / Format | Biome（Web）/ gofmt（Go） |

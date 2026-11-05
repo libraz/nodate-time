@@ -14,7 +14,7 @@
 # Every scratch database is dropped on exit, pass or fail.
 #
 # Environment:
-#   TC_UPGRADE_CHECK_DSN        user:pass@host:port of a MySQL 8.4+ server the
+#   TC_UPGRADE_CHECK_DSN        user:pass@host:port of a MySQL 9.7 server the
 #                               user may create databases on
 #                               (default root:rootpw@127.0.0.1:33306)
 #   TC_UPGRADE_CHECK_DB_PREFIX  scratch database name prefix (default sdb_up_)

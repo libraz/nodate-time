@@ -128,20 +128,6 @@ jobs:
       - name: Upgrade path
         run: make test-upgrade-path
 
-      # The same schema on MySQL 9.6, on a throwaway server of its own.
-      - name: Core contract conformance (MySQL 9.6)
-        run: |
-          docker run -d --name mysql96 -e MYSQL_ROOT_PASSWORD=rootpw -e MYSQL_DATABASE=conformance -p 33396:3306 mysql:9.6
-          for i in $(seq 1 60); do
-            if mysqladmin ping -h 127.0.0.1 -P 33396 -u root -prootpw --silent 2>/dev/null; then break; fi
-            sleep 3
-          done
-          bash sql/core/tools/build-schema.sh core time | mysql -h 127.0.0.1 -P 33396 -u root -prootpw conformance
-          bash sql/core/conformance/run.sh \
-            --dsn "root:rootpw@127.0.0.1:33396/conformance" \
-            --mode schema
-          docker rm -f mysql96
-
       - name: Go vet
         working-directory: apps/api
         run: go vet ./...
