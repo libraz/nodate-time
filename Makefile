@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up mail-up format lint
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -8,15 +8,16 @@
 # the seeded @example.com accounts. Admin rights are not part of it: they come
 # from the instance_admins table, which createuser -admin writes below.
 #
-# The other two say out loud what running locally actually relaxes -- the
-# object store ships with published credentials and there is no mail relay --
-# rather than letting one environment value stand for both.
+# The object store ships with published credentials, and the allowance for
+# that is named rather than implied by TC_ENV. Mail goes to the mailpit
+# service of compose.yml (web UI on TC_MAILPIT_UI_PORT, default 8025).
 DEV_JWT_SECRET_FILE = secrets/jwt-dev.key
 
 DEV_API_ENV = TC_ENV=$${TC_ENV:-development} \
 	TC_JWT_SECRET=$${TC_JWT_SECRET:-$$(cat $(CURDIR)/$(DEV_JWT_SECRET_FILE))} \
 	TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS=$${TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS:-true} \
-	TC_ALLOW_CONSOLE_MAILER=$${TC_ALLOW_CONSOLE_MAILER:-true}
+	TC_SMTP_HOST=$${TC_SMTP_HOST-127.0.0.1} \
+	TC_SMTP_PORT=$${TC_SMTP_PORT:-$${TC_MAILPIT_SMTP_PORT:-1025}}
 
 # Generated once per checkout, never committed: secrets/ is gitignored. A
 # literal here would be published exactly like the default it replaces, and
@@ -28,7 +29,7 @@ $(DEV_JWT_SECRET_FILE):
 	@echo "generated a development signing secret at $@"
 
 # Development – start everything (DB + API + Web) in parallel
-dev: db-up $(DEV_JWT_SECRET_FILE)
+dev: db-up mail-up $(DEV_JWT_SECRET_FILE)
 	@trap 'kill 0' EXIT; \
 	(cd apps/api && $(DEV_API_ENV) go run ./cmd/api) & \
 	(cd apps/web && bun run dev) & \
@@ -139,6 +140,9 @@ check-core-current:
 
 storage-up:
 	docker compose up -d storage
+
+mail-up:
+	docker compose up -d mailpit
 
 # Formatting & linting
 # format: apply fixes in place – gofmt for Go, Biome (format + safe lint fixes) for web.

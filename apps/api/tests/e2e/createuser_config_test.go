@@ -35,7 +35,6 @@ func TestCreateUserAsksForNoServingConfiguration(t *testing.T) {
 		"TC_S3_SECRET_KEY=minioadmin",
 		"TC_CORS_ALLOWED_ORIGINS=*",
 		"TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS=false",
-		"TC_ALLOW_CONSOLE_MAILER=false",
 	}
 
 	email := fmt.Sprintf("cu-noserving-%d@test.local", time.Now().UnixNano())

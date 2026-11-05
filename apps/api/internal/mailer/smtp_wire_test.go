@@ -2,10 +2,8 @@ package mailer
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"io"
-	"log/slog"
 	"mime"
 	"mime/quotedprintable"
 	"net"
@@ -127,21 +125,5 @@ func TestSMTPRefusalDoesNotCarryTheRecipient(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "550") {
 		t.Errorf("send error should keep the reply code: %v", err)
-	}
-}
-
-// Outside development the console mailer says that a message was written,
-// not to whom.
-func TestConsoleMailerDoesNotLogTheRecipient(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	if err := (ConsoleMailer{}).Send(context.Background(), Message{To: "person@example.com", Subject: "s", Text: "secret-token"}); err != nil {
-		t.Fatal(err)
-	}
-	if out := buf.String(); strings.Contains(out, "person@example.com") || strings.Contains(out, "secret-token") {
-		t.Fatalf("console mailer logged the recipient or the body: %s", out)
 	}
 }

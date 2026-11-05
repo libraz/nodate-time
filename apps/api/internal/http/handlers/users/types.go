@@ -15,8 +15,12 @@ type UserResponse struct {
 	// EmailVerified reports whether this address has been confirmed by
 	// following a link sent to it. Provider sign-in refuses to link to an
 	// account that has not, so the client surfaces it.
-	EmailVerified bool      `json:"emailVerified"`
-	CreatedAt     time.Time `json:"createdAt"`
+	EmailVerified bool `json:"emailVerified"`
+	// HasPassword reports whether the account has a local password identity
+	// with a hash. A provider-only account has none, so changing a password
+	// does not apply to it.
+	HasPassword bool      `json:"hasPassword"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // RefreshInput trades a refresh token for a new pair.
@@ -152,6 +156,9 @@ type OAuthProvidersOutput struct {
 		// PasswordEnabled reports whether email+password sign-in is available.
 		// When false the login screen shows OAuth/OIDC sign-in only.
 		PasswordEnabled bool `json:"passwordEnabled"`
+		// MailEnabled reports whether the server can deliver mail. When false,
+		// password reset and email verification are not offered.
+		MailEnabled bool `json:"mailEnabled"`
 	}
 }
 

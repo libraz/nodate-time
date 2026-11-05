@@ -140,6 +140,9 @@ func Build(deps Deps) http.Handler {
 	if authLimit == 0 {
 		authLimit = defaultAuthRateLimit
 	}
+	// What only mail can carry (password reset, address confirmation) is
+	// offered only when the mailer can deliver. The SPA is told the same value.
+	mailOn := mailer.Configured(deps.Mailer)
 	shareLimit := deps.ShareRateLimit
 	if shareLimit == 0 {
 		shareLimit = defaultShareRateLimit
@@ -196,8 +199,8 @@ func Build(deps Deps) http.Handler {
 			}, users.DevLogin(userDeps))
 		}
 
-		// Password reset only makes sense when password login is enabled.
-		if deps.PasswordLoginEnabled {
+		// Password reset needs password login and a mailer to carry the link.
+		if deps.PasswordLoginEnabled && mailOn {
 			resetDeps := users.ResetDeps{DB: deps.DB, Queries: deps.Queries, Mailer: deps.Mailer, WebURL: deps.WebURL, AppName: appName}
 
 			huma.Register(api, huma.Operation{
@@ -219,13 +222,15 @@ func Build(deps Deps) http.Handler {
 
 		// Confirming an address is public by design: the link lands in a mail
 		// client, which has no session with this API.
-		huma.Register(api, huma.Operation{
-			OperationID: "confirm-email-verification",
-			Method:      http.MethodPost,
-			Path:        "/auth/verify-email/confirm",
-			Summary:     "Confirm an email address with a token",
-			Tags:        []string{"Auth"},
-		}, users.ConfirmEmailVerification(userDeps))
+		if mailOn {
+			huma.Register(api, huma.Operation{
+				OperationID: "confirm-email-verification",
+				Method:      http.MethodPost,
+				Path:        "/auth/verify-email/confirm",
+				Summary:     "Confirm an email address with a token",
+				Tags:        []string{"Auth"},
+			}, users.ConfirmEmailVerification(userDeps))
+		}
 
 		oauthDeps := users.OAuthDeps{
 			DB:                   deps.DB,
@@ -237,6 +242,7 @@ func Build(deps Deps) http.Handler {
 			Cipher:               deps.Cipher,
 			AllowedDomains:       deps.GoogleAllowedDomains,
 			PasswordLoginEnabled: deps.PasswordLoginEnabled,
+			MailEnabled:          mailOn,
 			Defaults:             deps.AccountDefaults,
 		}
 
@@ -321,13 +327,15 @@ func Build(deps Deps) http.Handler {
 			Tags:        []string{"User"},
 		}, users.UpdateMe(userDeps))
 
-		huma.Register(api, huma.Operation{
-			OperationID: "resend-email-verification",
-			Method:      http.MethodPost,
-			Path:        "/user/verify-email/resend",
-			Summary:     "Send a fresh address-confirmation email",
-			Tags:        []string{"User"},
-		}, users.ResendEmailVerification(userDeps))
+		if mailOn {
+			huma.Register(api, huma.Operation{
+				OperationID: "resend-email-verification",
+				Method:      http.MethodPost,
+				Path:        "/user/verify-email/resend",
+				Summary:     "Send a fresh address-confirmation email",
+				Tags:        []string{"User"},
+			}, users.ResendEmailVerification(userDeps))
+		}
 
 		huma.Register(api, huma.Operation{
 			OperationID: "logout",

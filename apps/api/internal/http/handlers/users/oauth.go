@@ -61,6 +61,9 @@ type OAuthDeps struct {
 	// PasswordLoginEnabled reflects whether email+password auth is available,
 	// surfaced to the login screen so it can hide the password form.
 	PasswordLoginEnabled bool
+	// MailEnabled reflects whether the mailer can deliver, surfaced to the SPA
+	// so it hides the flows that only mail can carry.
+	MailEnabled bool
 	// Defaults seed the profile of an account a first sign-in creates. A
 	// provider hands over an address and a display name and nothing else, so
 	// this is the only say the deployment gets.
@@ -215,6 +218,7 @@ func ListEnabledProviders(deps OAuthDeps) func(context.Context, *OAuthProvidersI
 		out := &OAuthProvidersOutput{}
 		out.Body.Providers = make([]string, 0, 2)
 		out.Body.PasswordEnabled = deps.PasswordLoginEnabled
+		out.Body.MailEnabled = deps.MailEnabled
 		for _, p := range []string{"google", "line"} {
 			if _, ok := resolveProvider(ctx, deps, p); ok {
 				out.Body.Providers = append(out.Body.Providers, p)

@@ -135,15 +135,13 @@ services:
       TC_S3_BUCKET: ${TC_S3_BUCKET:-nodate-time}
       TC_S3_USE_SSL: ${TC_S3_USE_SSL:-false}
       TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS: ${TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS:-false}
-      # Without a relay the API refuses to start, and its log names the way
-      # out: mail written to the log is not delivered, and password reset is
-      # one of the things it carries.
+      # Optional. Without a relay no mail is sent, and password reset and
+      # email verification are not offered.
       TC_SMTP_HOST: ${TC_SMTP_HOST:-}
-      TC_ALLOW_CONSOLE_MAILER: ${TC_ALLOW_CONSOLE_MAILER:-false}
       TC_SMTP_PORT: ${TC_SMTP_PORT:-587}
       TC_SMTP_USERNAME: ${TC_SMTP_USERNAME:-}
       TC_SMTP_PASSWORD: ${TC_SMTP_PASSWORD:-}
-      TC_SMTP_FROM: ${TC_SMTP_FROM:?the From address outgoing mail is sent as}
+      TC_SMTP_FROM: ${TC_SMTP_FROM:-no-reply@nodate-time.local}
       # The slug is the workspace's identity: changing it starts an empty one.
       TC_WORKSPACE_SLUG: ${TC_WORKSPACE_SLUG:-default}
       TC_WORKSPACE_NAME: ${TC_WORKSPACE_NAME:-Nodate Time}

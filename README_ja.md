@@ -106,7 +106,7 @@ make dev               # DB + API + Web を一括起動
 - API: <http://localhost:8080>（`/health`, OpenAPI は Huma が生成）
 - Web: <http://localhost:5173>
 
-`make dev` が起動するのは MySQL だけなので、`make storage-up` をしないと添付・アルバム・アバターのエンドポイントは 503 を返す。
+`make dev` が起動するのは MySQL と mailpit（送信メールは <http://localhost:8025> で受け取る）だけなので、`make storage-up` をしないと添付・アルバム・アバターのエンドポイントは 503 を返す。
 
 開発環境（`TC_ENV=development`）では `/auth/dev-login` でシードユーザーにパスワードレスログインできる。
 
@@ -154,8 +154,7 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_WEB_URL` / `TC_API_PUBLIC_URL` | フロント / API の公開 URL。`TC_API_PUBLIC_URL` は blob URL が指し戻す先でもあるため、API を置いたパスまで含める必要がある | localhost |
 | `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3 互換ストレージ。到達するのは API だけで、ブラウザからは触らせない。`minioadmin` の認証情報は `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` がない限り拒否される | ローカルストレージの既定値 |
 | `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | 広く知られた `minioadmin` 認証情報を許可する（ローカルのオブジェクトストア用） | `false`（`make dev` は `true`） |
-| `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信。ホスト未設定だと `TC_ALLOW_CONSOLE_MAILER` がない限り API は起動を拒否する | 未設定 |
-| `TC_ALLOW_CONSOLE_MAILER` | SMTP リレーなしで動かす。メールは配送されずログに書かれる。開発環境以外ではログに残るのは件名だけで、宛先も本文も出ない | `false`（`make dev` は `true`） |
+| `TC_SMTP_HOST` ほか `TC_SMTP_*` | メール送信。空ならメール送信はオフで、これは全環境で有効な設定。API は起動し、送信オフをログに出し、パスワード再設定とメール確認を提供しない（auth-providers のレスポンスは `mailEnabled: false` を返し、SPA は該当の画面を隠す） | 未設定（`make dev` は mailpit を指す） |
 | `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | 空 |
 | `TC_GOOGLE_ALLOWED_DOMAINS` | サインアップ / サインインを許可するメールドメイン（カンマ区切り）。パスワードの登録・ログインと Google サインインが検査する。LINE はメールアドレスを検証しないため、リストを設定している間は拒否される。リスト外のアドレスでも、個別にアロウリストへ登録されていれば通り、`createuser` は作成したアカウントをアロウリストに登録する | 制限なし |
 | `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | 空 |
@@ -163,9 +162,9 @@ cd apps/web && bun run test   # Web ユニットテスト（Vitest）
 | `TC_METRICS_ADDR` | 管理用リスナーの待ち受けアドレス。空で無効化 | `127.0.0.1:9464` |
 | `TC_METRICS_ALLOWED_CIDRS` | 管理用リスナーに到達できるネットワーク。直接の TCP ピアと照合する。空はすべて拒否 | loopback + プライベート帯 |
 
-> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・既定の `minioadmin` 認証情報・空またはワイルドカードの CORS・未設定の SMTP ホストを起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのは 2 つだけで、ストレージの認証情報には `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS`、SMTP ホストには `TC_ALLOW_CONSOLE_MAILER`。他のガードに許可変数はない。`TC_ENV=development` が足すのは `/auth/dev-login` と、コンソールメーラーがメール全文（宛先も本文も）をログに書くことだけ。
+> `Config.Validate()` は `TC_ENV=development` を含む全環境で働く。組み込みまたは 32 バイト未満の JWT 秘密鍵・既定の `minioadmin` 認証情報・空またはワイルドカードの CORS を起動時に拒否し、tz データベースにない `TC_WORKSPACE_TIMEZONE` も弾く。許可用の変数があるのはストレージの認証情報の `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` だけで、他のガードに許可変数はない。`TC_ENV=development` が足すのは `/auth/dev-login` だけ。
 
-DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_S3_PORT`（既定 9000、ループバックのみ）。
+DB / ストレージ系（`compose.yml`）: `TC_DB_PORT`（既定 33306）, `TC_DB_ROOT_PASSWORD`, `TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_S3_PORT`（既定 9000、ループバックのみ）, `TC_MAILPIT_SMTP_PORT`（既定 1025）, `TC_MAILPIT_UI_PORT`（既定 8025、ともにループバックのみ）。
 
 ## API 概要
 
@@ -250,7 +249,7 @@ certbot renew --webroot -w /path/to/acme \
 
 TLS を別の場所で終端したい場合——ホスト上のリバースプロキシ、あるいはトンネル——は、`web` サービスから TLS テンプレートのマウントと証明書の 2 つのボリュームを外し、`127.0.0.1:8081:80` を publish する。イメージは平文 HTTP で応答し、`/api` は同じように自分で API へ流すので、ブラウザから見た構成は上と変わらない。ホスト側のプロキシはその 1 ポートだけを向けばよい。
 
-設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY`・`TC_SMTP_FROM` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SMTP_HOST` がなければ API が起動を拒否する（`TC_ALLOW_CONSOLE_MAILER=true` ならメールを配送せずログに書いて起動する）。上の表のその他の変数も同じ既定値のまま渡る。例外は次のとおり。
+設定は `compose.prod.yml` と同じ場所の `.env` に置く。`TC_DB_ROOT_PASSWORD`・`TC_DB_PASSWORD`・`TC_JWT_SECRET`（`openssl rand -hex 32`）・`TC_WEB_URL`・`TC_API_PUBLIC_URL`・`TC_PUBLIC_HOST`・`TC_S3_ACCESS_KEY`・`TC_S3_SECRET_KEY` には安全な既定値がなく、未設定なら Compose が該当する変数名を出して停止する。`TC_SMTP_HOST` は省略できる。なければメール送信はオフで、パスワード再設定とメール確認は提供されない。上の表のその他の変数も同じ既定値のまま渡る。例外は次のとおり。
 
 - `TC_CORS_ALLOWED_ORIGINS` は常に `TC_WEB_URL` になる。`.env` に書いた値は無視される。
 - `TC_PORT` は渡さない。API はコンテナ内で 8080 を待ち受け、ホスト側の loopback ポートは `TC_API_PORT`（既定 8080）で決める。
@@ -303,7 +302,7 @@ v0.1.0 から上げる場合は、配備の形も変わっている。
 
 - web サービスが TLS を終端し、`127.0.0.1:8081` の代わりに 80 と 443 を公開する。起動前に上記の手順で証明書を取得するか、ホスト側のプロキシを使い続けるなら「TLS を別の場所で終端したい場合」の段落に従う。
 - 証明書を発行するホスト名 `TC_PUBLIC_HOST` が必須になった。
-- Compose は `TC_SMTP_HOST` を必須にしなくなった。ただし API は、`TC_ALLOW_CONSOLE_MAILER=true` が無い限り、これが無いと起動しない。
+- `TC_SMTP_HOST` と `TC_SMTP_FROM` は省略できる。SMTP リレーがなければメール送信はオフで、パスワード再設定とメール確認は提供されない。
 - `TC_TRUSTED_PROXIES` の既定値が、Docker が compose のネットワークに割り当てる範囲 `172.16.0.0/12` になった。
 - オブジェクトストレージが MinIO（`minio` サービス、`minio_data` ボリューム）から Versity S3 Gateway（`storage` サービス、`storage_data` ボリューム）に変わった。保存形式が違うのでボリュームは流用できず、S3 経由でオブジェクトを移す。手順は「[MinIO からの移行](#minio-からの移行)」を参照。
 

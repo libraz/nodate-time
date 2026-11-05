@@ -84,12 +84,16 @@ func mapUser(u generated.User) UserResponse {
 }
 
 // mapUserWithAvatar is like mapUser but also resolves the avatar URL and the
-// instance-admin grant, both of which live outside the user row.
+// instance-admin grant and whether a local password exists, all of which live
+// outside the user row.
 func mapUserWithAvatar(ctx context.Context, deps Deps, u generated.User) UserResponse {
 	resp := mapUser(u)
 	resp.AvatarURL = avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u)
 	if isAdmin, err := deps.Queries.IsInstanceAdmin(ctx, u.ID); err == nil {
 		resp.IsAdmin = isAdmin
+	}
+	if local, err := deps.Queries.GetLocalIdentityByUser(ctx, u.ID); err == nil {
+		resp.HasPassword = local.PasswordHash.Valid && local.PasswordHash.String != ""
 	}
 	return resp
 }
@@ -236,7 +240,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		// sign-in linking to the account, not the account itself. A failure is
 		// logged rather than returned, since the account already exists and the
 		// link can be asked for again.
-		if deps.Mailer != nil {
+		if mailer.Configured(deps.Mailer) {
 			if err := sendEmailVerification(ctx, deps, deps.Queries, created); err != nil {
 				slog.ErrorContext(ctx, "registration confirmation not sent", "userID", created.ID, "error", err)
 			}

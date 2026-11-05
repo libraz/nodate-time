@@ -34,7 +34,7 @@ func TestValidateGuards(t *testing.T) {
 		{"default s3 creds rejected", func(c *Config) { c.S3AccessKey = "minioadmin"; c.S3SecretKey = "minioadmin" }, true},
 		{"cors wildcard rejected", func(c *Config) { c.CORSAllowedOrigins = "*" }, true},
 		{"empty cors rejected", func(c *Config) { c.CORSAllowedOrigins = "" }, true},
-		{"missing smtp host rejected", func(c *Config) { c.SMTPHost = "" }, true},
+		{"missing smtp host accepted: mail delivery is off", func(c *Config) { c.SMTPHost = "" }, false},
 		// The zone every account created from here on is stamped with. An
 		// unknown name is not refused downstream: it is stored, and read in the
 		// browser as a calendar drawn in the wrong place.
@@ -71,7 +71,6 @@ func TestDevelopmentDisablesNoGuard(t *testing.T) {
 			c.S3SecretKey = "minioadmin"
 		}},
 		{"a wildcard CORS origin", func(c *Config) { c.CORSAllowedOrigins = "*" }},
-		{"no mail relay", func(c *Config) { c.SMTPHost = "" }},
 	}
 	for _, g := range guards {
 		t.Run(g.name, func(t *testing.T) {
@@ -85,11 +84,10 @@ func TestDevelopmentDisablesNoGuard(t *testing.T) {
 	}
 }
 
-// TestTheTwoAllowancesAreNamedAndSeparate covers what a developer actually
-// needs: the local object store ships with published credentials and there is
-// no relay to send mail through. Each is asked for by name, so answering one
-// cannot answer the other -- which is the failure TC_ENV had.
-func TestTheTwoAllowancesAreNamedAndSeparate(t *testing.T) {
+// TestTheAllowanceIsNamed covers what a developer actually needs: the local
+// object store ships with published credentials, and the allowance for them is
+// asked for by name and reaches nothing else.
+func TestTheAllowanceIsNamed(t *testing.T) {
 	t.Run("object storage credentials, allowed", func(t *testing.T) {
 		c := baseConfig()
 		c.S3AccessKey = "minioadmin"
@@ -100,30 +98,8 @@ func TestTheTwoAllowancesAreNamedAndSeparate(t *testing.T) {
 		}
 	})
 
-	t.Run("console mailer, allowed", func(t *testing.T) {
-		c := baseConfig()
-		c.SMTPHost = ""
-		c.AllowConsoleMailer = true
-		if err := c.Validate(); err != nil {
-			t.Fatalf("the named allowance should permit running without a relay, got %v", err)
-		}
-	})
-
-	// Neither allowance may stand in for the other, and neither touches the
-	// two guards that have no allowance at all.
-	t.Run("one allowance does not answer the other", func(t *testing.T) {
-		c := baseConfig()
-		c.AllowConsoleMailer = true
-		c.S3AccessKey = "minioadmin"
-		c.S3SecretKey = "minioadmin"
-		if err := c.Validate(); err == nil {
-			t.Fatal("allowing the console mailer must not also allow default storage credentials")
-		}
-	})
-
 	t.Run("no allowance reaches the signing secret", func(t *testing.T) {
 		c := baseConfig()
-		c.AllowConsoleMailer = true
 		c.AllowDefaultObjectStorageCredentials = true
 		c.JWTSecret = defaultJWTSecret
 		if err := c.Validate(); err == nil {

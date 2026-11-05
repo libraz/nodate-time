@@ -23,7 +23,7 @@ import (
 // short window would strand anyone who registers and reads their mail later.
 const emailVerificationTTL = 7 * 24 * time.Hour
 
-// errNoMailer reports a deployment with nothing to send a confirmation with.
+// errNoMailer reports a deployment with mail delivery off.
 var errNoMailer = errors.New("no mailer configured")
 
 // errMailNotAccepted wraps a mailer's refusal, which a caller can answer as a
@@ -34,7 +34,7 @@ var errMailNotAccepted = errors.New("mail not accepted")
 // through q and hands it to the mailer. q decides the transaction the link is
 // stored in, so a caller can undo the store when the mailer refuses.
 func sendEmailVerification(ctx context.Context, deps Deps, q *generated.Queries, user generated.User) error {
-	if deps.Mailer == nil {
+	if !mailer.Configured(deps.Mailer) {
 		return errNoMailer
 	}
 

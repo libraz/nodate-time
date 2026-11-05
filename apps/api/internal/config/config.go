@@ -68,9 +68,9 @@ type Config struct {
 	// quick login (/auth/dev-login) is independent of this flag and stays
 	// available whenever IsDev() is true, so dev verification is never blocked.
 	PasswordLoginEnabled bool `env:"TC_PASSWORD_LOGIN_ENABLED" envDefault:"true"`
-	// SMTP delivery. When SMTPHost is set, password-reset and email-verification
-	// mails are sent via SMTP; otherwise they go to the console mailer, which Validate
-	// accepts only with AllowConsoleMailer.
+	// SMTP delivery. When SMTPHost is set, mail is sent via SMTP. Empty means
+	// mail delivery is off, which is valid in every environment: password reset
+	// and email verification are then not offered.
 	SMTPHost           string `env:"TC_SMTP_HOST" envDefault:""`
 	SMTPPort           int    `env:"TC_SMTP_PORT" envDefault:"587"`
 	SMTPUsername       string `env:"TC_SMTP_USERNAME" envDefault:""`
@@ -162,11 +162,6 @@ type Config struct {
 	// need rather than a relaxed rule; anywhere else they are a username and
 	// password anyone can look up.
 	AllowDefaultObjectStorageCredentials bool `env:"TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS" envDefault:"false"`
-	// AllowConsoleMailer permits running with no SMTP relay. Mail is then not
-	// delivered, which leaves the reset flow quietly broken. Only in
-	// development does the log carry the message body (reset links included);
-	// elsewhere it carries the subject alone.
-	AllowConsoleMailer bool `env:"TC_ALLOW_CONSOLE_MAILER" envDefault:"false"`
 }
 
 // parse reads the environment and normalizes the DSN. Both loaders need this
@@ -239,14 +234,14 @@ func LoadForTooling() (*Config, error) {
 // one reason does not also lose the others -- including signing every session
 // with a secret published in this repository.
 //
-// Two guards have an allowance of their own, because local development has a
-// real need for them: the object store ships with known credentials and there
-// is no mail relay. The JWT secret and CORS list have none: a development
-// secret is as cheap to generate as to copy, and the default CORS list is
-// already explicit localhost origins.
+// One guard has an allowance of its own, because local development has a real
+// need for it: the object store ships with known credentials. The JWT secret
+// and CORS list have none: a development secret is as cheap to generate as to
+// copy, and the default CORS list is already explicit localhost origins. An
+// unset SMTP host is not a guard at all: it means mail delivery is off.
 //
-// TC_ENV only adds the development affordances (/auth/dev-login, and the
-// console mailer logging whole messages); it takes no protection away.
+// TC_ENV only adds the development affordance /auth/dev-login; it takes no
+// protection away.
 func (c *Config) Validate() error {
 	// The signing secret is the session system. Its default is committed here,
 	// so accepting it anywhere reachable lets anyone mint a token for any
@@ -287,11 +282,6 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Without a relay, mail is written to the log instead of delivered.
-	if c.SMTPHost == "" && !c.AllowConsoleMailer {
-		return fmt.Errorf("TC_SMTP_HOST must be set, or set TC_ALLOW_CONSOLE_MAILER=true to write mail to the log instead of delivering it")
-	}
-
 	// The administrative listener's guards have to be legible, because both
 	// ways of getting them wrong are quiet: an unparseable entry that was
 	// meant to grant access denies it instead, and an address that was meant
@@ -318,10 +308,6 @@ func (c *Config) logRelaxations() {
 		(c.S3AccessKey == "minioadmin" || c.S3SecretKey == "minioadmin") {
 		slog.Warn("object storage is running on published default credentials",
 			"allowed_by", "TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS")
-	}
-	if c.SMTPHost == "" && c.AllowConsoleMailer {
-		slog.Warn("no mail relay configured: mail is not delivered; the log carries the subject only, or the full message in development",
-			"allowed_by", "TC_ALLOW_CONSOLE_MAILER")
 	}
 	if !c.MetricsEnabled() {
 		return

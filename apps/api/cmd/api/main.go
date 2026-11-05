@@ -159,13 +159,17 @@ func main() {
 
 	// Build app router. Mail goes out through a dispatcher so a slow relay
 	// costs a background goroutine instead of the request that triggered it.
-	mailerClient := mailer.NewDispatcher(mailer.New(mailer.SMTPConfig{
+	relay := mailer.New(mailer.SMTPConfig{
 		Host:     cfg.SMTPHost,
 		Port:     cfg.SMTPPort,
 		Username: cfg.SMTPUsername,
 		Password: cfg.SMTPPassword,
 		From:     cfg.SMTPFrom,
-	}, cfg.IsDev()), mailer.DispatcherOptions{})
+	})
+	if !mailer.Configured(relay) {
+		slog.Warn("mail delivery is off: password reset and email verification are not offered; set TC_SMTP_HOST to enable it")
+	}
+	mailerClient := mailer.NewDispatcher(relay, mailer.DispatcherOptions{})
 	oauthCfg := users.OAuthConfig{
 		RedirectBase: cfg.APIPublic,
 		Google: users.OAuthProviderConfig{

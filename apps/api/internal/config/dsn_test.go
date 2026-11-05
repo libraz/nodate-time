@@ -59,7 +59,6 @@ func TestLoadNormalizesTheConfiguredDSN(t *testing.T) {
 	// so this answers each one the way a developer's shell does.
 	t.Setenv("TC_JWT_SECRET", "a-sufficiently-long-signing-secret-for-this-test")
 	t.Setenv("TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS", "true")
-	t.Setenv("TC_ALLOW_CONSOLE_MAILER", "true")
 	t.Setenv("TC_DB_DSN", "ttuser:ttpw@tcp(127.0.0.1:33306)/nodate?loc=Asia%2FTokyo")
 	cfg, err := Load()
 	if err != nil {

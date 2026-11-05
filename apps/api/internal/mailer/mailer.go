@@ -28,26 +28,31 @@ type Message struct {
 	Text    string
 }
 
-// ConsoleMailer logs the email contents instead of sending. Use this in
-// development to inspect outgoing mail without an SMTP server. When Verbose is
-// false (the default outside development) only the subject is logged — never
-// the body, which may contain password-reset tokens or invite links, and never
-// the recipient, which is personal data the log has no use for.
-type ConsoleMailer struct {
-	Verbose bool
-}
+// ErrNotConfigured is returned by the mailer used when no SMTP relay is set.
+var ErrNotConfigured = errors.New("mailer: no SMTP relay configured")
 
-func (c ConsoleMailer) Send(_ context.Context, msg Message) error {
-	if !c.Verbose {
-		// Do not log the body: it can contain reset tokens / invite secrets.
-		slog.Info("[mailer:console] suppressed message (enable development mode to view)",
-			"subject", msg.Subject)
-		return nil
+// NoopMailer stands in when mail delivery is off. Every Send returns
+// ErrNotConfigured; features whose only channel is mail are not offered while
+// this is the mailer in use (see Configured).
+type NoopMailer struct{}
+
+// Send returns ErrNotConfigured.
+func (NoopMailer) Send(context.Context, Message) error { return ErrNotConfigured }
+
+// Configured reports whether m can deliver mail: false for nil and for the
+// noop mailer, including when either sits behind a Dispatcher. The router and
+// the handlers decide on this alone, so what is offered and what is reported
+// to the SPA cannot disagree.
+func Configured(m Mailer) bool {
+	switch v := m.(type) {
+	case nil:
+		return false
+	case NoopMailer:
+		return false
+	case *Dispatcher:
+		return v != nil && Configured(v.inner)
 	}
-	slog.Info("[mailer:console]", "to", msg.To, "subject", msg.Subject, "body", msg.Text)
-	fmt.Printf("\n========== EMAIL ==========\nTo: %s\nSubject: %s\n\n%s\n===========================\n\n",
-		msg.To, msg.Subject, msg.Text)
-	return nil
+	return true
 }
 
 // SMTPConfig holds SMTP server credentials.
@@ -211,16 +216,15 @@ func sanitizeHeader(s string) string {
 	return s
 }
 
-// New selects a mailer implementation. When cfg.Host is set, mail is delivered
-// via SMTP; otherwise a console mailer is returned (the config layer accepts
-// an unset host only with TC_ALLOW_CONSOLE_MAILER). devMode enables verbose
-// console logging of recipients and message bodies.
-func New(cfg SMTPConfig, devMode bool) Mailer {
+// New selects a mailer implementation. When cfg.Host and cfg.From are set,
+// mail is delivered via SMTP; otherwise a NoopMailer is returned and mail
+// delivery is off.
+func New(cfg SMTPConfig) Mailer {
 	if cfg.Host != "" && cfg.From != "" {
 		return SMTPMailer{cfg: cfg}
 	}
 	if cfg.Host != "" {
-		slog.Warn("SMTP host set but sender (TC_SMTP_FROM) missing; using console mailer")
+		slog.Warn("SMTP host set but sender (TC_SMTP_FROM) missing; mail delivery is off")
 	}
-	return ConsoleMailer{Verbose: devMode}
+	return NoopMailer{}
 }
