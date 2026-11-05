@@ -266,11 +266,9 @@ ALLOWED = {
     # problem.
     "GetLocalIdentityByUserForUpdate",
 
-    # No account screen yet. Listing a user's linked identities and
-    # disabling one are the read and write halves of a connected-accounts
-    # page that has not been built.
+    # No account screen yet. Listing a user's linked identities is the read
+    # half of a connected-accounts page that has not been built.
     "ListIdentitiesForUser",
-    "DisableIdentity",
 
     # Superseded by RevokeInviteByPublicIDAndCalendar, which the delete
     # endpoint calls. Revoking by internal id alone carries no calendar
