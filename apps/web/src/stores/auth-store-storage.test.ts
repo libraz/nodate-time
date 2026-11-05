@@ -22,8 +22,22 @@ import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
-const alice = { id: 'u1', name: 'Alice', email: 'a@x.test', locale: 'ja', timezone: 'Asia/Tokyo' };
-const bob = { id: 'u2', name: 'Bob', email: 'b@x.test', locale: 'ja', timezone: 'Asia/Tokyo' };
+const alice = {
+  id: 'u1',
+  name: 'Alice',
+  email: 'a@x.test',
+  locale: 'ja',
+  timezone: 'Asia/Tokyo',
+  hasPassword: true,
+};
+const bob = {
+  id: 'u2',
+  name: 'Bob',
+  email: 'b@x.test',
+  locale: 'ja',
+  timezone: 'Asia/Tokyo',
+  hasPassword: true,
+};
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 

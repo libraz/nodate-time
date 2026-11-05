@@ -93,6 +93,7 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 import { api } from '@/lib/api';
+import { resetAuthConfig } from '@/lib/auth-config';
 import { fetchWindow } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
 import {
@@ -100,6 +101,7 @@ import {
   AppearanceSection,
   CalendarsSection,
   ExportSection,
+  ProfileSection,
 } from './settings';
 
 const apiGet = vi.mocked(api.get);
@@ -705,5 +707,82 @@ describe('AppearanceSection holidays', () => {
     // jsdom reports en-US, so anything but the old hardcoded 'JP' is the point.
     expect(uiState.setHolidaysCountry).toHaveBeenCalledWith('US');
     uiState.holidaysCountry = 'JP';
+  });
+});
+
+describe('ProfileSection auth-config dependent parts', () => {
+  const unverified = { ...authState.user, emailVerified: false, hasPassword: true };
+
+  beforeEach(() => {
+    (authState as { user: unknown }).user = unverified;
+    resetAuthConfig();
+  });
+
+  afterEach(() => {
+    (authState as { user: unknown }).user = { ...unverified, emailVerified: undefined };
+  });
+
+  /** Answers the providers request with `answer` and every other read with an empty list. */
+  function answerProvidersWith(answer: Record<string, unknown> | Error) {
+    apiGet.mockImplementation((async (path: string) => {
+      if (path !== '/auth/oauth/providers') return [];
+      if (answer instanceof Error) throw answer;
+      return answer;
+    }) as never);
+  }
+  const config = (over: Record<string, unknown>) => ({
+    providers: [],
+    passwordEnabled: true,
+    mailEnabled: true,
+    ...over,
+  });
+
+  it('shows neither the resend button nor the password form while loading', () => {
+    apiGet.mockReturnValue(new Promise(() => {}) as never);
+    render(<ProfileSection />);
+    expect(screen.queryByText('profile.resendVerification')).toBeNull();
+    expect(screen.queryByText('profile.changePassword')).toBeNull();
+  });
+
+  it('shows both when mail and password sign-in are on', async () => {
+    answerProvidersWith(config({}));
+    render(<ProfileSection />);
+    await waitFor(() => expect(screen.getByText('profile.resendVerification')).toBeTruthy());
+    expect(screen.getByText('profile.changePassword')).toBeTruthy();
+  });
+
+  it('withdraws the resend button when mail is off', async () => {
+    answerProvidersWith(config({ mailEnabled: false }));
+    render(<ProfileSection />);
+    await waitFor(() => expect(screen.getByText('profile.changePassword')).toBeTruthy());
+    expect(screen.queryByText('profile.resendVerification')).toBeNull();
+    expect(screen.getByText('profile.emailUnverified')).toBeTruthy();
+  });
+
+  it('withdraws the password change when password sign-in is off', async () => {
+    answerProvidersWith(config({ passwordEnabled: false }));
+    render(<ProfileSection />);
+    await waitFor(() => expect(screen.getByText('profile.resendVerification')).toBeTruthy());
+    expect(screen.queryByText('profile.changePassword')).toBeNull();
+  });
+
+  it('withdraws the password change for an account with no local password', async () => {
+    (authState as { user: unknown }).user = { ...unverified, hasPassword: false };
+    answerProvidersWith(config({}));
+    render(<ProfileSection />);
+    await waitFor(() => expect(screen.getByText('profile.resendVerification')).toBeTruthy());
+    expect(screen.queryByText('profile.changePassword')).toBeNull();
+  });
+
+  it('offers a retry when the config cannot be read, and recovers', async () => {
+    answerProvidersWith(new Error('network'));
+    render(<ProfileSection />);
+    await waitFor(() => expect(screen.getByText('error.authConfigUnavailable')).toBeTruthy());
+    expect(screen.queryByText('profile.resendVerification')).toBeNull();
+
+    answerProvidersWith(config({}));
+    fireEvent.click(screen.getByText('error.retry'));
+    await waitFor(() => expect(screen.getByText('profile.resendVerification')).toBeTruthy());
+    expect(screen.queryByText('error.authConfigUnavailable')).toBeNull();
   });
 });

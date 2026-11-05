@@ -31,6 +31,8 @@ interface User {
    * settings screen offers to send the link again.
    */
   emailVerified?: boolean;
+  /** Whether the account holds a local password; a provider-only account does not. */
+  hasPassword: boolean;
 }
 
 interface AuthState {

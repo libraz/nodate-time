@@ -431,6 +431,7 @@ export const en: Record<TranslationKey, string> = {
   'error.membersUnavailable':
     "Permissions for some calendars couldn't be loaded, so they are read-only for now",
   'error.profileUnavailable': "Your account details couldn't be loaded",
+  'error.authConfigUnavailable': "The sign-in options couldn't be loaded",
 
   // Recurrence (custom builder)
   'event.recurrenceWeekdaysLabel': 'Days',

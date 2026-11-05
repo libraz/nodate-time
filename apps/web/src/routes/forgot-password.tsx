@@ -1,8 +1,10 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, Navigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
+import { LoadFailure } from '@/components/load-failure';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
+import { useAuthConfig } from '@/lib/auth-config';
 
 export const Route = createFileRoute('/forgot-password')({
   component: ForgotPasswordPage,
@@ -10,6 +12,7 @@ export const Route = createFileRoute('/forgot-password')({
 
 function ForgotPasswordPage() {
   const t = useT();
+  const authConfig = useAuthConfig();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -28,6 +31,24 @@ function ForgotPasswordPage() {
       setSubmitting(false);
     }
   };
+
+  // Without mail or password sign-in this flow does not exist; nothing renders
+  // until the deployment's config says which.
+  if (authConfig.status === 'loading') return null;
+  if (authConfig.status === 'error') {
+    return (
+      <AuthShell title={t('auth.forgotPasswordTitle')}>
+        <LoadFailure
+          title={t('error.authConfigUnavailable')}
+          detail={authConfig.detail}
+          onRetry={authConfig.retry}
+        />
+      </AuthShell>
+    );
+  }
+  if (!authConfig.mailEnabled || !authConfig.passwordEnabled) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <AuthShell

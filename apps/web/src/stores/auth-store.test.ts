@@ -51,6 +51,7 @@ const sampleUser = {
   email: 'alice@example.com',
   locale: 'ja',
   timezone: 'Asia/Tokyo',
+  hasPassword: true,
 };
 
 beforeEach(() => {

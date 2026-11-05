@@ -449,6 +449,7 @@ export const ja = {
   'error.membersUnavailable':
     '一部のカレンダーの権限を読み込めませんでした。編集できない状態になっています',
   'error.profileUnavailable': 'アカウント情報を読み込めませんでした',
+  'error.authConfigUnavailable': 'サインインの設定を読み込めませんでした',
 
   // Recurrence (custom builder)
   'event.recurrenceWeekdaysLabel': '曜日',

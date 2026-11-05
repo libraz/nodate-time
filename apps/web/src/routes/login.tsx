@@ -1,13 +1,12 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
+import { LoadFailure } from '@/components/load-failure';
 import { type TranslationKey, useT } from '@/i18n';
-import { api } from '@/lib/api';
 import { APP_NAME } from '@/lib/app-name';
+import { useAuthConfig } from '@/lib/auth-config';
 import { safeRedirect } from '@/lib/safe-redirect';
 import { useAuthStore } from '@/stores/auth-store';
-
-type OAuthProvider = 'google' | 'line';
 
 /**
  * Resolves the `error` search param (an OAuth failure code from `/login?error=`)
@@ -127,12 +126,12 @@ function LoginPage() {
 
   const oauthErrorKey = oauthErrorMessageKey(oauthError);
 
-  // Only render social buttons for providers that are actually configured.
-  const [providers, setProviders] = useState<OAuthProvider[] | null>(null);
+  // What the form and the buttons offer depends on the deployment, so they
+  // render only once its config is known.
+  const authConfig = useAuthConfig();
+  const { providers, passwordEnabled, mailEnabled } = authConfig;
+  const ready = authConfig.status === 'ready';
   const [oauthShown, setOauthShown] = useState(false);
-  // Whether email+password sign-in is offered; when false the screen is
-  // OAuth/OIDC-only. Defaults to true so the form shows while loading.
-  const [passwordEnabled, setPasswordEnabled] = useState(true);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -141,24 +140,7 @@ function LoginPage() {
   }, [isAuthenticated, navigate, redirect]);
 
   useEffect(() => {
-    let active = true;
-    api
-      .get<{ providers: OAuthProvider[]; passwordEnabled?: boolean }>('/auth/oauth/providers', true)
-      .then((r) => {
-        if (!active) return;
-        setProviders(r.providers);
-        // Only an explicit `false` disables password login; a missing field
-        // (older API) keeps the form visible so sign-in never silently breaks.
-        setPasswordEnabled(r.passwordEnabled !== false);
-      })
-      .catch(() => active && setProviders([]));
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (providers && providers.length > 0) {
+    if (providers.length > 0) {
       const id = requestAnimationFrame(() => setOauthShown(true));
       return () => cancelAnimationFrame(id);
     }
@@ -184,20 +166,34 @@ function LoginPage() {
     setMode(mode === 'login' ? 'register' : 'login');
   };
 
+  if (authConfig.status === 'error') {
+    return (
+      <AuthShell title={APP_NAME}>
+        <LoadFailure
+          title={t('error.authConfigUnavailable')}
+          detail={authConfig.detail}
+          onRetry={authConfig.retry}
+        />
+      </AuthShell>
+    );
+  }
+
   const oauthSuffix = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
 
   return (
     <AuthShell
       title={APP_NAME}
       subtitle={
-        !passwordEnabled
-          ? t('auth.oauthOnlySubtitle')
-          : mode === 'login'
-            ? t('auth.loginToAccount')
-            : t('auth.createAccount')
+        !ready
+          ? ''
+          : !passwordEnabled
+            ? t('auth.oauthOnlySubtitle')
+            : mode === 'login'
+              ? t('auth.loginToAccount')
+              : t('auth.createAccount')
       }
       footer={
-        passwordEnabled ? (
+        ready && passwordEnabled ? (
           <span className="text-[var(--color-text-secondary)]">
             {mode === 'login' ? t('auth.noAccount') : t('auth.hasAccount')}
             <button
@@ -229,7 +225,7 @@ function LoginPage() {
           </div>
         )}
 
-        {passwordEnabled && (
+        {ready && passwordEnabled && (
           <>
             {mode === 'register' && (
               <div className="auth-field mb-4" style={{ animationDelay: '0.13s' }}>
@@ -314,7 +310,7 @@ function LoginPage() {
               </div>
             </div>
 
-            {mode === 'login' && (
+            {mode === 'login' && mailEnabled && (
               <div className="mb-4 text-right">
                 <Link
                   to="/forgot-password"
@@ -342,7 +338,7 @@ function LoginPage() {
           </>
         )}
 
-        {providers && providers.length > 0 && (
+        {ready && providers.length > 0 && (
           <div
             className={`transition-all duration-500 ease-out motion-reduce:transition-none motion-reduce:translate-y-0 motion-reduce:opacity-100 ${
               oauthShown ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'

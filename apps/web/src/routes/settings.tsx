@@ -2,9 +2,11 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
 import { api, errorMessage, isAbortError } from '@/lib/api';
+import { useAuthConfig } from '@/lib/auth-config';
 import { copyText } from '@/lib/clipboard';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
@@ -309,7 +311,7 @@ function FieldRow({
   );
 }
 
-function ProfileSection() {
+export function ProfileSection() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
   const updateProfile = useAuthStore((s) => s.updateProfile);
@@ -325,6 +327,7 @@ function ProfileSection() {
   const [newPw, setNewPw] = useState('');
   const [pwSaving, setPwSaving] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
+  const authConfig = useAuthConfig();
 
   useEffect(() => {
     if (user) {
@@ -404,6 +407,9 @@ function ProfileSection() {
 
   return (
     <>
+      {authConfig.status === 'error' && (
+        <LoadFailureBanner title={t('error.authConfigUnavailable')} onRetry={authConfig.retry} />
+      )}
       <Section title={t('settings.profile')} description={t('profile.edit')}>
         <div className="mb-6 flex items-center gap-4">
           <button
@@ -466,14 +472,16 @@ function ProfileSection() {
             <p className="mt-1 text-caption text-[var(--color-text-secondary)]">
               {t('profile.emailUnverifiedHint')}
             </p>
-            <button
-              type="button"
-              onClick={handleResendVerification}
-              disabled={resendingVerification}
-              className="mt-2 text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
-            >
-              {t('profile.resendVerification')}
-            </button>
+            {authConfig.status === 'ready' && authConfig.mailEnabled && (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={resendingVerification}
+                className="mt-2 text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+              >
+                {t('profile.resendVerification')}
+              </button>
+            )}
           </div>
         )}
 
@@ -503,35 +511,37 @@ function ProfileSection() {
         </div>
       </Section>
 
-      <Section title={t('settings.security')}>
-        <FieldRow label={t('profile.currentPassword')}>
-          <input
-            type="password"
-            value={currentPw}
-            onChange={(e) => setCurrentPw(e.target.value)}
-            className="input-modern w-full"
-            autoComplete="current-password"
-          />
-        </FieldRow>
-        <FieldRow label={t('profile.newPassword')} hint={t('auth.passwordMinLength')}>
-          <input
-            type="password"
-            value={newPw}
-            onChange={(e) => setNewPw(e.target.value)}
-            className="input-modern w-full"
-            autoComplete="new-password"
-            minLength={8}
-          />
-        </FieldRow>
-        <button
-          type="button"
-          onClick={changePassword}
-          disabled={pwSaving || !currentPw || !newPw}
-          className="btn-primary px-5 text-default disabled:opacity-50"
-        >
-          {pwSaving ? t('profile.changing') : t('profile.changePassword')}
-        </button>
-      </Section>
+      {authConfig.status === 'ready' && authConfig.passwordEnabled && user?.hasPassword && (
+        <Section title={t('settings.security')}>
+          <FieldRow label={t('profile.currentPassword')}>
+            <input
+              type="password"
+              value={currentPw}
+              onChange={(e) => setCurrentPw(e.target.value)}
+              className="input-modern w-full"
+              autoComplete="current-password"
+            />
+          </FieldRow>
+          <FieldRow label={t('profile.newPassword')} hint={t('auth.passwordMinLength')}>
+            <input
+              type="password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              className="input-modern w-full"
+              autoComplete="new-password"
+              minLength={8}
+            />
+          </FieldRow>
+          <button
+            type="button"
+            onClick={changePassword}
+            disabled={pwSaving || !currentPw || !newPw}
+            className="btn-primary px-5 text-default disabled:opacity-50"
+          >
+            {pwSaving ? t('profile.changing') : t('profile.changePassword')}
+          </button>
+        </Section>
+      )}
 
       <SessionsSection />
     </>
