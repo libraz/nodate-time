@@ -108,7 +108,7 @@ test-e2e-storage:
 # storage_absent_test.go asserts that the name, the opt-out and this selector
 # never drift apart.
 test-e2e-storage-absent:
-	cd apps/api && TC_TEST_INTEGRATION=1 go test ./tests/e2e/ -v -count=1 -run '^TestStorageAbsent'
+	cd apps/api && TC_TEST_INTEGRATION=1 go test ./tests/e2e/ -v -count=1 $(GOTESTFLAGS) -run '^TestStorageAbsent'
 
 # Check this application's schema against the shared contract it claims to
 # implement. Runs on a scratch database so it never touches dev data.

@@ -137,7 +137,9 @@ jobs:
         env:
           TC_TEST_INTEGRATION: "1"
           TC_TEST_STORAGE: "1"
-        run: go test ./... -count=1
+        # -coverpkg: the e2e package drives the server in-process, so the
+        # code under test lives in other packages.
+        run: go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
 
       # The pass above has object storage for every test in it -- the test
       # server is built once per process -- so the tests that assert what the
@@ -146,4 +148,12 @@ jobs:
       # selects is defined in one place and can be reproduced locally with the
       # same command.
       - name: E2E tests (object storage absent)
-        run: make test-e2e-storage-absent
+        run: make test-e2e-storage-absent GOTESTFLAGS='-covermode=atomic -coverpkg=./... -coverprofile=coverage-absent.out'
+
+      # Public repo: codecov runs tokenless. Uploads never gate CI.
+      - name: Upload coverage (api)
+        uses: codecov/codecov-action@v7
+        with:
+          files: apps/api/coverage.out,apps/api/coverage-absent.out
+          flags: api
+          fail_ci_if_error: false

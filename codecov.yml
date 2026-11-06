@@ -1,0 +1,10 @@
+# Coverage is measured for insight only; it never gates a PR.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+comment: false

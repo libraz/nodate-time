@@ -72,3 +72,4 @@ backup/
 # sqlc.yaml because sqlc resolves paths relative to the config, and a killed
 # run would otherwise leave it behind as an untracked file.
 sql/.sqlc-drift-*.yaml
+/apps/api/coverage*.out
