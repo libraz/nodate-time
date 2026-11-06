@@ -364,6 +364,7 @@ function CommentsSection({
                 {editingId === c.id ? (
                   <div className="mt-1 flex gap-1">
                     <input
+                      data-1p-ignore
                       type="text"
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
@@ -402,6 +403,7 @@ function CommentsSection({
       {canPost && (
         <div className="flex items-center gap-2">
           <input
+            data-1p-ignore
             type="text"
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
@@ -597,6 +599,7 @@ function ChecklistSection({
       {editable && (
         <div className="flex items-center gap-2">
           <input
+            data-1p-ignore
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
@@ -1297,6 +1300,7 @@ export function EventModal() {
       {/* Title */}
       <div className="px-6 pt-2 pb-4">
         <textarea
+          data-1p-ignore
           ref={titleRef}
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
@@ -1548,6 +1552,7 @@ export function EventModal() {
                   </span>
                   <div className="flex items-center gap-2">
                     <input
+                      data-1p-ignore
                       type="number"
                       min={1}
                       max={99}
@@ -1725,6 +1730,7 @@ export function EventModal() {
                       </div>
                     ) : (
                       <input
+                        data-1p-ignore
                         type="number"
                         min={1}
                         max={31}
@@ -1845,6 +1851,7 @@ export function EventModal() {
                       </span>
                       {form.recurrenceRule.count && (
                         <input
+                          data-1p-ignore
                           type="number"
                           min={1}
                           max={365}
@@ -1921,6 +1928,7 @@ export function EventModal() {
                   <circle cx="12" cy="10" r="3" />
                 </svg>
                 <input
+                  data-1p-ignore
                   type="text"
                   value={form.location}
                   onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
@@ -1943,6 +1951,7 @@ export function EventModal() {
                   <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
                 </svg>
                 <input
+                  data-1p-ignore
                   type="url"
                   value={form.url}
                   onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
@@ -1965,6 +1974,7 @@ export function EventModal() {
                   <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
                 </svg>
                 <textarea
+                  data-1p-ignore
                   value={form.memo}
                   onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
                   placeholder={t('event.memo')}

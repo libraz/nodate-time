@@ -692,6 +692,7 @@ export function CustomSelect({
             {searchable && (
               <div className="border-b border-[var(--color-separator)] p-2">
                 <input
+                  data-1p-ignore
                   ref={filterRef}
                   type="text"
                   value={query}

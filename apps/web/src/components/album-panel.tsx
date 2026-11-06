@@ -492,6 +492,7 @@ export function AlbumPanel() {
               {editable ? (
                 <>
                   <input
+                    data-1p-ignore
                     type="text"
                     value={captionDraft}
                     onChange={(e) => setCaptionDraft(e.target.value)}

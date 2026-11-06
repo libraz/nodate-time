@@ -139,6 +139,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           </button>
         )}
         <input
+          data-1p-ignore
           ref={titleRef}
           type="text"
           value={form.title}
@@ -158,6 +159,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       {/* Body — a clean note area, not a boxed card */}
       <div className="px-6 py-3">
         <textarea
+          data-1p-ignore
           value={form.body}
           onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
           readOnly={!editable}

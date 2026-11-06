@@ -128,6 +128,7 @@ export function SearchPanel() {
           <line x1="16.65" y1="16.65" x2="21" y2="21" />
         </svg>
         <input
+          data-1p-ignore
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}

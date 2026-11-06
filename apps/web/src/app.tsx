@@ -116,6 +116,7 @@ function MobileSearchView() {
             <line x1="16.65" y1="16.65" x2="21" y2="21" />
           </svg>
           <input
+            data-1p-ignore
             ref={inputRef}
             type="text"
             value={query}

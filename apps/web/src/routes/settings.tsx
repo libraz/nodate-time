@@ -834,6 +834,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
     <Section title={t('settings.calendarDetails')}>
       <FieldRow label={t('settings.calendarName')}>
         <input
+          data-1p-ignore
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -843,6 +844,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
       </FieldRow>
       <FieldRow label={t('settings.calendarColor')}>
         <input
+          data-1p-ignore
           type="color"
           value={color}
           onChange={(e) => setColor(e.target.value)}
@@ -852,6 +854,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
       </FieldRow>
       <FieldRow label={t('settings.calendarCover')}>
         <input
+          data-1p-ignore
           type="url"
           value={coverUrl}
           onChange={(e) => setCoverUrl(e.target.value)}
@@ -1338,6 +1341,7 @@ export function ExportSection() {
         </FieldRow>
         <FieldRow label={t('settings.importPasted')}>
           <textarea
+            data-1p-ignore
             value={icsText}
             onChange={(e) => setIcsText(e.target.value)}
             placeholder={t('settings.importPlaceholder')}
@@ -1504,6 +1508,8 @@ export function AllowedEmailsSection() {
 
       <form onSubmit={add} className="mb-4 flex flex-wrap items-end gap-2">
         <input
+          data-1p-ignore
+          autoComplete="off"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -1512,6 +1518,7 @@ export function AllowedEmailsSection() {
           className="input-modern min-w-[220px] flex-1"
         />
         <input
+          data-1p-ignore
           type="text"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
@@ -1664,6 +1671,7 @@ function ProviderCard({
 
       <FieldRow label={t('settings.adminProviderClientId')}>
         <input
+          data-1p-ignore
           type="text"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
@@ -1681,6 +1689,7 @@ function ProviderCard({
         {editingSecret ? (
           <div className="flex items-center gap-2">
             <input
+              data-1p-ignore
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
