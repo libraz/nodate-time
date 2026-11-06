@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
-import { canOwn } from '@/lib/permissions';
+import { canManage, canOwn } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useUiStore } from '@/stores/ui-store';
 import { MEMBER_COLORS } from '@/types/calendar';
 
 /**
@@ -18,10 +19,15 @@ export function CalendarList() {
   const setActiveCalendarIds = useCalendarStore((s) => s.setActiveCalendarIds);
   const addCalendar = useCalendarStore((s) => s.addCalendar);
   const deleteCalendar = useCalendarStore((s) => s.deleteCalendar);
+  const openPanelFor = useUiStore((s) => s.openPanelFor);
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // A calendar is only shared once someone is invited, so the one just made
+  // offers that next step in place.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const newHintId = useId();
 
   const allActive = calendars.every((c) => activeCalendarIds.includes(c.id));
 
@@ -33,14 +39,25 @@ export function CalendarList() {
     }
   };
 
-  const handleCreateCalendar = () => {
+  const handleCreateCalendar = async () => {
     if (!newName.trim()) return;
-    addCalendar({
+    const request = addCalendar({
       name: newName.trim(),
       color: MEMBER_COLORS[calendars.length % MEMBER_COLORS.length] ?? '#47B2F7',
     });
     setNewName('');
     setShowNewForm(false);
+    try {
+      const created = await request;
+      if (created) setJustCreatedId(created.id);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  const handleInvite = (id: string) => {
+    setJustCreatedId(null);
+    openPanelFor('share', id);
   };
 
   // Deleting takes the calendar's events, memos and album with it for every
@@ -128,11 +145,15 @@ export function CalendarList() {
           </button>
         </div>
       </div>
+      <p className="px-4 pb-1 text-caption text-[var(--color-text-tertiary)]">
+        {t('calendar.listHint')}
+      </p>
 
       <div className="overflow-y-auto px-2 py-1">
         {calendars.map((cal) => {
           const isActive = activeCalendarIds.includes(cal.id);
           const confirming = pendingDeleteId === cal.id;
+          const offerInvite = justCreatedId === cal.id && canManage(cal.role);
           return (
             <div key={cal.id}>
               <div className="group flex w-full items-center rounded-lg transition-colors hover:bg-[var(--color-hover)]">
@@ -237,6 +258,39 @@ export function CalendarList() {
                   </div>
                 </div>
               )}
+
+              {offerInvite && (
+                <div
+                  className="mx-2 mb-1 rounded-[var(--radius-md)] border px-3 py-2"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
+                  }}
+                >
+                  <p className="text-footnote font-semibold text-[var(--color-text-primary)]">
+                    {t('calendar.createdTitle', { name: cal.name })}
+                  </p>
+                  <p className="mt-0.5 text-caption text-[var(--color-text-secondary)]">
+                    {t('calendar.createdInviteHint')}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setJustCreatedId(null)}
+                      className="btn-secondary h-8 flex-1 text-footnote"
+                    >
+                      {t('calendar.inviteLater')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleInvite(cal.id)}
+                      className="btn-primary h-8 flex-1 text-footnote"
+                    >
+                      {t('calendar.inviteMembers')}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -244,6 +298,7 @@ export function CalendarList() {
         {showNewForm && (
           <div className="px-2 py-2">
             <input
+              data-1p-ignore
               ref={inputRef}
               type="text"
               value={newName}
@@ -254,7 +309,11 @@ export function CalendarList() {
               }}
               placeholder={t('calendar.calendarName')}
               className="input-modern h-9 w-full text-sm"
+              aria-describedby={newHintId}
             />
+            <p id={newHintId} className="mt-1.5 text-caption text-[var(--color-text-tertiary)]">
+              {t('calendar.newCalendarHint')}
+            </p>
             <div className="mt-2 flex gap-2">
               <button
                 type="button"

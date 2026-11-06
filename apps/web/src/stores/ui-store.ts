@@ -25,6 +25,11 @@ interface UiState {
   eventDraftEnd: DateTime | null;
   showDayDetail: boolean;
   rightPanel: RightPanelId;
+  /**
+   * The calendar the last openPanelFor named. A fresh object per call, so a
+   * panel adopts it even when the same calendar is asked for twice.
+   */
+  panelCalendarRequest: { calendarId: string } | null;
   showSearch: boolean;
   searchQuery: string;
   mobileTab: MobileTab;
@@ -54,6 +59,8 @@ interface UiState {
   /** Selects today and brings it on screen, including in the mobile month scroller. */
   goToToday: () => void;
   toggleRightPanel: (panel: RightPanelId) => void;
+  /** Opens a side panel pointed at one calendar, closing the mobile menu it may come from. */
+  openPanelFor: (panel: Exclude<RightPanelId, null>, calendarId: string) => void;
   toggleSearch: () => void;
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
@@ -92,6 +99,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   eventDraftEnd: null,
   showDayDetail: false,
   rightPanel: null,
+  panelCalendarRequest: null,
   showSearch: false,
   searchQuery: '',
   mobileTab: 'calendar' as MobileTab,
@@ -158,6 +166,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       rightPanel: s.rightPanel === panel ? null : panel,
     })),
 
+  openPanelFor: (panel, calendarId) =>
+    set({ rightPanel: panel, panelCalendarRequest: { calendarId }, showMobileMenu: false }),
+
   toggleSearch: () => set((s) => ({ showSearch: !s.showSearch, searchQuery: '' })),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setMobileTab: (tab) => set({ mobileTab: tab }),
@@ -211,6 +222,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       eventDraftEnd: null,
       showDayDetail: false,
       rightPanel: null,
+      panelCalendarRequest: null,
       showSearch: false,
       searchQuery: '',
       mobileTab: 'calendar',

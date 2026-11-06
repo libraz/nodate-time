@@ -138,6 +138,9 @@ export function SharePanel() {
                   {t('share.inviteSection')}
                 </h3>
                 <p className="text-caption text-[var(--color-text-secondary)]">
+                  {t('share.inviteLead')}
+                </p>
+                <p className="text-caption text-[var(--color-text-secondary)]">
                   {t('share.inviteTermsNote')}
                 </p>
                 <CustomSelect
@@ -306,6 +309,7 @@ export function SharePanel() {
                             {t('share.embedCode')}
                           </span>
                           <textarea
+                            data-1p-ignore
                             readOnly
                             value={embedSnippet}
                             rows={3}
@@ -359,6 +363,7 @@ function UrlRow({ value, copied, onCopy, copyLabel, copiedLabel }: UrlRowProps) 
       style={{ borderRadius: 'var(--radius-sm)' }}
     >
       <input
+        data-1p-ignore
         type="text"
         readOnly
         value={value}

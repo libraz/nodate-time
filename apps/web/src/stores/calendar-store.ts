@@ -79,7 +79,8 @@ interface CalendarState {
   /** Re-runs whichever of the startup loads did not come back. */
   retryFailedLoads: () => Promise<void>;
 
-  addCalendar: (cal: { name: string; color: string }) => Promise<void>;
+  /** Resolves to the created calendar, or null when the account changed meanwhile. */
+  addCalendar: (cal: { name: string; color: string }) => Promise<Calendar | null>;
   updateCalendar: (
     id: string,
     patch: { name?: string; color?: string; coverUrl?: string },
@@ -402,7 +403,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   async addCalendar(cal) {
     const currentAccountGeneration = accountGeneration;
     const newCal = await api.post<Calendar>('/calendars', cal);
-    if (currentAccountGeneration !== accountGeneration) return;
+    if (currentAccountGeneration !== accountGeneration) return null;
     set((s) => {
       const ids = [...s.activeCalendarIds, newCal.id];
       saveJson('activeCalendarIds', ids);
@@ -412,6 +413,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       };
     });
     await get().fetchMembers(newCal.id);
+    return newCal;
   },
 
   async updateCalendar(id, patch) {

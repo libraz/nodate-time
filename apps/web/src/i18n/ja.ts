@@ -30,6 +30,14 @@ export const ja = {
   'calendar.selectAll': 'すべて選択',
   'calendar.newCalendar': '新しいカレンダーを作る',
   'calendar.calendarName': 'カレンダー名',
+  'calendar.listHint': 'チェックを入れたカレンダーの予定が、重ねて表示されます',
+  'calendar.newCalendarHint':
+    '作成後にメンバーを招待すると、全員の予定を 1 つのカレンダーにまとめられます',
+  'calendar.createdTitle': '「{name}」を作成しました',
+  'calendar.createdInviteHint':
+    'メンバーを招待すると、それぞれの予定がその人の色で重なって表示されます',
+  'calendar.inviteMembers': 'メンバーを招待',
+  'calendar.inviteLater': 'あとで',
   'calendar.deleteCalendar': 'カレンダーを削除',
   'calendar.deleteWarning': '「{name}」の予定・メモ・アルバムがメンバー全員から消えます。',
   'calendar.moreEvents': 'ほか{count}件の予定',
@@ -178,13 +186,16 @@ export const ja = {
   'share.calendarNotFound': 'カレンダーが見つかりません',
   'share.poweredBy': 'Powered by Nodate Time',
   'share.inviteSection': '招待リンク',
+  'share.inviteLead':
+    '受け取った人はこのカレンダーのメンバーになり、その人の予定はその人の色で重なって表示されます',
   'share.inviteTermsNote': 'リンクごとに権限・有効期限・使える人数を選べます。複数発行できます',
   'share.createInvite': '招待リンクを作成',
   'share.createAnotherInvite': '別の招待リンクを作成',
   'share.inviteUsed': '使用済み',
   'share.inviteUnused': '未使用',
   'share.publicSection': '公開・埋め込み',
-  'share.publicNote': 'リンクを知っている人は誰でも閲覧できます（サインアップ不要・参照専用）',
+  'share.publicNote':
+    'リンクを知っている人は誰でも閲覧できます（サインアップ不要・閲覧専用）。メンバーにはなりません',
   'share.createPublic': '公開リンクを作成',
   'share.publicActiveWarning':
     '外部公開中：リンクを知っている人は誰でもこのカレンダーを閲覧できます',
@@ -395,6 +406,9 @@ export const ja = {
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このメンバーを削除しますか?',
   'members.you': 'あなた',
+  'members.layerHint': '予定は、その予定の持ち主の色で表示されます。色はメンバー全員に共通です',
+  'members.soloHint':
+    'まだメンバーはあなただけです。招待した人の予定は、その人の色でこのカレンダーに重なります',
   'members.leave': 'カレンダーから退出',
   'members.leaveConfirm': 'このカレンダーから抜けますか? 予定は他のメンバーには残ります',
   'members.leftCalendar': 'カレンダーから抜けました',

@@ -50,6 +50,7 @@ function MemberColorInput({
     <label className="relative shrink-0" aria-label={label}>
       <Avatar src={member.avatar} name={member.name} size="h-9 w-9" color={draft} round />
       <input
+        data-1p-ignore
         ref={inputRef}
         type="color"
         value={draft}
@@ -65,6 +66,7 @@ export function MembersPanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const openPanelFor = useUiStore((s) => s.openPanelFor);
   const open = rightPanel === 'members';
   const panelRef = useModalA11y<HTMLDivElement>(open, () => toggleRightPanel('members'));
   const me = useAuthStore((s) => s.user);
@@ -107,7 +109,7 @@ export function MembersPanel() {
             {canManageMembers && (
               <button
                 type="button"
-                onClick={() => toggleRightPanel('share')}
+                onClick={() => openPanelFor('share', calendarId)}
                 className="btn-primary px-3 py-1.5 text-footnote"
               >
                 {t('invites.create')}
@@ -142,6 +144,9 @@ export function MembersPanel() {
               target={target}
               onChange={setTargetId}
             />
+            <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
+              {t('members.layerHint')}
+            </p>
           </div>
         )}
 
@@ -220,6 +225,11 @@ export function MembersPanel() {
                 );
               })}
             </ul>
+          )}
+          {members.length === 1 && (
+            <p className="px-5 py-4 text-caption text-[var(--color-text-tertiary)]">
+              {t('members.soloHint')}
+            </p>
           )}
         </div>
       </div>

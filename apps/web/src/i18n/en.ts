@@ -30,6 +30,14 @@ export const en: Record<TranslationKey, string> = {
   'calendar.selectAll': 'Select all',
   'calendar.newCalendar': 'New calendar',
   'calendar.calendarName': 'Calendar name',
+  'calendar.listHint': 'Events from checked calendars are layered together',
+  'calendar.newCalendarHint':
+    "Invite members once it exists to bring everyone's events into one calendar",
+  'calendar.createdTitle': 'Created "{name}"',
+  'calendar.createdInviteHint':
+    "Invite members and each person's events appear in their own colour",
+  'calendar.inviteMembers': 'Invite members',
+  'calendar.inviteLater': 'Later',
   'calendar.deleteCalendar': 'Delete calendar',
   'calendar.deleteWarning': 'The events, memos and album in "{name}" go with it, for everyone.',
   'calendar.moreEvents': '{count} more events',
@@ -173,6 +181,8 @@ export const en: Record<TranslationKey, string> = {
   'share.calendarNotFound': 'Calendar not found',
   'share.poweredBy': 'Powered by Nodate Time',
   'share.inviteSection': 'Invite link',
+  'share.inviteLead':
+    'Whoever uses it joins this calendar as a member, and their events appear in their own colour',
   'share.inviteTermsNote':
     'Each link carries the role, expiry and number of uses you choose below. You can issue several',
   'share.createInvite': 'Create invite link',
@@ -180,7 +190,8 @@ export const en: Record<TranslationKey, string> = {
   'share.inviteUsed': 'Used',
   'share.inviteUnused': 'Not used yet',
   'share.publicSection': 'Public & embed',
-  'share.publicNote': 'Anyone with this link can view (no sign-up, read-only)',
+  'share.publicNote':
+    'Anyone with this link can view (no sign-up, read-only). They do not become members',
   'share.createPublic': 'Create public link',
   'share.publicActiveWarning': 'Publicly exposed: anyone with the link can view this calendar',
   'share.publicConfirm':
@@ -379,6 +390,10 @@ export const en: Record<TranslationKey, string> = {
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'Remove this member?',
   'members.you': 'You',
+  'members.layerHint':
+    "Each event is drawn in its owner's colour, and colours are the same for every member",
+  'members.soloHint':
+    "You're the only member so far. Events from people you invite appear here in their own colour",
   'members.leave': 'Leave calendar',
   'members.leaveConfirm': 'Leave this calendar? Its events stay with the other members.',
   'members.leftCalendar': 'You have left the calendar',

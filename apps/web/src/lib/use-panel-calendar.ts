@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useUiStore } from '@/stores/ui-store';
 import type { Calendar } from '@/types/calendar';
 
 export interface PanelCalendar {
@@ -14,12 +15,17 @@ export interface PanelCalendar {
  * The calendar a side panel acts on: one of those currently shown, chosen by
  * the reader and named on screen, rather than whichever happens to be first.
  * A choice that stops being offered -- hidden, left -- falls back to the first
- * calendar that still is.
+ * calendar that still is. A panel opened through openPanelFor starts on the
+ * calendar it was opened for.
  */
 export function usePanelCalendar(eligible?: (calendar: Calendar) => boolean): PanelCalendar {
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const [targetId, setTargetId] = useState('');
+  const request = useUiStore((s) => s.panelCalendarRequest);
+  useEffect(() => {
+    if (request) setTargetId(request.calendarId);
+  }, [request]);
 
   const options = calendars.filter(
     (c) => activeCalendarIds.includes(c.id) && (eligible ? eligible(c) : true),

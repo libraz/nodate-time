@@ -28,6 +28,7 @@ vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
+import { useUiStore } from '@/stores/ui-store';
 import { CalendarList } from './calendar-list';
 
 afterEach(() => {
@@ -66,5 +67,37 @@ describe('CalendarList calendar deletion', () => {
     render(<CalendarList />);
 
     expect(screen.getAllByRole('button', { name: 'calendar.deleteCalendar' })).toHaveLength(1);
+  });
+});
+
+describe('CalendarList after creating a calendar', () => {
+  // A new calendar is shared only once someone is invited, so the next step
+  // is offered in place and lands on the calendar just made, not the first one.
+  it('offers an invite that opens the share panel on the new calendar', async () => {
+    const created = {
+      id: 'cal-new',
+      name: 'Band',
+      color: '#47B2F7',
+      role: 'owner',
+      publicShared: false,
+    };
+    calendarState.addCalendar.mockImplementation(async () => {
+      calendarState.calendars.push(created);
+      return created;
+    });
+    const user = userEvent.setup();
+    render(<CalendarList />);
+
+    await user.click(screen.getByRole('button', { name: 'calendar.newCalendar' }));
+    await user.type(screen.getByPlaceholderText('calendar.calendarName'), 'Band{Enter}');
+    await user.click(await screen.findByRole('button', { name: 'calendar.inviteMembers' }));
+
+    const ui = useUiStore.getState();
+    expect(ui.rightPanel).toBe('share');
+    expect(ui.panelCalendarRequest).toEqual({ calendarId: 'cal-new' });
+    expect(screen.queryByText('calendar.createdInviteHint')).toBeNull();
+
+    calendarState.calendars.pop();
+    useUiStore.getState().resetSessionUi();
   });
 });
