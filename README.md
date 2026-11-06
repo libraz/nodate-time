@@ -1,522 +1,88 @@
 # Nodate Time
 
-[![CI](https://github.com/libraz/nodate-time/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/nodate-time/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
-![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?logo=mysql&logoColor=white)
-![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)
+[![CI](https://img.shields.io/github/actions/workflow/status/libraz/nodate-time/ci.yml?branch=main&label=CI)](https://github.com/libraz/nodate-time/actions)
+[![codecov](https://codecov.io/gh/libraz/nodate-time/branch/main/graph/badge.svg)](https://codecov.io/gh/libraz/nodate-time)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-green)](https://github.com/libraz/nodate-time/blob/main/LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-A shared calendar app for running one calendar across multiple people — families,
-teams, talent agencies. It blends TimeTree's shared-calendar simplicity with a
-Google Calendar–style permission model. Monorepo: a Go REST API plus a React SPA.
+**Nodate Time is a shared calendar for running one calendar across several people: families, teams and agencies.**
+It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3-compatible object storage.
 
-**Stack:** Go 1.26 · Huma v2 · MySQL 9.7 · React 19 · Bun
+📖 **[Documentation](https://github.com/libraz/nodate-time/blob/main/docs/en/introduction.md)** &nbsp;·&nbsp; **[Getting started](#getting-started)** &nbsp;·&nbsp; **[Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md)**
 
----
+> Pre-1.0 and not independently security-audited.
 
 ## Screenshots
 
 | Monthly view | Weekly view |
 | --- | --- |
 | ![Monthly view with the event-create dialog](./docs/images/monthly-create-event.png) | ![Weekly timeline view](./docs/images/weekly-view.png) |
-| **Share & embed** | |
-| ![Share panel with invite links and embed code](./docs/images/share-panel.png) | |
+| **Share & embed** | **Mobile** |
+| ![Share panel with invite links and embed code](./docs/images/share-panel.png) | <img src="./docs/images/mobile-monthly.png" width="240" alt="Mobile monthly view"> |
 
-Responsive mobile layout (vertical month scroll):
+## What it does
 
-<p align="left">
-  <img src="./docs/images/mobile-monthly.png" width="280" alt="Mobile monthly view">
-</p>
+- **Shared calendars** — per-member roles (owner / manager / editor / viewer), invite links, public share tokens and an embeddable view. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Events** — all-day and timed, recurrence (RRULE) with per-occurrence exceptions, drag to move or resize, attendees, checklists, attachments, comments. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Memos and albums** — per-calendar notes and photo albums, optionally linked to events. [Object storage](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md#object-storage)
+- **Change history** — a history for events and memos, plus a per-calendar activity feed. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Sign-in** — email and password, Google and LINE OAuth, and a development-only password-less login. Password reset and email verification appear only when an SMTP relay is configured. [Configuration](https://github.com/libraz/nodate-time/blob/main/docs/en/configuration.md)
+- **Admin** — OAuth provider settings and an allowlist of permitted sign-in emails and domains. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Export and import** — export as iCal or CSV, import iCal. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Languages and themes** — English and Japanese, five themes, light, dark or system color mode.
+- **Self-hosting** — one compose file with TLS, object storage and upgrade scripts. [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md)
+- **Metrics and profiling** — Prometheus metrics, pprof and a per-dependency health report on a separate listener. [Observability](https://github.com/libraz/nodate-time/blob/main/docs/en/observability.md)
+- **Optional shared database** — can share one MySQL with [nodate-flow](https://github.com/libraz/nodate-flow) through a published schema contract, with no code dependency. [Introduction](https://github.com/libraz/nodate-time/blob/main/docs/en/introduction.md#optional-shared-database-with-nodate-flow)
 
-## Features
+## Getting started
 
-- **Shared calendars** — per-member roles (owner / manager / editor / viewer), invite links,
-  public share tokens, and an embeddable (embed) view
-- **Events** — all-day & timed, recurrence (RRULE) with per-occurrence exception
-  editing, drag to move/resize, attendees, checklists, attachments, comments
-- **Memos** — per-calendar notes
-- **Albums** — per-calendar photo albums (optionally linked to events)
-- **Activity & audit history** — change history for events/memos plus a per-calendar
-  activity feed
-- **Auth** — email + password, Google / LINE OAuth/OIDC, password reset, and a
-  development-only password-less login
-- **Admin** — OAuth provider configuration and an allowlist of permitted sign-in
-  emails/domains
-- **Export / import** — export as iCal or CSV; import iCal
-- **i18n & themes** — English / Japanese locales and theme switching
-
-## Tech stack
-
-| Area | Technology |
-| --- | --- |
-| API | Go 1.26 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
-| DB | MySQL 9.7 (Docker Compose) |
-| Object storage | S3-compatible (Versity S3 Gateway locally) |
-| Web | React 19 + TypeScript + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
-| Lint / format | Biome (web) / gofmt (Go) |
-| Package manager | Bun |
-| Testing | Go E2E (testify + real MySQL) / Vitest (web) |
-
-## Repo structure
-
-```
-apps/
-  api/                 Go REST API
-    cmd/api/           entrypoint
-    cmd/createuser/    user-creation CLI
-    cmd/healthcheck/   container health probe
-    internal/          config, auth, cleanup, db/generated, errors,
-                       eventlog, mailer, recurrence, secrets, storage,
-                       http/{handlers,middleware,router}
-    tests/e2e/         E2E tests
-  web/                 React SPA
-    src/components/     UI components
-    src/routes/         TanStack Router (file-based; incl. share/ and embed/)
-    src/stores/         Zustand (auth / calendar / ui stores)
-    src/lib/            utilities (date, recurrence, upload, theme, …)
-    src/i18n/           English / Japanese locales
-sql/
-  core/                vendored shared schema contract (pinned; not edited here)
-    tables/             shared table definitions
-    triggers/           shared triggers
-    conformance/        contract conformance checks
-    tools/              schema build, vendoring and layer checks
-    upgrades/           bring an existing database's shared tables up to date
-  time/                this application's own tables
-    tables/             table definitions
-    views/              view definitions
-    upgrades/           bring an existing database's own tables and rows up to date
-  queries/             sqlc query definitions
-  schema.sql           combined schema produced by build-schema.sh
-  sqlc.yaml            sqlc config
-compose.yml            local stack: MySQL + object storage
-compose.prod.yml       self-hosting stack: MySQL + object storage + API + web
-```
-
-## Quick start
-
-### Prerequisites
-
-- [Bun](https://bun.sh) 1.4+ (the lockfile format older versions cannot read)
-- Go 1.26+
-- Docker (for MySQL / object storage)
-- [sqlc](https://sqlc.dev) (only when regenerating DB code)
-
-### Run
+Prerequisites: [Bun](https://bun.sh) 1.4+, Go 1.26+, Docker (MySQL and object storage), and [sqlc](https://sqlc.dev) only when regenerating DB code.
 
 ```sh
-bun install            # install deps (Bun required)
-make db-up             # start MySQL (compose.yml)
-make storage-up        # start object storage: attachments, albums and avatars need it
-make db-apply          # build & apply the schema
-make db-seed-users     # create demo@example.com / admin@example.com
-make dev               # start DB + API + web together
+bun install
+make db-up             # MySQL on port 33306 (TC_DB_PORT)
+make db-seed           # schema, demo@example.com / admin@example.com (password123), sample data
+make storage-up        # object storage: attachments, albums and avatars need it
+make dev               # MySQL + mailpit + API + web together
 ```
 
-- API: <http://localhost:8080> (`/health`; OpenAPI is generated by Huma)
 - Web: <http://localhost:5173>
+- API: <http://localhost:8080> (`/health`, OpenAPI at `/openapi.json`, reference at `/docs`)
+- Mail caught by mailpit: <http://localhost:8025>
 
-`make dev` starts MySQL and mailpit (outgoing mail is caught at
-<http://localhost:8025>), so without `make storage-up` the attachment,
-album and avatar endpoints answer 503.
+Without `make storage-up`, the attachment, album and avatar endpoints answer 503. With `TC_ENV=development`, which `make dev` sets, `/auth/dev-login` signs in the seeded accounts without a password.
 
-In development (`TC_ENV=development`), `/auth/dev-login` provides password-less
-login for the seeded accounts.
+To host it for real, see [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md).
 
-### Common commands
+## Build from source
 
 ```sh
-make dev               # DB + API + web in parallel
-make db-up / db-down   # start / stop MySQL
-make db-apply          # apply schema (build-schema.sh → schema.sql)
-make db-seed           # schema + users + sample data
-make storage-up        # start object storage (S3-compatible)
-make sqlc              # generate sqlc code
-make api / make web    # run individually
-make build-api         # build the API binary (bin/api)
+make dev                # DB + API + web
+make db-up / db-down    # start / stop MySQL
+make db-apply           # build the schema and apply it to an empty database
+make sqlc               # regenerate the sqlc code
+make verify-codegen     # fail when generated files are out of date
+make build-api          # API binary at bin/api
 make create-user ARGS="-email a@b.com -password secret123 -admin"
-make format            # gofmt + Biome autofix
-make lint              # gofmt check + Biome (no writes)
-make test-api          # Go unit tests
-make test-e2e          # E2E (requires MySQL + TC_TEST_INTEGRATION=1)
-make test-e2e-storage  # E2E including the object storage tests
-
-bun run check          # Biome check
-bun run typecheck      # TypeScript typecheck (tsc -b)
-cd apps/web && bun run test   # web unit tests (Vitest)
+make format             # gofmt + Biome autofix
+make lint               # gofmt check + Biome, no writes
+make test-api           # Go unit tests
+make test-e2e           # E2E against MySQL (TC_TEST_INTEGRATION=1)
+make test-e2e-storage   # E2E including the object storage tests
+bun run typecheck       # tsc -b
 ```
 
-## Environment variables
+Repository layout, testing, migrations and code generation are in [Development](https://github.com/libraz/nodate-time/blob/main/docs/en/development.md).
 
-All prefixed with `TC_`. Key ones below; see `apps/api/internal/config/config.go`
-for the full list and defaults.
+## Documentation
 
-| Variable | Purpose | Default |
-| --- | --- | --- |
-| `TC_ENV` | `development` enables dev conveniences | `production` |
-| `TC_APP_NAME` | what the deployment calls itself (OpenAPI title, outgoing mail, iCalendar `PRODID`); the SPA takes the same name from the `VITE_APP_NAME` build argument | `Nodate Time` |
-| `TC_PORT` | API port | `8080` |
-| `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
-| `TC_JWT_SECRET` | JWT signing key, ≥32 bytes. Required in every environment: the built-in value is published in this repository and is refused | none (`make dev` generates one under `secrets/`) |
-| `TC_PASSWORD_LOGIN_ENABLED` | enable email+password auth | `true` |
-| `TC_WORKSPACE_TIMEZONE` | IANA zone a new account starts in — neither signing up nor a first provider sign-in asks, and the column is NOT NULL. Rejected at startup if the tz database does not know it | `Asia/Tokyo` |
-| `TC_DEFAULT_LOCALE` | BCP 47 tag a new account starts with, for the same reason | `ja` |
-| `TC_CORS_ALLOWED_ORIGINS` | allowed CORS origins, comma-separated. An empty list or `*` is refused in every environment | localhost:5173 |
-| `TC_TRUSTED_PROXIES` | reverse-proxy hops allowed to set `X-Forwarded-For` (CIDR or bare IP, comma-separated). Unset behind a proxy collapses every client onto one rate-limit bucket | none trusted |
-| `TC_AUTH_RATE_LIMIT` | per-IP requests/min for sign-in, registration, password reset and OAuth | `60` |
-| `TC_SHARE_RATE_LIMIT` | per-IP requests/min for public share links, counted separately from sign-in | `600` |
-| `TC_WEB_URL` / `TC_API_PUBLIC_URL` | public URLs for web / API. `TC_API_PUBLIC_URL` is also the address blob URLs point back at, so it must include any path the API is served under | localhost |
-| `TC_S3_ENDPOINT` / `TC_S3_ACCESS_KEY` / `TC_S3_SECRET_KEY` / `TC_S3_BUCKET` / `TC_S3_USE_SSL` | S3-compatible storage, reached by the API only — never by the browser. The `minioadmin` credentials are refused unless `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` is set | local storage defaults |
-| `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` | permit the well-known `minioadmin` credentials, for a local object store | `false` (`make dev` sets `true`) |
-| `TC_SMTP_HOST` and other `TC_SMTP_*` | mail delivery. Empty means mail is off, in every environment: the API starts, logs that delivery is off, and does not offer password reset or email verification (the auth-providers response carries `mailEnabled: false`, and the SPA hides those screens) | unset (`make dev` points it at mailpit) |
-| `TC_GOOGLE_CLIENT_ID` / `TC_GOOGLE_CLIENT_SECRET` | Google OAuth | empty |
-| `TC_GOOGLE_ALLOWED_DOMAINS` | email domains allowed to sign up or sign in (comma-separated). Password registration and login and Google sign-in check it; LINE verifies no address, so it is refused while the list is set. An address outside the list still gets in if it was allow-listed individually, and `createuser` allow-lists the accounts it creates | unrestricted |
-| `TC_LINE_CLIENT_ID` / `TC_LINE_CLIENT_SECRET` | LINE OAuth | empty |
-| `TC_SECRETS_KEY` | key encrypting secrets stored in the DB (hex/base64, 32 bytes) | empty |
-| `TC_METRICS_ADDR` | address of the administrative listener; empty disables it | `127.0.0.1:9464` |
-| `TC_METRICS_ALLOWED_CIDRS` | networks allowed to reach that listener, matched against the direct TCP peer. Empty denies everything | loopback + private ranges |
+The documentation lives in [`docs/en`](https://github.com/libraz/nodate-time/tree/main/docs/en).
 
-> `Config.Validate()` applies in every environment, `TC_ENV=development` included. It
-> refuses to start with the built-in or a short (<32 bytes) JWT secret, the default
-> `minioadmin` credentials, an empty or wildcard CORS list, and
-> rejects an unknown `TC_WORKSPACE_TIMEZONE`. One guard has an allowance
-> variable — `TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS` for the storage
-> credentials; the others have none. `TC_ENV=development` adds
-> `/auth/dev-login` and nothing else.
-
-DB / storage / mail (`compose.yml`): `TC_DB_PORT` (default 33306), `TC_DB_ROOT_PASSWORD`,
-`TC_DB_NAME`, `TC_DB_USER`, `TC_DB_PASSWORD`, `TC_S3_PORT` (default 9000,
-bound to loopback), `TC_MAILPIT_SMTP_PORT` (default 1025) and
-`TC_MAILPIT_UI_PORT` (default 8025), both bound to loopback.
-
-## API overview
-
-Huma v2 generates the OpenAPI description automatically. It is served without
-authentication at `/openapi.json` and `/openapi.yaml`, with a rendered
-reference at `/docs`. Routes live in
-`apps/api/internal/http/router/router.go`.
-
-The groups below are not exhaustive; the router is the full list.
-
-- **Public** — `/health`, `/openapi.json`, `/openapi.yaml`, `/docs`; `/auth/*` except
-  `/auth/logout` (register, login, refresh, password-reset, verify-email/confirm,
-  oauth; `dev-login` only in development); `/share/{token}` and
-  `/share/{token}/events`; `/blobs/*`, which carries no session and is authorized
-  by the signature on the URL
-- **Authenticated** — `/auth/logout`, `/user/*`, `/calendars`,
-  `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`,
-  and `/invites/{token}/accept`
-- **Admin** — `/admin/oauth-providers`, `/admin/allowed-emails`,
-  `/admin/instance-admins`
-
-Sign-in, registration, password reset and OAuth (`/auth/*`) and the public share
-links (`/share/*`) are rate-limited per client IP. `/health`, the OpenAPI and
-docs routes and `/blobs/*` are not.
-
-## Observability
-
-The server serves two ports. `TC_PORT` (8080) is the product. `TC_METRICS_ADDR`
-(127.0.0.1:9464) is a second listener carrying what describes the process
-rather than the product:
-
-| Path | What it answers |
-| --- | --- |
-| `/metrics` | Prometheus text format: request rate, latency histogram and response size by matched route; requests in flight; connection-pool saturation; Go runtime; rate-limit rejections by scope; outgoing mail by outcome |
-| `/debug/pprof/*` | live CPU, heap and goroutine profiles |
-| `/health/detail` | per-dependency report — database, object storage, mail relay — with the error each failing probe returned. 503 only when a *required* dependency is down, so a deployment is not pulled from rotation over an unreachable mail relay |
-
-It is guarded twice, and neither guard reads a forwarded header: it binds to
-loopback by default, and every request is matched against
-`TC_METRICS_ALLOWED_CIDRS` by its direct TCP peer. A request from outside the
-list gets 404 rather than 403 — a refusal that says "not allowed" confirms the
-endpoint exists. **Do not put a reverse-proxy rule in front of this port.**
-Proxied, every request arrives from the proxy's address, so one allow-list
-entry would admit the whole internet.
-
-`compose.prod.yml` publishes it as `127.0.0.1:9464` on the host; a scraper
-sharing the compose network reaches it at `api:9464`.
-
-```sh
-curl -s 127.0.0.1:9464/metrics | head
-curl -s 127.0.0.1:9464/health/detail | jq
-go tool pprof http://127.0.0.1:9464/debug/pprof/profile?seconds=30
-```
-
-The public `/health` stays what a load balancer needs: cheap, unauthenticated,
-and silent about which dependency is unwell.
-
-**The access log names the route, never the URL.** A share token is a path
-segment and a password reset carries its token in the query, so a conventional
-access log would file working credentials in the artifact that is kept longest
-and read most widely. Each line carries the matched route pattern, status,
-duration, response size, client IP and a request identifier; that identifier is
-also returned in `X-Request-Id` and attached to every other line the request
-logs, so one value collects the whole story. An identifier supplied by the
-caller is adopted only from a hop listed in `TC_TRUSTED_PROXIES`.
-
-The web service's nginx follows the same rule: its access log carries the path
-without the query string, with the token segment of `/share/`, `/embed/` and
-`/invites/` URLs replaced, and never the `Referer`. Its error log, written only
-for failures, quotes the request line and the `Referer` of the request that failed.
-
-## Testing
-
-E2E tests create an independent user + calendar per test (tenant isolation) and run
-in parallel against a real MySQL.
-
-```sh
-make db-up                      # MySQL on TC_DB_PORT (default 33306)
-make test-e2e                   # runs with TC_TEST_INTEGRATION=1
-```
-
-The tests connect to `127.0.0.1:${TC_DB_PORT:-33306}`, and so does CI, so a
-non-default `TC_DB_PORT` has to be exported for both commands.
-
-CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API
-(build / vet / E2E).
-
-## Migrations & code generation
-
-- The schema is layered. `sql/core/` is a copy of the shared schema contract that
-  lets more than one product write to the same database — it is not edited here and
-  is pinned upstream in `sql/core/UPSTREAM.json`. `sql/time/` holds this
-  application's own tables.
-- `sql/core/tools/build-schema.sh core time` concatenates core then time into
-  `sql/schema.sql` (`make db-schema`), which `make db-apply` applies to an empty
-  database.
-- An existing database is upgraded rather than rebuilt; see
-  [Upgrading](#upgrading). `bash scripts/check-upgrade-path.sh` checks that the
-  upgrades take a v0.1.0 database, with data, to the current schema.
-- `make test-conformance` checks the resulting schema against the contract.
-  `make check-core` checks that the vendored copy is unedited and current.
-- Write queries in `sql/queries/*.sql` and run `make sqlc` to generate Go code into
-  `apps/api/internal/db/generated/`.
-
-## Deployment
-
-`compose.prod.yml` runs the stack — MySQL, object storage, the API and the built
-SPA — on a single host. It builds the two images rather than pulling them: the
-SPA compiles the API origin into its bundle, so no prebuilt image is correct for
-two deployments.
-
-One hostname, one certificate, and nothing else published. The web service is
-the only way in: it terminates TLS, serves the SPA, and passes `/api` to the API
-over the compose network. Neither the API nor object storage needs a route from
-the internet, and neither is given one — attachments, album photos and avatars
-are relayed by the API, which hands the browser a short-lived signed URL back to
-itself and copies the bytes through.
-
-The certificate has to exist before the stack starts; nginx will not load a
-server block whose certificate is missing. Obtain one first, with port 80 free:
-
-```sh
-mkdir -p acme
-certbot certonly --standalone -d app.example.com
-```
-
-Renewal is answered by the running server out of `acme/`, so nothing has to be
-stopped for it. nginx keeps the old certificate until it is told to look again:
-
-```sh
-certbot renew --webroot -w /path/to/acme \
-  --deploy-hook 'docker compose -f /path/to/compose.prod.yml exec web nginx -s reload'
-```
-
-`TC_API_PUBLIC_URL` has to carry the `/api` prefix
-(`https://app.example.com/api`): it is the address the OAuth callback returns
-to, the address every blob URL points back at, and the path the `$schema` links
-in responses are built from. `TC_TRUSTED_PROXIES` defaults to `172.16.0.0/12`,
-the range Docker gives a compose network; if this one was given an address
-outside it, set the range yourself, or every client collapses onto one
-rate-limit bucket, since all of them arrive through nginx.
-
-To terminate TLS somewhere else instead — a reverse proxy on the host, or a
-tunnel — drop the TLS template mount and the two certificate volumes from the
-`web` service and publish `127.0.0.1:8081:80`. The image then serves plain HTTP
-and still proxies `/api` to the API itself, so the arrangement above is
-unchanged from the browser's side; point the host's proxy at that one port.
-
-Configuration goes in a `.env` beside `compose.prod.yml`. `TC_DB_ROOT_PASSWORD`,
-`TC_DB_PASSWORD`, `TC_JWT_SECRET` (`openssl rand -hex 32`), `TC_WEB_URL`,
-`TC_API_PUBLIC_URL`, `TC_PUBLIC_HOST`, `TC_S3_ACCESS_KEY` and `TC_S3_SECRET_KEY`
-have no safe default: Compose stops and names whichever is missing.
-`TC_SMTP_HOST` is optional: without a relay no mail is sent, and password reset
-and email verification are not offered. Every
-other variable in the table above is passed through too, with the same default,
-except:
-
-- `TC_CORS_ALLOWED_ORIGINS` is always `TC_WEB_URL`; a value in `.env` is ignored.
-- `TC_PORT` is not passed: the API listens on 8080 inside the container, and
-  `TC_API_PORT` (default 8080) chooses the host port on loopback.
-- `TC_METRICS_ADDR` defaults to `:9464`, because a container cannot bind the
-  host's loopback; the published port is what stays on `127.0.0.1`
-  (`TC_METRICS_PORT`, default 9464).
-- `TC_ENV` is always `production`, and `TC_DB_DSN` is assembled from
-  `TC_DB_USER`, `TC_DB_PASSWORD` and `TC_DB_NAME`.
-
-`TC_SECRETS_KEY` is optional — without it the admin panel
-refuses to save OAuth client secrets rather than storing them unencrypted.
-
-Every page the web service serves carries a Content-Security-Policy that
-forbids framing, `nosniff` and `Referrer-Policy: no-referrer`, plus HSTS when it
-terminates TLS itself. `/embed/*` is the one exception and may be framed by any
-site. The policy allows scripts and connections from the service's own origin
-only, so an API served from another origin needs `connect-src` widened in
-`apps/web/nginx/security-headers.conf`.
-
-```sh
-docker compose -f compose.prod.yml up -d --build
-docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
-  -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
-```
-
-The schema is applied when the MySQL volume is first created. `sql/schema.sql`
-drops every table before creating it, so it is never re-run against a database
-that holds data; see [Upgrading](#upgrading) for how a schema change reaches one.
-
-Two volumes hold everything durable: `mysql_data` and `storage_data`. Back them
-up together — an attachment is a row in one pointing at an object in the other.
-Objects are plain files whose content type and ETag live in extended
-attributes, so a file-level copy has to keep them (GNU `tar --xattrs
---xattrs-include='user.*'`; busybox tar drops them).
-
-### Upgrading
-
-Back up both volumes first, as described above. A database that holds data is
-never rebuilt: `sql/schema.sql` and `sql/core/tools/build-schema.sh` drop every
-table they create, so applying either to a live database wipes it. It is
-brought forward by upgrade files instead, in this order, with the API stopped:
-
-1. `sql/core/upgrades/*.sql`, every file, in number order. These change the
-   tables shared with other products and always come first; the next step
-   refuses to run until they have.
-2. `sql/time/upgrades/from-<release>.sql`, for each release between yours and
-   the one you are moving to, oldest first.
-3. The conformance check, which confirms the result matches the contract.
-
-```sh
-docker compose -f compose.prod.yml stop api
-docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
-docker compose -f compose.prod.yml exec -T mysql bash -euc '
-  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
-  for f in /tmp/upgrade-sql/core/upgrades/*.sql /tmp/upgrade-sql/time/upgrades/from-v0.1.0.sql; do
-    echo "applying ${f#/tmp/upgrade-sql/}"
-    mysql -uroot "$MYSQL_DATABASE" < "$f"
-  done
-  bash /tmp/upgrade-sql/core/conformance/run.sh \
-    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
-  rm -rf /tmp/upgrade-sql
-' && docker compose -f compose.prod.yml up -d --build
-```
-
-The password and database name are read inside the container, from the values
-`.env` gave it, so nothing has to be exported on the host. The loop stops at
-the first file that fails, and the rebuild runs only if every file and the
-check succeeded. Stop the old API first: a row it deletes after the upgrade has
-run would read as an upload still awaiting confirmation. Each step checks what
-is already there, so a run that stopped partway can be repeated, as long as the
-new API has not yet served a request.
-
-Allowed sign-in addresses turn the restriction on. The upgrade moves the
-admin panel's allowed e-mail addresses into the sign-in allowlist the database
-shares with other products, and any enabled entry there restricts OAuth
-sign-in to the listed addresses and domains, whether or not
-`TC_GOOGLE_ALLOWED_DOMAINS` is set. A deployment that left the domain list
-empty and listed a few addresses as exceptions let everyone sign in before the
-upgrade; after it, only those addresses can. Withdraw the entries in the admin
-panel if that is not what you want.
-
-The upgrade also rewrites some existing rows once: activity-log entries take
-the event names and payload keys shared with other products, e-mail addresses
-are stored lower-case, every session is marked as issued by this application,
-storage reference counts are recounted, and weekly repeats keep the Sunday week
-start they were shown with.
-
-Coming from v0.1.0, the deployment itself also changed:
-
-- The web service terminates TLS and publishes 80 and 443 instead of
-  `127.0.0.1:8081`. Obtain a certificate before starting, as described above, or
-  keep the proxy on the host by following the paragraph on terminating TLS
-  elsewhere.
-- `TC_PUBLIC_HOST`, the hostname the certificate is issued for, is required.
-- `TC_SMTP_HOST` and `TC_SMTP_FROM` are optional. Without a relay, mail is off
-  and password reset and email verification are not offered.
-- `TC_TRUSTED_PROXIES` defaults to `172.16.0.0/12`, the range Docker gives a
-  compose network.
-- Object storage moved from MinIO (`minio` service, `minio_data` volume) to the
-  Versity S3 Gateway (`storage` service, `storage_data` volume). The formats
-  differ, so the objects are copied over S3 rather than the volume being
-  reused; see [Moving objects off MinIO](#moving-objects-off-minio).
-
-### Object storage
-
-The bundled store is the Versity S3 Gateway over a plain directory: single node,
-no erasure coding, no versioning, no replication. Durability is the underlying
-volume plus the backup above, which is the same footing the database is on. It
-answers only on the private network, and `TC_S3_*` can point at any other
-S3-compatible endpoint instead without anything above the configuration
-changing: the API reaches the store, the browser never does, either way.
-
-#### Moving objects off MinIO
-
-A deployment from before the switch keeps its objects in `minio_data`, in
-MinIO's own on-disk format, so they are copied over S3 by the `mc` client inside
-the old container, which keeps running after the new compose file no longer
-defines it. Stop the API and apply the upgrades as above, but hold the rebuild
-until the objects have moved:
-
-```sh
-B=nodate-time   # TC_S3_BUCKET
-docker compose -f compose.prod.yml up -d --wait storage
-OLD=$(docker ps -q --filter label=com.docker.compose.service=minio)
-docker exec -e B="$B" "$OLD" sh -c '
-  mc alias set old http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
-  mc alias set new http://storage:7070 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
-  mc mb --ignore-existing "new/$B" &&
-  mc mirror --preserve "old/$B" "new/$B"'
-echo "SELECT storage_key, content_type FROM storage_objects WHERE storage_key LIKE 'albums/%.thumb'" |
-  docker compose -f compose.prod.yml exec -T mysql \
-    sh -c 'exec mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' |
-  while read -r key type; do
-    docker exec -e B="$B" -e P="${key%.thumb}" -e T="$type" "$OLD" sh -c '
-      mc cat "old/$B/$P/thumb" > /tmp/thumb &&
-      curl -sf --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" \
-        -H "Content-Type: $T" -T /tmp/thumb "http://storage:7070/$B/$P.thumb"' </dev/null ||
-      echo "not copied: $key"
-  done
-docker compose -f compose.prod.yml up -d --build --remove-orphans
-```
-
-Thumbnails need the second step. v0.1.0 stored one underneath its photo
-(`<photo>/thumb`), a key the new store cannot hold beside the photo itself, and
-MinIO does not list a key that sits under another object, so `mc mirror` never
-sees them. The upgrade file has already moved their rows to `<photo>.thumb`;
-the loop reads that list and copies each one to its new key. A `not copied`
-line names a thumbnail the old store did not have.
-
-Both stores take the same `TC_S3_*` credentials, so the old container's own
-variables serve for both. Keep the `minio_data` volume until attachments, album
-photos and avatars have been checked in the running app, then remove it with
-`docker volume rm`.
-
-```sh
-docker compose -f compose.prod.yml exec -T mysql \
-  sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction "$MYSQL_DATABASE"' \
-  > backup.sql
-```
+- **Learn** — [Introduction](https://github.com/libraz/nodate-time/blob/main/docs/en/introduction.md)
+- **Guides** — [Development](https://github.com/libraz/nodate-time/blob/main/docs/en/development.md) · [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md) · [Observability](https://github.com/libraz/nodate-time/blob/main/docs/en/observability.md)
+- **Reference** — [Configuration](https://github.com/libraz/nodate-time/blob/main/docs/en/configuration.md) · [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 
 ## License
 
-[AGPL-3.0](./LICENSE) — self-host, modify, and redistribute freely. Network use
-requires source availability.
-
-## Disclaimer & trademarks
-
-This is an independent, original project. It is **inspired by** the shared-calendar
-experience of TimeTree, but the code, UI, and UX are its own — no source, assets, or
-designs are copied from any third party.
-
-"TimeTree", "Google Calendar", and other product names are trademarks of their
-respective owners and are used here only for descriptive reference. This project is
-**not affiliated with, endorsed by, or sponsored by** any of them.
+[AGPL-3.0](LICENSE)

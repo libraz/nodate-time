@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" width="1000" height="480" role="img" aria-labelledby="t d">
+  <title id="t">nodate-time production topology</title>
+  <desc id="d">A browser reaches the web container over TLS. web serves the SPA and passes /api to the API, which uses MySQL and object storage. Storage has no route from the internet; the API relays blobs.</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; font-size: 14px; }
+      .h { font-size: 16px; font-weight: 600; }
+      .m { fill: #59636e; font-size: 12px; }
+      .s { fill: #59636e; font-size: 11px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: #0550ae; }
+      .box { fill: #ffffff; stroke: #8c959f; stroke-width: 1.25; }
+      .in { fill: none; stroke: #0969da; stroke-width: 1.75; }
+      .int { fill: none; stroke: #6e7781; stroke-width: 1.5; }
+    </style>
+    <marker id="ai" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 1 L9 5 L0 9 z" fill="#0969da"/></marker>
+    <marker id="an" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 1 L9 5 L0 9 z" fill="#6e7781"/></marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="999" height="479" rx="16" fill="#fafbfc" stroke="#d0d7de"/>
+
+  <rect x="200" y="50" width="770" height="320" rx="14" fill="none" stroke="#8c959f" stroke-width="1.25" stroke-dasharray="7 5"/>
+  <text class="m" x="222" y="76">compose network (nodate-time-prod)</text>
+
+  <rect class="box" x="20" y="195" width="120" height="60" rx="8"/>
+  <text class="h" x="80" y="230" text-anchor="middle">Browser</text>
+
+  <path class="in" d="M140 225 H230" marker-end="url(#ai)"/>
+  <text class="s" x="165" y="217" text-anchor="middle">HTTPS</text>
+
+  <rect x="230" y="150" width="220" height="150" rx="10" fill="#ffffff" stroke="#0969da" stroke-width="1.75"/>
+  <text class="h" x="250" y="182">web</text>
+  <text class="m" x="250" y="204">nginx, TLS terminated</text>
+  <text class="m" x="250" y="224">serves the SPA</text>
+  <rect x="250" y="248" width="182" height="24" rx="12" fill="#ddf4ff" stroke="#54aeff"/>
+  <text class="s" x="341" y="264" text-anchor="middle" style="fill:#0550ae">only published service</text>
+  <text class="s" x="250" y="290">ports 80 and 443</text>
+
+  <path class="in" d="M450 225 H540" marker-end="url(#ai)"/>
+  <text class="mono" x="495" y="217" text-anchor="middle">/api/</text>
+  <text class="s" x="495" y="243" text-anchor="middle">prefix stripped</text>
+
+  <rect class="box" x="540" y="150" width="190" height="150" rx="10"/>
+  <text class="h" x="560" y="182">api</text>
+  <text class="m" x="560" y="204">calendar API</text>
+  <text class="m" x="560" y="224">relays blobs at /blobs</text>
+
+  <rect class="box" x="808" y="130" width="152" height="64" rx="10"/>
+  <text class="h" x="884" y="168" text-anchor="middle">MySQL 9.7</text>
+  <path class="int" d="M730 175 H808" marker-end="url(#an)"/>
+
+  <rect class="box" x="808" y="246" width="152" height="90" rx="10"/>
+  <text class="h" x="884" y="274" text-anchor="middle">Object storage</text>
+  <text class="s" x="884" y="294" text-anchor="middle">S3-compatible</text>
+  <text class="s" x="884" y="314" text-anchor="middle">no route from</text>
+  <text class="s" x="884" y="328" text-anchor="middle">the internet</text>
+  <path class="int" d="M730 275 H808" marker-end="url(#an)"/>
+
+  <text class="m" x="500" y="410" text-anchor="middle">Attachments, album photos and avatars are relayed by the API: the browser receives a short-lived</text>
+  <text class="m" x="500" y="430" text-anchor="middle">signed URL that points back at the API, and the API copies the bytes through from storage.</text>
+</svg>
