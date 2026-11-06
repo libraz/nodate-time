@@ -47,6 +47,8 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
   -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
 ```
 
+With `TC_PASSWORD_LOGIN_ENABLED=false`, leave out `-password`. The account is then created without one, and the first Google sign-in whose verified email matches claims it, administrator rights included. An unconfirmed account that holds a password is never linked by a provider, because whoever registered the address could have set it.
+
 The schema is applied when the MySQL volume is first created. `sql/schema.sql` drops every table before creating it, so it is never re-run against a database that holds data; see [Upgrading](#upgrading) for how a schema change reaches one.
 
 ## Backups

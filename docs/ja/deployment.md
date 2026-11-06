@@ -47,6 +47,8 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
   -email you@example.com -password 'choose-a-long-one' -name "Your Name" -admin
 ```
 
+`TC_PASSWORD_LOGIN_ENABLED=false` で運用する場合は `-password` を省いてください。パスワードの無いアカウントができ、確認済みのメールアドレスが一致する最初の Google サインインが、管理者権限ごとそのアカウントを引き取ります。メールアドレスが未確認でパスワードを持つアカウントには、プロバイダからは紐づけません。そのパスワードは、アドレスの持ち主でない誰かが登録時に設定したものかもしれないからです。
+
 スキーマは MySQL のボリュームを最初に作ったときに適用されます。`sql/schema.sql` は全テーブルを DROP してから作り直すので、データの入った DB には流し直しません。スキーマの変更を既存の DB に当てる方法は[既存環境の更新](#既存環境の更新)を参照してください。
 
 ## バックアップ

@@ -5,6 +5,12 @@
 //
 //	go run ./cmd/createuser -email alice@example.com -password secret123 -name Alice
 //	go run ./cmd/createuser -email root@example.com -password secret123 -admin
+//	go run ./cmd/createuser -email root@example.com -admin
+//
+// Without -password the account has no password and no local identity. The
+// first provider sign-in whose verified email matches claims it, rights
+// included; that is the shape for a deployment with password sign-in off,
+// because a password on an unconfirmed account is what refuses the link.
 //
 // The database connection comes from TC_DB_DSN (same as the API server).
 package main
@@ -30,7 +36,7 @@ import (
 
 func main() {
 	email := flag.String("email", "", "email address (required)")
-	password := flag.String("password", "", "plaintext password (required, 8-128 characters)")
+	password := flag.String("password", "", "plaintext password, 8-128 characters (omit for an account claimed by provider sign-in)")
 	name := flag.String("name", "", "display name (defaults to the email local part)")
 	locale := flag.String("locale", "", "BCP 47 locale tag (default: TC_DEFAULT_LOCALE)")
 	timezone := flag.String("timezone", "", "IANA timezone (default: TC_WORKSPACE_TIMEZONE)")
@@ -69,13 +75,15 @@ func reportSkipped(ctx context.Context, queries *generated.Queries, existing gen
 }
 
 func run(email, password, name, locale, timezone string, admin, skipExisting bool) error {
-	if email == "" || password == "" {
-		return errors.New("-email and -password are required")
+	if email == "" {
+		return errors.New("-email is required")
 	}
 	// An account this command writes is one the API then has to live with, so
 	// the password it accepts is the one /auth/register would have accepted.
-	if err := auth.ValidatePassword(password); err != nil {
-		return err
+	if password != "" {
+		if err := auth.ValidatePassword(password); err != nil {
+			return err
+		}
 	}
 	if name == "" {
 		name = email
@@ -122,9 +130,11 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		return fmt.Errorf("connect db: %w", err)
 	}
 
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+	var hash string
+	if password != "" {
+		if hash, err = auth.HashPassword(password); err != nil {
+			return fmt.Errorf("hash password: %w", err)
+		}
 	}
 
 	pubID, err := uuid.NewV7()
@@ -144,10 +154,9 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		}
 	}
 
-	// The account is spread across five tables and only makes sense as a
-	// whole: a user with no identity cannot sign in, one outside the
-	// workspace can reach no calendar, and an admin grant without a user is
-	// an orphan. One transaction is what keeps a half-created account from
+	// The account is spread across several tables and only makes sense as a
+	// whole: a user outside the workspace can reach no calendar, and an admin
+	// grant without a user is an orphan. One transaction is what keeps a half-created account from
 	// existing.
 	ws, err := workspace.Ensure(ctx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, cfg.WorkspaceCountry)
 	if err != nil {
@@ -172,18 +181,20 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		}
 		userID = uint32(insertID)
 
-		identityPubID, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-		if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
-			PublicID:     identityPubID[:],
-			UserID:       userID,
-			Provider:     generated.IdentitiesProviderLocal,
-			Subject:      email,
-			PasswordHash: sql.NullString{String: hash, Valid: true},
-		}); err != nil {
-			return fmt.Errorf("create identity: %w", err)
+		if hash != "" {
+			identityPubID, err := uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
+				PublicID:     identityPubID[:],
+				UserID:       userID,
+				Provider:     generated.IdentitiesProviderLocal,
+				Subject:      email,
+				PasswordHash: sql.NullString{String: hash, Valid: true},
+			}); err != nil {
+				return fmt.Errorf("create identity: %w", err)
+			}
 		}
 
 		if _, err := workspace.Join(ctx, q, ws.ID, userID); err != nil {
