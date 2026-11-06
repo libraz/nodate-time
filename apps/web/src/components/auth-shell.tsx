@@ -27,7 +27,11 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
       <div className="relative z-10 w-full max-w-[420px] px-6">
         <div className="auth-brand mb-8 text-center">
           {APP_LOGO_URL ? (
-            <img src={APP_LOGO_URL} alt="" className="h-16 w-auto max-w-[15rem] object-contain" />
+            <img
+              src={APP_LOGO_URL}
+              alt=""
+              className="mx-auto h-16 w-auto max-w-[15rem] object-contain"
+            />
           ) : (
             <div
               aria-hidden
