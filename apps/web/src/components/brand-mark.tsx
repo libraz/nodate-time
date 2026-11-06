@@ -14,7 +14,7 @@ export function BrandMark({ size }: BrandMarkProps) {
       className={
         large
           ? 'auth-brand-mark relative inline-flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg'
-          : 'relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-sm'
+          : 'relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[0.4375rem] shadow-sm'
       }
       style={{
         background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent-hover))',
