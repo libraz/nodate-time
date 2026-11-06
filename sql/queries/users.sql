@@ -34,6 +34,11 @@ UPDATE users SET avatar_storage_object_id = ? WHERE id = ?;
 -- name: ClearUserAvatar :exec
 UPDATE users SET avatar_storage_object_id = NULL, avatar_url = NULL WHERE id = ?;
 
+-- SeedOAuthAvatarURL adopts a provider's picture for an account that has no
+-- avatar of any kind, so a picture the user removed or replaced is never undone.
+-- name: SeedOAuthAvatarURL :exec
+UPDATE users SET avatar_url = ? WHERE id = ? AND avatar_url IS NULL AND avatar_storage_object_id IS NULL;
+
 -- name: TouchUserLastLogin :exec
 UPDATE users SET last_login_at = NOW(3) WHERE id = ?;
 

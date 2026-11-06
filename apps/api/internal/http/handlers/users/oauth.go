@@ -306,11 +306,13 @@ type googleUserinfo struct {
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Hd            string `json:"hd"`
+	Picture       string `json:"picture"`
 }
 
 type lineUserinfo struct {
-	Sub  string `json:"sub"`
-	Name string `json:"name"`
+	Sub     string `json:"sub"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
 }
 
 func exchangeCode(ctx context.Context, pc OAuthProviderConfig, code, redirect, codeVerifier string) (accessToken, idToken string, err error) {
@@ -454,7 +456,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			return oauthRedirect(deps, "oauth_state"), nil
 		}
 
-		var subject, email, name string
+		var subject, email, name, picture string
 		// emailVerified gates automatic account linking by email: only a provider
 		// that proves the user owns the address may link to an existing account.
 		emailVerified := false
@@ -483,7 +485,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			if !allowed {
 				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
-			subject, email, name = u.Sub, u.Email, u.Name
+			subject, email, name, picture = u.Sub, u.Email, u.Name, u.Picture
 			emailVerified = true
 		case "line":
 			var u lineUserinfo
@@ -501,7 +503,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 			if !allowed {
 				return oauthRedirect(deps, "oauth_not_allowed"), nil
 			}
-			subject, name = u.Sub, u.Name
+			subject, name, picture = u.Sub, u.Name, u.Picture
 			emailVerified = false
 		}
 		if subject == "" {
@@ -517,7 +519,7 @@ func OAuthCallback(deps OAuthDeps) func(context.Context, *OAuthCallbackInput) (*
 		// would render a raw JSON body in the address bar the user is watching.
 		// A refusal the contract names carries its API error code, so the
 		// login page can say which one it was.
-		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, emailVerified, deps.Defaults.resolved())
+		userID, err := upsertOAuthUser(ctx, deps.DB, deps.WorkspaceID, in.Provider, subject, email, name, picture, emailVerified, deps.Defaults.resolved())
 		switch {
 		case errors.Is(err, errOAuthLinkRefused):
 			return oauthRedirect(deps, apierrors.AuthLinkRefused.Code), nil
@@ -574,7 +576,7 @@ var (
 // removed), and none of them issues anything to an account with a second
 // factor: that is refused before a link is written, so a refused sign-in
 // leaves no identity behind.
-func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
+func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name, picture string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -583,7 +585,7 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 
 	q := generated.New(tx)
 
-	userID, err := resolveOAuthUser(ctx, q, workspaceID, provider, subject, email, name, emailVerified, defaults)
+	userID, err := resolveOAuthUser(ctx, q, workspaceID, provider, subject, email, name, picture, emailVerified, defaults)
 	if err != nil {
 		return 0, err
 	}
@@ -596,7 +598,7 @@ func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provid
 	return userID, nil
 }
 
-func resolveOAuthUser(ctx context.Context, q *generated.Queries, workspaceID uint32, provider, subject, email, name string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
+func resolveOAuthUser(ctx context.Context, q *generated.Queries, workspaceID uint32, provider, subject, email, name, picture string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
 	if existing, err := q.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
 		Provider: generated.IdentitiesProvider(provider),
 		Subject:  subject,
@@ -644,6 +646,7 @@ func resolveOAuthUser(ctx context.Context, q *generated.Queries, workspaceID uin
 			}); err != nil {
 				return 0, err
 			}
+			seedOAuthAvatar(ctx, q, u.ID, picture)
 			return u.ID, nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
@@ -706,7 +709,37 @@ func resolveOAuthUser(ctx context.Context, q *generated.Queries, workspaceID uin
 	}); err != nil {
 		return 0, err
 	}
+	seedOAuthAvatar(ctx, q, uid, picture)
 	return uid, nil
+}
+
+// avatarURLMaxLen is what users.avatar_url holds (VARCHAR(2048)).
+const avatarURLMaxLen = 2048
+
+// usableAvatarURL reports whether a provider picture may be stored: an https
+// URL with a host that fits the column. Anything else is skipped silently,
+// since sign-in must not fail over an avatar.
+func usableAvatarURL(raw string) bool {
+	if raw == "" || len(raw) > avatarURLMaxLen {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != ""
+}
+
+// seedOAuthAvatar adopts the provider's picture when a provider is first
+// attached to an account. The query itself leaves an existing avatar alone,
+// and a failure is logged rather than failing the sign-in.
+func seedOAuthAvatar(ctx context.Context, q *generated.Queries, userID uint32, picture string) {
+	if !usableAvatarURL(picture) {
+		return
+	}
+	if err := q.SeedOAuthAvatarURL(ctx, generated.SeedOAuthAvatarURLParams{
+		AvatarURL: nullString(picture),
+		ID:        userID,
+	}); err != nil {
+		slog.WarnContext(ctx, "oauth avatar seeding failed", "user_id", userID, "error", err)
+	}
 }
 
 // refuseSecondFactor is errOAuthMFARequired for an account with a confirmed

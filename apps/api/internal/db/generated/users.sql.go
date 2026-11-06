@@ -229,6 +229,22 @@ func (q *Queries) MarkUserEmailVerified(ctx context.Context, arg MarkUserEmailVe
 	return q.db.ExecContext(ctx, markUserEmailVerified, arg.ID, arg.Email)
 }
 
+const seedOAuthAvatarURL = `-- name: SeedOAuthAvatarURL :exec
+UPDATE users SET avatar_url = ? WHERE id = ? AND avatar_url IS NULL AND avatar_storage_object_id IS NULL
+`
+
+type SeedOAuthAvatarURLParams struct {
+	AvatarURL sql.NullString `json:"avatarUrl"`
+	ID        uint32         `json:"id"`
+}
+
+// SeedOAuthAvatarURL adopts a provider's picture for an account that has no
+// avatar of any kind, so a picture the user removed or replaced is never undone.
+func (q *Queries) SeedOAuthAvatarURL(ctx context.Context, arg SeedOAuthAvatarURLParams) error {
+	_, err := q.db.ExecContext(ctx, seedOAuthAvatarURL, arg.AvatarURL, arg.ID)
+	return err
+}
+
 const setUserAvatarObject = `-- name: SetUserAvatarObject :exec
 UPDATE users SET avatar_storage_object_id = ? WHERE id = ?
 `
