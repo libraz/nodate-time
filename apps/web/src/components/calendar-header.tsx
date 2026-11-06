@@ -6,6 +6,123 @@ import { shortcutProps } from '@/lib/shortcuts';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 
+const ChevronLeft = () => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="var(--color-text-primary)"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M15 18l-6-6 6-6" />
+  </svg>
+);
+
+const ChevronRight = () => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="var(--color-text-primary)"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9 18l6-6-6-6" />
+  </svg>
+);
+
+const ChevronDown = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="var(--color-accent)"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
+
+const SearchIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="var(--color-text-primary)"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="sm:h-[22px] sm:w-[22px]"
+  >
+    <circle cx="11" cy="11" r="7" />
+    <line x1="16.65" y1="16.65" x2="21" y2="21" />
+  </svg>
+);
+
+type AvatarButtonProps = {
+  user: ReturnType<typeof useAuthStore.getState>['user'];
+  label: string;
+  onClick: () => void;
+  size?: 'default' | 'sm';
+};
+
+const AvatarButton = ({ user, label, onClick, size = 'default' }: AvatarButtonProps) => {
+  const dimensions = size === 'sm' ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl sm:h-11 sm:w-11';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center justify-center overflow-hidden hover:bg-[var(--color-hover)] active:bg-[var(--color-active)] ${dimensions}`}
+      aria-label={label}
+    >
+      {user?.avatarUrl ? (
+        <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" draggable={false} />
+      ) : user?.name ? (
+        <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.name.slice(0, 1)}</span>
+      ) : (
+        <svg
+          width={size === 'sm' ? '20' : '22'}
+          height={size === 'sm' ? '20' : '22'}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-primary)"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={size === 'sm' ? undefined : 'sm:h-6 sm:w-6'}
+        >
+          <circle cx="12" cy="8" r="4" />
+          <path d="M20 21a8 8 0 1 0-16 0" />
+        </svg>
+      )}
+    </button>
+  );
+};
+
 export function CalendarHeader() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
@@ -40,6 +157,12 @@ export function CalendarHeader() {
   ] as const;
   const currentViewLabel = VIEWS.find((v) => v.value === calendarView)?.label ?? '';
 
+  const avatarButtonProps = {
+    user,
+    label: t('profile.profile'),
+    onClick: () => setShowProfileMenu(!showProfileMenu),
+  };
+
   const goToProfile = () => {
     setShowProfileMenu(false);
     navigate({ to: '/settings', search: { tab: 'profile' } });
@@ -72,122 +195,6 @@ export function CalendarHeader() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showViewMenu]);
-
-  const ChevronLeft = () => (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--color-text-primary)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M15 18l-6-6 6-6" />
-    </svg>
-  );
-
-  const ChevronRight = () => (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--color-text-primary)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 18l6-6-6-6" />
-    </svg>
-  );
-
-  const ChevronDown = () => (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-
-  const CheckIcon = () => (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--color-accent)"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M20 6L9 17l-5-5" />
-    </svg>
-  );
-
-  const SearchIcon = () => (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="var(--color-text-primary)"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="sm:h-[22px] sm:w-[22px]"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <line x1="16.65" y1="16.65" x2="21" y2="21" />
-    </svg>
-  );
-
-  const AvatarButton = ({ size = 'default' }: { size?: 'default' | 'sm' }) => {
-    const dimensions =
-      size === 'sm' ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl sm:h-11 sm:w-11';
-    return (
-      <button
-        type="button"
-        onClick={() => setShowProfileMenu(!showProfileMenu)}
-        className={`flex items-center justify-center overflow-hidden hover:bg-[var(--color-hover)] active:bg-[var(--color-active)] ${dimensions}`}
-        aria-label={t('profile.profile')}
-      >
-        {user?.avatarUrl ? (
-          <img
-            src={user.avatarUrl}
-            alt=""
-            className="h-full w-full object-cover"
-            draggable={false}
-          />
-        ) : user?.name ? (
-          <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.name.slice(0, 1)}</span>
-        ) : (
-          <svg
-            width={size === 'sm' ? '20' : '22'}
-            height={size === 'sm' ? '20' : '22'}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-text-primary)"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={size === 'sm' ? undefined : 'sm:h-6 sm:w-6'}
-          >
-            <circle cx="12" cy="8" r="4" />
-            <path d="M20 21a8 8 0 1 0-16 0" />
-          </svg>
-        )}
-      </button>
-    );
-  };
 
   const profileDropdown = showProfileMenu && (
     <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-2xl py-2 ring-1 ring-[var(--color-border)]">
@@ -411,7 +418,7 @@ export function CalendarHeader() {
           )}
 
           <div className="relative" ref={mobileProfileMenuRef}>
-            <AvatarButton size="sm" />
+            <AvatarButton size="sm" {...avatarButtonProps} />
             {profileDropdown}
           </div>
         </div>
@@ -533,7 +540,7 @@ export function CalendarHeader() {
           </button>
 
           <div className="relative" ref={desktopProfileMenuRef}>
-            <AvatarButton />
+            <AvatarButton {...avatarButtonProps} />
             {profileDropdown}
           </div>
         </div>
