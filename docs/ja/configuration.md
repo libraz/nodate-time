@@ -6,7 +6,10 @@
 | --- | --- | --- |
 | `TC_ENV` | `development` で開発用機能を有効化 | `production` |
 | `TC_APP_NAME` | デプロイの名乗り（OpenAPI のタイトル、送信メール、iCalendar の `PRODID`）。SPA へはビルド引数 `VITE_APP_NAME` で同じ名前を渡し、`compose.prod.yml` はこの変数から埋めます。64 文字以内で、制御文字、行区切り、双方向制御文字、`:` は起動時とビルド時に拒否されます。空白のみの場合は既定値になります | `Nodate Time` |
-| `TC_APP_LOGO_URL` | サインイン画面のロゴと favicon。`https` の URL か、`data:image/`（png、svg+xml、webp、jpeg、gif）の URI で、32,768 文字以内です。ビルド引数 `VITE_APP_LOGO_URL` として SPA に焼き込まれるため、変更するには web イメージのリビルドが必要です。ロゴのホストはイメージの CSP に自動で許可されます | なし |
+| `TC_APP_LOGO_URL` | デプロイ名を含むロゴ。サインイン画面、サイドバー、モバイルメニュー、設定画面で名前の代わりに表示し、`https` の URL なら送信メールのヘッダーにも出ます。ホスト付きの `https` URL か、`data:image/`（png、svg+xml、webp、jpeg、gif）の URI で、32,768 文字以内です。印字可能な ASCII だけで書き、途中に空白は入れられません。国際化ドメイン名は punycode で書きます。ビルド引数 `VITE_APP_LOGO_URL` として SPA に焼き込まれるため、変更するには web イメージのリビルドが必要です。4 つのブランド画像のホストはイメージの CSP に自動で許可されます。正方形の画像は `TC_APP_ICON_URL` に設定します | なし |
+| `TC_APP_LOGO_DARK_URL` | ダークモードで使うロゴ。形式は `TC_APP_LOGO_URL` と同じで、`TC_APP_LOGO_URL` の設定が必要です。web のビルド（`VITE_APP_LOGO_DARK_URL`）だけが読みます | なし |
+| `TC_APP_ICON_URL` | 組み込みのカレンダーマークの代わりに名前の横に出す正方形のシンボルで、favicon にもなります。`https` の URL で、`https` のロゴが設定されていなければ、送信メールでは名前の横に表示します。形式は `TC_APP_LOGO_URL` と同じで、ビルド引数は `VITE_APP_ICON_URL` です | なし |
+| `TC_APP_ICON_DARK_URL` | ダークモードで使うアイコン。OS がダークモードのときの favicon にもなります。形式は同じで、`TC_APP_ICON_URL` の設定が必要です。web のビルド（`VITE_APP_ICON_DARK_URL`）だけが読みます | なし |
 | `TC_PORT` | API ポート | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT 署名鍵（32 バイト以上）。全環境で必須。組み込みの値はこのリポジトリで公開されているため拒否される | なし（`make dev` が `secrets/` 配下に生成） |
