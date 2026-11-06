@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
@@ -65,6 +66,8 @@ type SMTPConfig struct {
 	// Timeout bounds one whole SMTP conversation. Zero selects
 	// defaultSMTPTimeout.
 	Timeout time.Duration
+	// Brand heads the HTML alternative of every message.
+	Brand Brand
 }
 
 // defaultSMTPTimeout bounds a conversation when neither the config nor the
@@ -107,14 +110,18 @@ func (m SMTPMailer) Send(ctx context.Context, msg Message) error {
 	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n")
-	b.WriteString("\r\n")
-	qp := quotedprintable.NewWriter(&b)
-	if _, err := qp.Write([]byte(strings.ReplaceAll(msg.Text, "\r\n", "\n"))); err != nil {
-		return fmt.Errorf("encode body: %w", err)
+	mw := multipart.NewWriter(&b)
+	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%s\r\n\r\n", mw.Boundary())
+	text := strings.ReplaceAll(msg.Text, "\r\n", "\n")
+	for _, part := range []struct{ ctype, body string }{
+		{"text/plain", text},
+		{"text/html", renderHTML(m.cfg.Brand, text)},
+	} {
+		if err := writeQPPart(mw, part.ctype, part.body); err != nil {
+			return fmt.Errorf("encode body: %w", err)
+		}
 	}
-	if err := qp.Close(); err != nil {
+	if err := mw.Close(); err != nil {
 		return fmt.Errorf("encode body: %w", err)
 	}
 
@@ -127,6 +134,22 @@ func (m SMTPMailer) Send(ctx context.Context, msg Message) error {
 		return fmt.Errorf("smtp send: %w", err)
 	}
 	return nil
+}
+
+// writeQPPart adds one utf-8, quoted-printable part to mw.
+func writeQPPart(mw *multipart.Writer, ctype, body string) error {
+	w, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {ctype + "; charset=utf-8"},
+		"Content-Transfer-Encoding": {"quoted-printable"},
+	})
+	if err != nil {
+		return err
+	}
+	qp := quotedprintable.NewWriter(w)
+	if _, err := qp.Write([]byte(body)); err != nil {
+		return err
+	}
+	return qp.Close()
 }
 
 // deliver runs the SMTP conversation under ctx. net/smtp has no context-aware

@@ -100,6 +100,10 @@ services:
       # given the same name as a build argument below, and the two are expected
       # to agree.
       TC_APP_NAME: ${TC_APP_NAME:-}
+      # Shown in the header of outgoing mail; the SPA gets the same images as
+      # build arguments below.
+      TC_APP_LOGO_URL: ${TC_APP_LOGO_URL:-}
+      TC_APP_ICON_URL: ${TC_APP_ICON_URL:-}
       TC_DB_DSN: "${TC_DB_USER:-ttuser}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
       TC_JWT_SECRET: ${TC_JWT_SECRET:?generate one with `openssl rand -hex 32`}
       # Sign-in policy. An empty domain list leaves provider sign-in open to
@@ -189,6 +193,9 @@ services:
         # deployment means rebuilding this image, not restarting it.
         VITE_APP_NAME: ${TC_APP_NAME:-}
         VITE_APP_LOGO_URL: ${TC_APP_LOGO_URL:-}
+        VITE_APP_LOGO_DARK_URL: ${TC_APP_LOGO_DARK_URL:-}
+        VITE_APP_ICON_URL: ${TC_APP_ICON_URL:-}
+        VITE_APP_ICON_DARK_URL: ${TC_APP_ICON_DARK_URL:-}
     restart: unless-stopped
     depends_on:
       - api

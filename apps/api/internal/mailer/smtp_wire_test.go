@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"mime"
-	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"strings"
@@ -99,14 +98,13 @@ func TestSMTPMessageIsSevenBitOnTheWire(t *testing.T) {
 	if from, err := msg.Header.AddressList("From"); err != nil || from[0].Name != "Nodate 時間" {
 		t.Errorf("From = %v (%v)", from, err)
 	}
-	if cte := msg.Header.Get("Content-Transfer-Encoding"); cte != "quoted-printable" {
-		t.Fatalf("Content-Transfer-Encoding = %q", cte)
+	parts := readParts(t, msg)
+	for _, p := range parts {
+		if p.cte != "quoted-printable" {
+			t.Fatalf("%s Content-Transfer-Encoding = %q", p.ctype, p.cte)
+		}
 	}
-	decoded, err := io.ReadAll(quotedprintable.NewReader(msg.Body))
-	if err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if got := strings.ReplaceAll(string(decoded), "\r\n", "\n"); got != body {
+	if got := strings.ReplaceAll(parts[0].body, "\r\n", "\n"); got != body {
 		t.Errorf("body decodes to %q, want %q", got, body)
 	}
 }

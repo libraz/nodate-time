@@ -165,6 +165,7 @@ func main() {
 		Username: cfg.SMTPUsername,
 		Password: cfg.SMTPPassword,
 		From:     cfg.SMTPFrom,
+		Brand:    mailer.Brand{Name: cfg.AppName, LogoURL: cfg.AppLogoURL, IconURL: cfg.AppIconURL},
 	})
 	if !mailer.Configured(relay) {
 		slog.Warn("mail delivery is off: password reset and email verification are not offered; set TC_SMTP_HOST to enable it")

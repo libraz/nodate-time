@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,13 @@ type Config struct {
 	// self-hosted one is not obliged to present itself under the name of the
 	// software it runs.
 	AppName string `env:"TC_APP_NAME"`
+
+	// AppLogoURL is the logo with the company name, and AppIconURL the square
+	// symbol; only the mail header uses them here (the SPA has its own build
+	// copies). Each is an https URL or a data:image URI and is validated in
+	// Load; unset means none.
+	AppLogoURL string `env:"TC_APP_LOGO_URL"`
+	AppIconURL string `env:"TC_APP_ICON_URL"`
 
 	// The single workspace this deployment runs in. The shared schema scopes
 	// every row by workspace because a second product on the same database
@@ -219,8 +228,49 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.AppName = name
+	if cfg.AppLogoURL, err = resolveImageURL("TC_APP_LOGO_URL", cfg.AppLogoURL); err != nil {
+		return nil, err
+	}
+	if cfg.AppIconURL, err = resolveImageURL("TC_APP_ICON_URL", cfg.AppIconURL); err != nil {
+		return nil, err
+	}
 	cfg.logRelaxations()
 	return cfg, nil
+}
+
+// maxImageDataURILen caps a data URI image, matching the SPA build.
+const maxImageDataURILen = 32768
+
+var imageDataURI = regexp.MustCompile(`(?i)^data:image/(png|svg\+xml|webp|jpeg|gif)[;,]`)
+
+// resolveImageURL trims ASCII whitespace and validates a brand image value:
+// printable ASCII only, then a data:image URI within the size cap or an https
+// URL with a host. Empty means unset. The trimmed value is returned as is.
+func resolveImageURL(name, raw string) (string, error) {
+	v := strings.Trim(raw, " \t\n\r\f\v")
+	if v == "" {
+		return "", nil
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] < 0x21 || v[i] > 0x7E {
+			return "", fmt.Errorf("%s must contain only printable ASCII characters", name)
+		}
+	}
+	shape := fmt.Errorf("%s must be an https URL or a data:image/(png|svg+xml|webp|jpeg|gif) URI", name)
+	if strings.EqualFold(v[:min(5, len(v))], "data:") {
+		if !imageDataURI.MatchString(v) {
+			return "", shape
+		}
+		if len(v) > maxImageDataURILen {
+			return "", fmt.Errorf("%s data URI must be at most %d characters", name, maxImageDataURILen)
+		}
+		return v, nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+		return "", shape
+	}
+	return v, nil
 }
 
 // resolveAppName trims the name, substitutes the default for an empty one and
