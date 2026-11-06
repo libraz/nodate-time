@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { BrandRow } from '@/components/brand-mark';
 import { CalendarList } from '@/components/calendar-list';
 import { LabelledButton } from '@/components/labelled-button';
 import { MemoSection } from '@/components/right-panel';
@@ -14,6 +15,10 @@ export function LeftSidebar() {
 
   return (
     <div className="glass-surface hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
+      <div className="px-4 pt-4 pb-2">
+        <BrandRow />
+      </div>
+
       {/* Calendars section */}
       <CalendarList />
 

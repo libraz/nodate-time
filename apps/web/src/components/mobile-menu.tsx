@@ -1,4 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
+import { BrandRow } from '@/components/brand-mark';
 import { CalendarList } from '@/components/calendar-list';
 import type { TranslationKey } from '@/i18n';
 import { useT } from '@/i18n';
@@ -182,9 +183,7 @@ export function MobileMenu() {
         className="glass-surface-heavy drawer-panel fixed left-0 top-0 z-50 flex h-full w-[280px] max-w-[82vw] flex-col border-r border-[var(--color-border)]"
       >
         <div className="flex items-center justify-between px-4 py-3">
-          <span className="text-title font-semibold text-[var(--color-text-primary)]">
-            {t('tabs.calendar')}
-          </span>
+          <BrandRow />
           <button
             type="button"
             onClick={() => setShow(false)}

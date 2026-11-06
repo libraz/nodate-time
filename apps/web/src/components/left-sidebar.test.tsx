@@ -15,6 +15,13 @@ const memoStub = vi.hoisted(() => () => <p>memo body</p>);
 // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
 vi.mock('@/components/right-panel', () => ({ MemoSection: memoStub }));
 
+vi.mock('@/lib/brand', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
+  APP_NAME: 'Acme',
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
+  APP_LOGO_URL: undefined,
+}));
+
 const uiState = { setShowActivity: vi.fn() };
 
 vi.mock('@/stores/ui-store', () => ({
@@ -37,5 +44,12 @@ describe('LeftSidebar memo section', () => {
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('memo body')).toBeNull();
+  });
+});
+
+describe('LeftSidebar brand row', () => {
+  it('shows the deployment name above the calendar list', () => {
+    render(<LeftSidebar />);
+    expect(screen.getByText('Acme')).toBeInTheDocument();
   });
 });
