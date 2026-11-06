@@ -45,7 +45,8 @@ services:
     # while the network listener is still closed -- so the API would be
     # released to start, fail its first ping and be restarted.
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${TC_DB_ROOT_PASSWORD}"]
+      test:
+        ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${TC_DB_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 20

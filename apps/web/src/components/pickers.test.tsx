@@ -193,8 +193,9 @@ describe('CustomSelect', () => {
     const alpha = screen.getByRole('option', { name: 'Alpha' });
     const beta = screen.getByRole('option', { name: 'Beta' });
 
-    expect(beta).toHaveStyle({ backgroundColor: 'var(--color-hover)' });
-    expect(alpha).toHaveStyle({ backgroundColor: 'var(--color-accent-bg)' });
+    // Inline style, not computed: jsdom resolves var() and no theme is loaded here.
+    expect(beta.style.backgroundColor).toBe('var(--color-hover)');
+    expect(alpha.style.backgroundColor).toBe('var(--color-accent-bg)');
     expect(alpha).toHaveAttribute('aria-selected', 'true');
     expect(beta).toHaveAttribute('aria-selected', 'false');
   });
