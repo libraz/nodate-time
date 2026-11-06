@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BrandRow } from '@/components/brand-mark';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
 import { type Locale, useT } from '@/i18n';
@@ -182,7 +183,10 @@ function SettingsPage() {
     <div className="app-bg h-full">
       <div className="mx-auto flex h-full max-w-[1080px] flex-col px-4 py-6 sm:px-6">
         <header className="mb-6 flex items-center justify-between">
-          <div>
+          <div className="min-w-0">
+            <div className="mb-3">
+              <BrandRow />
+            </div>
             <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
               {t('settings.title')}
             </h1>

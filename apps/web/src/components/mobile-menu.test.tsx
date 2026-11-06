@@ -15,9 +15,9 @@ vi.mock('@/lib/brand', () => ({
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
   APP_NAME: 'Acme',
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
-  get APP_LOGO_URL() {
-    return undefined;
-  },
+  APP_LOGO: undefined,
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
+  APP_ICON: undefined,
 }));
 
 const calendarListStub = vi.hoisted(() => () => null);

@@ -4,8 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Calendar, Member } from '@/types/calendar';
 import type { InviteData } from '@/types/invite';
 
+const page = vi.hoisted(() => ({ component: undefined as (() => unknown) | undefined }));
+
 vi.mock('@tanstack/react-router', () => ({
-  createFileRoute: () => () => ({ useSearch: () => ({}) }),
+  createFileRoute: () => (options: { component: () => unknown }) => {
+    page.component = options.component;
+    return { useSearch: () => ({}) };
+  },
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
   Link: ({ children }: { children?: unknown }) => children,
   useNavigate: () => vi.fn(),
@@ -94,6 +99,7 @@ vi.mock('@/stores/ui-store', () => ({
 
 import { api } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
+import { APP_NAME } from '@/lib/brand';
 import { fetchWindow } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
 import {
@@ -153,6 +159,15 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe('SettingsPage header', () => {
+  it('shows the brand row above the title', () => {
+    const Page = page.component as () => React.ReactElement;
+    render(<Page />);
+    expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('settings.title');
+  });
+});
 
 /**
  * Listing a calendar's invites needs the right to manage it. The screen used

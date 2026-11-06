@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
-import { BrandMark } from '@/components/brand-mark';
-import { APP_LOGO_URL } from '@/lib/brand';
+import { BrandHero } from '@/components/brand-mark';
+import { APP_LOGO, APP_NAME } from '@/lib/brand';
 
 interface AuthShellProps {
-  title: string;
+  /** Page heading; omitted, the heading is the deployment name. */
+  title?: string;
   subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
@@ -27,17 +28,13 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
 
       <div className="relative z-10 w-full max-w-[420px] px-6">
         <div className="auth-brand mb-8 text-center">
-          {APP_LOGO_URL ? (
-            <img
-              src={APP_LOGO_URL}
-              alt=""
-              className="mx-auto h-16 w-auto max-w-[15rem] object-contain"
-            />
-          ) : (
-            <BrandMark size="lg" />
-          )}
-          <h1 className="auth-title mt-4 text-display font-bold tracking-tight text-[var(--color-text-primary)]">
-            {title}
+          <BrandHero alt={title === undefined ? '' : APP_NAME} />
+          <h1
+            className={`auth-title mt-4 text-display font-bold tracking-tight text-[var(--color-text-primary)]${
+              title === undefined && APP_LOGO ? ' sr-only' : ''
+            }`}
+          >
+            {title ?? APP_NAME}
           </h1>
           {subtitle && (
             <p className="mt-1.5 text-callout text-[var(--color-text-secondary)]">{subtitle}</p>

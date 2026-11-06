@@ -19,7 +19,9 @@ vi.mock('@/lib/brand', () => ({
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
   APP_NAME: 'Acme',
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
-  APP_LOGO_URL: undefined,
+  APP_LOGO: undefined,
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exports
+  APP_ICON: undefined,
 }));
 
 const uiState = { setShowActivity: vi.fn() };

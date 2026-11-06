@@ -27,10 +27,17 @@ ENV VITE_API_BASE=${VITE_API_BASE}
 ARG VITE_APP_NAME
 ENV VITE_APP_NAME=${VITE_APP_NAME}
 
-# The logo, an https URL or a data:image URI. Its host is added to the CSP
-# below, so it is compiled in for the same reason as the name.
+# The logo (with the company name) and the square icon, each an https URL or a
+# data:image URI, plus dark-theme variants. Their hosts are added to the CSP
+# below, so they are compiled in for the same reason as the name.
 ARG VITE_APP_LOGO_URL
 ENV VITE_APP_LOGO_URL=${VITE_APP_LOGO_URL}
+ARG VITE_APP_LOGO_DARK_URL
+ENV VITE_APP_LOGO_DARK_URL=${VITE_APP_LOGO_DARK_URL}
+ARG VITE_APP_ICON_URL
+ENV VITE_APP_ICON_URL=${VITE_APP_ICON_URL}
+ARG VITE_APP_ICON_DARK_URL
+ENV VITE_APP_ICON_DARK_URL=${VITE_APP_ICON_DARK_URL}
 
 RUN cd apps/web && bun run build
 
@@ -38,7 +45,7 @@ RUN cd apps/web && bun run build
 # the build rather than copied into the nginx config where it would go stale.
 RUN bun apps/web/nginx/csp-script-hash.mjs apps/web/dist/index.html > /src/csp.conf
 
-# The logo's host for img-src, validated by the same rules as the build.
+# The images' hosts for img-src, validated by the same rules as the build.
 RUN bun apps/web/nginx/csp-img-src.mjs > /src/csp-img.conf
 
 FROM nginx:1.29-alpine
