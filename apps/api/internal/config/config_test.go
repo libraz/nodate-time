@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/caarlos0/env/v11"
@@ -183,5 +184,55 @@ func TestExplicitEmptyKeepsItsMeaning(t *testing.T) {
 	}
 	if got := c.CORSAllowedOriginList(); len(got) != 0 {
 		t.Errorf("empty TC_CORS_ALLOWED_ORIGINS should stay empty so Validate refuses it, got %v", got)
+	}
+}
+
+func TestLoadRejectsInvalidAppName(t *testing.T) {
+	t.Setenv("TC_JWT_SECRET", "a-sufficiently-long-production-secret-value")
+	t.Setenv("TC_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("TC_ALLOW_DEFAULT_OBJECT_STORAGE_CREDENTIALS", "true")
+
+	rejected := map[string]string{
+		"65 ascii":       strings.Repeat("a", 64) + "b",
+		"65 astral":      strings.Repeat("\U0001F600", 65),
+		"colon":          "Acme:Cal",
+		"newline":        "Acme\nCal",
+		"c1 control":     "Acme\u0085Cal",
+		"line separator": "Acme\u2028Cal",
+		"bidi override":  "Acme\u202ECal",
+		"bidi isolate":   "Acme\u2066Cal",
+		"delete":         "Acme\u007FCal",
+	}
+	for name, value := range rejected {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("TC_APP_NAME", value)
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load accepted the name")
+			}
+			if !strings.Contains(err.Error(), "TC_APP_NAME") {
+				t.Errorf("error does not name the variable: %v", err)
+			}
+		})
+	}
+
+	accepted := []struct{ label, value, want string }{
+		{"unset-equivalent empty", "", DefaultAppName},
+		{"blank", "   ", DefaultAppName},
+		{"trimmed", "  Acme  ", "Acme"},
+		{"64 ascii", strings.Repeat("a", 64), strings.Repeat("a", 64)},
+		{"64 astral", strings.Repeat("\U0001F600", 64), strings.Repeat("\U0001F600", 64)},
+	}
+	for _, c := range accepted {
+		t.Run("accepts "+c.label, func(t *testing.T) {
+			t.Setenv("TC_APP_NAME", c.value)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.AppName != c.want {
+				t.Errorf("AppName = %q, want %q", cfg.AppName, c.want)
+			}
+		})
 	}
 }

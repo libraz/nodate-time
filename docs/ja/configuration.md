@@ -5,7 +5,8 @@
 | 変数 | 用途 | デフォルト |
 | --- | --- | --- |
 | `TC_ENV` | `development` で開発用機能を有効化 | `production` |
-| `TC_APP_NAME` | デプロイの名乗り（OpenAPI のタイトル、送信メール、iCalendar の `PRODID`）。SPA へはビルド引数 `VITE_APP_NAME` で同じ名前を渡す | `Nodate Time` |
+| `TC_APP_NAME` | デプロイの名乗り（OpenAPI のタイトル、送信メール、iCalendar の `PRODID`）。SPA へはビルド引数 `VITE_APP_NAME` で同じ名前を渡し、`compose.prod.yml` はこの変数から埋めます。64 文字以内で、制御文字、行区切り、双方向制御文字、`:` は起動時とビルド時に拒否されます。空白のみの場合は既定値になります | `Nodate Time` |
+| `TC_APP_LOGO_URL` | サインイン画面のロゴと favicon。`https` の URL か、`data:image/`（png、svg+xml、webp、jpeg、gif）の URI で、32,768 文字以内です。ビルド引数 `VITE_APP_LOGO_URL` として SPA に焼き込まれるため、変更するには web イメージのリビルドが必要です。ロゴのホストはイメージの CSP に自動で許可されます | なし |
 | `TC_PORT` | API ポート | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT 署名鍵（32 バイト以上）。全環境で必須。組み込みの値はこのリポジトリで公開されているため拒否される | なし（`make dev` が `secrets/` 配下に生成） |

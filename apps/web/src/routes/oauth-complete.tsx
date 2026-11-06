@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
-import { APP_NAME } from '@/lib/app-name';
+import { APP_NAME } from '@/lib/brand';
 import { safeRedirect } from '@/lib/safe-redirect';
 import { useAuthStore } from '@/stores/auth-store';
 

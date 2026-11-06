@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { LoadFailure } from '@/components/load-failure';
 import { type TranslationKey, useT } from '@/i18n';
-import { APP_NAME } from '@/lib/app-name';
+import { APP_NAME } from '@/lib/brand';
 import { useAuthConfig } from '@/lib/auth-config';
 import { safeRedirect } from '@/lib/safe-redirect';
 import { useAuthStore } from '@/stores/auth-store';

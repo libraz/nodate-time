@@ -5,7 +5,8 @@ All variables are prefixed with `TC_`. The table lists the key ones; `apps/api/i
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `TC_ENV` | `development` enables dev conveniences | `production` |
-| `TC_APP_NAME` | what the deployment calls itself (OpenAPI title, outgoing mail, iCalendar `PRODID`); the SPA takes the same name from the `VITE_APP_NAME` build argument | `Nodate Time` |
+| `TC_APP_NAME` | what the deployment calls itself (OpenAPI title, outgoing mail, iCalendar `PRODID`); the SPA takes the same name from the `VITE_APP_NAME` build argument, which `compose.prod.yml` fills from this variable. At most 64 characters; control characters, line and bidirectional separators, and `:` are refused at startup and at build time. Blank means the default | `Nodate Time` |
+| `TC_APP_LOGO_URL` | logo shown on the sign-in screens and as the favicon: an `https` URL or a `data:image/` URI (png, svg+xml, webp, jpeg, gif) of at most 32,768 characters. Compiled into the SPA through the `VITE_APP_LOGO_URL` build argument, so changing it means rebuilding the web image; the image's CSP allows the logo's host automatically | none |
 | `TC_PORT` | API port | `8080` |
 | `TC_DB_DSN` | MySQL DSN | `ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true` |
 | `TC_JWT_SECRET` | JWT signing key, at least 32 bytes. Required in every environment: the built-in value is published in this repository and is refused | none (`make dev` generates one under `secrets/`) |

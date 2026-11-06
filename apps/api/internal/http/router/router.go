@@ -101,7 +101,7 @@ const (
 )
 
 // What the deployment is called when it has not been told. The SPA falls back
-// to the same name, in vite.config.ts and src/lib/app-name.ts.
+// to the same name, in apps/web/src/lib/brand-rules.ts.
 const defaultAppName = "Nodate Time"
 
 func Build(deps Deps) http.Handler {

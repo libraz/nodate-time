@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -16,6 +17,13 @@ import (
 // defaultJWTSecret is the development fallback secret. It must never be used in
 // production: Validate rejects it in every environment.
 const defaultJWTSecret = "dev-secret-change-me-in-production"
+
+// DefaultAppName is what a deployment calls itself when TC_APP_NAME is unset
+// or blank.
+const DefaultAppName = "Nodate Time"
+
+// maxAppNameRunes caps the name in code points, matching the SPA build.
+const maxAppNameRunes = 64
 
 type Config struct {
 	// Env selects the runtime environment. When set to "development"/"dev" it
@@ -35,7 +43,7 @@ type Config struct {
 	// sharing the calendars; this names the installation they are using, and a
 	// self-hosted one is not obliged to present itself under the name of the
 	// software it runs.
-	AppName string `env:"TC_APP_NAME" envDefault:"Nodate Time"`
+	AppName string `env:"TC_APP_NAME"`
 
 	// The single workspace this deployment runs in. The shared schema scopes
 	// every row by workspace because a second product on the same database
@@ -206,8 +214,44 @@ func Load() (*Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	name, err := resolveAppName(cfg.AppName)
+	if err != nil {
+		return nil, err
+	}
+	cfg.AppName = name
 	cfg.logRelaxations()
 	return cfg, nil
+}
+
+// resolveAppName trims the name, substitutes the default for an empty one and
+// rejects what the rules in apps/web/src/lib/brand-rules.ts reject. The error
+// names the variable and never echoes the value.
+func resolveAppName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return DefaultAppName, nil
+	}
+	if utf8.RuneCountInString(name) > maxAppNameRunes {
+		return "", fmt.Errorf("TC_APP_NAME must be at most %d characters", maxAppNameRunes)
+	}
+	for _, r := range name {
+		if isForbiddenAppNameRune(r) {
+			return "", fmt.Errorf("TC_APP_NAME must not contain control characters, bidirectional controls, line separators or ':'")
+		}
+	}
+	return name, nil
+}
+
+func isForbiddenAppNameRune(r rune) bool {
+	switch {
+	case r <= 0x1F, r >= 0x7F && r <= 0x9F:
+		return true
+	case r == 0x2028, r == 0x2029:
+		return true
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return r == ':'
 }
 
 // LoadForTooling reads the same configuration for a command-line tool that

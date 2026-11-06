@@ -27,11 +27,19 @@ ENV VITE_API_BASE=${VITE_API_BASE}
 ARG VITE_APP_NAME
 ENV VITE_APP_NAME=${VITE_APP_NAME}
 
+# The logo, an https URL or a data:image URI. Its host is added to the CSP
+# below, so it is compiled in for the same reason as the name.
+ARG VITE_APP_LOGO_URL
+ENV VITE_APP_LOGO_URL=${VITE_APP_LOGO_URL}
+
 RUN cd apps/web && bun run build
 
 # The CSP names the hash of index.html's inline script, so it is derived from
 # the build rather than copied into the nginx config where it would go stale.
 RUN bun apps/web/nginx/csp-script-hash.mjs apps/web/dist/index.html > /src/csp.conf
+
+# The logo's host for img-src, validated by the same rules as the build.
+RUN bun apps/web/nginx/csp-img-src.mjs > /src/csp-img.conf
 
 FROM nginx:1.29-alpine
 # app.conf holds what is served either way and is included by both server
@@ -42,6 +50,7 @@ COPY apps/web/nginx/http.conf /etc/nginx/conf.d/default.conf
 # http-level definitions, ordered ahead of default.conf, which uses them.
 COPY apps/web/nginx/maps.conf /etc/nginx/conf.d/00-maps.conf
 COPY --from=build /src/csp.conf /etc/nginx/conf.d/10-csp.conf
+COPY --from=build /src/csp-img.conf /etc/nginx/conf.d/11-csp-img.conf
 COPY apps/web/nginx/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /src/apps/web/dist /usr/share/nginx/html
 EXPOSE 80 443

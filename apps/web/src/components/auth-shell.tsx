@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { APP_LOGO_URL } from '@/lib/brand';
 
 interface AuthShellProps {
   title: string;
@@ -25,37 +26,42 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
 
       <div className="relative z-10 w-full max-w-[420px] px-6">
         <div className="auth-brand mb-8 text-center">
-          <div
-            aria-hidden
-            className="auth-brand-mark relative inline-flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg"
-            style={{
-              background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent-hover))',
-            }}
-          >
-            <span aria-hidden className="auth-halo" />
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="4" width="18" height="16" rx="2" stroke="white" strokeWidth="2" />
-              <line x1="3" y1="9" x2="21" y2="9" stroke="white" strokeWidth="2" />
-              <line
-                x1="8"
-                y1="2"
-                x2="8"
-                y2="6"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <line
-                x1="16"
-                y1="2"
-                x2="16"
-                y2="6"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
+          {APP_LOGO_URL ? (
+            <img src={APP_LOGO_URL} alt="" className="h-16 w-auto max-w-[15rem] object-contain" />
+          ) : (
+            <div
+              aria-hidden
+              className="auth-brand-mark relative inline-flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg"
+              style={{
+                background:
+                  'linear-gradient(135deg, var(--color-accent), var(--color-accent-hover))',
+              }}
+            >
+              <span aria-hidden className="auth-halo" />
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="18" height="16" rx="2" stroke="white" strokeWidth="2" />
+                <line x1="3" y1="9" x2="21" y2="9" stroke="white" strokeWidth="2" />
+                <line
+                  x1="8"
+                  y1="2"
+                  x2="8"
+                  y2="6"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="16"
+                  y1="2"
+                  x2="16"
+                  y2="6"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+          )}
           <h1 className="auth-title mt-4 text-display font-bold tracking-tight text-[var(--color-text-primary)]">
             {title}
           </h1>
