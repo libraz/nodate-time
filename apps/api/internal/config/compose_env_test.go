@@ -36,7 +36,7 @@ func apiEnvironment(t *testing.T) map[string]string {
 	if err != nil {
 		t.Fatalf("open %s: %v", composeFile, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	entry := regexp.MustCompile(`^      (TC_[A-Z0-9_]+):\s*(.*)$`)
 	out := map[string]string{}
