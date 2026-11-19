@@ -228,8 +228,7 @@ function DatePickerDropdown({
         <button
           type="button"
           onClick={() => setViewMonth((m) => m.minus({ months: 1 }))}
-          className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="icon-btn h-8 w-8"
           aria-label={t('calendar.prevMonth')}
         >
           <svg
@@ -249,8 +248,7 @@ function DatePickerDropdown({
         <button
           type="button"
           onClick={() => setViewMonth((m) => m.plus({ months: 1 }))}
-          className="flex h-8 w-8 items-center justify-center hover:bg-[var(--color-hover)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="icon-btn h-8 w-8"
           aria-label={t('calendar.nextMonth')}
         >
           <svg

@@ -188,7 +188,7 @@ export function MobileMenu() {
             type="button"
             onClick={() => setShow(false)}
             aria-label={t('common.close')}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+            className="icon-btn h-9 w-9"
           >
             <svg
               width="18"

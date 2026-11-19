@@ -90,8 +90,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           type="button"
           onClick={onClose}
           aria-label={t('common.close')}
-          className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="icon-btn h-10 w-10 bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
         >
           <svg
             width="18"

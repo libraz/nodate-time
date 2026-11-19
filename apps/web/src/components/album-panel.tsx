@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
+import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import { fromISOInZone } from '@/lib/date-utils';
@@ -12,6 +13,7 @@ import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarPages } from '@/lib/use-calendar-pages';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
+import { usePresence } from '@/lib/use-presence';
 import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -47,6 +49,7 @@ interface PresignResponse {
 export function AlbumPanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
+  const presence = usePresence(rightPanel === 'album');
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const calendars = useCalendarStore((s) => s.calendars);
   const events = useCalendarStore((s) => s.events);
@@ -80,7 +83,7 @@ export function AlbumPanel() {
     reload,
     loadMore,
     updateItems,
-  } = useCalendarPages<AlbumPhoto>(activeCalendarId, 'albums', rightPanel === 'album');
+  } = useCalendarPages<AlbumPhoto>(activeCalendarId, 'albums', presence.mounted);
   const myRole = roleOnCalendar(calendars, activeCalendarId);
   const editable = canEdit(myRole);
 
@@ -100,7 +103,6 @@ export function AlbumPanel() {
     if (lightbox) return;
     toggleRightPanel('album');
   };
-  const panelRef = useModalA11y<HTMLDivElement>(rightPanel === 'album', dismissPanel);
   const lightboxRef = useModalA11y<HTMLDivElement>(lightbox !== null, dismissLightbox);
   // The lightbox carries its own trap because its controls sit outside the
   // panel's container, and without one Tab walks straight out of the page. The
@@ -312,70 +314,58 @@ export function AlbumPanel() {
     [activeCalendarId, setError],
   );
 
-  if (rightPanel !== 'album') return null;
+  if (!presence.mounted) return null;
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={t('common.close')}
-        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
-        onClick={() => toggleRightPanel('album')}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('panel.album')}
-        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
-          <h2 className="text-subhead font-semibold">{t('panel.album')}</h2>
-          <div className="flex items-center gap-2">
-            {editable && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || !activeCalendarId}
-                  className="btn-primary px-3 py-1.5 text-footnote disabled:opacity-50"
-                >
-                  {uploading ? t('profile.saving') : '+'}
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleUpload(f);
-                    if (e.target) e.target.value = '';
-                  }}
-                />
-              </>
-            )}
-            <button
-              type="button"
-              onClick={() => toggleRightPanel('album')}
-              className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-              style={{ borderRadius: 'var(--radius-sm)' }}
-              aria-label={t('common.close')}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
+      <SidePanel
+        presence={presence}
+        onClose={dismissPanel}
+        title={t('panel.album')}
+        actions={
+          editable && (
+            <>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || !activeCalendarId}
+                aria-label={uploading ? t('event.uploading') : t('album.add')}
+                aria-busy={uploading}
+                title={t('album.add')}
+                className="icon-btn icon-btn-accent h-8 w-8"
               >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
+                {uploading ? (
+                  <span className="spinner h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.25"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUpload(f);
+                  if (e.target) e.target.value = '';
+                }}
+              />
+            </>
+          )
+        }
+      >
         {target && (
           <div className="border-b border-[var(--color-border)] px-5 py-3">
             <PanelCalendarPicker
@@ -435,7 +425,7 @@ export function AlbumPanel() {
             </div>
           )}
         </div>
-      </div>
+      </SidePanel>
 
       {lightbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">

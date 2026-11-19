@@ -14,10 +14,12 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
 import { Route as LoginRouteImport } from './routes/login';
 import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
 import { Route as ResetPasswordRouteImport } from './routes/reset-password';
+import { Route as SchedulePollsRouteImport } from './routes/schedule-polls';
 import { Route as SettingsRouteImport } from './routes/settings';
 import { Route as VerifyEmailRouteImport } from './routes/verify-email';
 import { Route as EmbedTokenRouteImport } from './routes/embed/$token';
 import { Route as ShareTokenRouteImport } from './routes/share/$token';
+import { Route as SchedulePollsCalendarIdPollIdRouteImport } from './routes/schedule-polls_.$calendarId.$pollId';
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -44,6 +46,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any);
+const SchedulePollsRoute = SchedulePollsRouteImport.update({
+  id: '/schedule-polls',
+  path: '/schedule-polls',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -64,6 +71,12 @@ const ShareTokenRoute = ShareTokenRouteImport.update({
   path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any);
+const SchedulePollsCalendarIdPollIdRoute =
+  SchedulePollsCalendarIdPollIdRouteImport.update({
+    id: '/schedule-polls_/$calendarId/$pollId',
+    path: '/schedule-polls/$calendarId/$pollId',
+    getParentRoute: () => rootRouteImport,
+  } as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
@@ -71,10 +84,12 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/schedule-polls': typeof SchedulePollsRoute;
   '/settings': typeof SettingsRoute;
   '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
+  '/schedule-polls/$calendarId/$pollId': typeof SchedulePollsCalendarIdPollIdRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
@@ -82,10 +97,12 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/schedule-polls': typeof SchedulePollsRoute;
   '/settings': typeof SettingsRoute;
   '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
+  '/schedule-polls/$calendarId/$pollId': typeof SchedulePollsCalendarIdPollIdRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -94,10 +111,12 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
+  '/schedule-polls': typeof SchedulePollsRoute;
   '/settings': typeof SettingsRoute;
   '/verify-email': typeof VerifyEmailRoute;
   '/embed/$token': typeof EmbedTokenRoute;
   '/share/$token': typeof ShareTokenRoute;
+  '/schedule-polls_/$calendarId/$pollId': typeof SchedulePollsCalendarIdPollIdRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -107,10 +126,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
+    | '/schedule-polls'
     | '/settings'
     | '/verify-email'
     | '/embed/$token'
-    | '/share/$token';
+    | '/share/$token'
+    | '/schedule-polls/$calendarId/$pollId';
   fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
@@ -118,10 +139,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
+    | '/schedule-polls'
     | '/settings'
     | '/verify-email'
     | '/embed/$token'
-    | '/share/$token';
+    | '/share/$token'
+    | '/schedule-polls/$calendarId/$pollId';
   id:
     | '__root__'
     | '/'
@@ -129,10 +152,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
+    | '/schedule-polls'
     | '/settings'
     | '/verify-email'
     | '/embed/$token'
-    | '/share/$token';
+    | '/share/$token'
+    | '/schedule-polls_/$calendarId/$pollId';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -141,10 +166,12 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute;
   OauthCompleteRoute: typeof OauthCompleteRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
+  SchedulePollsRoute: typeof SchedulePollsRoute;
   SettingsRoute: typeof SettingsRoute;
   VerifyEmailRoute: typeof VerifyEmailRoute;
   EmbedTokenRoute: typeof EmbedTokenRoute;
   ShareTokenRoute: typeof ShareTokenRoute;
+  SchedulePollsCalendarIdPollIdRoute: typeof SchedulePollsCalendarIdPollIdRoute;
 }
 
 declare module '@tanstack/react-router' {
@@ -184,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/schedule-polls': {
+      id: '/schedule-polls';
+      path: '/schedule-polls';
+      fullPath: '/schedule-polls';
+      preLoaderRoute: typeof SchedulePollsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/settings': {
       id: '/settings';
       path: '/settings';
@@ -212,6 +246,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShareTokenRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/schedule-polls_/$calendarId/$pollId': {
+      id: '/schedule-polls_/$calendarId/$pollId';
+      path: '/schedule-polls/$calendarId/$pollId';
+      fullPath: '/schedule-polls/$calendarId/$pollId';
+      preLoaderRoute: typeof SchedulePollsCalendarIdPollIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
   }
 }
 
@@ -221,10 +262,12 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OauthCompleteRoute: OauthCompleteRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SchedulePollsRoute: SchedulePollsRoute,
   SettingsRoute: SettingsRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   EmbedTokenRoute: EmbedTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
+  SchedulePollsCalendarIdPollIdRoute: SchedulePollsCalendarIdPollIdRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

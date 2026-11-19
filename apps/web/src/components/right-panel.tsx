@@ -52,8 +52,7 @@ export function SettingsModal() {
             <LabelledButton
               label={t('common.close')}
               onClick={toggleSettings}
-              className="flex h-9 w-9 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-              style={{ borderRadius: 'var(--radius-sm)' }}
+              className="icon-btn h-9 w-9"
             >
               <svg
                 width="18"
@@ -229,8 +228,8 @@ export function MemoSection() {
       )}
       <div className="flex-1 overflow-y-auto">
         {visibleMemos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-tertiary)]">
-            <p className="text-default">{t('panel.noMemos')}</p>
+          <div className="flex flex-col items-center justify-center px-4 py-8 text-[var(--color-text-tertiary)]">
+            <p className="text-body">{t('panel.noMemos')}</p>
           </div>
         ) : (
           visibleMemos.map((memo) => {

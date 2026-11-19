@@ -34,7 +34,7 @@ export function LeftSidebar() {
           label={t('tabs.memo')}
           expanded={memoExpanded}
           onClick={() => setMemoExpanded((v) => !v)}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-hover)]"
+          className="icon-btn h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
         >
           <svg
             width="14"
@@ -47,7 +47,7 @@ export function LeftSidebar() {
             strokeLinejoin="round"
             style={{
               transform: memoExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.15s ease',
+              transition: 'transform 0.28s var(--ease-press)',
             }}
           >
             <path d="M6 9l6 6 6-6" />
@@ -56,7 +56,7 @@ export function LeftSidebar() {
       </div>
 
       {memoExpanded && (
-        <div className="flex-1 overflow-hidden">
+        <div className="reveal-in flex-1 overflow-hidden">
           <MemoSection />
         </div>
       )}

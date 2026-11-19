@@ -43,7 +43,9 @@ function RootLayout() {
   }
 
   if (!isAuthenticated && !isPublic) {
-    return <Navigate to="/login" />;
+    const hash = location.hash ? `#${location.hash.replace(/^#/, '')}` : '';
+    const redirect = `${location.pathname}${location.searchStr ?? ''}${hash}`;
+    return <Navigate to="/login" search={{ redirect }} />;
   }
 
   // The session is intact -- the profile behind it is not. Rendering the

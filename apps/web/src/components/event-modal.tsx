@@ -1,9 +1,10 @@
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
+import { Switch } from '@/components/switch';
 import { type Locale, type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
@@ -42,6 +43,7 @@ import type {
   ChecklistItem,
   EventAttachment,
   EventComment,
+  Flexibility,
   RecurrencePreset,
   RecurrenceRule,
   Rsvp,
@@ -414,14 +416,14 @@ function CommentsSection({
               }
             }}
             placeholder={t('event.commentPlaceholder')}
-            className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
             style={{ borderRadius: 'var(--radius-sm)' }}
           />
           <LabelledButton
             label={t('event.send')}
             onClick={handleSend}
             disabled={!newComment.trim() || isSending}
-            className="flex h-8 w-8 shrink-0 items-center justify-center bg-[var(--color-accent)] disabled:opacity-40"
+            className="icon-btn h-10 w-10 shrink-0 bg-[var(--color-accent)] disabled:opacity-40"
             style={{ borderRadius: 'var(--radius-sm)' }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
@@ -610,7 +612,7 @@ function ChecklistSection({
               }
             }}
             placeholder={t('event.checklistPlaceholder')}
-            className="flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
+            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
             style={{ borderRadius: 'var(--radius-sm)' }}
           />
         </div>
@@ -831,6 +833,7 @@ interface FormState {
   ownerId: string | null;
   visibility: Visibility;
   showAs: ShowAs;
+  flexibility: Flexibility;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
 }
@@ -973,6 +976,7 @@ export function EventModal() {
     ownerId: null,
     visibility: 'default',
     showAs: 'busy',
+    flexibility: 'fixed',
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
@@ -1065,6 +1069,7 @@ export function EventModal() {
         ownerId: editingEvent.ownerId ?? null,
         visibility: editingEvent.visibility ?? 'default',
         showAs: editingEvent.showAs ?? 'busy',
+        flexibility: editingEvent.flexibility ?? 'fixed',
         recurrenceRule: rule,
         recurrencePreset: preset,
       });
@@ -1075,6 +1080,7 @@ export function EventModal() {
           editingEvent.memo ||
           (editingEvent.participants?.length ?? 0) > 0 ||
           editingEvent.notificationOffset != null ||
+          (editingEvent.flexibility && editingEvent.flexibility !== 'fixed') ||
           editingEvent.ownerId
         ),
       );
@@ -1104,6 +1110,7 @@ export function EventModal() {
         ownerId: null,
         visibility: 'default',
         showAs: 'busy',
+        flexibility: 'fixed',
         recurrencePreset: 'none',
         recurrenceRule: null,
       });
@@ -1178,6 +1185,7 @@ export function EventModal() {
         ownerId: form.ownerId,
         visibility: form.visibility,
         showAs: form.showAs,
+        flexibility: form.flexibility,
         recurrenceRule: normalizeRuleForApi(form.recurrenceRule, anchorZone),
       };
       setSaving(true);
@@ -1274,12 +1282,11 @@ export function EventModal() {
   const formContent = (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3">
+      <div className="grid grid-cols-[2.5rem_1fr_2.5rem] items-center gap-3 px-6 py-3">
         <LabelledButton
           label={t('common.close')}
           onClick={requestClose}
-          className="flex h-10 w-10 items-center justify-center bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="icon-btn h-10 w-10 bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
         >
           <svg
             width="18"
@@ -1292,7 +1299,7 @@ export function EventModal() {
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </LabelledButton>
-        <span className="text-callout font-medium text-[var(--color-text-secondary)]">
+        <span className="truncate text-center text-callout font-semibold text-[var(--color-text-primary)]">
           {editingEvent ? t('event.editEvent') : t('event.createEvent')}
         </span>
       </div>
@@ -1312,71 +1319,69 @@ export function EventModal() {
       </div>
 
       {/* Identity: which calendar + which color (event's visual identity) */}
-      <div className="px-6 pb-3">
-        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-          {(() => {
-            const current = calendars.find((c) => c.id === formCalendarId);
-            const calIcon = (
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-text-tertiary)"
-                strokeWidth="2"
-                className="shrink-0"
-              >
-                <rect x="3" y="4" width="18" height="18" rx="2" />
-                <path d="M8 2v4M16 2v4M3 10h18" />
-              </svg>
-            );
-            if (!editingEvent && postableCalendars.length > 1) {
-              return (
-                <>
-                  <div className="flex items-center gap-3 py-1.5">
-                    {calIcon}
-                    <CustomSelect
-                      value={formCalendarId}
-                      onChange={(v) => setForm((f) => ({ ...f, calendarId: v }))}
-                      ariaLabel={t('event.calendar')}
-                      className="min-w-0 flex-1"
-                      triggerClassName="input-modern"
-                      options={postableCalendars.map((c) => ({
-                        value: c.id,
-                        label: c.name,
-                        color: c.color,
-                      }))}
-                    />
-                  </div>
-                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-                </>
-              );
-            }
-            if (current && calendars.length > 1) {
-              return (
-                <>
-                  <div className="flex items-center gap-3 py-1.5">
-                    {calIcon}
-                    <span
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: current.color }}
-                    />
-                    <span className="text-callout font-medium text-[var(--color-text-primary)]">
-                      {current.name}
-                    </span>
-                  </div>
-                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-                </>
-              );
-            }
-            return null;
-          })()}
-
-          {/* An event has no colour of its own: it sits on its owner's layer,
-              and the layer is what carries a colour the whole calendar has
-              agreed on. Changing it is done in the members list. */}
-        </div>
-      </div>
+      {/* An event has no colour of its own: it sits on its owner's layer, and
+          the layer is what carries a colour the whole calendar has agreed on.
+          Changing it is done in the members list. With one calendar there is
+          nothing to choose or name, so the card is left out. */}
+      {(() => {
+        const current = calendars.find((c) => c.id === formCalendarId);
+        const calIcon = (
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-text-tertiary)"
+            strokeWidth="2"
+            className="shrink-0"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M8 2v4M16 2v4M3 10h18" />
+          </svg>
+        );
+        let row: ReactNode = null;
+        if (!editingEvent && postableCalendars.length > 1) {
+          row = (
+            <>
+              {calIcon}
+              <CustomSelect
+                value={formCalendarId}
+                onChange={(v) => setForm((f) => ({ ...f, calendarId: v }))}
+                ariaLabel={t('event.calendar')}
+                className="min-w-0 flex-1"
+                triggerClassName="input-modern"
+                options={postableCalendars.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  color: c.color,
+                }))}
+              />
+            </>
+          );
+        } else if (current && calendars.length > 1) {
+          row = (
+            <>
+              {calIcon}
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: current.color }}
+              />
+              <span className="text-callout font-medium text-[var(--color-text-primary)]">
+                {current.name}
+              </span>
+            </>
+          );
+        }
+        if (!row) return null;
+        return (
+          <div className="px-6 pb-3">
+            <div className="card-section flex items-center gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5">
+              {row}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Creator (read-only metadata, shown only for existing events) */}
       {editingEvent &&
@@ -1475,22 +1480,11 @@ export function EventModal() {
               <span className="text-default text-[var(--color-text-primary)]">
                 {t('calendar.allDay')}
               </span>
-              <LabelledButton
+              <Switch
                 label={t('calendar.allDay')}
-                pressed={form.allDay}
-                onClick={() => setForm((f) => withPresetRule({ ...f, allDay: !f.allDay }))}
-                className="toggle-track relative h-7 w-12"
-                style={{
-                  backgroundColor: form.allDay
-                    ? 'var(--color-accent)'
-                    : 'var(--color-surface-inset)',
-                }}
-              >
-                <span
-                  className="toggle-knob absolute top-0.5 h-6 w-6"
-                  style={{ left: form.allDay ? '22px' : '2px' }}
-                />
-              </LabelledButton>
+                checked={form.allDay}
+                onChange={() => setForm((f) => withPresetRule({ ...f, allDay: !f.allDay }))}
+              />
             </div>
 
             {/* Recurrence */}
@@ -2153,6 +2147,24 @@ export function EventModal() {
                   options={SHOW_AS_OPTIONS.map((v) => ({ value: v, label: t(showAsLabelKey(v)) }))}
                   onChange={(v) => setForm((f) => ({ ...f, showAs: v as ShowAs }))}
                   className="flex-1"
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <span className="text-body text-[var(--color-text-secondary)]">
+                  {t('event.flexibility')}
+                </span>
+                <CustomSelect
+                  ariaLabel={t('event.flexibility')}
+                  value={form.flexibility}
+                  options={[
+                    { value: 'fixed', label: t('event.flexibilityFixed') },
+                    { value: 'negotiable', label: t('event.flexibilityNegotiable') },
+                    { value: 'conditional', label: t('event.flexibilityConditional') },
+                  ]}
+                  onChange={(value) =>
+                    setForm((current) => ({ ...current, flexibility: value as Flexibility }))
+                  }
+                  className="min-w-36"
                 />
               </div>
 

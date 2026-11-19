@@ -8,6 +8,10 @@ const logout = vi.fn();
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
 }));
 
 const uiState = {
@@ -38,12 +42,63 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { CalendarHeader } from './calendar-header';
+import { SchedulePollActionNotice } from './schedule-poll-actions';
 
 afterEach(() => {
   cleanup();
   navigate.mockClear();
   logout.mockClear();
+  useSchedulePollStore.getState().reset();
+});
+
+describe('schedule poll entry and notice', () => {
+  it('shows the same pending count in both headers and links to the response', () => {
+    useSchedulePollStore.setState({
+      accountId: 'u1',
+      actions: [
+        {
+          calendarId: 'cal-1',
+          calendarName: 'Family',
+          pollId: 'poll-1',
+          title: 'Studio day',
+          kind: 'answer',
+        },
+      ],
+    });
+
+    render(
+      <>
+        <CalendarHeader />
+        <SchedulePollActionNotice />
+      </>,
+    );
+
+    expect(screen.getAllByRole('link', { name: /Scheduling/ })).toHaveLength(2);
+    expect(screen.getByRole('link', { name: /Studio day/ })).toHaveAttribute(
+      'href',
+      '/schedule-polls/$calendarId/$pollId',
+    );
+  });
+
+  it('keeps another account’s action out of the notice', () => {
+    useSchedulePollStore.setState({
+      accountId: 'u2',
+      actions: [
+        {
+          calendarId: 'cal-2',
+          calendarName: 'Work',
+          pollId: 'poll-2',
+          title: 'Private meeting',
+          kind: 'answer',
+        },
+      ],
+    });
+
+    const { container } = render(<SchedulePollActionNotice />);
+    expect(container).toBeEmptyDOMElement();
+  });
 });
 
 /**

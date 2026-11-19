@@ -71,7 +71,7 @@ export function EmbeddedCalendarView() {
               setFailure(null);
               loadCalendar();
             }}
-            className="rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-default text-[var(--color-accent)]"
+            className="btn-secondary h-10 px-5 text-default"
           >
             {t('share.retry')}
           </button>
@@ -109,7 +109,7 @@ export function EmbeddedCalendarView() {
           type="button"
           aria-label={t('calendar.prevMonth')}
           onClick={() => shiftMonth(-1)}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+          className="icon-btn h-7 w-7 rounded-full"
         >
           <svg
             width="15"
@@ -129,7 +129,7 @@ export function EmbeddedCalendarView() {
           type="button"
           aria-label={t('calendar.nextMonth')}
           onClick={() => shiftMonth(1)}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+          className="icon-btn h-7 w-7 rounded-full"
         >
           <svg
             width="15"

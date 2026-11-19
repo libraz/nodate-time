@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,10 @@ import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
 }));
 
 vi.mock('@/i18n', () => ({
@@ -139,7 +143,9 @@ describe('App right sidebar', () => {
     expect(within(panel as HTMLElement).getByText('panel.noMemos')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'panel.memo' }));
-    expect(screen.queryByRole('heading', { name: 'panel.memo' })).toBeNull();
+    // Closing plays an exit first: the sheet is marked as leaving, then goes.
+    expect(panel).toHaveClass('side-panel-exit');
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'panel.memo' })).toBeNull());
   });
 });
 

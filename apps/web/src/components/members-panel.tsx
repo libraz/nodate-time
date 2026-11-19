@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
+import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { memberRowRules } from '@/lib/member-row';
 import { roleLabelKey } from '@/lib/permissions';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
-import { useModalA11y } from '@/lib/use-modal-a11y';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
+import { usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { Member } from '@/types/calendar';
@@ -67,12 +68,12 @@ export function MembersPanel() {
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const openPanelFor = useUiStore((s) => s.openPanelFor);
-  const open = rightPanel === 'members';
-  const panelRef = useModalA11y<HTMLDivElement>(open, () => toggleRightPanel('members'));
+  const presence = usePresence(rightPanel === 'members');
   const me = useAuthStore((s) => s.user);
   const { options, target, setTargetId } = usePanelCalendar();
   const calendarId = target?.id ?? '';
-  // Nothing is asked of the server while the panel is closed.
+  // Nothing is asked of the server while the panel is closed. It stays asked
+  // through the exit, so the list does not empty out as the sheet slides away.
   const {
     members,
     canManageMembers,
@@ -82,157 +83,122 @@ export function MembersPanel() {
     changeRole,
     removeMember,
     changeColor,
-  } = useCalendarMembers(open ? calendarId : '');
+  } = useCalendarMembers(presence.mounted ? calendarId : '');
 
-  if (!open) return null;
+  if (!presence.mounted) return null;
 
   return (
-    <>
-      <button
-        type="button"
-        aria-label={t('common.close')}
-        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
-        onClick={() => toggleRightPanel('members')}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('panel.members')}
-        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
-          <div className="min-w-0">
-            <h2 className="truncate text-subhead font-semibold">{t('panel.members')}</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {canManageMembers && (
-              <button
-                type="button"
-                onClick={() => openPanelFor('share', calendarId)}
-                className="btn-primary px-3 py-1.5 text-footnote"
-              >
-                {t('invites.create')}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => toggleRightPanel('members')}
-              className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-              style={{ borderRadius: 'var(--radius-sm)' }}
-              aria-label={t('common.close')}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+    <SidePanel
+      presence={presence}
+      onClose={() => toggleRightPanel('members')}
+      title={t('panel.members')}
+      actions={
+        canManageMembers && (
+          <button
+            type="button"
+            onClick={() => openPanelFor('share', calendarId)}
+            className="btn-primary h-8 px-3 text-footnote"
+          >
+            {t('invites.create')}
+          </button>
+        )
+      }
+    >
+      {target && (
+        <div className="border-b border-[var(--color-border)] px-5 py-3">
+          <PanelCalendarPicker
+            label={t('panel.targetCalendar')}
+            options={options}
+            target={target}
+            onChange={setTargetId}
+          />
+          <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
+            {t('members.layerHint')}
+          </p>
         </div>
+      )}
 
-        {target && (
-          <div className="border-b border-[var(--color-border)] px-5 py-3">
-            <PanelCalendarPicker
-              label={t('panel.targetCalendar')}
-              options={options}
-              target={target}
-              onChange={setTargetId}
-            />
-            <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
-              {t('members.layerHint')}
-            </p>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto">
-          {!calendarId ? (
-            <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
-          ) : members.length === 0 ? (
-            <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
-          ) : (
-            <ul className="divide-y divide-[var(--color-separator)]">
-              {members.map((m) => {
-                const { isMe, canChangeRole, canRemove } = memberRowRules(m, {
-                  meId: me?.id,
-                  canManageMembers,
-                  amOwner,
-                  ownerCount,
-                });
-                return (
-                  <li key={m.id} className="flex items-center gap-3 px-5 py-3">
-                    {canManageMembers || isMe ? (
-                      <MemberColorInput
-                        member={m}
-                        label={t('members.color')}
-                        onCommit={(color) => changeColor(m, color)}
-                      />
-                    ) : (
-                      <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
-                        {m.name}
-                        {isMe && (
-                          <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
-                            {t('members.you')}
-                          </span>
-                        )}
-                      </p>
-                      <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                        {m.email}
-                      </p>
-                    </div>
-                    {canChangeRole ? (
-                      <CustomSelect
-                        value={m.role}
-                        onChange={(v) => changeRole(m, v)}
-                        className="shrink-0"
-                        triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-                        options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
-                      />
-                    ) : (
-                      <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
-                        {t(roleLabelKey(m.role))}
-                      </span>
-                    )}
-                    {canRemove && (
-                      <button
-                        type="button"
-                        onClick={() => removeMember(m)}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
-                        style={{ borderRadius: 'var(--radius-sm)' }}
-                        aria-label={isMe ? t('members.leave') : t('common.delete')}
+      <div className="flex-1 overflow-y-auto">
+        {!calendarId ? (
+          <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
+        ) : members.length === 0 ? (
+          <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
+        ) : (
+          <ul className="divide-y divide-[var(--color-separator)]">
+            {members.map((m) => {
+              const { isMe, canChangeRole, canRemove } = memberRowRules(m, {
+                meId: me?.id,
+                canManageMembers,
+                amOwner,
+                ownerCount,
+              });
+              return (
+                <li key={m.id} className="flex items-center gap-3 px-5 py-3">
+                  {canManageMembers || isMe ? (
+                    <MemberColorInput
+                      member={m}
+                      label={t('members.color')}
+                      onCommit={(color) => changeColor(m, color)}
+                    />
+                  ) : (
+                    <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
+                      {m.name}
+                      {isMe && (
+                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+                          {t('members.you')}
+                        </span>
+                      )}
+                    </p>
+                    <p className="truncate text-footnote text-[var(--color-text-secondary)]">
+                      {m.email}
+                    </p>
+                  </div>
+                  {canChangeRole ? (
+                    <CustomSelect
+                      value={m.role}
+                      onChange={(v) => changeRole(m, v)}
+                      className="shrink-0"
+                      triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+                      options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                    />
+                  ) : (
+                    <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
+                      {t(roleLabelKey(m.role))}
+                    </span>
+                  )}
+                  {canRemove && (
+                    <button
+                      type="button"
+                      onClick={() => removeMember(m)}
+                      className="icon-btn icon-btn-danger h-8 w-8"
+                      aria-label={isMe ? t('members.leave') : t('common.delete')}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
                       >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {members.length === 1 && (
-            <p className="px-5 py-4 text-caption text-[var(--color-text-tertiary)]">
-              {t('members.soloHint')}
-            </p>
-          )}
-        </div>
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {members.length === 1 && (
+          <p className="px-5 py-4 text-caption text-[var(--color-text-tertiary)]">
+            {t('members.soloHint')}
+          </p>
+        )}
       </div>
-    </>
+    </SidePanel>
   );
 }

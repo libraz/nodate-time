@@ -37,6 +37,7 @@ vi.mock('@/lib/image-resize', () => ({
 
 import { ApiError, api, endSession, hasToken, setToken } from '@/lib/api';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
@@ -65,6 +66,7 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   });
+  useSchedulePollStore.getState().reset();
   useUiStore.setState({
     showEventModal: false,
     editingEventId: null,
@@ -165,6 +167,18 @@ describe('logout', () => {
       showActivity: true,
     });
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+    useSchedulePollStore.setState({
+      accountId: sampleUser.id,
+      actions: [
+        {
+          calendarId: 'cal-1',
+          calendarName: 'A',
+          pollId: 'poll-1',
+          title: 'Meeting',
+          kind: 'answer',
+        },
+      ],
+    });
 
     useAuthStore.getState().logout();
 
@@ -175,6 +189,7 @@ describe('logout', () => {
     expect(auth.user).toBeNull();
     expect(auth.isAuthenticated).toBe(false);
     expect(useCalendarStore.getState().calendars).toEqual([]);
+    expect(useSchedulePollStore.getState()).toMatchObject({ accountId: null, actions: [] });
     expect(useUiStore.getState()).toMatchObject({
       showEventModal: false,
       editingEventId: null,

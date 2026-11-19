@@ -134,7 +134,7 @@ function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate({ to: safeRedirect(redirect) });
+      navigate({ href: safeRedirect(redirect), replace: true });
     }
   }, [isAuthenticated, navigate, redirect]);
 

@@ -143,7 +143,7 @@ describe('ActivityPanel', () => {
   it('says it is loading until the first page arrives', () => {
     mockApi.get.mockReturnValue(new Promise(() => {}));
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(screen.getByText('history.loading')).toBeInTheDocument();
     expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/activity?limit=50');
@@ -155,7 +155,7 @@ describe('ActivityPanel', () => {
       nextCursor: undefined,
     });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(await screen.findByText('Rin')).toBeInTheDocument();
     expect(screen.getByText('activity.entityEvent')).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe('ActivityPanel', () => {
   it.each(ENTITIES)('badges a $action row as $label', async ({ action, entityType, label }) => {
     mockApi.get.mockResolvedValue({ items: [feedItem({ action, entityType })] });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(await screen.findByText(label)).toBeInTheDocument();
     expect(screen.queryByText(entityType)).not.toBeInTheDocument();
@@ -188,7 +188,7 @@ describe('ActivityPanel', () => {
       items: [feedItem({ action: 'calendar.reminder.created', entityType: 'reminder' })],
     });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(await screen.findByText('reminder')).toBeInTheDocument();
     expect(screen.getByText('history.created')).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe('ActivityPanel', () => {
   it('shows the empty state for a calendar with no activity', async () => {
     mockApi.get.mockResolvedValue({ items: [] });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(await screen.findByText('activity.empty')).toBeInTheDocument();
   });
@@ -205,7 +205,7 @@ describe('ActivityPanel', () => {
   it('asks for nothing when no calendar is in view', () => {
     calendarState.activeCalendarIds = [];
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     expect(screen.getByText('activity.empty')).toBeInTheDocument();
     expect(mockApi.get).not.toHaveBeenCalled();
@@ -214,7 +214,7 @@ describe('ActivityPanel', () => {
   it('reports a failed load instead of leaving the panel spinning', async () => {
     mockApi.get.mockRejectedValue(new Error('feed unavailable'));
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('feed unavailable'));
     expect(screen.queryByText('history.loading')).not.toBeInTheDocument();
@@ -232,7 +232,7 @@ describe('ActivityPanel', () => {
         items: [feedItem({ id: 'row-2', summary: 'second page' })],
       });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     fireEvent.click(await screen.findByText('activity.loadMore'));
 
@@ -254,7 +254,7 @@ describe('ActivityPanel', () => {
       })
       .mockRejectedValueOnce(new Error('paging failed'));
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     fireEvent.click(await screen.findByText('activity.loadMore'));
 
@@ -272,7 +272,7 @@ describe('ActivityPanel', () => {
     calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
     mockApi.get.mockResolvedValue({ items: [] });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     const picker = await screen.findByRole('button', { name: 'panel.targetCalendar' });
     fireEvent.click(picker);
@@ -291,7 +291,7 @@ describe('ActivityPanel', () => {
   it('names the single calendar in view instead of offering a choice', async () => {
     mockApi.get.mockResolvedValue({ items: [] });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     await waitFor(() => expect(mockApi.get).toHaveBeenCalled());
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
@@ -302,7 +302,7 @@ describe('ActivityPanel', () => {
     mockApi.get.mockResolvedValue({ items: [] });
     const onClose = vi.fn();
 
-    render(<ActivityPanel onClose={onClose} />);
+    render(<ActivityPanel open onClose={onClose} />);
 
     const closers = screen.getAllByLabelText('common.close');
     expect(closers).toHaveLength(2);
@@ -317,7 +317,7 @@ describe('ActivityPanel keyboard', () => {
   it('announces itself as a modal dialog', async () => {
     mockApi.get.mockResolvedValue({ items: [] });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     const panel = await screen.findByRole('dialog');
     expect(panel).toHaveAttribute('aria-modal', 'true');
@@ -328,7 +328,7 @@ describe('ActivityPanel keyboard', () => {
     mockApi.get.mockResolvedValue({ items: [] });
     const onClose = vi.fn();
 
-    render(<ActivityPanel onClose={onClose} />);
+    render(<ActivityPanel open onClose={onClose} />);
 
     expect(document.body.style.overflow).toBe('hidden');
 
@@ -344,7 +344,7 @@ describe('ActivityPanel keyboard', () => {
       nextCursor: '00000000-0000-7000-8000-0000000000c1',
     });
 
-    render(<ActivityPanel onClose={() => {}} />);
+    render(<ActivityPanel open onClose={() => {}} />);
 
     const panel = await screen.findByRole('dialog');
     await screen.findByText('activity.loadMore');
@@ -375,7 +375,7 @@ describe('ActivityPanel keyboard', () => {
           <button type="button" data-testid="trigger">
             open
           </button>
-          {open && <ActivityPanel onClose={() => {}} />}
+          {open && <ActivityPanel open onClose={() => {}} />}
         </>
       );
     }

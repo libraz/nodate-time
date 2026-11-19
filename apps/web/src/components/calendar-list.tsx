@@ -86,7 +86,7 @@ export function CalendarList() {
           <button
             type="button"
             onClick={handleToggleAll}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-hover)]"
+            className="icon-btn h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
             aria-label={t('calendar.selectAll')}
           >
             {allActive ? (
@@ -128,7 +128,7 @@ export function CalendarList() {
           <button
             type="button"
             onClick={() => setShowNewForm(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-hover)]"
+            className="icon-btn h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
             aria-label={t('calendar.newCalendar')}
           >
             <svg
@@ -163,7 +163,7 @@ export function CalendarList() {
                   className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
                 >
                   <span
-                    className="h-3 w-3 shrink-0 rounded-full"
+                    className="h-3 w-3 shrink-0 rounded-full transition-[background-color,opacity,transform] duration-200 group-active:scale-90"
                     style={{
                       backgroundColor: isActive ? cal.color : 'var(--color-text-tertiary)',
                       opacity: isActive ? 1 : 0.3,
@@ -199,7 +199,14 @@ export function CalendarList() {
                     </span>
                   )}
                   {isActive && (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      className="pop-in shrink-0"
+                      aria-hidden="true"
+                    >
                       <path
                         d="M5 12l5 5L19 7"
                         stroke="var(--color-accent)"
@@ -217,7 +224,7 @@ export function CalendarList() {
                     aria-label={t('calendar.deleteCalendar')}
                     aria-expanded={confirming}
                     title={t('calendar.deleteCalendar')}
-                    className={`mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)] ${
+                    className={`icon-btn icon-btn-danger mr-1 h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)] ${
                       confirming ? '' : 'reveal-on-hover'
                     }`}
                   >
@@ -236,7 +243,7 @@ export function CalendarList() {
               </div>
 
               {confirming && (
-                <div className="mx-2 mb-1 rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-3 py-2">
+                <div className="reveal-in mx-2 mb-1 rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-3 py-2">
                   <p className="text-caption text-[var(--color-text-secondary)]">
                     {t('calendar.deleteWarning', { name: cal.name })}
                   </p>
@@ -260,20 +267,14 @@ export function CalendarList() {
               )}
 
               {offerInvite && (
-                <div
-                  className="mx-2 mb-1 rounded-[var(--radius-md)] border px-3 py-2"
-                  style={{
-                    borderColor: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
-                    backgroundColor: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
-                  }}
-                >
-                  <p className="text-footnote font-semibold text-[var(--color-text-primary)]">
+                <div className="callout reveal-in mx-2 mb-1 flex-col gap-0 px-3 py-2">
+                  <p className="callout-title text-footnote">
                     {t('calendar.createdTitle', { name: cal.name })}
                   </p>
                   <p className="mt-0.5 text-caption text-[var(--color-text-secondary)]">
                     {t('calendar.createdInviteHint')}
                   </p>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex w-full gap-2">
                     <button
                       type="button"
                       onClick={() => setJustCreatedId(null)}
@@ -296,7 +297,7 @@ export function CalendarList() {
         })}
 
         {showNewForm && (
-          <div className="px-2 py-2">
+          <div className="reveal-in px-2 py-2">
             <input
               data-1p-ignore
               ref={inputRef}

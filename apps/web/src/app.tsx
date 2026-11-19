@@ -7,7 +7,9 @@ import { LoadFailure, LoadFailureBanner } from '@/components/load-failure';
 import { MonthScroll } from '@/components/month-scroll';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
+import { SchedulePollActionNotice } from '@/components/schedule-poll-actions';
 import { Highlight } from '@/components/search-results';
+import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { fetchWindow } from '@/lib/date-utils';
@@ -21,9 +23,10 @@ import { useCalendarShortcuts } from '@/lib/shortcuts';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
-import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useLatch, usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -271,50 +274,16 @@ function MobileSettingsView() {
  */
 function MemoPanel() {
   const t = useT();
+  const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
-  const panelRef = useModalA11y<HTMLDivElement>(true, () => toggleRightPanel('memo'));
+  const presence = usePresence(rightPanel === 'memo');
 
   return (
-    <>
-      <button
-        type="button"
-        aria-label={t('common.close')}
-        className="modal-backdrop fixed inset-0 z-40 bg-[var(--color-overlay)]"
-        onClick={() => toggleRightPanel('memo')}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('panel.memo')}
-        className="glass-surface-heavy side-panel fixed right-0 top-0 z-40 flex h-full w-full max-w-[420px] flex-col border-l border-[var(--color-border)]"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
-          <h2 className="truncate text-subhead font-semibold">{t('panel.memo')}</h2>
-          <button
-            type="button"
-            onClick={() => toggleRightPanel('memo')}
-            className="flex h-8 w-8 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-            style={{ borderRadius: 'var(--radius-sm)' }}
-            aria-label={t('common.close')}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <MemoSection />
-        </div>
+    <SidePanel presence={presence} onClose={() => toggleRightPanel('memo')} title={t('panel.memo')}>
+      <div className="flex-1 overflow-hidden">
+        <MemoSection />
       </div>
-    </>
+    </SidePanel>
   );
 }
 
@@ -414,9 +383,20 @@ export function App() {
   const showSettings = useUiStore((s) => s.showSettings);
   const rightPanel = useUiStore((s) => s.rightPanel);
   const setShowActivity = useUiStore((s) => s.setShowActivity);
+  // Each side panel loads on first open and then stays mounted, so closing
+  // it can play its exit and reopening it does not load it again.
+  const memoLoaded = useLatch(rightPanel === 'memo');
+  const albumLoaded = useLatch(rightPanel === 'album');
+  const membersLoaded = useLatch(rightPanel === 'members');
+  const shareLoaded = useLatch(rightPanel === 'share');
+  const activityLoaded = useLatch(showActivity);
   const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const fetchMemos = useCalendarStore((s) => s.fetchMemos);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const userId = useAuthStore((s) => s.user?.id);
+  const fetchSchedulePollActions = useSchedulePollStore((s) => s.fetchActions);
+  const resetSchedulePollActions = useSchedulePollStore((s) => s.reset);
   const calendars = useCalendarStore((s) => s.calendars);
   const loadError = useCalendarStore((s) => s.loadError);
   const memberErrors = useCalendarStore((s) => s.memberErrors);
@@ -481,6 +461,28 @@ export function App() {
     return () => controller.abort();
   }, [calendars, fetchMemos]);
 
+  useEffect(() => {
+    if (!isAuthenticated || !userId) {
+      resetSchedulePollActions();
+      return;
+    }
+    const controller = new AbortController();
+    const refresh = () => void fetchSchedulePollActions(userId, controller.signal);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [fetchSchedulePollActions, isAuthenticated, resetSchedulePollActions, userId]);
+
   const membersFailed = Object.keys(memberErrors).length > 0;
   const eventsTruncated = truncatedCalendarIds.some((id) => shownCalendarIds.includes(id));
 
@@ -533,6 +535,8 @@ export function App() {
       <div className="relative z-[1] contents">
         <CalendarHeader />
       </div>
+
+      <SchedulePollActionNotice />
 
       {membersFailed && (
         <div className="relative z-[1]">
@@ -611,24 +615,24 @@ export function App() {
       )}
 
       {/* Memo overlay */}
-      {rightPanel === 'memo' && <MemoPanel />}
+      {memoLoaded && <MemoPanel />}
 
       {/* Album overlay */}
-      {rightPanel === 'album' && (
+      {albumLoaded && (
         <Deferred>
           <AlbumPanel />
         </Deferred>
       )}
 
       {/* Members overlay */}
-      {rightPanel === 'members' && (
+      {membersLoaded && (
         <Deferred>
           <MembersPanel />
         </Deferred>
       )}
 
       {/* Share overlay */}
-      {rightPanel === 'share' && (
+      {shareLoaded && (
         <Deferred>
           <SharePanel />
         </Deferred>
@@ -642,9 +646,9 @@ export function App() {
       )}
 
       {/* Activity feed overlay (desktop + mobile) */}
-      {showActivity && (
+      {activityLoaded && (
         <Deferred>
-          <ActivityPanel onClose={() => setShowActivity(false)} />
+          <ActivityPanel open={showActivity} onClose={() => setShowActivity(false)} />
         </Deferred>
       )}
 

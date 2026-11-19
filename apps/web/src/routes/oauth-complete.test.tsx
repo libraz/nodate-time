@@ -65,7 +65,9 @@ describe('OAuth completion', () => {
 
     renderPage();
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: '/settings?tab=export' }));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ href: '/settings?tab=export', replace: true }),
+    );
     expect(localStorage.getItem('tt_token')).toBe('access-1');
   });
 
@@ -80,6 +82,6 @@ describe('OAuth completion', () => {
 
     renderPage();
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: '/' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ href: '/', replace: true }));
   });
 });

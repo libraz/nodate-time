@@ -14,6 +14,7 @@ import { resizeImageForAvatar } from '@/lib/image-resize';
 import { accountPreferences, detectLocale, detectTimezone } from '@/lib/preferences';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
 
 interface User {
@@ -84,6 +85,17 @@ let fetchMeInFlight = false;
 // Set when the stored session changed while a profile load was running.
 let fetchMeAgain = false;
 
+function resetAccountScopedStores() {
+  useCalendarStore.getState().resetSessionData();
+  useUiStore.getState().resetSessionUi();
+  useSchedulePollStore.getState().reset();
+}
+
+function resetStoresIfAccountChanged(nextUser: User) {
+  const currentUser = useAuthStore.getState().user;
+  if (currentUser && currentUser.id !== nextUser.id) resetAccountScopedStores();
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: hasToken(),
@@ -97,6 +109,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const data = await api.post<AuthResponse>('/auth/login', { email, password });
       setToken(data.token, data.refreshToken);
+      resetStoresIfAccountChanged(data.user);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
@@ -110,6 +123,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const data = await api.post<AuthResponse>('/auth/dev-login', { email });
       setToken(data.token, data.refreshToken);
+      resetStoresIfAccountChanged(data.user);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
     } catch (e) {
@@ -123,6 +137,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const data = await api.post<AuthResponse>('/auth/register', { name, email, password });
       setToken(data.token, data.refreshToken);
+      resetStoresIfAccountChanged(data.user);
       set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
       // A new account is seeded with the server's defaults, which know
       // nothing about where the person signing up actually is. Send what
@@ -157,8 +172,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       error: null,
       initError: null,
     });
-    useCalendarStore.getState().resetSessionData();
-    useUiStore.getState().resetSessionUi();
+    resetAccountScopedStores();
   },
 
   fetchMe: async () => {
@@ -177,8 +191,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       // A different account's data must not outlive the sign-in that replaced it.
       const previous = useAuthStore.getState().user;
       if (previous && previous.id !== user.id) {
-        useCalendarStore.getState().resetSessionData();
-        useUiStore.getState().resetSessionUi();
+        resetAccountScopedStores();
       }
       set({ user, isAuthenticated: true, isInitializing: false, initError: null });
       useUiStore.getState().adoptAccountPreferences(accountPreferences(user));

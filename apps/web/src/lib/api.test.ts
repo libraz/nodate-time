@@ -502,6 +502,17 @@ describe('401 handling', () => {
     expect(window.location.pathname).toBe('/calendar');
   });
 
+  it('keeps the return destination if an in-flight protected request expires on the login page', async () => {
+    const redirect = `?redirect=${encodeURIComponent('/schedule-polls/calendar/poll?view=respond')}`;
+    window.history.replaceState(null, '', `/login${redirect}`);
+    setToken('expired');
+    fetchMock.mockResolvedValue(jsonResponse({ detail: 'nope' }, 401));
+
+    await expect(api.get('/me/schedule-poll-actions')).rejects.toMatchObject({ status: 401 });
+    expect(window.location.pathname).toBe('/login');
+    expect(window.location.search).toBe(redirect);
+  });
+
   it('does not redirect or clear the token for /auth/* failures', async () => {
     setToken('still-current');
     fetchMock.mockResolvedValue(jsonResponse({ detail: 'Invalid credentials' }, 401));

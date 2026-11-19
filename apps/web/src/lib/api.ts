@@ -288,12 +288,12 @@ async function buildError(res: Response): Promise<ApiError> {
 
 function redirectTarget(): string | null {
   const { pathname, search, hash } = window.location;
-  if (pathname === '/login') return null;
   const target = `${pathname}${search}${hash}`;
   return isSafeRedirect(target) ? target : null;
 }
 
 function navigateToLogin(): void {
+  if (window.location.pathname === '/login') return;
   const redirect = redirectTarget();
   const next = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
   if (`${window.location.pathname}${window.location.search}` === next) return;
@@ -474,6 +474,12 @@ export const api = {
       method: 'PUT',
       ...(headers ? { headers } : {}),
       ...(body != null ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
+    }),
+  patch: <T>(path: string, body: unknown, signal?: AbortSignal) =>
+    request<T>(path, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     }),
   delete: <T>(path: string, signal?: AbortSignal) =>

@@ -1,5 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { Avatar } from '@/components/avatar';
+import { SchedulePollNavDesktop, SchedulePollNavMobile } from '@/components/schedule-poll-actions';
 import { useT } from '@/i18n';
 import { formatMonthYear } from '@/lib/date-utils';
 import { shortcutProps } from '@/lib/shortcuts';
@@ -91,18 +93,23 @@ type AvatarButtonProps = {
 };
 
 const AvatarButton = ({ user, label, onClick, size = 'default' }: AvatarButtonProps) => {
-  const dimensions = size === 'sm' ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl sm:h-11 sm:w-11';
+  const box = size === 'sm' ? 'h-8 w-8' : 'h-10 w-10 sm:h-11 sm:w-11';
+  const face = size === 'sm' ? 'h-7 w-7' : 'h-8 w-8 sm:h-9 sm:w-9';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center justify-center overflow-hidden hover:bg-[var(--color-hover)] active:bg-[var(--color-active)] ${dimensions}`}
+      className={`icon-btn rounded-full ${box}`}
       aria-label={label}
     >
-      {user?.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" draggable={false} />
-      ) : user?.name ? (
-        <span className={size === 'sm' ? 'text-base' : 'text-lg'}>{user.name.slice(0, 1)}</span>
+      {user ? (
+        <Avatar
+          src={user.avatarUrl}
+          name={user.name}
+          size={face}
+          color="var(--color-accent)"
+          round
+        />
       ) : (
         <svg
           width={size === 'sm' ? '20' : '22'}
@@ -201,13 +208,13 @@ export function CalendarHeader() {
       {user && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[var(--color-accent)] text-lg text-white">
-              {user.avatarUrl ? (
-                <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <span>{user.name.slice(0, 1)}</span>
-              )}
-            </div>
+            <Avatar
+              src={user.avatarUrl}
+              name={user.name}
+              size="h-10 w-10"
+              color="var(--color-accent)"
+              round
+            />
             <div className="min-w-0 flex-1">
               <p className="truncate text-default font-bold text-[var(--color-text-primary)]">
                 {user.name}
@@ -297,7 +304,7 @@ export function CalendarHeader() {
           type="button"
           onClick={() => setShowMobileMenu(true)}
           aria-label={t('calendar.calendarList')}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-primary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+          className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
         >
           <svg
             width="20"
@@ -359,7 +366,7 @@ export function CalendarHeader() {
             <button
               type="button"
               onClick={() => stepView(-1)}
-              className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
               aria-label={t('calendar.prevMonth')}
             >
               <ChevronLeft />
@@ -367,7 +374,7 @@ export function CalendarHeader() {
             <button
               type="button"
               onClick={() => stepView(1)}
-              className="flex h-8 w-7 items-center justify-center rounded-lg hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
               aria-label={t('calendar.nextMonth')}
             >
               <ChevronRight />
@@ -394,11 +401,7 @@ export function CalendarHeader() {
             <button
               type="button"
               onClick={() => openEventModal()}
-              className="flex h-8 w-8 items-center justify-center hover:opacity-80 active:scale-95 transition-all"
-              style={{
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-accent)',
-              }}
+              className="icon-btn icon-btn-accent h-8 w-8"
               aria-label={t('event.createEvent')}
             >
               <svg
@@ -424,6 +427,8 @@ export function CalendarHeader() {
         </div>
       </div>
 
+      <SchedulePollNavMobile />
+
       {/* PC header (sm+) */}
       <div className="hidden h-[56px] items-center px-3 sm:flex">
         {/* Left: month label + nav arrows + today */}
@@ -435,7 +440,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => stepView(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            className="icon-btn h-8 w-8 rounded-full text-[var(--color-text-primary)]"
             aria-label={t('calendar.prevMonth')}
             {...shortcutProps('prev', t('calendar.prevMonth'))}
           >
@@ -445,7 +450,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => stepView(1)}
-            className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            className="icon-btn h-8 w-8 rounded-full text-[var(--color-text-primary)]"
             aria-label={t('calendar.nextMonth')}
             {...shortcutProps('next', t('calendar.nextMonth'))}
           >
@@ -505,12 +510,14 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={toggleSearch}
-            className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+            className="icon-btn h-11 w-11 rounded-xl text-[var(--color-text-primary)]"
             aria-label={t('search.searchEvents')}
             {...shortcutProps('search', t('search.searchEvents'))}
           >
             <SearchIcon />
           </button>
+
+          <SchedulePollNavDesktop />
 
           <button
             type="button"

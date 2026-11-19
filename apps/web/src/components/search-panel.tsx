@@ -59,6 +59,7 @@ export function SearchPanel() {
             stroke="currentColor"
             strokeWidth="1.5"
             opacity="0.5"
+            aria-hidden="true"
           >
             <circle cx="11" cy="11" r="7" />
             <line x1="16.65" y1="16.65" x2="21" y2="21" />
@@ -66,8 +67,25 @@ export function SearchPanel() {
           <span className="text-callout">{t('search.searchEvents')}</span>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]">
-          {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
+        <div className="reveal-in flex flex-col items-center justify-center gap-2 px-8 py-16 text-center text-[var(--color-text-tertiary)]">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            opacity="0.5"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="16.65" y1="16.65" x2="21" y2="21" />
+            <line x1="8.5" y1="11" x2="13.5" y2="11" />
+          </svg>
+          <span className="text-callout text-balance">
+            {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
+          </span>
         </div>
       ) : (
         <div className="py-1">
@@ -138,8 +156,7 @@ export function SearchPanel() {
         <button
           type="button"
           onClick={toggleSearch}
-          className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="icon-btn h-7 w-7"
           aria-label={t('common.close')}
         >
           <svg

@@ -19,6 +19,7 @@ vi.mock('@/lib/image-resize', () => ({ resizeImageForAvatar: vi.fn() }));
 
 import { api, hasToken } from '@/lib/api';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
@@ -45,6 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(hasToken).mockReturnValue(true);
   useAuthStore.setState({ user: alice, isAuthenticated: true, isInitializing: false });
+  useSchedulePollStore.getState().reset();
 });
 
 describe('another tab changing the stored session', () => {
@@ -64,6 +66,18 @@ describe('another tab changing the stored session', () => {
     vi.mocked(api.get).mockResolvedValue(bob as never);
     const resetData = vi.spyOn(useCalendarStore.getState(), 'resetSessionData');
     const resetUi = vi.spyOn(useUiStore.getState(), 'resetSessionUi');
+    useSchedulePollStore.setState({
+      accountId: alice.id,
+      actions: [
+        {
+          calendarId: 'cal-1',
+          calendarName: 'Calendar',
+          pollId: 'poll-1',
+          title: 'Meeting',
+          kind: 'answer',
+        },
+      ],
+    });
 
     window.dispatchEvent(new StorageEvent('storage', { key: 'tt_token', newValue: 'other' }));
     await settle();
@@ -72,6 +86,7 @@ describe('another tab changing the stored session', () => {
     expect(useAuthStore.getState().user).toEqual(bob);
     expect(resetData).toHaveBeenCalled();
     expect(resetUi).toHaveBeenCalled();
+    expect(useSchedulePollStore.getState()).toMatchObject({ accountId: null, actions: [] });
   });
 
   it('keeps this tab untouched when the same account was merely renewed', async () => {

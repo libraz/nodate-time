@@ -1,15 +1,19 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const routerState = vi.hoisted(() => ({ pathname: '/' }));
+const routerState = vi.hoisted(() => ({ pathname: '/', searchStr: '', hash: '' }));
 
 vi.mock('@tanstack/react-router', () => ({
   createRootRoute: (options: unknown) => ({ options }),
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
-  Navigate: ({ to }: { to: string }) => <div data-testid="navigate">{to}</div>,
+  Navigate: ({ to, search }: { to: string; search?: Record<string, string> }) => (
+    <div data-testid="navigate" data-search={JSON.stringify(search ?? {})}>
+      {to}
+    </div>
+  ),
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
   Outlet: () => <div data-testid="outlet" />,
-  useLocation: () => ({ pathname: routerState.pathname }),
+  useLocation: () => routerState,
 }));
 
 vi.mock('@/i18n', () => ({ useT: () => (key: string) => key }));
@@ -39,8 +43,10 @@ vi.mock('@/stores/auth-store', () => {
 
 import { Route } from './__root';
 
-function renderAt(pathname: string) {
+function renderAt(pathname: string, searchStr = '', hash = '') {
   routerState.pathname = pathname;
+  routerState.searchStr = searchStr;
+  routerState.hash = hash;
   const RootLayout = (Route as unknown as { options: { component: () => React.ReactNode } }).options
     .component;
   render(<RootLayout />);
@@ -65,5 +71,14 @@ describe('root layout for a signed-out visitor', () => {
   it('redirects a protected path to the login screen', () => {
     renderAt('/settings');
     expect(screen.getByTestId('navigate').textContent).toBe('/login');
+  });
+
+  it('preserves a schedule-poll deep link through login', () => {
+    renderAt('/schedule-polls/cal-7/poll-9', '?view=respond&source=notice', 'answers');
+    const redirect = screen.getByTestId('navigate');
+    expect(redirect.textContent).toBe('/login');
+    expect(JSON.parse(redirect.getAttribute('data-search') ?? '{}')).toEqual({
+      redirect: '/schedule-polls/cal-7/poll-9?view=respond&source=notice#answers',
+    });
   });
 });

@@ -714,9 +714,9 @@ describe('AppearanceSection holidays', () => {
 
   it('turns holidays on for the country the browser implies', () => {
     uiState.holidaysCountry = null;
-    const { container } = render(<AppearanceSection />);
+    render(<AppearanceSection />);
 
-    const toggle = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const toggle = screen.getByRole('button', { name: 'settings.holidays' });
     fireEvent.click(toggle);
 
     // jsdom reports en-US, so anything but the old hardcoded 'JP' is the point.

@@ -535,6 +535,7 @@ describe('EventModal save payload', () => {
   const wireFields = [
     'allDay',
     'endAt',
+    'flexibility',
     'location',
     'memo',
     'notificationOffset',
@@ -561,6 +562,22 @@ describe('EventModal save payload', () => {
     const payload = await saveExisting();
 
     expect(Object.keys(payload).sort()).toEqual(wireFields);
+  });
+
+  it('saves how movable the event is independently of how its time is shown', async () => {
+    calendarState.events = [{ ...event, flexibility: 'conditional' }];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    const flexibility = screen.getByRole('button', { name: 'event.flexibility' });
+    expect(flexibility).toHaveTextContent('event.flexibilityConditional');
+    fireEvent.click(flexibility);
+    fireEvent.click(await screen.findByRole('option', { name: 'event.flexibilityNegotiable' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    expect(calendarState.updateEvent.mock.calls[0]?.[2]).toMatchObject({
+      flexibility: 'negotiable',
+      showAs: 'busy',
+    });
   });
 
   // The colour of an event is derived from the owner's membership; there is no

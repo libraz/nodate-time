@@ -54,7 +54,7 @@ function OAuthCompletePage() {
         navigate({ to: '/login', search: { error: 'oauth_failed' } });
         return;
       }
-      navigate({ to: safeRedirect(redirect) });
+      navigate({ href: safeRedirect(redirect), replace: true });
     })();
     return () => {
       cancelled = true;

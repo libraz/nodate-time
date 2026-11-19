@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrandRow } from '@/components/brand-mark';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
+import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
 import { api, errorMessage, isAbortError } from '@/lib/api';
 import { useAuthConfig } from '@/lib/auth-config';
@@ -25,6 +26,7 @@ import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useEnsureCalendars } from '@/lib/use-ensure-calendars';
 import { useHolidayCountries } from '@/lib/use-holidays';
 import { useInvites } from '@/lib/use-invites';
+import { describeUserAgent } from '@/lib/user-agent';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -301,7 +303,7 @@ function FieldRow({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   children: React.ReactNode;
 }) {
   return (
@@ -469,23 +471,40 @@ export function ProfileSection() {
         </div>
 
         {user && user.emailVerified === false && (
-          <div className="mx-6 mt-3 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3">
-            <p className="text-default font-medium text-[var(--color-danger)]">
-              {t('profile.emailUnverified')}
-            </p>
-            <p className="mt-1 text-caption text-[var(--color-text-secondary)]">
-              {t('profile.emailUnverifiedHint')}
-            </p>
-            {authConfig.status === 'ready' && authConfig.mailEnabled && (
-              <button
-                type="button"
-                onClick={handleResendVerification}
-                disabled={resendingVerification}
-                className="mt-2 text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
-              >
-                {t('profile.resendVerification')}
-              </button>
-            )}
+          <div role="status" className="callout callout-warning reveal-in mb-5">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="callout-icon"
+              aria-hidden="true"
+            >
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="M3 7l9 6 9-6" />
+            </svg>
+            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="callout-title text-default">{t('profile.emailUnverified')}</p>
+                <p className="mt-0.5 text-caption text-[var(--color-text-secondary)]">
+                  {t('profile.emailUnverifiedHint')}
+                </p>
+              </div>
+              {authConfig.status === 'ready' && authConfig.mailEnabled && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendingVerification}
+                  className="btn-secondary h-8 shrink-0 self-start px-3 text-footnote sm:self-center"
+                >
+                  {t('profile.resendVerification')}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -570,8 +589,6 @@ interface SessionData {
  */
 function SessionsSection() {
   const t = useT();
-  const locale = useUiStore((s) => s.locale);
-  const timezone = useUiStore((s) => s.timezone);
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -614,36 +631,78 @@ function SessionsSection() {
       ) : (
         <ul className="-my-2 divide-y divide-[var(--color-separator)]">
           {sessions.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-default text-[var(--color-text-primary)]">
-                  {s.userAgent || t('sessions.unknownDevice')}
-                  {s.current && (
-                    <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
-                      {t('sessions.current')}
-                    </span>
-                  )}
-                </p>
-                <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                  {[s.ipAddress, formatDateTime(s.createdAt, timezone, locale)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-              </div>
-              {!s.current && (
-                <button
-                  type="button"
-                  onClick={() => revoke(s.id)}
-                  className="shrink-0 rounded-lg px-3 py-1 text-footnote text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
-                >
-                  {t('sessions.revoke')}
-                </button>
-              )}
-            </li>
+            <SessionRow key={s.id} session={s} onRevoke={() => revoke(s.id)} />
           ))}
         </ul>
       )}
     </Section>
+  );
+}
+
+/** One sign-in: the device it came from, where and when, and the way to end it. */
+function SessionRow({ session: s, onRevoke }: { session: SessionData; onRevoke: () => void }) {
+  const t = useT();
+  const locale = useUiStore((st) => st.locale);
+  const timezone = useUiStore((st) => st.timezone);
+  const device = s.userAgent ? describeUserAgent(s.userAgent) : null;
+  const name =
+    [device?.browser, device?.os].filter(Boolean).join(' · ') ||
+    s.userAgent ||
+    t('sessions.unknownDevice');
+  return (
+    <li className="flex items-center gap-3 py-3">
+      <span
+        aria-hidden
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {device?.mobile ? (
+            <>
+              <rect x="7" y="2.5" width="10" height="19" rx="2" />
+              <path d="M11 18.5h2" />
+            </>
+          ) : (
+            <>
+              <rect x="3" y="4" width="18" height="12" rx="2" />
+              <path d="M8 20h8M12 16v4" />
+            </>
+          )}
+        </svg>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex min-w-0 items-center gap-2 text-default text-[var(--color-text-primary)]">
+          <span className="truncate" title={s.userAgent}>
+            {name}
+          </span>
+          {s.current && (
+            <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+              {t('sessions.current')}
+            </span>
+          )}
+        </p>
+        <p className="truncate text-footnote tabular-nums text-[var(--color-text-secondary)]">
+          {[s.ipAddress, formatDateTime(s.createdAt, timezone, locale)].filter(Boolean).join(' · ')}
+        </p>
+      </div>
+      {!s.current && (
+        <button
+          type="button"
+          onClick={onRevoke}
+          className="h-8 shrink-0 rounded-lg px-3 text-footnote font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] active:scale-95"
+        >
+          {t('sessions.revoke')}
+        </button>
+      )}
+    </li>
   );
 }
 
@@ -740,7 +799,12 @@ export function AppearanceSection() {
       </Section>
 
       <Section title={t('settings.timezone')}>
-        <FieldRow label={t('settings.timezone')} hint={detectedTz}>
+        <FieldRow
+          label={t('settings.timezone')}
+          hint={
+            detectedTz === timezone ? undefined : t('settings.timezoneDevice', { tz: detectedTz })
+          }
+        >
           <CustomSelect
             value={timezone}
             onChange={(next) => savePreference({ timezone: next })}
@@ -755,32 +819,21 @@ export function AppearanceSection() {
       </Section>
 
       <Section title={t('settings.holidays')}>
-        <label className="mb-4 flex cursor-pointer items-center justify-between gap-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <span>
             <span className="block text-default font-medium text-[var(--color-text-primary)]">
               {t('settings.holidays')}
             </span>
             <span className="text-footnote text-[var(--color-text-secondary)]">
-              {t('calendar.holidayLabel')}
+              {t('settings.holidaysHint')}
             </span>
           </span>
-          <span className="relative inline-flex h-6 w-11 items-center">
-            <input
-              type="checkbox"
-              checked={holidaysCountry !== null}
-              onChange={(e) => setHolidaysCountry(e.target.checked ? detectHolidayCountry() : null)}
-              className="peer sr-only"
-            />
-            <span
-              aria-hidden
-              className="absolute inset-0 rounded-full bg-[var(--color-border)] transition peer-checked:bg-[var(--color-accent)]"
-            />
-            <span
-              aria-hidden
-              className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"
-            />
-          </span>
-        </label>
+          <Switch
+            label={t('settings.holidays')}
+            checked={holidaysCountry !== null}
+            onChange={(on) => setHolidaysCountry(on ? detectHolidayCountry() : null)}
+          />
+        </div>
         {holidaysCountry !== null && (
           <FieldRow label={t('settings.holidaysCountry')}>
             <CustomSelect
@@ -1652,25 +1705,15 @@ function ProviderCard({
             </span>
           )}
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-body text-[var(--color-text-secondary)]">
+        <div className="flex items-center gap-2 text-body text-[var(--color-text-secondary)]">
           <span>{t('settings.adminProviderEnable')}</span>
-          <span className="relative inline-flex h-5 w-9 items-center">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className="peer sr-only"
-            />
-            <span
-              aria-hidden
-              className="absolute inset-0 rounded-full bg-[var(--color-border)] transition peer-checked:bg-[var(--color-accent)]"
-            />
-            <span
-              aria-hidden
-              className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-4"
-            />
-          </span>
-        </label>
+          <Switch
+            size="sm"
+            label={t('settings.adminProviderEnable')}
+            checked={enabled}
+            onChange={setEnabled}
+          />
+        </div>
       </div>
 
       <FieldRow label={t('settings.adminProviderClientId')}>

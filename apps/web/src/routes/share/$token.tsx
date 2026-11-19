@@ -124,7 +124,7 @@ export function SharedCalendarView() {
                 setFailure(null);
                 loadCalendar();
               }}
-              className="mt-4 rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-default text-[var(--color-accent)]"
+              className="btn-secondary mt-4 h-10 px-5 text-default"
             >
               {t('share.retry')}
             </button>
@@ -183,7 +183,7 @@ export function SharedCalendarView() {
                 type="button"
                 onClick={() => shiftMonth(-1)}
                 aria-label={t('calendar.prevMonth')}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+                className="icon-btn h-8 w-8 rounded-full"
               >
                 <svg
                   width="16"
@@ -203,7 +203,7 @@ export function SharedCalendarView() {
                 type="button"
                 onClick={() => shiftMonth(1)}
                 aria-label={t('calendar.nextMonth')}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+                className="icon-btn h-8 w-8 rounded-full"
               >
                 <svg
                   width="16"

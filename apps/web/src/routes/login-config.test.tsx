@@ -1,14 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const navigate = vi.hoisted(() => vi.fn());
+const search = vi.hoisted(() => ({ redirect: undefined as string | undefined }));
+
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
     options,
-    useSearch: () => ({}),
+    useSearch: () => search,
   }),
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
   Link: ({ children }: { children?: unknown }) => children,
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }));
 
 vi.mock('@/i18n', () => ({
@@ -54,12 +57,26 @@ function config(over: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  navigate.mockReset();
+  search.redirect = undefined;
+  authState.isAuthenticated = false;
   apiGet.mockReset();
   resetAuthConfig();
 });
 afterEach(cleanup);
 
 describe('login page', () => {
+  it('passes an authenticated return path to the router with its query intact', async () => {
+    apiGet.mockResolvedValue(config({ providers: [], mailEnabled: false }));
+    const redirect = '/schedule-polls/calendar/poll?view=respond';
+    search.redirect = redirect;
+    authState.isAuthenticated = true;
+
+    render(<Page />);
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ href: redirect, replace: true }));
+  });
+
   it('renders no form, link or provider button while the config is loading', () => {
     apiGet.mockReturnValue(new Promise(() => {}));
     render(<Page />);
