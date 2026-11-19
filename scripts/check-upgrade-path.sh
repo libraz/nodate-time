@@ -7,14 +7,14 @@
 # before the core upgrades existed), on a scratch database:
 #   1. load that schema and scripts/fixtures/v0.1.0-data.sql
 #   2. apply sql/core/upgrades/*.sql in number order, then
-#      sql/time/upgrades/from-v0.1.0.sql -- twice, so a re-run is proven
-#      harmless
+#      the time-layer upgrades in release order -- twice, to prove a re-run
+#      is harmless
 #   3. check the rewritten rows, run the conformance suite (--mode all),
 #      and compare the schema against a fresh core+time build
 # Every scratch database is dropped on exit, pass or fail.
 #
 # Environment:
-#   TC_UPGRADE_CHECK_DSN        user:pass@host:port of a MySQL 9.7 server the
+#   TC_UPGRADE_CHECK_DSN        user:pass@host:port of a MySQL server the
 #                               user may create databases on
 #                               (default root:rootpw@127.0.0.1:33306)
 #   TC_UPGRADE_CHECK_DB_PREFIX  scratch database name prefix (default sdb_up_)
@@ -30,7 +30,10 @@ export LC_ALL=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="${ROOT}/scripts/fixtures/v0.1.0-data.sql"
-TIME_UPGRADE="${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
+TIME_FILES=(
+  "${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
+  "${ROOT}/sql/time/upgrades/schedule-polls.sql"
+)
 CORE_UPGRADES="${TC_CORE_UPGRADES_DIR:-${ROOT}/sql/core/upgrades}"
 DSN="${TC_UPGRADE_CHECK_DSN:-root:rootpw@127.0.0.1:33306}"
 PREFIX="${TC_UPGRADE_CHECK_DB_PREFIX:-sdb_up_}"
@@ -67,7 +70,7 @@ if [[ ${#CORE_FILES[@]} -eq 0 ]]; then
   echo "check-upgrade-path.sh: no core upgrades under ${CORE_UPGRADES}" >&2
   exit 2
 fi
-for f in "${FIXTURE}" "${TIME_UPGRADE}"; do
+for f in "${FIXTURE}" "${TIME_FILES[@]}"; do
   if [[ ! -f "${f}" ]]; then
     echo "check-upgrade-path.sh: missing ${f}" >&2
     exit 2
@@ -99,10 +102,9 @@ create_db() {
 # apply_upgrades DB: the order an operator follows, core first.
 apply_upgrades() {
   local f
-  for f in "${CORE_FILES[@]}"; do
+  for f in "${CORE_FILES[@]}" "${TIME_FILES[@]}"; do
     sql "$1" <"${f}" >/dev/null || { echo "  failed: $(basename "${f}")" >&2; return 1; }
   done
-  sql "$1" <"${TIME_UPGRADE}" >/dev/null || { echo "  failed: $(basename "${TIME_UPGRADE}")" >&2; return 1; }
 }
 
 # Each query counts the fixture rows a rewrite missed; every count must be 0.

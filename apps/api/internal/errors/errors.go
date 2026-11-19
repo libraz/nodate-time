@@ -200,6 +200,20 @@ var (
 	MemoNotFound = &Spec{Status: 404, Code: "MEMO.NOT_FOUND", Message: "Memo not found"}
 )
 
+// --- Schedule poll errors ---
+
+var (
+	SchedulePollNotFound             = &Spec{Status: 404, Code: "SCHEDULE_POLL.NOT_FOUND", Message: "Schedule poll not found"}
+	SchedulePollAccessDenied         = &Spec{Status: 403, Code: "SCHEDULE_POLL.ACCESS_DENIED", Message: "You are not a recipient or manager of this schedule poll"}
+	SchedulePollStale                = &Spec{Status: 409, Code: "SCHEDULE_POLL.STALE", Message: "This schedule poll changed; reload it before continuing"}
+	SchedulePollConflict             = &Spec{Status: 409, Code: "SCHEDULE_POLL.CONFLICT", Message: "This schedule poll cannot be changed in its current state"}
+	SchedulePollSlotUnavailable      = &Spec{Status: 409, Code: "SCHEDULE_POLL.SLOT_UNAVAILABLE", Message: "The selected time now conflicts with a fixed event"}
+	SchedulePollConfirmationRequired = &Spec{Status: 409, Code: "SCHEDULE_POLL.CONFIRMATION_REQUIRED", Message: "Confirm the selected availability warnings before finalizing"}
+	SchedulePollTooManyMembers       = &Spec{Status: 413, Code: "SCHEDULE_POLL.TOO_MANY_MEMBERS", Message: "This calendar has too many members for one schedule poll"}
+	SchedulePollTooManySlots         = &Spec{Status: 413, Code: "SCHEDULE_POLL.TOO_MANY_SLOTS", Message: "This schedule poll has too many candidate times"}
+	SchedulePollTooMuchHistory       = &Spec{Status: 413, Code: "SCHEDULE_POLL.HISTORY_LIMIT", Message: "This calendar has too many schedule polls for one history response"}
+)
+
 // --- General errors ---
 
 var (

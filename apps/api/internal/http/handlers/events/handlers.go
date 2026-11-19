@@ -430,10 +430,10 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 			return err
 		}
 	}
-	arriving := make([]eventParticipant, 0, len(participants))
+	arriving := make([]uint32, 0, len(participants))
 	for _, p := range participants {
 		if _, ok := present[p.userID]; !ok {
-			arriving = append(arriving, p)
+			arriving = append(arriving, p.userID)
 		}
 	}
 	return addEventParticipants(ctx, q, workspaceID, eventID, arriving)
@@ -455,8 +455,8 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 //
 // The inserts on their own do not collide: an insert-intention lock conflicts
 // with another transaction's gap lock, not with another insert intention.
-func addEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, participants []eventParticipant) error {
-	for _, participant := range participants {
+func addEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, attendeeUserIDs []uint32) error {
+	for _, userID := range attendeeUserIDs {
 		pubID, err := uuid.NewV7()
 		if err != nil {
 			return err
@@ -465,12 +465,47 @@ func addEventParticipants(ctx context.Context, q *generated.Queries, workspaceID
 			PublicID:    pubID[:],
 			WorkspaceID: workspaceID,
 			EventID:     sql.NullInt32{Int32: int32(eventID), Valid: true},
-			UserID:      participant.userID,
+			UserID:      userID,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// InsertEvent persists a validated new event, its attendees, and history using
+// the caller's transaction. Callers resolve the calendar grant and attendee
+// membership before calling it.
+func InsertEvent(ctx context.Context, q *generated.Queries, params generated.CreateCalendarEventParams, attendeeUserIDs []uint32) (generated.CalendarEvent, error) {
+	result, err := q.CreateCalendarEvent(ctx, params)
+	if err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	eventID, err := result.LastInsertId()
+	if err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	if err := addEventParticipants(ctx, q, params.WorkspaceID, uint32(eventID), attendeeUserIDs); err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	created, err := q.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{
+		WorkspaceID: params.WorkspaceID,
+		PublicID:    params.PublicID,
+	})
+	if err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	if err := eventlog.Append(ctx, q, eventlog.Entry{
+		WorkspaceID: params.WorkspaceID,
+		CalendarID:  params.CalendarID,
+		ActorUserID: params.CreatedByUserID,
+		Type:        eventlog.TypeEventCreated,
+		Title:       params.Title,
+		Subject:     params.PublicID,
+	}); err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	return created, nil
 }
 
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
@@ -1088,7 +1123,12 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			if spec != nil {
 				return spec
 			}
-			result, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
+			attendeeUserIDs := make([]uint32, 0, len(participants))
+			for _, participant := range participants {
+				attendeeUserIDs = append(attendeeUserIDs, participant.userID)
+			}
+			var err error
+			created, err = InsertEvent(ctx, q, generated.CreateCalendarEventParams{
 				PublicID:           pubID[:],
 				WorkspaceID:        deps.WorkspaceID,
 				CalendarID:         cal.ID,
@@ -1109,37 +1149,8 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				NotificationOffset: ptrIntToNullInt32(in.Body.NotificationOffset),
 				RecurrenceRule:     ruleData,
 				RecurrenceEnd:      recEnd,
-			})
-			if err != nil {
-				return err
-			}
-			eventID64, err := result.LastInsertId()
-			if err != nil {
-				return err
-			}
-			eventID := uint32(eventID64)
-			// Added rather than replaced: the row was inserted a statement ago
-			// and has no attendees to replace.
-			if err := addEventParticipants(ctx, q, deps.WorkspaceID, eventID, participants); err != nil {
-				return err
-			}
-			// Reload the stored row so the response reflects DB truth (normalized
-			// datetimes, DB-assigned created_at/updated_at) rather than time.Now().
-			created, err = q.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{
-				WorkspaceID: deps.WorkspaceID,
-				PublicID:    pubID[:],
-			})
-			if err != nil {
-				return err
-			}
-			return eventlog.Append(ctx, q, eventlog.Entry{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  cal.ID,
-				ActorUserID: userID,
-				Type:        eventlog.TypeEventCreated,
-				Title:       in.Body.Title,
-				Subject:     pubID[:],
-			})
+			}, attendeeUserIDs)
+			return err
 		})
 		if err != nil {
 			var spec *apierrors.Spec

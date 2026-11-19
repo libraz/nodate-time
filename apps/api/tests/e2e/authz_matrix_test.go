@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/require"
@@ -88,6 +89,8 @@ type mxRow struct {
 	// rather than by looking the subject up -- a deleted event's history stays
 	// readable -- so a foreign id reads as an empty history instead of a 404.
 	logScoped bool
+	// Schedule polls authorize recipients and the assigned organizer individually.
+	pollScoped bool
 }
 
 func (r mxRow) key() string { return r.method + " " + r.path }
@@ -121,10 +124,24 @@ func mxRows() []mxRow {
 	photoPresign := func(*mxWorld) any {
 		return map[string]any{"contentType": "image/png", "byteSize": 128}
 	}
+	availabilityRequest := func(w *mxWorld) map[string]any {
+		start := time.Now().UTC().AddDate(0, 0, 7).Truncate(time.Hour)
+		return map[string]any{
+			"timezone": "UTC", "memberIds": []string{w.users[mxViewer].UserID},
+			"slots": []map[string]string{scheduleSlot(start)},
+		}
+	}
+	pollRequest := func(w *mxWorld) any {
+		body := availabilityRequest(w)
+		body["title"] = "Matrix poll"
+		return body
+	}
 
 	const (
-		cal = "/calendars/{calendarId}"
-		evt = cal + "/events/{eventId}"
+		cal   = "/calendars/{calendarId}"
+		evt   = cal + "/events/{eventId}"
+		polls = cal + "/schedule-polls"
+		poll  = polls + "/{pollId}"
 	)
 	return []mxRow{
 		// Public: no credentials asked for.
@@ -155,6 +172,7 @@ func mxRows() []mxRow {
 		{method: "GET", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/invites/{token}/accept", group: mxProtected},
+		{method: "GET", path: "/me/schedule-poll-actions", group: mxProtected},
 
 		// Calendar-scoped.
 		{method: "GET", path: cal, group: mxProtected, allow: mxRead},
@@ -170,6 +188,19 @@ func mxRows() []mxRow {
 		{method: "GET", path: cal + "/export", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/import", group: mxProtected, allow: mxWrite, body: mxJSON(map[string]any{"ics": mxICS})},
 		{method: "GET", path: cal + "/activity", group: mxProtected, allow: mxRead},
+
+		{method: "GET", path: polls, group: mxProtected, allow: mxRead},
+		{method: "GET", path: polls + "/members", group: mxProtected, allow: mxManage},
+		{method: "GET", path: polls + "/availability-sharing", group: mxProtected, allow: mxManage},
+		{method: "PUT", path: polls + "/availability-sharing", group: mxProtected, allow: mxManage, body: mxJSON(map[string]any{"enabled": false})},
+		{method: "POST", path: polls + "/availability", group: mxProtected, allow: mxManage, body: func(w *mxWorld) any { return availabilityRequest(w) }},
+		{method: "POST", path: polls, group: mxProtected, allow: mxManage, body: pollRequest},
+		{method: "GET", path: poll, group: mxProtected, pollScoped: true},
+		{method: "PATCH", path: poll, group: mxProtected, pollScoped: true},
+		{method: "POST", path: poll + "/refresh-availability", group: mxProtected, pollScoped: true},
+		{method: "PUT", path: poll + "/response", group: mxProtected, pollScoped: true},
+		{method: "POST", path: poll + "/finalize", group: mxProtected, pollScoped: true},
+		{method: "POST", path: poll + "/cancel", group: mxProtected, pollScoped: true},
 
 		{method: "GET", path: cal + "/events", group: mxProtected, allow: mxRead, query: "?start=2026-06-01&end=2026-06-30"},
 		{method: "POST", path: cal + "/events", group: mxProtected, allow: mxWrite,
@@ -631,7 +662,7 @@ func TestAuthzMatrix(t *testing.T) {
 
 	t.Run("caller-scoped", func(t *testing.T) {
 		for _, r := range rows {
-			if r.group != mxProtected || r.allow != nil {
+			if r.group != mxProtected || r.allow != nil || r.pollScoped {
 				continue
 			}
 			// Logging out ends the session, so it gets an account of its own.
@@ -677,6 +708,79 @@ func TestAuthzMatrix(t *testing.T) {
 			})
 		}
 	})
+	t.Run("schedule-poll", func(t *testing.T) {
+		for _, r := range rows {
+			if !r.pollScoped {
+				continue
+			}
+			t.Run(r.key(), func(t *testing.T) {
+				t.Parallel()
+				runPollRow(t, actors, r)
+			})
+		}
+	})
+}
+
+func runPollRow(t *testing.T, actors *mxActors, row mxRow) {
+	w := newMxWorld(t, actors)
+	respondent := actors.users[mxViewer]
+	base := testServerURL + "/calendars/" + w.calID + "/schedule-polls"
+	start := time.Now().UTC().AddDate(0, 0, 7).Truncate(time.Hour)
+	var poll schedulePollBody
+	helpers.DoJSON(t, http.MethodPost, base, w.owner(), map[string]any{
+		"title": "Private matrix poll", "timezone": "UTC", "memberIds": []string{respondent.UserID},
+		"slots": []map[string]string{scheduleSlot(start)},
+	}, &poll)
+	require.Len(t, poll.Slots, 1)
+	target := testServerURL + strings.NewReplacer("{calendarId}", w.calID, "{pollId}", poll.ID).Replace(row.path)
+	foreign := testServerURL + strings.NewReplacer("{calendarId}", actors.stranger.CalendarID, "{pollId}", poll.ID).Replace(row.path)
+	body := map[string]any{"version": poll.Version}
+	answers := []map[string]string{{"slotId": poll.Slots[0].ID, "value": "yes"}}
+	organizerOnly := true
+	switch {
+	case row.method == http.MethodGet, strings.HasSuffix(row.path, "/refresh-availability"):
+		body = nil
+		organizerOnly = false
+	case row.method == http.MethodPatch:
+		body["title"] = "Updated matrix poll"
+	case strings.HasSuffix(row.path, "/response"):
+		var ballot schedulePollBody
+		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
+		body["responseVersion"] = ballot.ResponseVersion
+		body["answers"] = answers
+		organizerOnly = false
+	case strings.HasSuffix(row.path, "/finalize"):
+		var ballot schedulePollBody
+		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
+		helpers.DoJSON(t, http.MethodPut, base+"/"+poll.ID+"/response", respondent.AccessToken, map[string]any{
+			"version": poll.Version, "responseVersion": ballot.ResponseVersion, "answers": answers,
+		}, nil)
+		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, w.owner(), nil, &poll)
+		body["reviewVersion"] = poll.ReviewVersion
+		body["slotId"] = poll.Slots[0].ID
+		body["ownerId"] = respondent.UserID
+	}
+
+	for _, actor := range []*helpers.TestTenant{actors.users[mxEditor], actors.users[mxManager], respondent} {
+		if actor == respondent && !organizerOnly {
+			continue
+		}
+		status, raw := w.do(row.method, target, actor.AccessToken, body)
+		expected := http.StatusNotFound
+		if organizerOnly {
+			expected = http.StatusForbidden
+		}
+		require.Equal(t, expected, status, raw)
+		require.NotContains(t, raw, "Private matrix poll")
+	}
+	status, raw := w.do(row.method, foreign, actors.stranger.AccessToken, body)
+	require.Equal(t, http.StatusNotFound, status, raw)
+	allowed := respondent.AccessToken
+	if organizerOnly {
+		allowed = w.owner()
+	}
+	status, raw = w.do(row.method, target, allowed, body)
+	require.True(t, status >= 200 && status < 300, "%s: %d %s", row.key(), status, raw)
 }
 
 func mxCode(raw []byte) string {

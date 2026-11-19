@@ -310,6 +310,8 @@ func Build(deps Deps) http.Handler {
 		albumDeps := albums.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
 		auditDeps := audit.Deps{DB: deps.DB, Queries: deps.Queries, Storage: deps.Storage, WorkspaceID: deps.WorkspaceID}
 
+		registerSchedulePolls(api, deps)
+
 		// User
 		huma.Register(api, huma.Operation{
 			OperationID: "get-me",

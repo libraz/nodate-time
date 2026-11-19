@@ -38,9 +38,14 @@ DROP TABLE IF EXISTS `workspaces`;
 DROP TABLE IF EXISTS `album_photos`;
 DROP TABLE IF EXISTS `avatar_uploads`;
 DROP TABLE IF EXISTS `calendar_invites`;
+DROP TABLE IF EXISTS `calendar_schedule_poll_answers`;
+DROP TABLE IF EXISTS `calendar_schedule_poll_members`;
+DROP TABLE IF EXISTS `calendar_schedule_poll_slots`;
+DROP TABLE IF EXISTS `calendar_schedule_polls`;
 DROP TABLE IF EXISTS `email_verifications`;
 DROP TABLE IF EXISTS `oauth_provider_configs`;
 DROP TABLE IF EXISTS `password_resets`;
+DROP TABLE IF EXISTS `schedule_availability_calendars`;
 DROP TABLE IF EXISTS `signin_states`;
 
 -- >>> audit_logs.sql
@@ -1566,6 +1571,81 @@ CREATE TABLE calendar_invites (
   CONSTRAINT chk_calendar_invites_uses CHECK (max_uses IS NULL OR use_count <= max_uses)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Join-by-link calendar invitations';
 
+-- >>> calendar_schedule_poll_answers.sql
+CREATE TABLE calendar_schedule_poll_answers (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  poll_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to calendar_schedule_polls.id',
+  slot_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to a slot in the same poll',
+  member_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to a recipient in the same poll',
+  user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to the answering user; must match member_id',
+  value ENUM('yes','maybe','no') NOT NULL,
+  updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  UNIQUE KEY uniq_calendar_schedule_poll_answers_poll_slot_member (poll_id, slot_id, member_id),
+  KEY idx_calendar_schedule_poll_answers_member (poll_id, member_id, slot_id),
+  KEY idx_calendar_schedule_poll_answers_user (user_id, poll_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Private yes/maybe/no responses for each recipient and candidate';
+
+-- >>> calendar_schedule_poll_members.sql
+CREATE TABLE calendar_schedule_poll_members (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  poll_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to calendar_schedule_polls.id',
+  user_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to users.id; public responses use the user public ID',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'FALSE when removed from this poll; re-adding requires fresh answers',
+  answer_version INT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Per-recipient optimistic revision for stale ballot tabs',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  UNIQUE KEY uniq_calendar_schedule_poll_members_poll_user (poll_id, user_id),
+  UNIQUE KEY uniq_calendar_schedule_poll_members_poll_id_id_user (poll_id, id, user_id),
+  KEY idx_calendar_schedule_poll_members_user (user_id, poll_id, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Snapshot of recipients chosen when a private schedule poll is sent';
+
+-- >>> calendar_schedule_poll_slots.sql
+CREATE TABLE calendar_schedule_poll_slots (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible candidate ID',
+  poll_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to calendar_schedule_polls.id',
+  start_at DATETIME(3) NOT NULL COMMENT 'Candidate start instant stored as UTC',
+  end_at DATETIME(3) NOT NULL COMMENT 'Candidate end instant stored as UTC',
+  availability ENUM('open','soft','hard') NOT NULL COMMENT 'Latest aggregate availability; no event details are stored here',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Hard conflicts are kept for the manager to see but removed from response requirements',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  UNIQUE KEY uniq_calendar_schedule_poll_slots_public_id (public_id),
+  UNIQUE KEY uniq_calendar_schedule_poll_slots_poll_public_id (poll_id, public_id),
+  UNIQUE KEY uniq_calendar_schedule_poll_slots_poll_id_id (poll_id, id),
+  KEY idx_calendar_schedule_poll_slots_poll_enabled (poll_id, enabled, start_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Private schedule poll candidate instants';
+
+-- >>> calendar_schedule_polls.sql
+-- Private, time-only request state. Poll answers are intentionally not
+-- written to the shared events log; finalizing the poll writes one ordinary
+-- calendar event through the existing event creation path.
+CREATE TABLE calendar_schedule_polls (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT 'Internal PK, never exposed',
+  public_id BINARY(16) NOT NULL COMMENT 'UUID v7, the only externally visible poll ID',
+  workspace_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to workspaces.id',
+  calendar_id INT UNSIGNED NOT NULL COMMENT 'Internal FK to calendars.id',
+  created_by_user_id INT UNSIGNED NULL COMMENT 'Creator; nullable so account removal preserves private history',
+  manager_user_id INT UNSIGNED NULL COMMENT 'Current manager; owner/manager may explicitly take over when absent or inactive',
+  title VARCHAR(500) NOT NULL,
+  timezone VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL,
+  status ENUM('open','finalized','cancelled') NOT NULL DEFAULT 'open',
+  version INT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Lifecycle and organizer-edit revision',
+  response_version INT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Roster/candidate revision used to reject stale answers',
+  selected_slot_public_id BINARY(16) NULL COMMENT 'Chosen candidate UUID after finalization',
+  confirmed_event_public_id BINARY(16) NULL COMMENT 'Public ID of the ordinary event created at finalization; retained if that event is deleted',
+  updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  UNIQUE KEY uniq_calendar_schedule_polls_public_id (public_id),
+  UNIQUE KEY uniq_calendar_schedule_polls_workspace_public_id (workspace_id, public_id),
+  KEY idx_calendar_schedule_polls_calendar_status (workspace_id, calendar_id, status, created_at),
+  KEY idx_calendar_schedule_polls_manager (workspace_id, manager_user_id, status),
+  KEY idx_calendar_schedule_polls_calendar_id_id (calendar_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Private schedule poll lifecycle; only finalized events enter shared history';
+
 -- >>> email_verifications.sql
 -- ====================================
 -- email_verifications
@@ -1673,6 +1753,19 @@ CREATE TABLE password_resets (
   CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Single-use password reset tokens';
 
+-- >>> schedule_availability_calendars.sql
+-- A calendar's managers can contribute aggregate busy time to other
+-- schedule polls in the same workspace. No row means no sharing.
+CREATE TABLE schedule_availability_calendars (
+  calendar_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  CONSTRAINT fk_schedule_availability_calendars_calendar
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Source calendar consent to workspace schedule availability checks';
+
 -- >>> signin_states.sql
 -- ====================================
 -- signin_states
@@ -1705,6 +1798,55 @@ CREATE TABLE signin_states (
   UNIQUE KEY uniq_signin_states_state_hash (state_hash),
   KEY idx_signin_states_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='In-flight OAuth sign-in state';
+
+DROP PROCEDURE IF EXISTS nf_drop_fk_if_exists;
+DELIMITER $$
+CREATE PROCEDURE nf_drop_fk_if_exists(IN p_table VARCHAR(64), IN p_name VARCHAR(64))
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = p_table
+      AND CONSTRAINT_NAME = p_name AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+  ) THEN
+    SET @nf_drop_fk_sql = CONCAT('ALTER TABLE `', p_table, '` DROP FOREIGN KEY `', p_name, '`');
+    PREPARE nf_drop_fk_stmt FROM @nf_drop_fk_sql;
+    EXECUTE nf_drop_fk_stmt;
+    DEALLOCATE PREPARE nf_drop_fk_stmt;
+  END IF;
+END$$
+DELIMITER ;
+CALL nf_drop_fk_if_exists('calendar_schedule_polls', 'fk_calendar_schedule_polls_workspace');
+CALL nf_drop_fk_if_exists('calendar_schedule_polls', 'fk_calendar_schedule_polls_calendar');
+CALL nf_drop_fk_if_exists('calendar_schedule_polls', 'fk_calendar_schedule_polls_creator');
+CALL nf_drop_fk_if_exists('calendar_schedule_polls', 'fk_calendar_schedule_polls_manager');
+CALL nf_drop_fk_if_exists('calendar_schedule_poll_slots', 'fk_calendar_schedule_poll_slots_poll');
+CALL nf_drop_fk_if_exists('calendar_schedule_poll_members', 'fk_calendar_schedule_poll_members_poll');
+CALL nf_drop_fk_if_exists('calendar_schedule_poll_members', 'fk_calendar_schedule_poll_members_user');
+CALL nf_drop_fk_if_exists('calendar_schedule_poll_answers', 'fk_calendar_schedule_poll_answers_slot');
+
+-- >>> schedule_polls.sql
+ALTER TABLE calendar_schedule_polls
+  ADD CONSTRAINT fk_calendar_schedule_polls_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE ON UPDATE RESTRICT;
+ALTER TABLE calendar_schedule_polls
+  ADD CONSTRAINT fk_calendar_schedule_polls_calendar FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE ON UPDATE RESTRICT;
+ALTER TABLE calendar_schedule_polls
+  ADD CONSTRAINT fk_calendar_schedule_polls_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL ON UPDATE RESTRICT;
+ALTER TABLE calendar_schedule_polls
+  ADD CONSTRAINT fk_calendar_schedule_polls_manager FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL ON UPDATE RESTRICT;
+
+ALTER TABLE calendar_schedule_poll_slots
+  ADD CONSTRAINT fk_calendar_schedule_poll_slots_poll FOREIGN KEY (poll_id) REFERENCES calendar_schedule_polls(id) ON DELETE CASCADE ON UPDATE RESTRICT;
+
+ALTER TABLE calendar_schedule_poll_members
+  ADD CONSTRAINT fk_calendar_schedule_poll_members_poll FOREIGN KEY (poll_id) REFERENCES calendar_schedule_polls(id) ON DELETE CASCADE ON UPDATE RESTRICT;
+ALTER TABLE calendar_schedule_poll_members
+  ADD CONSTRAINT fk_calendar_schedule_poll_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE RESTRICT;
+
+ALTER TABLE calendar_schedule_poll_answers
+  ADD CONSTRAINT fk_calendar_schedule_poll_answers_slot FOREIGN KEY (poll_id, slot_id) REFERENCES calendar_schedule_poll_slots(poll_id, id) ON DELETE CASCADE ON UPDATE RESTRICT,
+  ADD CONSTRAINT fk_calendar_schedule_poll_answers_member FOREIGN KEY (poll_id, member_id, user_id) REFERENCES calendar_schedule_poll_members(poll_id, id, user_id) ON DELETE CASCADE ON UPDATE RESTRICT;
+
+DROP PROCEDURE IF EXISTS nf_drop_fk_if_exists;
 
 DROP VIEW IF EXISTS `storage_objects_unreferenced`;
 

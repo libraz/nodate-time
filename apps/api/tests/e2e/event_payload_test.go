@@ -26,6 +26,9 @@ func spaCreateBody() map[string]any {
 		"notificationOffset": nil,
 		"participants":       []string{},
 		"ownerId":            nil,
+		"flexibility":        "negotiable",
+		"showAs":             "busy",
+		"visibility":         "default",
 		"recurrenceRule":     nil,
 	}
 }
@@ -51,11 +54,13 @@ func TestEventAcceptsBrowserClientPayload(t *testing.T) {
 	update["endAt"] = "2026-04-21T16:00:00+09:00"
 
 	var updated struct {
-		Title string `json:"title"`
-		Color string `json:"color"`
+		Title       string `json:"title"`
+		Color       string `json:"color"`
+		Flexibility string `json:"flexibility"`
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+created.ID, tt.AccessToken, update, &updated)
 	require.Equal(t, "定例MTG（移動）", updated.Title)
+	require.Equal(t, "negotiable", updated.Flexibility)
 	// Colour comes from the owner's membership on both responses; it is not a
 	// writable field, which is why the client must not send one.
 	require.Equal(t, created.Color, updated.Color)
