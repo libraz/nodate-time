@@ -2,15 +2,15 @@
 
 ## Tech stack
 
-| Area | Technology |
-| --- | --- |
-| API | Go 1.26 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
-| DB | MySQL 9.7 (Docker Compose) |
-| Object storage | S3-compatible (Versity S3 Gateway locally) |
-| Web | React 19 + TypeScript 7 + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
-| Lint / format | Biome (web) / gofmt (Go) |
-| Package manager | Bun |
-| Testing | Go E2E (testify + real MySQL) / Vitest (web) |
+| Area            | Technology                                                                              |
+| --------------- | --------------------------------------------------------------------------------------- |
+| API             | Go 1.27.4 + [Huma v2](https://huma.rocks) (OpenAPI) + chi/v5 + [sqlc](https://sqlc.dev) |
+| DB              | MySQL 26.10.0 (Docker Compose)                                                          |
+| Object storage  | S3-compatible (Versity S3 Gateway locally)                                              |
+| Web             | React 19 + TypeScript 7 + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon     |
+| Lint / format   | Biome (web) / gofmt (Go)                                                                |
+| Package manager | Bun 1.4.5                                                                               |
+| Testing         | Go E2E (testify + real MySQL) / Vitest (web)                                            |
 
 ## Repo structure
 

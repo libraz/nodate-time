@@ -1,8 +1,8 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.29.0
 # Multi-stage build for the nodate-time Go API.
 # The build context is the repository root.
 
-FROM golang:1.27-alpine AS build
+FROM golang:1.27.4-alpine3.24 AS build
 WORKDIR /src
 
 # Manifests first so a source-only change reuses the download layer.
@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/createuser ./cmd/createuser && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/api /api
 COPY --from=build /out/createuser /createuser
 COPY --from=build /out/healthcheck /healthcheck

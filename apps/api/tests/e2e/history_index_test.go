@@ -91,7 +91,7 @@ func seedSubjectHistory(t *testing.T, workspaceID, calendarID uint32, subject st
 // to perform itself being the part that does not show up in the row count.
 func explainOne(t *testing.T, query string, args ...any) (string, int64, string) {
 	t.Helper()
-	// The tabular format is named because MySQL 9 defaults explain_format to TREE,
+	// The tabular format is named because MySQL defaults explain_format to TREE,
 	// which returns one text column and no "key" to read.
 	rows, err := testDB.Query("EXPLAIN FORMAT=TRADITIONAL "+query, args...)
 	require.NoError(t, err)

@@ -24,7 +24,7 @@ name: nodate-time-prod
 
 services:
   mysql:
-    image: mysql:9.7
+    image: mysql:26.10.0
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:?set a MySQL root password}
@@ -64,7 +64,7 @@ services:
   # An S3 gateway over plain files: object metadata lives in extended
   # attributes, so a file-level copy of the volume has to carry them.
   storage:
-    image: versity/versitygw:v1.10.0
+    image: versity/versitygw:v1.11.0
     restart: unless-stopped
     command: ["posix", "/data"]
     environment:

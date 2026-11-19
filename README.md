@@ -15,11 +15,11 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 
 ## Screenshots
 
-| Monthly view | Weekly view |
-| --- | --- |
-| ![Monthly view with the event-create dialog](./docs/images/monthly-create-event.png) | ![Weekly timeline view](./docs/images/weekly-view.png) |
-| **Share & embed** | **Mobile** |
-| ![Share panel with invite links and embed code](./docs/images/share-panel.png) | <img src="./docs/images/mobile-monthly.png" width="240" alt="Mobile monthly view"> |
+| Monthly view                                                                         | Weekly view                                                                        |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| ![Monthly view with the event-create dialog](./docs/images/monthly-create-event.png) | ![Weekly timeline view](./docs/images/weekly-view.png)                             |
+| **Share & embed**                                                                    | **Mobile**                                                                         |
+| ![Share panel with invite links and embed code](./docs/images/share-panel.png)       | <img src="./docs/images/mobile-monthly.png" width="240" alt="Mobile monthly view"> |
 
 ## What it does
 
@@ -37,7 +37,7 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 
 ## Getting started
 
-Prerequisites: [Bun](https://bun.sh) 1.4+, Go 1.26+, Docker (MySQL and object storage), and [sqlc](https://sqlc.dev) only when regenerating DB code.
+Local development requires [Bun](https://bun.sh) 1.4.5 or later, Node.js 26.13.1, Go 1.26.10 or later, and Docker for MySQL and object storage. Use [sqlc](https://sqlc.dev) 1.31.1 to regenerate the database code.
 
 ```sh
 bun install

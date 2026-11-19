@@ -2,15 +2,15 @@
 
 ## 技術スタック
 
-| 領域 | 採用技術 |
-| --- | --- |
-| API | Go 1.26 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
-| DB | MySQL 9.7（Docker Compose） |
-| オブジェクトストレージ | S3 互換（ローカルは Versity S3 Gateway） |
-| Web | React 19 + TypeScript 7 + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon |
-| Lint / Format | Biome（Web）/ gofmt（Go） |
-| パッケージマネージャ | Bun |
-| テスト | Go E2E（testify + 実 MySQL）/ Vitest（Web） |
+| 領域                   | 採用技術                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| API                    | Go 1.27.4 + [Huma v2](https://huma.rocks)（OpenAPI）+ chi/v5 + [sqlc](https://sqlc.dev) |
+| DB                     | MySQL 26.10.0（Docker Compose）                                                         |
+| オブジェクトストレージ | S3 互換（ローカルは Versity S3 Gateway）                                                |
+| Web                    | React 19 + TypeScript 7 + Vite + TanStack Router + Zustand + Tailwind CSS 4 + Luxon     |
+| Lint / Format          | Biome（Web）/ gofmt（Go）                                                               |
+| パッケージマネージャ   | Bun 1.4.5                                                                               |
+| テスト                 | Go E2E（testify + 実 MySQL）/ Vitest（Web）                                             |
 
 ## ディレクトリ構成
 

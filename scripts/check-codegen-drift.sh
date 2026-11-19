@@ -39,7 +39,7 @@ SQLC_CONFIG="$ROOT_DIR/sql/sqlc.yaml"
 
 # Pinned because two sqlc versions can emit different output from identical
 # input; comparing across versions would report drift that is not there.
-SQLC_VERSION="v1.30.0"
+SQLC_VERSION="v1.31.1"
 
 staged_only=0
 tool_only=0

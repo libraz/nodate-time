@@ -45,7 +45,7 @@
   <text class="m" x="560" y="224">relays blobs at /blobs</text>
 
   <rect class="box" x="808" y="130" width="152" height="64" rx="10"/>
-  <text class="h" x="884" y="168" text-anchor="middle">MySQL 9.7</text>
+  <text class="h" x="884" y="168" text-anchor="middle">MySQL 26.10.0</text>
   <path class="int" d="M730 175 H808" marker-end="url(#an)"/>
 
   <rect class="box" x="808" y="246" width="152" height="90" rx="10"/>

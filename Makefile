@@ -46,13 +46,13 @@ db-schema:
 	bash sql/core/tools/build-schema.sh core time > sql/schema.sql
 
 db-apply: db-schema
-	docker run --rm -i --network host mysql:9.7 \
+	docker run --rm -i --network host mysql:26.10.0 \
 		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/schema.sql
 
 # Create the demo/admin accounts via the helper (no password hashes in SQL),
 # then load the sample calendars/events/memos that reference them by email.
 db-seed: db-apply db-seed-users
-	docker run --rm -i --network host mysql:9.7 \
+	docker run --rm -i --network host mysql:26.10.0 \
 		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/seed.sql
 
 # A user has no colour of its own: the colour that identifies someone on a

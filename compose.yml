@@ -1,7 +1,7 @@
 # Local development compose stack for nodate-time.
 services:
   mysql:
-    image: mysql:9.7
+    image: mysql:26.10.0
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:-rootpw}
@@ -37,7 +37,7 @@ services:
   # S3-compatible gateway storing objects as plain files under /data. Reached
   # only by the API; loopback binding exists only for a host-run dev API.
   storage:
-    image: versity/versitygw:v1.10.0
+    image: versity/versitygw:v1.11.0
     restart: unless-stopped
     command: ["posix", "/data"]
     environment:
@@ -57,7 +57,7 @@ services:
 
   # Catches the mail the dev API sends (SMTP on 1025, web UI on 8025).
   mailpit:
-    image: axllent/mailpit:v1.21
+    image: axllent/mailpit:v1.34.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:${TC_MAILPIT_SMTP_PORT:-1025}:1025"

@@ -2,11 +2,11 @@
 
 The server serves two ports. `TC_PORT` (8080) is the product. `TC_METRICS_ADDR` (127.0.0.1:9464) is a second listener carrying what describes the process rather than the product:
 
-| Path | What it answers |
-| --- | --- |
-| `/metrics` | Prometheus text format: request rate, latency histogram and response size by matched route; requests in flight; connection-pool saturation; Go runtime; rate-limit rejections by scope; outgoing mail by outcome |
-| `/debug/pprof/*` | live CPU, heap and goroutine profiles |
-| `/health/detail` | per-dependency report (database, object storage, mail relay) with the error each failing probe returned. 503 only when a *required* dependency is down, so a deployment is not pulled from rotation over an unreachable mail relay |
+| Path             | What it answers                                                                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/metrics`       | Prometheus text format: request rate, latency histogram and response size by matched route; requests in flight; connection-pool saturation; Go runtime; rate-limit rejections by scope; outgoing mail by outcome                   |
+| `/debug/pprof/*` | live CPU, heap and goroutine profiles                                                                                                                                                                                              |
+| `/health/detail` | per-dependency report (database, object storage, mail relay) with the error each failing probe returned. 503 only when a _required_ dependency is down, so a deployment is not pulled from rotation over an unreachable mail relay |
 
 ## Access control
 

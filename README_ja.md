@@ -15,11 +15,11 @@
 
 ## スクリーンショット
 
-| 月表示 | 週表示 |
-| --- | --- |
-| ![イベント作成ダイアログを開いた月表示](./docs/images/monthly-create-event.png) | ![週表示のタイムライン](./docs/images/weekly-view.png) |
-| **共有・埋め込み** | **モバイル** |
-| ![招待リンクと埋め込みコードの共有パネル](./docs/images/share-panel.png) | <img src="./docs/images/mobile-monthly.png" width="240" alt="モバイルの月表示"> |
+| 月表示                                                                          | 週表示                                                                          |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| ![イベント作成ダイアログを開いた月表示](./docs/images/monthly-create-event.png) | ![週表示のタイムライン](./docs/images/weekly-view.png)                          |
+| **共有・埋め込み**                                                              | **モバイル**                                                                    |
+| ![招待リンクと埋め込みコードの共有パネル](./docs/images/share-panel.png)        | <img src="./docs/images/mobile-monthly.png" width="240" alt="モバイルの月表示"> |
 
 ## できること
 
@@ -37,7 +37,7 @@
 
 ## はじめに
 
-必要なもの: [Bun](https://bun.sh) 1.4 以上、Go 1.26 以上、Docker（MySQL とオブジェクトストレージ用）。DB のコードを再生成する場合だけ [sqlc](https://sqlc.dev) も必要です。
+ローカル開発には [Bun](https://bun.sh) 1.4.5 以上、Node.js 26.13.1、Go 1.26.10 以上、MySQL とオブジェクトストレージを動かす Docker が必要です。DB のコードを再生成する場合は [sqlc](https://sqlc.dev) 1.31.1 を使います。
 
 ```sh
 bun install

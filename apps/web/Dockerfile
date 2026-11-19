@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.29.0
 # Multi-stage build for the nodate-time React SPA.
 # The build context is the repository root: the lockfile and the shared
 # TypeScript configuration live there.
 
-FROM oven/bun:1.4-alpine AS build
+FROM oven/bun:1.4.5-alpine AS build
 WORKDIR /src
 
 COPY package.json bun.lock bunfig.toml tsconfig.base.json tsconfig.json ./
@@ -48,7 +48,7 @@ RUN bun apps/web/nginx/csp-script-hash.mjs apps/web/dist/index.html > /src/csp.c
 # The images' hosts for img-src, validated by the same rules as the build.
 RUN bun apps/web/nginx/csp-img-src.mjs > /src/csp-img.conf
 
-FROM nginx:1.29-alpine
+FROM nginx:1.31.9-alpine3.24
 # app.conf holds what is served either way and is included by both server
 # blocks. The default is plain HTTP, for a deployment where something else
 # terminates TLS; compose.prod.yml mounts the TLS template over it.

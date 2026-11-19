@@ -30,7 +30,7 @@
 
   <!-- shared database -->
   <rect x="330" y="80" width="440" height="410" rx="12" fill="#ffffff" stroke="#8c959f" stroke-width="1.25" stroke-dasharray="7 5"/>
-  <text class="h" x="350" y="108">One MySQL 9.7</text>
+  <text class="h" x="350" y="108">One MySQL 26.10.0</text>
   <text class="s" x="470" y="108">optional: both products pointed at the same database</text>
 
   <rect x="350" y="124" width="400" height="92" rx="8" fill="#ffffff" stroke="#54aeff" stroke-width="1.5"/>
