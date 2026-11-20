@@ -1,12 +1,11 @@
 package calendars
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
+	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 )
 
 type rawEvent struct {
@@ -33,7 +32,7 @@ type rawEvent struct {
 	tzUnknown bool
 	rrule     string
 	// exdates are the occurrences the series cancels, distinct and at most
-	// importMaxExdates of them; tooManyExdates records that the file named more.
+	// calimport.MaxExdates of them; tooManyExdates records that the file named more.
 	exdates        []time.Time
 	tooManyExdates bool
 	// duration is the DURATION property, the alternative to DTEND.
@@ -155,11 +154,6 @@ func splitContentLine(line string) (name string, params []string, value string, 
 	return "", nil, "", false
 }
 
-// importMaxExdates bounds the cancellations one imported series may carry.
-// Every listing and export of the series reads the whole list, so a file
-// naming hundreds of thousands of them is refused rather than stored.
-const importMaxExdates = 1000
-
 func parseICS(text string) []rawEvent {
 	text = unfoldICS(text)
 	lines := strings.Split(text, "\n")
@@ -232,7 +226,7 @@ func parseICS(text string) []rawEvent {
 			case "LOCATION":
 				cur.location = unescapeICS(val)
 			case "DESCRIPTION":
-				cur.desc = truncateRunes(unescapeICS(val), importMaxMemoRunes)
+				cur.desc = truncateRunes(unescapeICS(val), calimport.MaxMemoRunes)
 			case "URL":
 				cur.url = val
 			case "CLASS":
@@ -279,7 +273,7 @@ func parseICS(text string) []rawEvent {
 					if exdateSeen[key] {
 						continue
 					}
-					if len(cur.exdates) >= importMaxExdates {
+					if len(cur.exdates) >= calimport.MaxExdates {
 						cur.tooManyExdates = true
 						break
 					}
@@ -296,27 +290,6 @@ func parseICS(text string) []rawEvent {
 	}
 	return events
 }
-
-// convertRRule maps an RFC 5545 RRULE value onto the stored rule JSON, or
-// reports false for a rule the expander would expand to other dates, so the
-// caller skips the event instead of importing a different series. start is
-// DTSTART in the event's zone.
-func convertRRule(value string, start time.Time) (*json.RawMessage, bool) {
-	rule, ok := recurrence.ParseRRule(value, start)
-	if !ok {
-		return nil, false
-	}
-	data, err := json.Marshal(rule)
-	if err != nil {
-		return nil, false
-	}
-	raw := json.RawMessage(data)
-	return &raw, true
-}
-
-// importMaxMemoRunes is the memo length the events API accepts. A longer
-// description is cut to it rather than stored as a memo no edit could save.
-const importMaxMemoRunes = 16000
 
 // truncateRunes cuts s to at most n characters, never inside one.
 func truncateRunes(s string, n int) string {
