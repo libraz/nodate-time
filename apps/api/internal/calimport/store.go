@@ -16,6 +16,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
@@ -391,7 +392,7 @@ func importSeriesHead(
 		return importedSeries{}, importFailed, nil
 	}
 
-	res, err := q.CreateCalendarEvent(ctx, generated.CreateCalendarEventParams{
+	created, err := eventstore.Insert(ctx, q, generated.CreateCalendarEventParams{
 		PublicID:           pubID[:],
 		WorkspaceID:        s.workspaceID,
 		CalendarID:         cal.ID,
@@ -413,18 +414,11 @@ func importSeriesHead(
 		RecurrenceRule:     ruleData,
 		RecurrenceEnd:      recEnd,
 		SourceUid:          identity,
-	})
+	}, e.AttendeeUserIDs, map[string]any{"source": s.source})
 	if err != nil {
 		return importedSeries{}, importFailed, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return importedSeries{}, importFailed, err
-	}
-	newID := uint32(id)
-	if err := attendees.AddToNew(ctx, q, s.workspaceID, newID, e.AttendeeUserIDs); err != nil {
-		return importedSeries{}, importFailed, err
-	}
+	newID := created.ID
 	if exceptions != nil {
 		if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
 			RecurrenceExceptions: exceptions,
@@ -432,17 +426,6 @@ func importSeriesHead(
 		}); err != nil {
 			return importedSeries{}, importFailed, err
 		}
-	}
-	if err := eventlog.Append(ctx, q, eventlog.Entry{
-		WorkspaceID: s.workspaceID,
-		CalendarID:  cal.ID,
-		ActorUserID: userID,
-		Type:        eventlog.TypeEventCreated,
-		Title:       e.Title,
-		Subject:     pubID[:],
-		Extra:       map[string]any{"source": s.source},
-	}); err != nil {
-		return importedSeries{}, importFailed, err
 	}
 	return importedSeries{
 		id: newID, publicID: pubID[:], title: e.Title, start: e.Start, end: endAt,

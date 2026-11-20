@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -267,41 +267,6 @@ func matchesETag(ifMatch string, e generated.CalendarEvent) bool {
 		}
 	}
 	return false
-}
-
-// InsertEvent persists a validated new event, its attendees, and history using
-// the caller's transaction. Callers resolve the calendar grant and attendee
-// membership before calling it.
-func InsertEvent(ctx context.Context, q *generated.Queries, params generated.CreateCalendarEventParams, attendeeUserIDs []uint32) (generated.CalendarEvent, error) {
-	result, err := q.CreateCalendarEvent(ctx, params)
-	if err != nil {
-		return generated.CalendarEvent{}, err
-	}
-	eventID, err := result.LastInsertId()
-	if err != nil {
-		return generated.CalendarEvent{}, err
-	}
-	if err := attendees.AddToNew(ctx, q, params.WorkspaceID, uint32(eventID), attendeeUserIDs); err != nil {
-		return generated.CalendarEvent{}, err
-	}
-	created, err := q.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{
-		WorkspaceID: params.WorkspaceID,
-		PublicID:    params.PublicID,
-	})
-	if err != nil {
-		return generated.CalendarEvent{}, err
-	}
-	if err := eventlog.Append(ctx, q, eventlog.Entry{
-		WorkspaceID: params.WorkspaceID,
-		CalendarID:  params.CalendarID,
-		ActorUserID: params.CreatedByUserID,
-		Type:        eventlog.TypeEventCreated,
-		Title:       params.Title,
-		Subject:     params.PublicID,
-	}); err != nil {
-		return generated.CalendarEvent{}, err
-	}
-	return created, nil
 }
 
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
@@ -734,7 +699,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				attendeeUserIDs = append(attendeeUserIDs, participant.userID)
 			}
 			var err error
-			created, err = InsertEvent(ctx, q, generated.CreateCalendarEventParams{
+			created, err = eventstore.Insert(ctx, q, generated.CreateCalendarEventParams{
 				PublicID:           pubID[:],
 				WorkspaceID:        deps.WorkspaceID,
 				CalendarID:         cal.ID,
@@ -755,7 +720,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				NotificationOffset: ptrIntToNullInt32(in.Body.NotificationOffset),
 				RecurrenceRule:     ruleData,
 				RecurrenceEnd:      recEnd,
-			}, attendeeUserIDs)
+			}, attendeeUserIDs, nil)
 			return err
 		})
 		if err != nil {

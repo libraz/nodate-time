@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
-	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 )
 
 func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMutationOutput, error) {
@@ -191,7 +191,7 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			for _, recipient := range members {
 				attendeeIDs = append(attendeeIDs, recipient.UserID)
 			}
-			created, err := events.InsertEvent(ctx, q, generated.CreateCalendarEventParams{
+			created, err := eventstore.Insert(ctx, q, generated.CreateCalendarEventParams{
 				PublicID:           eventPublicID,
 				WorkspaceID:        deps.WorkspaceID,
 				CalendarID:         cal.ID,
@@ -214,7 +214,7 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 				RecurrenceEnd:      sql.NullTime{},
 				BlockLabel:         sql.NullString{},
 				SourceUid:          sql.NullString{},
-			}, attendeeIDs)
+			}, attendeeIDs, nil)
 			if err != nil {
 				return err
 			}
