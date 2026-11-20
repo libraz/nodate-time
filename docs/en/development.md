@@ -68,5 +68,5 @@ CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API (b
 - The schema is layered. `sql/core/` is a copy of the shared schema contract that lets more than one product write to the same database; it is not edited here and is pinned upstream in `sql/core/UPSTREAM.json`. `sql/time/` holds this application's own tables.
 - `sql/core/tools/build-schema.sh core time` concatenates core then time into `sql/schema.sql` (`make db-schema`), which `make db-apply` applies to an empty database.
 - An existing database is upgraded rather than rebuilt; see [Upgrading](deployment.md#upgrading). `bash scripts/check-upgrade-path.sh` checks that the upgrades take a v0.1.0 database, with data, to the current schema.
-- `make test-conformance` checks the resulting schema against the contract. `make check-core` checks that the vendored copy is unedited and current.
+- `make test-conformance` checks the resulting schema against the contract. `make check-core` checks offline that the vendored copy is unedited and that no product layer alters a core table; `make check-core-pin` also checks the copy against the commit it claims to come from, and needs network access to GitHub.
 - Write queries in `sql/queries/*.sql` and run `make sqlc` to generate Go code into `apps/api/internal/db/generated/`.

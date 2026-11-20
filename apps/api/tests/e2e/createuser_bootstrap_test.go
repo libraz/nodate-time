@@ -37,7 +37,7 @@ func runCreateUserWithEnv(t *testing.T, extraEnv []string, args ...string) (stri
 	}
 	name := os.Getenv("TC_DB_NAME")
 	if name == "" {
-		name = "timetree_clone"
+		name = "nodate_time"
 	}
 
 	cmd := exec.Command("go", append([]string{"run", "../../cmd/createuser"}, args...)...)
@@ -45,7 +45,7 @@ func runCreateUserWithEnv(t *testing.T, extraEnv []string, args ...string) (stri
 	// so they are the whole of what it is given. It used to need TC_ENV as
 	// well, to reach an exemption that turned off guards it never used.
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("TC_DB_DSN=ttuser:ttpw@tcp(127.0.0.1:%s)/%s?parseTime=true", port, name),
+		fmt.Sprintf("TC_DB_DSN=%s@tcp(127.0.0.1:%s)/%s?parseTime=true", helpers.TestDBCredentials(), port, name),
 		"TC_WORKSPACE_SLUG="+helpers.TestWorkspaceSlug,
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)

@@ -6,7 +6,7 @@
 # The web service is the only way in. It terminates TLS, serves the SPA, and
 # passes /api to the API over this network. The API and the object store are
 # reached through it rather than published beside it, so one hostname and one
-# certificate cover the whole deployment; see the README's Deployment section
+# certificate cover the whole deployment; see docs/en/deployment.md
 # for obtaining the certificate, and for putting a proxy on the host instead.
 #
 # The images are built rather than pulled. The SPA compiles the API origin
@@ -29,7 +29,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:?set a MySQL root password}
       MYSQL_DATABASE: ${TC_DB_NAME:-nodate_time}
-      MYSQL_USER: ${TC_DB_USER:-ttuser}
+      MYSQL_USER: ${TC_DB_USER:-nodate}
       MYSQL_PASSWORD: ${TC_DB_PASSWORD:?set a MySQL application password}
     command:
       - --character-set-server=utf8mb4
@@ -104,7 +104,7 @@ services:
       # build arguments below.
       TC_APP_LOGO_URL: ${TC_APP_LOGO_URL:-}
       TC_APP_ICON_URL: ${TC_APP_ICON_URL:-}
-      TC_DB_DSN: "${TC_DB_USER:-ttuser}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
+      TC_DB_DSN: "${TC_DB_USER:-nodate}:${TC_DB_PASSWORD}@tcp(mysql:3306)/${TC_DB_NAME:-nodate_time}?parseTime=true"
       TC_JWT_SECRET: ${TC_JWT_SECRET:?generate one with `openssl rand -hex 32`}
       # Sign-in policy. An empty domain list leaves provider sign-in open to
       # any account the provider vouches for.

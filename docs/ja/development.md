@@ -68,5 +68,5 @@ CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と 
 - スキーマは 2 層構成です。`sql/core/` は複数のプロダクトが同じ DB に書き合うための共有スキーマ契約のコピーで、編集できず、`sql/core/UPSTREAM.json` で上流に固定されています。`sql/time/` が本アプリ固有のテーブルです。
 - `sql/core/tools/build-schema.sh core time` が core、time の順に結合して `sql/schema.sql` を生成し（`make db-schema`）、`make db-apply` が空の DB に適用します。
 - 既存の DB は作り直さずに更新します。手順は[既存環境の更新](deployment.md#既存環境の更新)を参照してください。`bash scripts/check-upgrade-path.sh` は、データの入った v0.1.0 の DB が更新で現在のスキーマになることを確かめます。
-- `make test-conformance` は、生成したスキーマが契約を満たしているかを検証します。`make check-core` は、vendor したコピーが未編集で最新かを確認します。
+- `make test-conformance` は、生成したスキーマが契約を満たしているかを検証します。`make check-core` は、vendor したコピーが未編集であることと、製品層が core のテーブルを変更していないことをオフラインで確認します。`make check-core-pin` はさらに、コピーが由来を主張するコミットと一致するかを確認し、GitHub へのネットワークアクセスが必要です。
 - クエリは `sql/queries/*.sql` に書き、`make sqlc` で `apps/api/internal/db/generated/` に Go コードを生成します。

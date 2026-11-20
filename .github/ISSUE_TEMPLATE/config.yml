@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/libraz/nodate-time/tree/main/docs/en
+    about: Setup, configuration, deployment and the API overview.
+  - name: Shared schema contract (nodate-flow)
+    url: https://github.com/libraz/nodate-flow/issues
+    about: Issues with the tables vendored under sql/core.
+  - name: Security policy
+    url: https://github.com/libraz/nodate-time/blob/main/SECURITY.md
+    about: Report vulnerabilities by email, not in a public issue.

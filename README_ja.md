@@ -37,10 +37,11 @@
 
 ## はじめに
 
-ローカル開発には [Bun](https://bun.sh) 1.4.5 以上、Node.js 26.13.1、Go 1.26.10 以上、MySQL とオブジェクトストレージを動かす Docker が必要です。DB のコードを再生成する場合は [sqlc](https://sqlc.dev) 1.31.1 を使います。
+ローカル開発には [Bun](https://bun.sh) 1.4.5 以上、Node.js 26.13.1、Go 1.26.10 以上、MySQL とオブジェクトストレージを動かす Docker が必要です。DB のコードを再生成する場合は [sqlc](https://sqlc.dev) 1.31.1 を使います。ホストの `mysql` クライアントは `make test-conformance` と `make test-upgrade-path` に必要で、`make check-core-pin` は GitHub へのネットワークアクセスを必要とします。
 
 ```sh
 bun install
+git config core.hooksPath .githooks   # pre-commit フック: vendor した sql/core の編集を拒否
 make db-up             # MySQL をポート 33306（TC_DB_PORT）で起動
 make db-seed           # スキーマ、demo@example.com / admin@example.com（password123）、サンプルデータ
 make storage-up        # オブジェクトストレージ。添付・アルバム・アバターに必要
@@ -73,7 +74,7 @@ make test-e2e-storage   # オブジェクトストレージのテストを含む
 bun run typecheck       # tsc -b
 ```
 
-ディレクトリ構成、テスト、マイグレーション、コード生成は[開発](https://github.com/libraz/nodate-time/blob/main/docs/ja/development.md)にあります。
+ディレクトリ構成、テスト、マイグレーション、コード生成は[開発](https://github.com/libraz/nodate-time/blob/main/docs/ja/development.md)にあります。コントリビュートの手順は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## ドキュメント
 

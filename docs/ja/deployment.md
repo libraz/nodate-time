@@ -207,14 +207,12 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 
 ### 実行
 
-ansible からは、`ansible/` で次のように流します。
-
 ```sh
-ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml --check   # dry-run
-ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml
+docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PASSWORD \
+  --entrypoint /importtimetree api -mapping - < mapping.yaml
 ```
 
-対応表は制御側に置いたまま、標準入力でコンテナに渡します。認証情報は `vault.yml` の `timetree_email` と `timetree_password` から取ります。`--check` では `-dry-run` を付けて実行します。
+先にシェルで `TIMETREE_EMAIL` と `TIMETREE_PASSWORD` を export しておきます。`-e` により、値をコマンドラインに載せずにコンテナへ渡せます。対応表は標準入力でコンテナに渡します。
 
 | 終了コード | 意味                                                                                                   |
 | ---------- | ------------------------------------------------------------------------------------------------------ |

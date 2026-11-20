@@ -5,9 +5,9 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${TC_DB_ROOT_PASSWORD:-rootpw}
-      MYSQL_DATABASE: ${TC_DB_NAME:-timetree_clone}
-      MYSQL_USER: ${TC_DB_USER:-ttuser}
-      MYSQL_PASSWORD: ${TC_DB_PASSWORD:-ttpw}
+      MYSQL_DATABASE: ${TC_DB_NAME:-nodate_time}
+      MYSQL_USER: ${TC_DB_USER:-nodate}
+      MYSQL_PASSWORD: ${TC_DB_PASSWORD:-nodate_dev}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci

@@ -126,7 +126,7 @@ jobs:
       - name: Core contract conformance
         run: |
           bash sql/core/conformance/run.sh \
-            --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-timetree_clone}" \
+            --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-nodate_time}" \
             --mode all
 
       # Check the historical upgrades against their target schema.

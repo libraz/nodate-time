@@ -46,15 +46,16 @@ db-schema:
 	bash sql/core/tools/build-schema.sh core time > sql/schema.sql
 	bash scripts/gen-layer-triggers-upgrade.sh time > sql/time/upgrades/triggers.sql
 
+# Needs the mysql service of compose.yml running (make db-up).
 db-apply: db-schema
-	docker run --rm -i --network host mysql:26.10.0 \
-		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/schema.sql
+	docker compose exec -T mysql \
+		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} $${TC_DB_NAME:-nodate_time} < $(CURDIR)/sql/schema.sql
 
 # Create the demo/admin accounts via the helper (no password hashes in SQL),
 # then load the sample calendars/events/memos that reference them by email.
 db-seed: db-apply db-seed-users
-	docker run --rm -i --network host mysql:26.10.0 \
-		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} -h 127.0.0.1 -P $${TC_DB_PORT:-33306} $${TC_DB_NAME:-timetree_clone} < $(CURDIR)/sql/seed.sql
+	docker compose exec -T mysql \
+		mysql --default-character-set=utf8mb4 -u root -p$${TC_DB_ROOT_PASSWORD:-rootpw} $${TC_DB_NAME:-nodate_time} < $(CURDIR)/sql/seed.sql
 
 # A user has no colour of its own: the colour that identifies someone on a
 # calendar is per-membership, so the seed sets it in calendar_members.
@@ -117,7 +118,7 @@ test-e2e-storage-absent:
 # implement. Runs on a scratch database so it never touches dev data.
 test-conformance: db-schema
 	bash sql/core/conformance/run.sh \
-		--dsn root:$${TC_DB_ROOT_PASSWORD:-rootpw}@127.0.0.1:$${TC_DB_PORT:-33306}/$${TC_DB_NAME:-timetree_clone} \
+		--dsn root:$${TC_DB_ROOT_PASSWORD:-rootpw}@127.0.0.1:$${TC_DB_PORT:-33306}/$${TC_DB_NAME:-nodate_time} \
 		--mode all
 
 # Upgrade v0.1.0 and the last pre-layering main to the current schema on

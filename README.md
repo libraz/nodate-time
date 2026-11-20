@@ -37,10 +37,11 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 
 ## Getting started
 
-Local development requires [Bun](https://bun.sh) 1.4.5 or later, Node.js 26.13.1, Go 1.26.10 or later, and Docker for MySQL and object storage. Use [sqlc](https://sqlc.dev) 1.31.1 to regenerate the database code.
+Local development requires [Bun](https://bun.sh) 1.4.5 or later, Node.js 26.13.1, Go 1.26.10 or later, and Docker for MySQL and object storage. Use [sqlc](https://sqlc.dev) 1.31.1 to regenerate the database code. A host `mysql` client is needed by `make test-conformance` and `make test-upgrade-path`, and `make check-core-pin` needs network access to GitHub.
 
 ```sh
 bun install
+git config core.hooksPath .githooks   # pre-commit hook: refuses edits to the vendored sql/core
 make db-up             # MySQL on port 33306 (TC_DB_PORT)
 make db-seed           # schema, demo@example.com / admin@example.com (password123), sample data
 make storage-up        # object storage: attachments, albums and avatars need it
@@ -73,7 +74,7 @@ make test-e2e-storage   # E2E including the object storage tests
 bun run typecheck       # tsc -b
 ```
 
-Repository layout, testing, migrations and code generation are in [Development](https://github.com/libraz/nodate-time/blob/main/docs/en/development.md).
+Repository layout, testing, migrations and code generation are in [Development](https://github.com/libraz/nodate-time/blob/main/docs/en/development.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 

@@ -235,6 +235,21 @@ func NewTestServer(t *testing.T, db *sql.DB) *TestServer {
 	}
 }
 
+// TestDBCredentials returns "user:password" for the test database, from
+// TC_DB_USER and TC_DB_PASSWORD (the variables compose.yml creates the account
+// from), defaulting to the account the local stack creates.
+func TestDBCredentials() string {
+	user := os.Getenv("TC_DB_USER")
+	if user == "" {
+		user = "nodate"
+	}
+	password := os.Getenv("TC_DB_PASSWORD")
+	if password == "" {
+		password = "nodate_dev"
+	}
+	return user + ":" + password
+}
+
 // OpenTestDB opens a connection to the test MySQL. With a nil t (TestMain) a
 // failure is reported on stderr and nil is returned, so the caller's non-zero
 // exit always comes with its cause.
@@ -248,12 +263,12 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	}
 	name := os.Getenv("TC_DB_NAME")
 	if name == "" {
-		name = "timetree_clone"
+		name = "nodate_time"
 	}
 	// Same normalization the server applies, so tests observe the production
 	// time semantics rather than the driver's defaults.
 	dsn, err := config.NormalizeDSN(
-		fmt.Sprintf("ttuser:ttpw@tcp(127.0.0.1:%s)/%s", port, name),
+		fmt.Sprintf("%s@tcp(127.0.0.1:%s)/%s", TestDBCredentials(), port, name),
 	)
 	if err != nil {
 		if t != nil {

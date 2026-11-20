@@ -207,14 +207,12 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 
 ### Running it
 
-With ansible, from `ansible/`:
-
 ```sh
-ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml --check   # dry run
-ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml
+docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PASSWORD \
+  --entrypoint /importtimetree api -mapping - < mapping.yaml
 ```
 
-The mapping file stays on the controller and reaches the container on standard input; the credentials come from `timetree_email` and `timetree_password` in `vault.yml`. `--check` runs the importer with `-dry-run`.
+Export `TIMETREE_EMAIL` and `TIMETREE_PASSWORD` in the shell first; `-e` passes them into the container without putting them on the command line. The mapping file reaches the container on standard input.
 
 | Exit code | Meaning                                                                                                                 |
 | --------- | ----------------------------------------------------------------------------------------------------------------------- |

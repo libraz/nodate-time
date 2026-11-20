@@ -33,7 +33,7 @@ type Config struct {
 	// endpoint. Defaults to "production" so those are off unless opted in.
 	Env       string `env:"TC_ENV" envDefault:"production"`
 	Port      int    `env:"TC_PORT" envDefault:"8080"`
-	DbDsn     string `env:"TC_DB_DSN" envDefault:"ttuser:ttpw@tcp(127.0.0.1:33306)/timetree_clone?parseTime=true"`
+	DbDsn     string `env:"TC_DB_DSN" envDefault:"nodate:nodate_dev@tcp(127.0.0.1:33306)/nodate_time?parseTime=true"`
 	JWTSecret string `env:"TC_JWT_SECRET" envDefault:"dev-secret-change-me-in-production"`
 
 	// AppName is what this deployment calls itself. It reaches a reader in the
