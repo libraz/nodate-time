@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -37,6 +38,10 @@ const defaultCalendarColor = "#4CAF50"
 // is worse than a ceiling -- so this is a ceiling on cost rather than a page
 // size, set well above any membership a shared calendar plausibly has.
 const maxMembersListed = 500
+
+// maxCandidatesListed is one screen of a picker; a larger workspace is
+// narrowed by searching rather than scrolled.
+const maxCandidatesListed = 50
 
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
@@ -91,6 +96,18 @@ func mapCalendar(c generated.Calendar, role generated.CalendarMembersRole, membe
 func publicShared(ctx context.Context, deps Deps, calendarID uint32) bool {
 	cnt, err := deps.Queries.CountActivePublicInvites(ctx, calendarID)
 	return err == nil && cnt > 0
+}
+
+// withShareState fills in who the calendar is shared with. A response that
+// left these at their zero values would read as a calendar nobody shares.
+func withShareState(ctx context.Context, deps Deps, resp CalendarResponse, calendarID uint32) (CalendarResponse, error) {
+	count, err := deps.Queries.CountCalendarMembers(ctx, calendarID)
+	if err != nil {
+		return resp, err
+	}
+	resp.MemberCount = int(count)
+	resp.PublicShared = publicShared(ctx, deps, calendarID)
+	return resp, nil
 }
 
 // resolveCalendar converts public UUID to internal calendar row + verifies membership.
@@ -175,6 +192,7 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 			}
 			response := mapCalendarWithCover(deps, calendar, c.MemberRole, c.MemberColor, coverKeys[c.ID])
 			response.PublicShared = publicSet[c.ID]
+			response.MemberCount = int(c.MemberCount)
 			out.Body = append(out.Body, response)
 		}
 		return out, nil
@@ -192,8 +210,10 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		resp := mapCalendarWithCover(deps, cal, member.Role, member.MemberColor, coverKey)
-		resp.PublicShared = publicShared(ctx, deps, cal.ID)
+		resp, err := withShareState(ctx, deps, mapCalendarWithCover(deps, cal, member.Role, member.MemberColor, coverKey), cal.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		return &GetCalendarOutput{Body: resp}, nil
 	}
 }
@@ -268,11 +288,11 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 		}
 
 		// The creator owns the calendar, in the colour it was just created
-		// with. Nothing has had the chance to share it yet, so publicShared
-		// is false by construction rather than by omission.
-		return &CreateCalendarOutput{
-			Body: mapCalendarWithCover(deps, created, generated.CalendarMembersRoleOwner, color, ""),
-		}, nil
+		// with. Nothing has had the chance to share it yet, so the creator is
+		// its only member and publicShared is false by construction.
+		resp := mapCalendarWithCover(deps, created, generated.CalendarMembersRoleOwner, color, "")
+		resp.MemberCount = 1
+		return &CreateCalendarOutput{Body: resp}, nil
 	}
 }
 
@@ -344,8 +364,10 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		resp := mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, coverKey)
-		resp.PublicShared = publicShared(ctx, deps, cal.ID)
+		resp, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, coverKey), cal.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		return &UpdateCalendarOutput{Body: resp}, nil
 	}
 }
@@ -438,6 +460,115 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 			})
 		}
 		return out, nil
+	}
+}
+
+// ListMemberCandidates lists the workspace members a manager can add to the
+// calendar without sending a link.
+func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidatesInput) (*ListMemberCandidatesOutput, error) {
+	return func(ctx context.Context, in *ListMemberCandidatesInput) (*ListMemberCandidatesOutput, error) {
+		userID, _ := middleware.ActorFromContext(ctx)
+		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+		rows, err := deps.Queries.ListCalendarMemberCandidates(ctx, generated.ListCalendarMemberCandidatesParams{
+			WorkspaceID: cal.WorkspaceID,
+			CalendarID:  cal.ID,
+			Query:       strings.TrimSpace(in.Query),
+			Limit:       maxCandidatesListed + 1,
+		})
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		out := &ListMemberCandidatesOutput{}
+		if len(rows) > maxCandidatesListed {
+			rows = rows[:maxCandidatesListed]
+			out.Body.HasMore = true
+		}
+		out.Body.Items = make([]MemberCandidateResponse, 0, len(rows))
+		av := avatars.New(deps.Queries, deps.Storage)
+		for _, r := range rows {
+			out.Body.Items = append(out.Body.Items, MemberCandidateResponse{
+				ID:     pubIDToHex(r.UserPublicID),
+				Name:   r.UserDisplayName,
+				Email:  r.UserEmail,
+				Avatar: av.FromKey(ctx, r.UserAvatarStorageKey, r.UserAvatarURL),
+			})
+		}
+		return out, nil
+	}
+}
+
+// AddMember grants a workspace member access to the calendar directly, the
+// way a join link would once they opened it.
+func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutput, error) {
+	return func(ctx context.Context, in *AddMemberInput) (*AddMemberOutput, error) {
+		actorID, _ := middleware.ActorFromContext(ctx)
+		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+		targetPub, err := parseUUID(in.Body.UserID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		target, err := deps.Queries.GetUserByPublicID(ctx, targetPub)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.MemberNotFound)
+		}
+		role := generated.CalendarMembersRole(in.Body.Role)
+
+		var color string
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			members, err := calresolve.LockMembers(ctx, q, cal.ID, actorID, target.ID)
+			if err != nil {
+				return err
+			}
+			actorMember, ok := members[actorID]
+			if !ok {
+				return apierrors.CalendarAccessDenied
+			}
+			if !calresolve.CanManage(actorMember.Role) {
+				return apierrors.CalendarRoleRequired
+			}
+			if _, ok := members[target.ID]; ok {
+				return apierrors.MemberAlreadyAdded
+			}
+			// Only someone already in the workspace can be added this way; a
+			// removed workspace member is not brought back through a calendar
+			// (sql/core/PROTOCOL.md, Identity rule 8). Whether the person
+			// exists at all is not disclosed separately.
+			if _, err := q.GetWorkspaceMember(ctx, generated.GetWorkspaceMemberParams{
+				WorkspaceID: cal.WorkspaceID,
+				UserID:      target.ID,
+			}); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.MemberNotFound
+				}
+				return err
+			}
+			color, err = calresolve.Grant(ctx, q, calresolve.GrantInput{
+				Calendar:  cal,
+				User:      target,
+				Role:      role,
+				Actor:     actorID,
+				InvitedBy: actorID,
+			})
+			return err
+		})
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+
+		return &AddMemberOutput{Body: MemberResponse{
+			ID:     pubIDToHex(target.PublicID),
+			Name:   target.DisplayName,
+			Email:  target.Email,
+			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
+			Role:   string(role),
+			Color:  color,
+		}}, nil
 	}
 }
 

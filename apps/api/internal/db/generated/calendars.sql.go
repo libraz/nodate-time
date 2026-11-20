@@ -125,7 +125,9 @@ func (q *Queries) GetCalendarByPublicID(ctx context.Context, arg GetCalendarByPu
 }
 
 const listCalendarsByUser = `-- name: ListCalendarsByUser :many
-SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color, c.cover_url, c.owner_user_id, c.system_slug, c.default_event_visibility, c.sort_weight, c.notes, c.enabled, c.updated_at, c.created_at, cm.role AS member_role, cm.member_color
+SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color, c.cover_url, c.owner_user_id, c.system_slug, c.default_event_visibility, c.sort_weight, c.notes, c.enabled, c.updated_at, c.created_at, cm.role AS member_role, cm.member_color,
+  (SELECT COUNT(*) FROM calendar_members m
+   WHERE m.calendar_id = c.id AND m.enabled = TRUE) AS member_count
 FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
@@ -160,6 +162,7 @@ type ListCalendarsByUserRow struct {
 	CreatedAt              time.Time                       `json:"createdAt"`
 	MemberRole             CalendarMembersRole             `json:"memberRole"`
 	MemberColor            string                          `json:"memberColor"`
+	MemberCount            int64                           `json:"memberCount"`
 }
 
 // ListCalendarsByUser joins through calendar_members, which is the access
@@ -193,6 +196,7 @@ func (q *Queries) ListCalendarsByUser(ctx context.Context, arg ListCalendarsByUs
 			&i.CreatedAt,
 			&i.MemberRole,
 			&i.MemberColor,
+			&i.MemberCount,
 		); err != nil {
 			return nil, err
 		}

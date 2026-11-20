@@ -19,7 +19,6 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
-	"github.com/libraz/nodate-time/apps/api/internal/memberpalette"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
@@ -28,10 +27,6 @@ type Deps struct {
 	Queries     *generated.Queries
 	WorkspaceID uint32
 }
-
-// colorSampleSize bounds how many current members are read to pick a joiner's
-// colour; past it every palette colour is long taken and the pick only evens out.
-const colorSampleSize = 500
 
 // maxInvitesListed caps one response. Revoking a link takes it out of this
 // answer, so the list is what an administrator is currently managing rather
@@ -299,11 +294,6 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		memberPubID, err := uuid.NewV7()
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
 				if errors.Is(err, apierrors.CalendarNotFound) {
@@ -382,54 +372,21 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				return apierrors.InviteExpired
 			}
 
-			// A joiner starts on the colour fewest members carry, so a calendar
-			// filled through one link does not draw everyone alike. They, or a
-			// manager, can change it afterwards; a repeat is allowed.
-			current, err := q.ListCalendarMembers(ctx, generated.ListCalendarMembersParams{
-				CalendarID: cal.ID,
-				Limit:      colorSampleSize,
-			})
-			if err != nil {
-				return err
-			}
-			used := make([]string, len(current))
-			for i, m := range current {
-				used[i] = m.MemberColor
-			}
-
-			// AddCalendarMember revives a grant that was revoked rather than
-			// colliding with it, so someone removed from the calendar who
+			// Grant revives a grant that was revoked rather than colliding
+			// with it, so someone removed from the calendar who
 			// still holds a live link comes back through it -- which is what
 			// makes the link's own expiry the thing that ends their access.
-			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
-				PublicID:        memberPubID[:],
-				WorkspaceID:     deps.WorkspaceID,
-				CalendarID:      cal.ID,
-				UserID:          userID,
-				Role:            generated.CalendarMembersRole(locked.Role),
-				MemberColor:     memberpalette.Pick(used),
-				InvitedByUserID: sql.NullInt32{Int32: int32(locked.CreatedByUserID), Valid: true},
+			if _, err := calresolve.Grant(ctx, q, calresolve.GrantInput{
+				Calendar:  cal,
+				User:      user,
+				Role:      generated.CalendarMembersRole(locked.Role),
+				Actor:     userID,
+				InvitedBy: locked.CreatedByUserID,
 			}); err != nil {
 				return err
 			}
 			out.Body.Role = string(locked.Role)
-
-			summary := string(locked.Role)
-			if user.DisplayName != "" {
-				summary = user.DisplayName + " -> " + string(locked.Role)
-			}
-			return eventlog.Append(ctx, q, eventlog.Entry{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  cal.ID,
-				ActorUserID: userID,
-				Type:        eventlog.TypeMemberAdded,
-				Summary:     summary,
-				Extra: map[string]any{
-					"calendarId": eventlog.UUID(cal.PublicID),
-					"userId":     eventlog.UUID(user.PublicID),
-					"role":       string(locked.Role),
-				},
-			})
+			return nil
 		})
 		if err != nil {
 			return nil, toAPIError(err)

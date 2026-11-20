@@ -464,6 +464,23 @@ func Build(deps Deps) http.Handler {
 		}, calendars.ListMembers(calDeps))
 
 		huma.Register(api, huma.Operation{
+			OperationID:   "add-member",
+			Method:        http.MethodPost,
+			Path:          "/calendars/{calendarId}/members",
+			Summary:       "Add a workspace member to a calendar",
+			Tags:          []string{"Member"},
+			DefaultStatus: http.StatusCreated,
+		}, calendars.AddMember(calDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "list-member-candidates",
+			Method:      http.MethodGet,
+			Path:        "/calendars/{calendarId}/member-candidates",
+			Summary:     "List workspace members who can be added to a calendar",
+			Tags:        []string{"Member"},
+		}, calendars.ListMemberCandidates(calDeps))
+
+		huma.Register(api, huma.Operation{
 			OperationID: "update-member-role",
 			Method:      http.MethodPut,
 			Path:        "/calendars/{calendarId}/members/{userId}/role",

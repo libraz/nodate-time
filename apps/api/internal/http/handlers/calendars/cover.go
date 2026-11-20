@@ -311,8 +311,10 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		response := mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, key)
-		response.PublicShared = publicShared(ctx, deps, calendar.ID)
+		response, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, key), calendar.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		return &PutCalendarCoverOutput{Body: response}, nil
 	}
 }
@@ -384,8 +386,10 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		response := mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, "")
-		response.PublicShared = publicShared(ctx, deps, calendar.ID)
+		response, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, ""), calendar.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
 		return &DeleteCalendarCoverOutput{Body: response}, nil
 	}
 }

@@ -62,6 +62,34 @@ UPDATE calendar_members SET member_color = ? WHERE calendar_id = ? AND user_id =
 -- name: RevokeCalendarMember :exec
 UPDATE calendar_members SET enabled = FALSE WHERE calendar_id = ? AND user_id = ?;
 
+-- People a manager may add directly: enabled members of the calendar's
+-- workspace who hold no enabled grant on it. Someone outside the workspace
+-- is reached by a join link instead (sql/core/PROTOCOL.md, Identity rule 8).
+-- An empty query matches everyone; LOCATE keeps % and _ literal.
+-- name: ListCalendarMemberCandidates :many
+SELECT u.public_id AS user_public_id, u.display_name AS user_display_name,
+       u.email AS user_email, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key
+FROM workspace_members wm
+INNER JOIN users u ON u.id = wm.user_id AND u.enabled = TRUE
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+WHERE wm.workspace_id = sqlc.arg(workspace_id) AND wm.enabled = TRUE
+  AND (sqlc.arg(query) = ''
+    OR LOCATE(sqlc.arg(query), u.display_name) > 0
+    OR LOCATE(sqlc.arg(query), u.email) > 0)
+  AND NOT EXISTS (
+    SELECT 1 FROM calendar_members cm
+    WHERE cm.calendar_id = sqlc.arg(calendar_id) AND cm.user_id = wm.user_id AND cm.enabled = TRUE
+  )
+ORDER BY u.display_name, u.id
+LIMIT ?;
+
+-- Counts the same rows ListCalendarMembers returns, so the number a
+-- calendar reports matches the member list it opens.
+-- name: CountCalendarMembers :one
+SELECT COUNT(*) FROM calendar_members
+WHERE calendar_id = ? AND enabled = TRUE;
+
 -- GetLongestStandingOwner names who inherits the events of a member leaving
 -- the calendar: the owner who has been one longest, so the answer is stable.
 -- name: GetLongestStandingOwner :one

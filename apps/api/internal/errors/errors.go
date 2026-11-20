@@ -163,9 +163,10 @@ var (
 // --- Member errors ---
 
 var (
-	MemberNotFound   = &Spec{Status: 404, Code: "MEMBER.NOT_FOUND", Message: "Member not found"}
-	MemberLastAdmin  = &Spec{Status: 400, Code: "MEMBER.LAST_ADMIN", Message: "Cannot remove the last admin"}
-	MemberSelfModify = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
+	MemberNotFound     = &Spec{Status: 404, Code: "MEMBER.NOT_FOUND", Message: "Member not found"}
+	MemberLastAdmin    = &Spec{Status: 400, Code: "MEMBER.LAST_ADMIN", Message: "Cannot remove the last admin"}
+	MemberSelfModify   = &Spec{Status: 400, Code: "MEMBER.SELF_MODIFY", Message: "You cannot change your own membership"}
+	MemberAlreadyAdded = &Spec{Status: 409, Code: "MEMBER.ALREADY_ADDED", Message: "This person is already a member of the calendar"}
 )
 
 // --- Instance admin errors ---

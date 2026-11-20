@@ -18,7 +18,9 @@ SELECT id FROM calendars WHERE id = ? AND enabled = TRUE FOR SHARE;
 -- grant. A calendar the user cannot reach must not appear, so this is the
 -- same table every authorization check resolves through.
 -- name: ListCalendarsByUser :many
-SELECT c.*, cm.role AS member_role, cm.member_color
+SELECT c.*, cm.role AS member_role, cm.member_color,
+  (SELECT COUNT(*) FROM calendar_members m
+   WHERE m.calendar_id = c.id AND m.enabled = TRUE) AS member_count
 FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE

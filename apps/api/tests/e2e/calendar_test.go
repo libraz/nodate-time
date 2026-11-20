@@ -79,6 +79,7 @@ type calendarBody struct {
 	Role         string `json:"role"`
 	MemberColor  string `json:"memberColor"`
 	PublicShared bool   `json:"publicShared"`
+	MemberCount  int    `json:"memberCount"`
 }
 
 func TestCalendarListReportsTheCallersOwnRole(t *testing.T) {
@@ -128,6 +129,53 @@ func TestCalendarListReportsTheCallersOwnRole(t *testing.T) {
 		map[string]any{"name": "新規", "color": "#B38BDC"}, &created)
 	require.Equal(t, "owner", created.Role)
 	require.Equal(t, "#B38BDC", created.MemberColor)
+}
+
+func TestCalendarReportsHowManyPeopleShareIt(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	joiner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	var single calendarBody
+	helpers.DoJSON(t, http.MethodGet, calURL, owner.AccessToken, nil, &single)
+	require.Equal(t, 1, single.MemberCount, "a calendar nobody joined is the owner's alone")
+
+	var inv struct {
+		Token string `json:"token"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", owner.AccessToken,
+		map[string]any{"role": "editor"}, &inv)
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", joiner.AccessToken, nil, nil)
+
+	// Every response that carries the calendar says the same thing.
+	var list []calendarBody
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", owner.AccessToken, nil, &list)
+	listed, ok := findCalendar(list, owner.CalendarID)
+	require.True(t, ok)
+	require.Equal(t, 2, listed.MemberCount)
+	ownPersonal := 0
+	for _, c := range list {
+		if c.ID != owner.CalendarID {
+			ownPersonal = c.MemberCount
+		}
+	}
+	require.Equal(t, 1, ownPersonal, "the owner's personal calendar is still theirs alone")
+
+	helpers.DoJSON(t, http.MethodGet, calURL, joiner.AccessToken, nil, &single)
+	require.Equal(t, 2, single.MemberCount)
+
+	var renamed calendarBody
+	helpers.DoJSON(t, http.MethodPut, calURL, owner.AccessToken,
+		map[string]any{"name": "改名", "color": "#F35F8C"}, &renamed)
+	require.Equal(t, 2, renamed.MemberCount, "a rename must not read as the calendar being unshared")
+
+	var created calendarBody
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars", owner.AccessToken,
+		map[string]any{"name": "新規", "color": "#B38BDC"}, &created)
+	require.Equal(t, 1, created.MemberCount)
 }
 
 func TestRenamingAPubliclySharedCalendarKeepsItShared(t *testing.T) {

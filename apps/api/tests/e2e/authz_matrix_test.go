@@ -179,6 +179,10 @@ func mxRows() []mxRow {
 		{method: "PUT", path: cal, group: mxProtected, allow: mxManage, body: mxJSON(map[string]any{"name": "Renamed"})},
 		{method: "DELETE", path: cal, group: mxProtected, allow: mxOwn},
 		{method: "GET", path: cal + "/members", group: mxProtected, allow: mxRead},
+		{method: "POST", path: cal + "/members", group: mxProtected, allow: mxManage, body: func(w *mxWorld) any {
+			return map[string]any{"userId": w.users[mxOutsider].UserID, "role": "viewer"}
+		}},
+		{method: "GET", path: cal + "/member-candidates", group: mxProtected, allow: mxManage},
 		{method: "PUT", path: cal + "/members/{userId}/role", group: mxProtected, allow: mxManage, child: mxMember,
 			userID: subject, body: mxJSON(map[string]any{"role": "viewer"})},
 		{method: "PUT", path: cal + "/members/{userId}/color", group: mxProtected, allow: mxManage, child: mxMember,

@@ -15,6 +15,10 @@ type CalendarResponse struct {
 	// PublicShared is true when an active public (read-only embed) link exists,
 	// so the UI can flag the calendar as externally exposed.
 	PublicShared bool `json:"publicShared"`
+	// MemberCount is how many people the calendar is shared with, the
+	// requesting user included, so the UI can tell a shared calendar from one
+	// only its owner sees.
+	MemberCount int `json:"memberCount"`
 	// Role is the requesting user's own role on this calendar. It is what
 	// decides which actions the client may offer, and it is reported here
 	// because the calendar is never reached without resolving it -- a client
@@ -106,6 +110,42 @@ type ListMembersInput struct {
 }
 type ListMembersOutput struct {
 	Body []MemberResponse
+}
+
+type ListMemberCandidatesInput struct {
+	CalendarID string `path:"calendarId"`
+	Query      string `query:"q" required:"false" maxLength:"100" doc:"Part of a name or email address"`
+}
+
+// MemberCandidateResponse is a workspace member who is not on the calendar
+// yet and can be added to it directly.
+type MemberCandidateResponse struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+	Avatar string `json:"avatar,omitempty"`
+}
+type ListMemberCandidatesPage struct {
+	Items []MemberCandidateResponse `json:"items"`
+	// HasMore says more people match than were returned, so the picker asks
+	// for a narrower query instead of implying the list is complete.
+	HasMore bool `json:"hasMore"`
+}
+type ListMemberCandidatesOutput struct {
+	Body ListMemberCandidatesPage
+}
+
+type AddMemberInput struct {
+	CalendarID string `path:"calendarId"`
+	Body       struct {
+		UserID string `json:"userId" doc:"Public ID of a workspace member who is not on the calendar"`
+		// Like a join link, a direct addition stops short of the roles that
+		// hand out access; promotion goes through UpdateMemberRole.
+		Role string `json:"role" enum:"editor,viewer"`
+	}
+}
+type AddMemberOutput struct {
+	Body MemberResponse
 }
 
 type RemoveMemberInput struct {
