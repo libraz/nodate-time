@@ -655,10 +655,13 @@ func loadPeople(ctx context.Context, deps Deps, calID uint32, userIDs []uint32) 
 }
 
 // apply fills in the fields that are not columns on the event row: the
-// owner's public id, the colour their membership carries, and the creator's
+// owner's identity, the colour their membership carries, and the creator's
 // identity.
 func (p people) apply(resp *EventResponse, e generated.CalendarEvent) {
-	resp.OwnerID = p.briefs[e.OwnerUserID].publicID
+	owner := p.briefs[e.OwnerUserID]
+	resp.OwnerID = owner.publicID
+	resp.OwnerName = owner.name
+	resp.OwnerAvatarURL = owner.avatarURL
 	resp.Color = defaultEventColor
 	if c, ok := p.colors[e.OwnerUserID]; ok {
 		resp.Color = c

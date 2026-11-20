@@ -52,6 +52,8 @@ type EventResponse struct {
 	// stays as the id-only list because it is also the write format.
 	Attendees        []AttendeeResponse      `json:"attendees"`
 	OwnerID          string                  `json:"ownerId" doc:"public user ID of the member whose layer this event sits on"`
+	OwnerName        string                  `json:"ownerName" doc:"display name of the owning member; empty once they have left"`
+	OwnerAvatarURL   string                  `json:"ownerAvatarUrl,omitempty"`
 	RecurrenceRule   *RecurrenceRuleResponse `json:"recurrenceRule"`
 	TaskOwned        bool                    `json:"taskOwned" doc:"true when a task projects this event; its title, dates and recurrence then change on the task"`
 	IsRecurrence     bool                    `json:"isRecurrence"`
