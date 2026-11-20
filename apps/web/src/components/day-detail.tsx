@@ -3,7 +3,8 @@ import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { isGroupEvent } from '@/lib/event-group';
-import { canEdit, roleOnCalendar } from '@/lib/permissions';
+import { flexibilityLabelKey } from '@/lib/event-style';
+import { canEdit, roleOnCalendar, showAsLabelKey } from '@/lib/permissions';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -126,39 +127,53 @@ export function DayDetail() {
               <div className="flex flex-col gap-2 px-4 pt-1">
                 {dayEvents
                   .sort((a, b) => a.startAt.localeCompare(b.startAt))
-                  .map((evt) => (
-                    <button
-                      key={evt.id}
-                      type="button"
-                      onClick={() => {
-                        closeDayDetail();
-                        openEventModal(evt.id);
-                      }}
-                      className="card-section flex w-full items-start gap-3 bg-[var(--color-surface-secondary)] p-4 text-left transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-                    >
-                      <OwnerMark
-                        name={evt.ownerName}
-                        avatarUrl={evt.ownerAvatarUrl}
-                        color={evt.color}
-                        size={24}
-                        group={isGroupEvent(evt)}
-                        className="mt-0.5"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <p className="text-subhead font-medium text-[var(--color-text-primary)]">
-                          {evt.title}
-                        </p>
-                        <p className="mt-1 text-default text-[var(--color-text-secondary)]">
-                          {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
-                        </p>
-                        {evt.location && (
-                          <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
-                            {evt.location}
+                  .map((evt) => {
+                    const flexKey = flexibilityLabelKey(evt.flexibility, { short: true });
+                    const state = [
+                      evt.showAs !== 'busy' ? t(showAsLabelKey(evt.showAs)) : '',
+                      flexKey ? t(flexKey) : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <button
+                        key={evt.id}
+                        type="button"
+                        onClick={() => {
+                          closeDayDetail();
+                          openEventModal(evt.id);
+                        }}
+                        className="card-section flex w-full items-start gap-3 bg-[var(--color-surface-secondary)] p-4 text-left transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+                      >
+                        <OwnerMark
+                          name={evt.ownerName}
+                          avatarUrl={evt.ownerAvatarUrl}
+                          color={evt.color}
+                          size={24}
+                          group={isGroupEvent(evt)}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <p className="text-subhead font-medium text-[var(--color-text-primary)]">
+                            {evt.title}
                           </p>
-                        )}
-                      </span>
-                    </button>
-                  ))}
+                          <p className="mt-1 text-default text-[var(--color-text-secondary)]">
+                            {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
+                          </p>
+                          {evt.location && (
+                            <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
+                              {evt.location}
+                            </p>
+                          )}
+                          {state && (
+                            <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
+                              {state}
+                            </p>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
               </div>
             )}
           </div>

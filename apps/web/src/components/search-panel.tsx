@@ -3,6 +3,8 @@ import { OwnerMark } from '@/components/owner-mark';
 import { Highlight, handleResultListKeys } from '@/components/search-results';
 import { useT } from '@/i18n';
 import { isGroupEvent } from '@/lib/event-group';
+import { flexibilityLabelKey } from '@/lib/event-style';
+import { showAsLabelKey } from '@/lib/permissions';
 import {
   filterEventsForSearch,
   searchedMonths,
@@ -93,6 +95,13 @@ export function SearchPanel() {
         <div className="py-1">
           {filtered.map((evt) => {
             const dateLabel = searchResultLabel(evt, timezone, locale);
+            const flexKey = flexibilityLabelKey(evt.flexibility, { short: true });
+            const state = [
+              evt.showAs !== 'busy' ? t(showAsLabelKey(evt.showAs)) : '',
+              flexKey ? t(flexKey) : '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
 
             return (
               <button
@@ -122,6 +131,9 @@ export function SearchPanel() {
                     <p className="truncate text-body text-[var(--color-text-tertiary)]">
                       <Highlight text={evt.location} query={searchQuery} />
                     </p>
+                  )}
+                  {state && (
+                    <p className="truncate text-body text-[var(--color-text-tertiary)]">{state}</p>
                   )}
                 </div>
               </button>

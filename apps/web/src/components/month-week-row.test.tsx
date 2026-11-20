@@ -262,3 +262,49 @@ describe('memoisation', () => {
     expect(screen.getByTitle('Bar one')).toBeInTheDocument();
   });
 });
+
+describe('availability states', () => {
+  it('puts the modifier on the chip and names the state', async () => {
+    await renderRow({
+      events: [{ ...chip('c1', 'Chip', '2026-08-08', 9), showAs: 'tentative' }],
+    });
+
+    const el = within(cellOf('2026-08-08')).getByRole('button', { name: /Chip/ });
+    expect(el).toHaveClass('event-chip', 'evt-tentative');
+    expect(within(el).getByText('event.showAsTentative')).toHaveClass('sr-only');
+  });
+
+  it('leaves a busy chip unmodified and unlabelled', async () => {
+    await renderRow({ events: [chip('c1', 'Chip', '2026-08-08', 9)] });
+
+    const el = within(cellOf('2026-08-08')).getByRole('button', { name: /Chip/ });
+    expect(el.className).not.toContain('evt-');
+    expect(within(el).queryByText('event.showAsTentative')).toBeNull();
+  });
+
+  it('shows the out-of-office marker only where the chip is wide enough', async () => {
+    const events = [{ ...chip('c1', 'Chip', '2026-08-08', 9), showAs: 'oof' as const }];
+
+    await renderRow({ density: 'comfortable', events });
+    const wide = within(cellOf('2026-08-08')).getByRole('button', { name: /Chip/ });
+    expect(wide).toHaveClass('evt-oof');
+    expect(wide.querySelector('.evt-marker')).not.toBeNull();
+
+    cleanup();
+    await renderRow({ density: 'compact', events });
+    const narrow = within(cellOf('2026-08-08')).getByRole('button', { name: /Chip/ });
+    expect(narrow.querySelector('.evt-marker')).toBeNull();
+  });
+
+  it('paints a bar from custom properties and carries the modifier', async () => {
+    await renderRow({
+      events: [{ ...spanEvent('b0', 'Bar zero', '2026-08-02', '2026-08-06'), showAs: 'free' }],
+    });
+
+    const bar = screen.getByTitle('Bar zero');
+    expect(bar).toHaveClass('event-bar', 'evt-free');
+    expect(bar.style.getPropertyValue('--evt')).toBe('#47B2F7');
+    expect(bar.style.backgroundColor).toBe('');
+    expect(within(bar).getByText('event.showAsFree')).toHaveClass('sr-only');
+  });
+});

@@ -21,7 +21,9 @@ import {
 } from '@/lib/date-utils';
 import { isGroupEvent } from '@/lib/event-group';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
+import { showAsClass } from '@/lib/event-style';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
+import { showAsLabelKey } from '@/lib/permissions';
 import {
   layoutTimedEventsForDay,
   MIN_RENDERED_MINUTES,
@@ -518,7 +520,7 @@ export function WeeklyTimeline() {
                         if (consumeClick() || consumeResizeClick()) return;
                         openEventModal(evt.id);
                       }}
-                      className={`event-block event-block-stacked absolute z-[5] flex flex-col justify-start overflow-hidden rounded-md px-1.5 pt-1 text-left ${
+                      className={`event-block event-block-stacked ${showAsClass(evt.showAs)} absolute z-[5] flex flex-col justify-start overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                       style={
@@ -540,12 +542,20 @@ export function WeeklyTimeline() {
                           group={isGroupEvent(evt)}
                         />
                         <span className="truncate">{evt.title}</span>
+                        {evt.showAs === 'oof' && (
+                          <span aria-hidden="true" className="evt-marker ml-auto shrink-0">
+                            {t('event.showAsOof')}
+                          </span>
+                        )}
                       </p>
                       <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
                         {marker
                           ? startDt.toFormat('H:mm')
                           : `${startDt.toFormat('H:mm')} - ${endLabel}`}
                       </p>
+                      {evt.showAs !== 'busy' && (
+                        <span className="sr-only">{t(showAsLabelKey(evt.showAs))}</span>
+                      )}
                       {movable && holdsEnd && (
                         <div
                           aria-hidden

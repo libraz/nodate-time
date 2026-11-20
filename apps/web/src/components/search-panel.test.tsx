@@ -319,3 +319,18 @@ describe('SearchPanel dates', () => {
     expect(screen.getAllByText('2026/08/04 (Tue) 21:00 - 22:00')).toHaveLength(2);
   });
 });
+
+describe('SearchPanel availability states', () => {
+  it('shows the showAs and flexibility labels on a result', () => {
+    calendarState.events = [
+      { ...event('e1', 'cal-1', 'Rehearsal'), showAs: 'free', flexibility: 'negotiable' },
+    ];
+    uiState.searchQuery = 'rehearsal';
+
+    render(<SearchPanel />);
+
+    expect(
+      screen.getAllByText('event.showAsFree · event.flexibilityShort.negotiable'),
+    ).toHaveLength(2);
+  });
+});

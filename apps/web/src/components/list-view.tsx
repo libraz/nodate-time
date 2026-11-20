@@ -6,7 +6,9 @@ import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
 import { formatMonthYear, fromISOInZone, isToday, nowInZone } from '@/lib/date-utils';
 import { isGroupEvent } from '@/lib/event-group';
+import { flexibilityLabelKey, showAsClass } from '@/lib/event-style';
 import { getHoliday } from '@/lib/holidays';
+import { showAsLabelKey } from '@/lib/permissions';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -100,12 +102,19 @@ export function ListView() {
                   {evts.map((evt) => {
                     const start = fromISOInZone(evt.startAt, timezone);
                     const end = fromISOInZone(evt.endAt, timezone);
+                    const flexKey = flexibilityLabelKey(evt.flexibility, { short: true });
+                    const state = [
+                      evt.showAs !== 'busy' ? t(showAsLabelKey(evt.showAs)) : '',
+                      flexKey ? t(flexKey) : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
                     return (
                       <li key={evt.id}>
                         <button
                           type="button"
                           onClick={() => openEventModal(evt.id)}
-                          className="event-block flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3.5 py-2.5 text-left"
+                          className={`event-block ${showAsClass(evt.showAs)} flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3.5 py-2.5 text-left`}
                           style={{ '--evt': evt.color } as CSSProperties}
                         >
                           <OwnerMark
@@ -122,6 +131,11 @@ export function ListView() {
                             {evt.location && (
                               <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                                 {evt.location}
+                              </p>
+                            )}
+                            {state && (
+                              <p className="truncate text-footnote text-[var(--color-text-secondary)]">
+                                {state}
                               </p>
                             )}
                           </div>

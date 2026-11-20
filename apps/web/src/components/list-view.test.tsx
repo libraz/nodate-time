@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -64,5 +64,30 @@ describe('ListView holidays', () => {
     expect(screen.getByText('Shrine visit')).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText('元日')).toBeInTheDocument());
+  });
+});
+
+describe('ListView availability states', () => {
+  it('marks the row and states showAs and flexibility as secondary text', () => {
+    calendarState.events = [
+      { ...newYear, showAs: 'free', flexibility: 'negotiable' } as CalendarEvent,
+    ];
+
+    render(<ListView />);
+
+    const row = screen.getByRole('button', { name: /Shrine visit/ });
+    expect(row).toHaveClass('event-block', 'evt-free');
+    expect(
+      within(row).getByText('event.showAsFree · event.flexibilityShort.negotiable'),
+    ).toBeInTheDocument();
+    calendarState.events = [newYear];
+  });
+
+  it('adds nothing for a busy, fixed event', () => {
+    render(<ListView />);
+
+    const row = screen.getByRole('button', { name: /Shrine visit/ });
+    expect(row.className).not.toContain('evt-');
+    expect(within(row).queryByText(/event\./)).toBeNull();
   });
 });

@@ -1956,10 +1956,10 @@ textarea,
 }
 @media (hover: hover) and (pointer: fine) {
   .event-chip:hover {
-    background: color-mix(in srgb, var(--evt) 24%, var(--color-surface-elevated));
+    background-color: color-mix(in srgb, var(--evt) 24%, var(--color-surface-elevated));
   }
   .event-block:hover {
-    background: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
+    background-color: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
     box-shadow: var(--shadow-md);
   }
 }
@@ -1985,7 +1985,7 @@ textarea,
 }
 @media (hover: hover) and (pointer: fine) {
   .event-block-stacked:hover::before {
-    background: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
+    background-color: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
     border-color: color-mix(in srgb, var(--evt) 55%, transparent);
   }
 }
@@ -1998,6 +1998,8 @@ textarea,
 
 /* Multi-day bars — glassy sheen on glass, clean flat fill elsewhere */
 .event-bar {
+  background-color: var(--evt);
+  color: var(--evt-ink);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
@@ -2007,6 +2009,69 @@ textarea,
 }
 :root[data-theme="nothing"] .event-bar {
   box-shadow: none;
+}
+
+/* Availability states. The modifier sits on the element that paints the fill:
+   the chip, the bar, a plain block, or the ::before layer of a stacked block
+   (whose own box is transparent). Declared after the hover rules so they win. */
+.event-chip.evt-tentative,
+.event-block:not(.event-block-stacked).evt-tentative,
+.event-block-stacked.evt-tentative::before {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--evt) 30%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+}
+.event-bar.evt-tentative {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.35) 0 2px,
+    transparent 2px 6px
+  );
+}
+.event-chip.evt-free,
+.event-bar.evt-free,
+.event-block:not(.event-block-stacked).evt-free,
+.event-block-stacked.evt-free::before {
+  background-color: transparent;
+  outline: 1px dashed var(--evt);
+  outline-offset: -1px;
+}
+.event-chip.evt-free,
+.event-bar.evt-free {
+  color: var(--color-text-secondary);
+}
+.event-block-stacked.evt-free::before {
+  border-color: transparent;
+}
+.event-chip.evt-oof,
+.event-bar.evt-oof,
+.event-block:not(.event-block-stacked).evt-oof {
+  background-color: color-mix(in srgb, var(--evt) 45%, var(--color-text-tertiary));
+}
+.event-block-stacked.evt-oof::before {
+  background-color: color-mix(in srgb, var(--evt) 45%, var(--color-text-tertiary));
+}
+.evt-marker {
+  font-size: 0.75em;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* The month dot: solid for busy, a ring for free, half filled for tentative. */
+.evt-dot {
+  background-color: var(--evt);
+  box-sizing: border-box;
+}
+.evt-free .evt-dot {
+  background-color: transparent;
+  border: 1px solid var(--evt);
+}
+.evt-tentative .evt-dot {
+  background-image: linear-gradient(90deg, var(--evt) 50%, transparent 50%);
+  background-color: transparent;
+  border: 1px solid var(--evt);
 }
 
 /* Calendar entrance — gentle settle when the month changes */
@@ -2845,7 +2910,8 @@ textarea,
   backdrop-filter: blur(10px);
 }
 
-.album-viewer-sheet {
+.album-viewer-sheet,
+.confirm-sheet {
   animation: sheet-up 0.28s var(--ease-out);
 }
 
@@ -2870,7 +2936,8 @@ textarea,
 @media (prefers-reduced-motion: reduce) {
   .album-viewer,
   .album-viewer-image,
-  .album-viewer-sheet {
+  .album-viewer-sheet,
+  .confirm-sheet {
     animation: none;
     transition: none;
   }

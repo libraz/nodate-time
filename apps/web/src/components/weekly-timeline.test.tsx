@@ -484,3 +484,29 @@ describe('WeeklyTimeline resize gesture', () => {
     expect(handles[0]?.closest('[data-daycol]')?.getAttribute('data-daycol')).toBe('2026-03-10');
   });
 });
+
+describe('WeeklyTimeline availability states', () => {
+  it('puts the modifier on the stacked block and names the state', () => {
+    calendarState.events = [{ ...probe, showAs: 'oof' }];
+
+    render(<WeeklyTimeline />);
+
+    const block = within(dayColumn()).getByRole('button', { name: /Morning run/ });
+    expect(block).toHaveClass('event-block-stacked', 'evt-oof');
+    expect(
+      within(block).getByText('event.showAsOof', { selector: '.sr-only' }),
+    ).toBeInTheDocument();
+    expect(block.querySelector('.evt-marker')).not.toBeNull();
+    calendarState.events = [probe];
+  });
+
+  it('leaves a busy block unmodified', () => {
+    calendarState.events = [probe];
+
+    render(<WeeklyTimeline />);
+
+    const block = within(dayColumn()).getByRole('button', { name: /Morning run/ });
+    expect(block.className).not.toContain('evt-');
+    expect(block.querySelector('.sr-only')).toBeNull();
+  });
+});

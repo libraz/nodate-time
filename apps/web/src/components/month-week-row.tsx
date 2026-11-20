@@ -4,8 +4,10 @@ import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { fromISOInZone, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { isGroupEvent } from '@/lib/event-group';
+import { showAsClass } from '@/lib/event-style';
 import { getHoliday } from '@/lib/holidays';
 import { readableInk } from '@/lib/member-color';
+import { showAsLabelKey } from '@/lib/permissions';
 import {
   eventStartDay,
   isMultiDay,
@@ -343,7 +345,7 @@ function MonthWeekRowImpl({
                       type="button"
                       onPointerDown={(e) => onEventPointerDown(evt, e)}
                       onClick={() => onEventClick(evt.id)}
-                      className={`event-chip pointer-events-auto mx-0.5 flex items-center text-left font-semibold tabular-nums ${style.chip} ${
+                      className={`event-chip ${showAsClass(evt.showAs)} pointer-events-auto mx-0.5 flex items-center text-left font-semibold tabular-nums ${style.chip} ${
                         canMoveEvent(evt) ? style.cursorMovable : style.cursorFixed
                       }`}
                       style={
@@ -367,14 +369,21 @@ function MonthWeekRowImpl({
                       ) : (
                         <span
                           aria-hidden
-                          className={`shrink-0 rounded-full ${style.dot}`}
-                          style={{ backgroundColor: evt.color }}
+                          className={`evt-dot shrink-0 rounded-full ${style.dot}`}
                         />
                       )}
                       <span className="truncate">
                         {evt.allDay || !style.chipTime ? '' : `${start.toFormat('H:mm')} `}
                         {evt.title}
                       </span>
+                      {evt.showAs !== 'busy' && (
+                        <span className="sr-only">{t(showAsLabelKey(evt.showAs))}</span>
+                      )}
+                      {evt.showAs === 'oof' && style.markSize > 0 && (
+                        <span aria-hidden="true" className="evt-marker ml-auto shrink-0">
+                          {t('event.showAsOof')}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -425,20 +434,22 @@ function MonthWeekRowImpl({
               type="button"
               onPointerDown={(e) => onEventPointerDown(p.event, e)}
               onClick={() => onEventClick(p.event.id)}
-              className={`event-bar pointer-events-auto absolute flex items-center truncate font-semibold tabular-nums ${style.bar} ${style.chipHover} ${
+              className={`event-bar ${showAsClass(p.event.showAs)} pointer-events-auto absolute flex items-center truncate font-semibold tabular-nums ${style.bar} ${style.chipHover} ${
                 canMoveEvent(p.event) ? style.cursorMovable : style.cursorFixed
               }`}
-              style={{
-                left: colLeft(p.startCol),
-                width: colWidth(p.span),
-                top: p.track * metrics.slotH,
-                height: barH,
-                lineHeight: `${barH}px`,
-                backgroundColor: p.event.color,
-                color: readableInk(p.event.color),
-                borderRadius: barRadius(p.continuesLeft, p.continuesRight),
-                opacity: draggingEventId === p.event.id ? 0.4 : undefined,
-              }}
+              style={
+                {
+                  '--evt': p.event.color,
+                  '--evt-ink': readableInk(p.event.color),
+                  left: colLeft(p.startCol),
+                  width: colWidth(p.span),
+                  top: p.track * metrics.slotH,
+                  height: barH,
+                  lineHeight: `${barH}px`,
+                  borderRadius: barRadius(p.continuesLeft, p.continuesRight),
+                  opacity: draggingEventId === p.event.id ? 0.4 : undefined,
+                } as CSSProperties
+              }
               title={p.event.title}
             >
               {p.continuesLeft && (
@@ -453,7 +464,7 @@ function MonthWeekRowImpl({
                   color={p.event.color}
                   size={style.markSize}
                   group={isGroupEvent(p.event)}
-                  inverse
+                  inverse={p.event.showAs !== 'free' && p.event.showAs !== 'tentative'}
                 />
               )}
               <span className="truncate">
@@ -462,6 +473,9 @@ function MonthWeekRowImpl({
                 )}
                 {p.event.title}
               </span>
+              {p.event.showAs !== 'busy' && (
+                <span className="sr-only">{t(showAsLabelKey(p.event.showAs))}</span>
+              )}
               {p.continuesRight && (
                 <span aria-hidden className="ml-auto opacity-80">
                   ›
@@ -475,18 +489,20 @@ function MonthWeekRowImpl({
       {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
       {previewSeg && dragLanding && (
         <div
-          className={`pointer-events-none absolute z-20 flex items-center truncate font-semibold shadow-lg ${style.bar}`}
-          style={{
-            top: overlayTop,
-            left: colLeft(previewSeg.startCol),
-            width: colWidth(previewSeg.span),
-            height: barH,
-            lineHeight: `${barH}px`,
-            backgroundColor: dragLanding.event.color,
-            color: readableInk(dragLanding.event.color),
-            borderRadius: '5px',
-            opacity: 0.85,
-          }}
+          className={`event-bar ${showAsClass(dragLanding.event.showAs)} pointer-events-none absolute z-20 flex items-center truncate font-semibold shadow-lg ${style.bar}`}
+          style={
+            {
+              '--evt': dragLanding.event.color,
+              '--evt-ink': readableInk(dragLanding.event.color),
+              top: overlayTop,
+              left: colLeft(previewSeg.startCol),
+              width: colWidth(previewSeg.span),
+              height: barH,
+              lineHeight: `${barH}px`,
+              borderRadius: '5px',
+              opacity: 0.85,
+            } as CSSProperties
+          }
         >
           {dragLanding.event.title}
         </div>

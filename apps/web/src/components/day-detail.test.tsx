@@ -141,3 +141,23 @@ describe('DayDetail', () => {
     expect(screen.getByText('00:00')).toBeInTheDocument();
   });
 });
+
+describe('DayDetail availability states', () => {
+  it('shows the showAs and flexibility labels as secondary text', () => {
+    calendarState.events = [{ ...rehearsal, showAs: 'tentative', flexibility: 'conditional' }];
+
+    render(<DayDetail />);
+
+    expect(
+      screen.getByText('event.showAsTentative · event.flexibilityShort.conditional'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows nothing extra for a busy, fixed event', () => {
+    calendarState.events = [rehearsal];
+
+    render(<DayDetail />);
+
+    expect(screen.queryByText(/event\.(showAs|flexibility)/)).toBeNull();
+  });
+});
