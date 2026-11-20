@@ -1,8 +1,10 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -180,7 +182,7 @@ func mxRows() []mxRow {
 		{method: "DELETE", path: cal, group: mxProtected, allow: mxOwn},
 		{method: "GET", path: cal + "/members", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/members", group: mxProtected, allow: mxManage, body: func(w *mxWorld) any {
-			return map[string]any{"userId": w.users[mxOutsider].UserID, "role": "viewer"}
+			return map[string]any{"userId": w.a.stranger.UserID, "role": "viewer"}
 		}},
 		{method: "GET", path: cal + "/member-candidates", group: mxProtected, allow: mxManage},
 		{method: "PUT", path: cal + "/members/{userId}/role", group: mxProtected, allow: mxManage, child: mxMember,
@@ -192,6 +194,9 @@ func mxRows() []mxRow {
 		{method: "GET", path: cal + "/export", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/import", group: mxProtected, allow: mxWrite, body: mxJSON(map[string]any{"ics": mxICS})},
 		{method: "GET", path: cal + "/activity", group: mxProtected, allow: mxRead},
+		{method: "PUT", path: cal + "/cover", group: mxProtected, allow: mxManage, storage: true,
+			body: func(w *mxWorld) any { return mxBytes(newCalendarCoverPNG(w.t)) }},
+		{method: "DELETE", path: cal + "/cover", group: mxProtected, allow: mxManage, storage: true},
 
 		{method: "GET", path: polls, group: mxProtected, allow: mxRead},
 		{method: "GET", path: polls + "/members", group: mxProtected, allow: mxManage},
@@ -513,8 +518,23 @@ func mxBlankURLs(v any) any {
 	return v
 }
 
+// mxBytes is a request body sent as raw bytes rather than JSON.
+type mxBytes []byte
+
 func (w *mxWorld) do(method, url, token string, body any) (int, string) {
 	w.t.Helper()
+	if b, ok := body.(mxBytes); ok {
+		req, err := http.NewRequestWithContext(w.t.Context(), method, url, bytes.NewReader(b))
+		require.NoError(w.t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(w.t, err)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(w.t, err)
+		return resp.StatusCode, string(raw)
+	}
 	status, raw := helpers.DoJSONStatus(w.t, method, url, token, body)
 	return status, string(raw)
 }
@@ -765,20 +785,35 @@ func runPollRow(t *testing.T, actors *mxActors, row mxRow) {
 		body["ownerId"] = respondent.UserID
 	}
 
-	for _, actor := range []*helpers.TestTenant{actors.users[mxEditor], actors.users[mxManager], respondent} {
-		if actor == respondent && !organizerOnly {
-			continue
-		}
-		status, raw := w.do(row.method, target, actor.AccessToken, body)
-		expected := http.StatusNotFound
-		if organizerOnly {
-			expected = http.StatusForbidden
-		}
-		require.Equal(t, expected, status, raw)
+	type refusal struct {
+		who    string
+		actor  *helpers.TestTenant
+		status int
+		code   string
+	}
+	// The stranger is not a member of the poll's calendar.
+	refusals := []refusal{{"non-member", actors.stranger, http.StatusForbidden, "CALENDAR.ACCESS_DENIED"}}
+	if organizerOnly {
+		refusals = append(refusals,
+			refusal{"editor", actors.users[mxEditor], http.StatusForbidden, "CALENDAR.ROLE_REQUIRED"},
+			refusal{"unassigned manager", actors.users[mxManager], http.StatusForbidden, "SCHEDULE_POLL.ACCESS_DENIED"},
+			refusal{"respondent", respondent, http.StatusForbidden, "CALENDAR.ROLE_REQUIRED"},
+		)
+	} else {
+		refusals = append(refusals,
+			refusal{"editor", actors.users[mxEditor], http.StatusNotFound, "SCHEDULE_POLL.NOT_FOUND"},
+			refusal{"unassigned manager", actors.users[mxManager], http.StatusNotFound, "SCHEDULE_POLL.NOT_FOUND"},
+		)
+	}
+	for _, r := range refusals {
+		status, raw := w.do(row.method, target, r.actor.AccessToken, body)
+		require.Equal(t, r.status, status, "%s as %s: %s", row.key(), r.who, raw)
+		require.Equal(t, r.code, mxCode([]byte(raw)), "%s as %s", row.key(), r.who)
 		require.NotContains(t, raw, "Private matrix poll")
 	}
 	status, raw := w.do(row.method, foreign, actors.stranger.AccessToken, body)
 	require.Equal(t, http.StatusNotFound, status, raw)
+	require.Equal(t, "SCHEDULE_POLL.NOT_FOUND", mxCode([]byte(raw)), row.key())
 	allowed := respondent.AccessToken
 	if organizerOnly {
 		allowed = w.owner()
