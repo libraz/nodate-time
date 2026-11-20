@@ -232,7 +232,7 @@ func TestAlbumPhotoTooLarge(t *testing.T) {
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/jpeg", "byteSize": 21 * 1024 * 1024})
-	assert.Equal(t, http.StatusUnprocessableEntity, status)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, status)
 }
 
 func TestAlbumPagination(t *testing.T) {

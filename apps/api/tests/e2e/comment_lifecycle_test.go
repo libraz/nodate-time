@@ -28,7 +28,7 @@ func commentThread(t *testing.T, tt *helpers.TestTenant) (eventURL string, post 
 			ID string `json:"id"`
 		}
 		helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", tt.AccessToken,
-			map[string]any{"content": body}, &c)
+			map[string]any{"body": body}, &c)
 		return c.ID
 	}
 }
@@ -63,7 +63,7 @@ func TestEditedAndRemovedCommentTextIsNotInHistoryOrActivity(t *testing.T) {
 
 	id := post(original)
 	helpers.DoJSON(t, http.MethodPut, eventURL+"/activities/"+id, owner.AccessToken,
-		map[string]any{"content": edited}, nil)
+		map[string]any{"body": edited}, nil)
 	helpers.DoJSON(t, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, nil, nil)
 
 	for name, url := range map[string]string{
@@ -145,7 +145,7 @@ func TestAnEditRacingARemovalNeverLandsAfterIt(t *testing.T) {
 				return status
 			}
 			status, _ := helpers.DoJSONStatus(t, http.MethodPut, eventURL+"/activities/"+id, owner.AccessToken,
-				map[string]any{"content": fmt.Sprintf("round %d, edited", round)})
+				map[string]any{"body": fmt.Sprintf("round %d, edited", round)})
 			return status
 		})
 		require.Equal(t, http.StatusNoContent, statuses[0])

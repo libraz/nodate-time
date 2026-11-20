@@ -96,7 +96,7 @@ func TestEventSideChangesReachTheHistory(t *testing.T) {
 		}, &evt)
 
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", owner.AccessToken,
-		map[string]any{"content": "who is bringing what"}, nil)
+		map[string]any{"body": "who is bringing what"}, nil)
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/checklist", owner.AccessToken,
 		map[string]any{"title": "book the room"}, nil)
 

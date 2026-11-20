@@ -302,11 +302,17 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			if err != nil {
 				return err
 			}
+			// The contract has no reopened kind, so only the move to done is a
+			// completion; un-completing is an ordinary update.
+			kind := eventlog.TypeMemoUpdated
+			if done && !memo.Done {
+				kind = eventlog.TypeMemoCompleted
+			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
 				ActorUserID: userID,
-				Type:        eventlog.TypeMemoUpdated,
+				Type:        kind,
 				Summary:     title,
 				Subject:     memo.PublicID,
 				Extra:       map[string]any{"calendarId": eventlog.UUID(cal.PublicID)},

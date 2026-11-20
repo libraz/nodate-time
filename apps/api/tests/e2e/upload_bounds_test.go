@@ -69,7 +69,7 @@ func TestAttachmentPresignRefusesAnOversizedFile(t *testing.T) {
 			"filename": "huge.bin", "contentType": "application/octet-stream",
 			"byteSize": 101 * 1024 * 1024, "sha256": helpers.SHA256Hex([]byte("huge")),
 		})
-	require.Equal(t, http.StatusUnprocessableEntity, status, string(body))
+	require.Equal(t, http.StatusRequestEntityTooLarge, status, string(body))
 	require.Contains(t, string(body), "ATTACHMENT.TOO_LARGE")
 }
 

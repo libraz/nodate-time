@@ -81,7 +81,8 @@ func Read(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID s
 }
 
 // Write admits everyone above viewer: editor, manager and owner may change
-// calendar contents.
+// calendar contents. Write, Manage and Own all refuse a system calendar, whose
+// contents come from a provider feed, with CalendarReadOnly.
 func Write(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID string, userID uint32) (generated.Calendar, error) {
 	cal, member, err := Member(ctx, q, workspaceID, calendarPublicID, userID)
 	if err != nil {
@@ -89,6 +90,9 @@ func Write(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID 
 	}
 	if !CanWrite(member.Role) {
 		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	if cal.Kind == generated.CalendarsKindSystem {
+		return generated.Calendar{}, apierrors.CalendarReadOnly
 	}
 	return cal, nil
 }
@@ -112,6 +116,9 @@ func ManageMember(ctx context.Context, q Querier, workspaceID uint32, calendarPu
 	if !CanManage(member.Role) {
 		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarRoleRequired
 	}
+	if cal.Kind == generated.CalendarsKindSystem {
+		return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarReadOnly
+	}
 	return cal, member, nil
 }
 
@@ -125,6 +132,9 @@ func Own(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID st
 	}
 	if !CanOwn(member.Role) {
 		return generated.Calendar{}, apierrors.CalendarRoleRequired
+	}
+	if cal.Kind == generated.CalendarsKindSystem {
+		return generated.Calendar{}, apierrors.CalendarReadOnly
 	}
 	return cal, nil
 }

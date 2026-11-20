@@ -181,7 +181,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 				WorkspaceID: deps.WorkspaceID,
 				EventID:     sql.NullInt32{Int32: int32(w.evt.ID), Valid: true},
 				AuthorID:    userID,
-				Body:        in.Body.Content,
+				Body:        in.Body.Body,
 			}); err != nil {
 				return err
 			}
@@ -279,7 +279,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 				return apierrors.CommentAccessDenied
 			}
 			if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
-				Body: in.Body.Content,
+				Body: in.Body.Body,
 				ID:   comment.ID,
 			}); err != nil {
 				return err

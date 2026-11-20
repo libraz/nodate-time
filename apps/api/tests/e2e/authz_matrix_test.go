@@ -224,10 +224,10 @@ func mxRows() []mxRow {
 
 		{method: "GET", path: evt + "/activities", group: mxProtected, allow: mxRead, child: mxEvent},
 		{method: "POST", path: evt + "/activities", group: mxProtected, allow: mxWrite, child: mxEvent,
-			body: mxJSON(map[string]any{"content": "Added"})},
+			body: mxJSON(map[string]any{"body": "Added"})},
 		// Only the author edits a comment; the fixture's author is the owner.
 		{method: "PUT", path: evt + "/activities/{commentId}", group: mxProtected, allow: mxOwn, child: mxComment,
-			body: mxJSON(map[string]any{"content": "Edited"})},
+			body: mxJSON(map[string]any{"body": "Edited"})},
 		{method: "DELETE", path: evt + "/activities/{commentId}", group: mxProtected, allow: mxManage, child: mxComment},
 
 		{method: "GET", path: evt + "/checklist", group: mxProtected, allow: mxRead, child: mxEvent},
@@ -378,7 +378,7 @@ func (w *mxWorld) child(kind mxChild) string {
 		var c struct {
 			ID string `json:"id"`
 		}
-		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/events/"+w.event+"/activities", w.owner(), map[string]any{"content": "Matrix comment"}, &c)
+		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/events/"+w.event+"/activities", w.owner(), map[string]any{"body": "Matrix comment"}, &c)
 		id = c.ID
 	case mxInvite:
 		var inv struct {

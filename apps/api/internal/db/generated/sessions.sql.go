@@ -310,6 +310,10 @@ WHERE sessions.refresh_hash = ?
   AND sessions.enabled = TRUE
   AND sessions.expires_at > NOW(3)
   AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE)
+  AND EXISTS (
+    SELECT 1 FROM identities ui
+    WHERE ui.user_id = sessions.user_id AND ui.enabled = TRUE
+      AND (ui.locked_until_at IS NULL OR ui.locked_until_at <= NOW(3)))
   AND NOT EXISTS (
     SELECT 1 FROM identities i
     WHERE i.user_id = sessions.user_id AND i.provider = 'local'
@@ -336,7 +340,9 @@ type RotateSessionByHashParams struct {
 // A disabled user's session matches nothing, as in GetLiveSession, so it
 // cannot be kept alive by refreshing. Nor does the session of a user whose
 // local identity has confirmed a second factor: this application cannot ask
-// for one, so a factor enrolled elsewhere ends its sessions here.
+// for one, so a factor enrolled elsewhere ends its sessions here. A session
+// does not record which identity opened it, so the user must still hold at
+// least one identity that is enabled and not locked.
 func (q *Queries) RotateSessionByHash(ctx context.Context, arg RotateSessionByHashParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, rotateSessionByHash, arg.RefreshHash, arg.ExpiresAt, arg.RefreshHash_2)
 }

@@ -382,7 +382,7 @@ func TestCommentEditDelete(t *testing.T) {
 		Body string `json:"body"`
 	}
 	helpers.DoJSON(t, http.MethodPost, activityURL, tt.AccessToken,
-		map[string]any{"content": "Original comment"}, &comment)
+		map[string]any{"body": "Original comment"}, &comment)
 	require.NotEmpty(t, comment.ID)
 	assert.Equal(t, "Original comment", comment.Body)
 
@@ -402,7 +402,7 @@ func TestCommentEditDelete(t *testing.T) {
 		Body string `json:"body"`
 	}
 	helpers.DoJSON(t, http.MethodPut, activityURL+"/"+comment.ID, tt.AccessToken,
-		map[string]any{"content": "Edited comment"}, &updated)
+		map[string]any{"body": "Edited comment"}, &updated)
 	assert.Equal(t, "Edited comment", updated.Body)
 
 	// List comments, verify body is updated
@@ -459,11 +459,11 @@ func TestCommentEditDenied(t *testing.T) {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt1.AccessToken,
-		map[string]any{"content": "tt1 comment"}, &comment)
+		map[string]any{"body": "tt1 comment"}, &comment)
 
 	// tt2 tries to edit tt1's comment — should get 403
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID+"/activities/"+comment.ID, tt2.AccessToken,
-		map[string]any{"content": "hacked"})
+		map[string]any{"body": "hacked"})
 	assert.Equal(t, 403, status)
 
 	// tt2 tries to delete tt1's comment — should get 403
@@ -500,11 +500,11 @@ func TestCommentEditDeleteMustMatchEventPath(t *testing.T) {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+first.ID+"/activities", tt.AccessToken,
-		map[string]any{"content": "first comment"}, &comment)
+		map[string]any{"body": "first comment"}, &comment)
 
 	wrongPath := calURL + "/events/" + second.ID + "/activities/" + comment.ID
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, wrongPath, tt.AccessToken,
-		map[string]any{"content": "wrong event"})
+		map[string]any{"body": "wrong event"})
 	require.Equal(t, http.StatusNotFound, status)
 
 	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, wrongPath, tt.AccessToken, nil)
@@ -586,7 +586,7 @@ func TestEventDeleteCascade(t *testing.T) {
 
 	// Add a comment
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt.AccessToken,
-		map[string]any{"content": "Some comment"}, nil)
+		map[string]any{"body": "Some comment"}, nil)
 
 	// Delete the event
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken, nil)

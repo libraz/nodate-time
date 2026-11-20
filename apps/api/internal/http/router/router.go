@@ -493,7 +493,7 @@ func Build(deps Deps) http.Handler {
 			Method:      http.MethodPut,
 			Path:        "/calendars/{calendarId}/members/{userId}/color",
 			Summary:     "Change the colour a member's layer is drawn in",
-			Tags:        []string{"Calendar"},
+			Tags:        []string{"Member"},
 		}, calendars.UpdateMemberColor(calDeps))
 
 		huma.Register(api, huma.Operation{

@@ -111,7 +111,7 @@ export function CommentsSection({
     if (!content || isSending) return;
     setIsSending(true);
     try {
-      await api.post(`/calendars/${calendarId}/events/${eventId}/activities`, { content });
+      await api.post(`/calendars/${calendarId}/events/${eventId}/activities`, { body: content });
       setNewComment('');
       await fetchComments();
     } catch (err) {
@@ -124,7 +124,7 @@ export function CommentsSection({
   const saveEdit = async (commentId: string) => {
     try {
       await api.put(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`, {
-        content: editContent,
+        body: editContent,
       });
     } catch (err) {
       toast.error(errorMessage(err));

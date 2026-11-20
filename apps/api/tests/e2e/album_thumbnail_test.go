@@ -251,7 +251,7 @@ func TestPresignRefusesAThumbnailThatIsNotOne(t *testing.T) {
 		{"active content", http.StatusBadRequest, "ALBUM.INVALID_CONTENT_TYPE", map[string]any{
 			"thumbnailContentType": "image/svg+xml", "thumbnailByteSize": 128,
 		}},
-		{"a full-size picture in a thumbnail's clothing", http.StatusUnprocessableEntity, "ALBUM.THUMBNAIL_TOO_LARGE", map[string]any{
+		{"a full-size picture in a thumbnail's clothing", http.StatusRequestEntityTooLarge, "ALBUM.THUMBNAIL_TOO_LARGE", map[string]any{
 			"thumbnailContentType": "image/jpeg", "thumbnailByteSize": 2 * 1024 * 1024,
 		}},
 		{"a type with no size", http.StatusBadRequest, "ALBUM.THUMBNAIL_INCOMPLETE", map[string]any{

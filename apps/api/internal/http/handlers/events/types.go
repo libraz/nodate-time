@@ -233,7 +233,7 @@ type CreateCommentInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
 	Body       struct {
-		Content string `json:"content" minLength:"1"`
+		Body string `json:"body" minLength:"1" maxLength:"16000"`
 	}
 }
 type CreateCommentOutput struct {
@@ -245,7 +245,7 @@ type UpdateCommentInput struct {
 	EventID    string `path:"eventId"`
 	CommentID  string `path:"commentId"`
 	Body       struct {
-		Content string `json:"content" minLength:"1"`
+		Body string `json:"body" minLength:"1" maxLength:"16000"`
 	}
 }
 type UpdateCommentOutput struct {

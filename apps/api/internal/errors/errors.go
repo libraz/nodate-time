@@ -73,9 +73,12 @@ var (
 // --- Calendar errors ---
 
 var (
-	CalendarNotFound       = &Spec{Status: 404, Code: "CALENDAR.NOT_FOUND", Message: "Calendar not found"}
-	CalendarAccessDenied   = &Spec{Status: 403, Code: "CALENDAR.ACCESS_DENIED", Message: "You do not have access to this calendar"}
-	CalendarRoleRequired   = &Spec{Status: 403, Code: "CALENDAR.ROLE_REQUIRED", Message: "Insufficient role for this action"}
+	CalendarNotFound     = &Spec{Status: 404, Code: "CALENDAR.NOT_FOUND", Message: "Calendar not found"}
+	CalendarAccessDenied = &Spec{Status: 403, Code: "CALENDAR.ACCESS_DENIED", Message: "You do not have access to this calendar"}
+	CalendarRoleRequired = &Spec{Status: 403, Code: "CALENDAR.ROLE_REQUIRED", Message: "Insufficient role for this action"}
+	// CalendarReadOnly refuses a change to a system calendar, whose contents
+	// come from a provider feed, at any role.
+	CalendarReadOnly       = &Spec{Status: 403, Code: "CALENDAR.READ_ONLY", Message: "This calendar is read-only"}
 	CalendarCoverForbidden = &Spec{Status: 403, Code: "CALENDAR.COVER_FORBIDDEN", Message: "Uploaded covers are available only on shared personal calendars"}
 	CalendarCoverTooLarge  = &Spec{Status: 413, Code: "CALENDAR.COVER_TOO_LARGE", Message: "Cover image exceeds the maximum size of 5 MB"}
 	CalendarCoverInvalid   = &Spec{Status: 400, Code: "CALENDAR.COVER_INVALID", Message: "Only valid JPEG, PNG, and WebP cover images are accepted"}
@@ -122,7 +125,7 @@ var (
 
 var (
 	AttachmentNotFound = &Spec{Status: 404, Code: "ATTACHMENT.NOT_FOUND", Message: "Attachment not found"}
-	AttachmentTooLarge = &Spec{Status: 422, Code: "ATTACHMENT.TOO_LARGE", Message: "File exceeds maximum size of 100MB"}
+	AttachmentTooLarge = &Spec{Status: 413, Code: "ATTACHMENT.TOO_LARGE", Message: "File exceeds maximum size of 100MB"}
 	// AttachmentDigestMismatch reports that the uploaded bytes are not the
 	// ones the reservation declared.
 	AttachmentDigestMismatch = &Spec{Status: 400, Code: "ATTACHMENT.DIGEST_MISMATCH", Message: "Uploaded file does not match the declared checksum"}
@@ -133,7 +136,7 @@ var (
 
 var (
 	AvatarNotFound          = &Spec{Status: 404, Code: "AVATAR.NOT_FOUND", Message: "Avatar upload session not found"}
-	AvatarTooLarge          = &Spec{Status: 422, Code: "AVATAR.TOO_LARGE", Message: "Avatar exceeds maximum size of 5MB"}
+	AvatarTooLarge          = &Spec{Status: 413, Code: "AVATAR.TOO_LARGE", Message: "Avatar exceeds maximum size of 5MB"}
 	AvatarUploadInvalid     = &Spec{Status: 400, Code: "AVATAR.UPLOAD_INVALID", Message: "Uploaded avatar does not match the declared file"}
 	AvatarUploadLimit       = &Spec{Status: 429, Code: "AVATAR.UPLOAD_LIMIT", Message: "Too many active avatar uploads"}
 	InvalidImageContentType = &Spec{Status: 400, Code: "IMAGE.INVALID_CONTENT_TYPE", Message: "Only JPEG, PNG, and WebP images are accepted"}
@@ -146,13 +149,13 @@ var (
 	// AlbumInvalidContentType names the album's own accepted types, which
 	// include GIF; the avatar's narrower list is InvalidImageContentType.
 	AlbumInvalidContentType = &Spec{Status: 400, Code: "ALBUM.INVALID_CONTENT_TYPE", Message: "Only JPEG, PNG, WebP, and GIF images are accepted"}
-	AlbumPhotoTooLarge      = &Spec{Status: 422, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
+	AlbumPhotoTooLarge      = &Spec{Status: 413, Code: "ALBUM.TOO_LARGE", Message: "Photo exceeds maximum size of 20MB"}
 	// AlbumThumbnailTooLarge refuses the small rendering a photo is uploaded
 	// with, not the photo. Deliberately not ALBUM.TOO_LARGE: that one names
 	// the photo's own ceiling, so a rejected 1.5MB thumbnail would be
 	// answered with a sentence about 20MB and send the reader looking at the
 	// wrong file.
-	AlbumThumbnailTooLarge = &Spec{Status: 422, Code: "ALBUM.THUMBNAIL_TOO_LARGE", Message: "Thumbnail exceeds maximum size of 1MB"}
+	AlbumThumbnailTooLarge = &Spec{Status: 413, Code: "ALBUM.THUMBNAIL_TOO_LARGE", Message: "Thumbnail exceeds maximum size of 1MB"}
 	// AlbumThumbnailIncomplete answers a request that names a thumbnail's
 	// type without its size, or the reverse. Answering it as "no thumbnail"
 	// would be silent: the caller believes it is sending one, and the only

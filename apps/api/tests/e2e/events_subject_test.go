@@ -135,9 +135,9 @@ func TestEventRowsCarryTheirRegistrySubjectAndRequiredKeys(t *testing.T) {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", owner.AccessToken,
-		map[string]any{"content": "a comment"}, &comment)
+		map[string]any{"body": "a comment"}, &comment)
 	helpers.DoJSON(t, http.MethodPut, eventURL+"/activities/"+comment.ID, owner.AccessToken,
-		map[string]any{"content": "an edited comment"}, nil)
+		map[string]any{"body": "an edited comment"}, nil)
 	var item struct {
 		ID string `json:"id"`
 	}
@@ -148,6 +148,8 @@ func TestEventRowsCarryTheirRegistrySubjectAndRequiredKeys(t *testing.T) {
 	helpers.DoJSON(t, http.MethodDelete, eventURL+"/checklist/"+item.ID, owner.AccessToken, nil, nil)
 
 	memoID := createMemo(t, calURL, owner.AccessToken, "a memo")
+	helpers.DoJSON(t, http.MethodPut, calURL+"/memos/"+memoID, owner.AccessToken,
+		map[string]any{"title": "a renamed memo"}, nil)
 	helpers.DoJSON(t, http.MethodPut, calURL+"/memos/"+memoID, owner.AccessToken,
 		map[string]any{"done": true}, nil)
 	helpers.DoJSON(t, http.MethodDelete, calURL+"/memos/"+memoID, owner.AccessToken, nil, nil)
@@ -207,7 +209,7 @@ func TestEventRowsCarryTheirRegistrySubjectAndRequiredKeys(t *testing.T) {
 		"calendar.event.created", "calendar.event.updated", "calendar.event.deleted",
 		"calendar.event.comment.created", "calendar.event.comment.updated",
 		"calendar.event.checklist.created", "calendar.event.checklist.updated", "calendar.event.checklist.deleted",
-		"calendar.memo.created", "calendar.memo.updated", "calendar.memo.deleted",
+		"calendar.memo.created", "calendar.memo.updated", "calendar.memo.completed", "calendar.memo.deleted",
 		"calendar.invite.created", "calendar.invite.revoked",
 		"calendar.member.added", "calendar.member.role_changed", "calendar.member.removed",
 	} {

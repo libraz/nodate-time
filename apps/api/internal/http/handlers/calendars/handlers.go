@@ -226,7 +226,7 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 			return err
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		// The creator owns the calendar, in the colour it was just created

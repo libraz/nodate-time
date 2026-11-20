@@ -135,13 +135,13 @@ func TestEventComments(t *testing.T) {
 		Body     string `json:"body"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt.AccessToken,
-		map[string]any{"content": "了解です！"}, &comment)
+		map[string]any{"body": "了解です！"}, &comment)
 	require.NotEmpty(t, comment.ID)
 	require.Equal(t, "了解です！", comment.Body)
 
 	// Create second comment
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt.AccessToken,
-		map[string]any{"content": "資料を準備します"}, nil)
+		map[string]any{"body": "資料を準備します"}, nil)
 
 	// List comments
 	var comments struct {

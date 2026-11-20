@@ -87,7 +87,7 @@ func TestUploadedAvatarShowsWhereverAUserIsRendered(t *testing.T) {
 		AuthorAvatarURL string `json:"authorAvatarUrl"`
 	}
 	helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", member.AccessToken,
-		map[string]any{"content": "資料を持っていきます"}, &created)
+		map[string]any{"body": "資料を持っていきます"}, &created)
 	requireShowsPicture(t, "the comment that was just posted", created.AuthorAvatarURL, png)
 
 	var thread struct {

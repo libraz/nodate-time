@@ -45,7 +45,7 @@ func TestWhoeverRunsTheCalendarCanTakeACommentDown(t *testing.T) {
 			ID string `json:"id"`
 		}
 		helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", token,
-			map[string]any{"content": body}, &c)
+			map[string]any{"body": body}, &c)
 		return c.ID
 	}
 
@@ -82,11 +82,11 @@ func TestWhoeverRunsTheCalendarCanTakeACommentDown(t *testing.T) {
 	// Rewriting somebody else's comment stays refused for both of them.
 	third := post(author.AccessToken, "資料は当日配ります")
 	ownerEdit, _ := helpers.DoJSONStatus(t, http.MethodPut,
-		eventURL+"/activities/"+third, owner.AccessToken, map[string]any{"content": "資料は不要です"})
+		eventURL+"/activities/"+third, owner.AccessToken, map[string]any{"body": "資料は不要です"})
 	require.Equal(t, 403, ownerEdit, "moderation is removal, not rewriting")
 
 	// And the author still governs their own comment.
 	authorEdit, _ := helpers.DoJSONStatus(t, http.MethodPut,
-		eventURL+"/activities/"+third, author.AccessToken, map[string]any{"content": "資料は前日に配ります"})
+		eventURL+"/activities/"+third, author.AccessToken, map[string]any{"body": "資料は前日に配ります"})
 	require.Equal(t, 200, authorEdit)
 }
