@@ -129,7 +129,7 @@ jobs:
             --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-timetree_clone}" \
             --mode all
 
-      # An existing database upgrades to the same schema a fresh build has.
+      # Check the historical upgrades against their target schema.
       - name: Upgrade path
         run: make test-upgrade-path
 

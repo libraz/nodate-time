@@ -10,7 +10,7 @@
 #      the time-layer upgrades in release order -- twice, to prove a re-run
 #      is harmless
 #   3. check the rewritten rows, run the conformance suite (--mode all),
-#      and compare the schema against a fresh core+time build
+#      and compare the schema against the last schema covered by these upgrades
 # Every scratch database is dropped on exit, pass or fail.
 #
 # Environment:
@@ -34,6 +34,9 @@ TIME_FILES=(
   "${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
   "${ROOT}/sql/time/upgrades/schedule-polls.sql"
 )
+# Keep the reference at the schema the above upgrades target. The CI suite
+# checks the current install schema separately with a fresh database.
+TARGET_REF="f3c4d681b89dd444e2ca8249e03df933cfcd89e3"
 CORE_UPGRADES="${TC_CORE_UPGRADES_DIR:-${ROOT}/sql/core/upgrades}"
 DSN="${TC_UPGRADE_CHECK_DSN:-root:rootpw@127.0.0.1:33306}"
 PREFIX="${TC_UPGRADE_CHECK_DB_PREFIX:-sdb_up_}"
@@ -175,9 +178,9 @@ check_rows() {
 failed=0
 fresh="${PREFIX}fresh"
 
-echo "fresh core+time build -> ${fresh}"
+echo "upgrade target ${TARGET_REF} -> ${fresh}"
 create_db "${fresh}"
-bash "${ROOT}/sql/core/tools/build-schema.sh" core time | sql "${fresh}"
+git -C "${ROOT}" show "${TARGET_REF}:sql/schema.sql" | sql "${fresh}"
 
 for state in "${STATES[@]}"; do
   label="${state%%:*}"
