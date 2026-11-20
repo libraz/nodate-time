@@ -107,8 +107,8 @@ func TestPageByIDStopsOnAListingError(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
-// A queued key that a storage object row still holds, confirmed or reserved,
-// keeps its blob; the queue row goes either way. Written in a transaction
+// A queued key a confirmed or still-referenced storage object holds keeps its
+// blob; a discarded reservation holds nothing. The queue row goes either way. Written in a transaction
 // that is rolled back, against a fake store, so no other test's blobs move.
 func TestDrainBlobRemovalsKeepsKeysAnObjectHolds(t *testing.T) {
 	if os.Getenv("TC_TEST_INTEGRATION") == "" {
@@ -129,14 +129,17 @@ func TestDrainBlobRemovalsKeepsKeysAnObjectHolds(t *testing.T) {
 	require.NoError(t, err)
 
 	prefix := "drain-test/" + id.String() + "/"
-	confirmed, reserved, unheld := prefix+"confirmed", prefix+"reserved", prefix+"unheld"
+	confirmed, reserved := prefix+"confirmed", prefix+"reserved"
+	discarded, unheld := prefix+"discarded", prefix+"unheld"
 	_, err = tx.ExecContext(ctx, `INSERT INTO storage_objects
 		(public_id, workspace_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at)
-		VALUES (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 1, CURRENT_TIMESTAMP(3)),
+		VALUES (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 0, CURRENT_TIMESTAMP(3)),
+		       (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 1, NULL),
 		       (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 0, NULL)`,
-		workspaceID, confirmed, confirmed, workspaceID, reserved, reserved)
+		workspaceID, confirmed, confirmed, workspaceID, reserved, reserved,
+		workspaceID, discarded, discarded)
 	require.NoError(t, err)
-	for _, key := range []string{confirmed, reserved, unheld} {
+	for _, key := range []string{confirmed, reserved, discarded, unheld} {
 		_, err = tx.ExecContext(ctx, `INSERT INTO storage_blob_removals (storage_key) VALUES (?)`, key)
 		require.NoError(t, err)
 	}
@@ -146,10 +149,11 @@ func TestDrainBlobRemovalsKeepsKeysAnObjectHolds(t *testing.T) {
 
 	assert.True(t, slices.Contains(store.deleted, unheld), "a key nothing holds is removed")
 	assert.False(t, slices.Contains(store.deleted, confirmed), "a confirmed object's key is kept")
-	assert.False(t, slices.Contains(store.deleted, reserved), "a reserved object's key is kept")
+	assert.False(t, slices.Contains(store.deleted, reserved), "a referenced reservation's key is kept")
+	assert.True(t, slices.Contains(store.deleted, discarded), "an unreferenced reservation holds nothing")
 	var queued int
 	require.NoError(t, tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM storage_blob_removals WHERE storage_key IN (?, ?, ?)`,
-		confirmed, reserved, unheld).Scan(&queued))
+		`SELECT COUNT(*) FROM storage_blob_removals WHERE storage_key IN (?, ?, ?, ?)`,
+		confirmed, reserved, discarded, unheld).Scan(&queued))
 	assert.Zero(t, queued, "every queue row is dropped")
 }

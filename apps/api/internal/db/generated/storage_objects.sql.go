@@ -24,6 +24,22 @@ func (q *Queries) CountStorageObjectsByKey(ctx context.Context, storageKey strin
 	return count, err
 }
 
+const countStorageObjectsHoldingKey = `-- name: CountStorageObjectsHoldingKey :one
+SELECT COUNT(*) FROM storage_objects
+WHERE storage_key = ? AND (uploaded_at IS NOT NULL OR ref_count > 0)
+`
+
+// CountStorageObjectsHoldingKey answers whether a queued removal must leave a
+// key alone: a confirmed row vouches for the bytes there, and a reservation
+// still referenced is an upload in flight. A reservation nothing references
+// any more -- one whose bytes failed their digest -- holds nothing.
+func (q *Queries) CountStorageObjectsHoldingKey(ctx context.Context, storageKey string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countStorageObjectsHoldingKey, storageKey)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createStorageObject = `-- name: CreateStorageObject :execresult
 
 INSERT INTO storage_objects (public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count)

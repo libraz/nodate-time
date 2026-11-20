@@ -115,6 +115,14 @@ DELETE FROM storage_objects WHERE id = ? AND uploaded_at IS NULL;
 -- name: CountStorageObjectsByKey :one
 SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?;
 
+-- CountStorageObjectsHoldingKey answers whether a queued removal must leave a
+-- key alone: a confirmed row vouches for the bytes there, and a reservation
+-- still referenced is an upload in flight. A reservation nothing references
+-- any more -- one whose bytes failed their digest -- holds nothing.
+-- name: CountStorageObjectsHoldingKey :one
+SELECT COUNT(*) FROM storage_objects
+WHERE storage_key = ? AND (uploaded_at IS NOT NULL OR ref_count > 0);
+
 -- QueueStorageBlobRemoval records a key whose blob is to be removed, in the
 -- transaction that deletes the rows naming it. A key already queued stays one
 -- row.

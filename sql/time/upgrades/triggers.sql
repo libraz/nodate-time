@@ -50,11 +50,12 @@ DROP TRIGGER IF EXISTS `user_album_photo_teardown`;
 -- and cover on the calendars they own would cascade (owned calendars fire no
 -- trigger) past the RESTRICT on storage_objects, so release and remove them
 -- here. Objects are workspace-scoped and survive: only photo keys no
--- storage_objects row holds are queued, and the unreferenced sweep reclaims
--- the rest. Lock order is owned calendars, photos, objects, queue, covers,
--- matching the calendar-first request paths. The photo set is two indexed
--- lookups joined by UNION; an OR plans as a full scan. STRAIGHT_JOIN keeps
--- each read driven from the user's rows, so no unrelated row is locked.
+-- confirmed or still-referenced object holds are queued, and the unreferenced
+-- sweep reclaims the rest. Lock order is owned calendars, photos, objects,
+-- queue, covers, matching the calendar-first request paths. The photo set is
+-- two indexed lookups joined by UNION; an OR plans as a full scan.
+-- STRAIGHT_JOIN keeps each read driven from the user's rows, so no unrelated
+-- row is locked.
 DELIMITER $$
 CREATE TRIGGER user_album_photo_teardown
 BEFORE DELETE ON users FOR EACH ROW
@@ -119,6 +120,7 @@ BEGIN
     SELECT 1 FROM storage_objects so
     WHERE so.storage_key = k.storage_key
       AND BINARY so.storage_key = BINARY k.storage_key
+      AND (so.uploaded_at IS NOT NULL OR so.ref_count > 0)
   )
   ON DUPLICATE KEY UPDATE storage_key = VALUES(storage_key);
 

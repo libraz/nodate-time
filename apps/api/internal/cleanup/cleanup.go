@@ -625,9 +625,9 @@ func sweepUnreferencedObjects(ctx context.Context, db DB, q *generated.Queries, 
 
 // drainBlobRemovals removes the blobs queued in storage_blob_removals: the
 // blob first, the queue row second, so a failed removal is retried on the
-// next pass. Removing a key that is already gone is not an error. A key any
-// storage object row holds, confirmed or reserved, is dropped without touching
-// the blob: that row's own lifecycle removes it.
+// next pass. Removing a key that is already gone is not an error. A key a
+// confirmed or still-referenced storage object holds is dropped without
+// touching the blob: that row's own lifecycle removes it.
 //
 // Both products drain the same queue, which is safe only while they write to
 // the same bucket; Run checks that before letting this run.
@@ -644,7 +644,7 @@ func drainBlobRemovals(ctx context.Context, q *generated.Queries, storageClient 
 		}
 		for _, row := range rows {
 			cursor = row.ID
-			held, err := q.CountStorageObjectsByKey(ctx, row.StorageKey)
+			held, err := q.CountStorageObjectsHoldingKey(ctx, row.StorageKey)
 			if err != nil {
 				slog.Warn("cleanup: count objects for queued key failed", "key", row.StorageKey, "error", err)
 				continue
