@@ -341,13 +341,7 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			if err := q.SoftDeleteAttachmentsByCalendar(ctx, cal.ID); err != nil {
 				return err
 			}
-			// Album photos go the same way. Deleting the calendar only disables
-			// the calendar row, so no cascade reaches them: left enabled they
-			// stay in object storage for good, with no API path left that could
-			// ever name them again.
-			if err := q.SoftDeleteAlbumPhotosByCalendar(ctx, cal.ID); err != nil {
-				return err
-			}
+			// The calendar_album_photo_disable trigger retires its album photos.
 			if err := q.SoftDeleteCalendar(ctx, cal.ID); err != nil {
 				return err
 			}

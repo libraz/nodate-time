@@ -3,14 +3,16 @@
 #
 #   bash scripts/check-upgrade-path.sh
 #
-# For each starting state (the v0.1.0 schema, and the schema main carried
-# before the core upgrades existed), on a scratch database:
-#   1. load that schema and scripts/fixtures/v0.1.0-data.sql
-#   2. apply sql/core/upgrades/*.sql in number order, then
-#      the time-layer upgrades in release order -- twice, to prove a re-run
-#      is harmless
-#   3. check the rewritten rows, run the conformance suite (--mode all),
-#      and compare the schema against the last schema covered by these upgrades
+# For each starting state (the v0.1.0 schema, the schema main carried before
+# the core upgrades existed, and f3c4d681, a database already past
+# from-v0.1.0.sql), on a scratch database:
+#   1. load that schema, plus scripts/fixtures/v0.1.0-data.sql for the states
+#      that run from-v0.1.0.sql
+#   2. apply sql/core/upgrades/*.sql in number order, then the time-layer
+#      upgrades in operator order -- twice, to prove a re-run is harmless
+#   3. check the rewritten rows (fixture states), run the conformance suite
+#      (--mode all), and compare the schema against a fresh load of the
+#      working tree's sql/schema.sql
 # Every scratch database is dropped on exit, pass or fail.
 #
 # Environment:
@@ -30,21 +32,23 @@ export LC_ALL=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="${ROOT}/scripts/fixtures/v0.1.0-data.sql"
-TIME_FILES=(
-  "${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
+RELEASE_FILE="${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
+# Feature files in operator order, then the generated triggers last.
+FEATURE_FILES=(
   "${ROOT}/sql/time/upgrades/schedule-polls.sql"
+  "${ROOT}/sql/time/upgrades/calendar-covers.sql"
+  "${ROOT}/sql/time/upgrades/triggers.sql"
 )
-# Keep the reference at the schema the above upgrades target. The CI suite
-# checks the current install schema separately with a fresh database.
-TARGET_REF="f3c4d681b89dd444e2ca8249e03df933cfcd89e3"
 CORE_UPGRADES="${TC_CORE_UPGRADES_DIR:-${ROOT}/sql/core/upgrades}"
 DSN="${TC_UPGRADE_CHECK_DSN:-root:rootpw@127.0.0.1:33306}"
 PREFIX="${TC_UPGRADE_CHECK_DB_PREFIX:-sdb_up_}"
 
-# label:git-ref of every starting state.
+# label:git-ref:release of every starting state; release is "run" when the
+# state applies from-v0.1.0.sql and "skip" when it already has.
 STATES=(
-  "v010:v0.1.0"
-  "head:ad8ab12"
+  "v010:v0.1.0:run"
+  "head:ad8ab12:run"
+  "past:f3c4d681:skip"
 )
 
 if [[ ! "${DSN}" =~ ^([^:]+):([^@]*)@([^:/]+):([0-9]+)$ ]]; then
@@ -73,7 +77,7 @@ if [[ ${#CORE_FILES[@]} -eq 0 ]]; then
   echo "check-upgrade-path.sh: no core upgrades under ${CORE_UPGRADES}" >&2
   exit 2
 fi
-for f in "${FIXTURE}" "${TIME_FILES[@]}"; do
+for f in "${FIXTURE}" "${RELEASE_FILE}" "${FEATURE_FILES[@]}"; do
   if [[ ! -f "${f}" ]]; then
     echo "check-upgrade-path.sh: missing ${f}" >&2
     exit 2
@@ -102,10 +106,14 @@ create_db() {
   CREATED+=("$1")
 }
 
-# apply_upgrades DB: the order an operator follows, core first.
+# apply_upgrades DB RELEASE: the order an operator follows, core first.
 apply_upgrades() {
-  local f
-  for f in "${CORE_FILES[@]}" "${TIME_FILES[@]}"; do
+  local f files=("${CORE_FILES[@]}")
+  if [[ "$2" == run ]]; then
+    files+=("${RELEASE_FILE}")
+  fi
+  files+=("${FEATURE_FILES[@]}")
+  for f in "${files[@]}"; do
     sql "$1" <"${f}" >/dev/null || { echo "  failed: $(basename "${f}")" >&2; return 1; }
   done
 }
@@ -178,13 +186,12 @@ check_rows() {
 failed=0
 fresh="${PREFIX}fresh"
 
-echo "upgrade target ${TARGET_REF} -> ${fresh}"
+echo "upgrade target: working tree sql/schema.sql -> ${fresh}"
 create_db "${fresh}"
-git -C "${ROOT}" show "${TARGET_REF}:sql/schema.sql" | sql "${fresh}"
+sql "${fresh}" <"${ROOT}/sql/schema.sql"
 
 for state in "${STATES[@]}"; do
-  label="${state%%:*}"
-  ref="${state#*:}"
+  IFS=: read -r label ref release <<<"${state}"
   db="${PREFIX}${label}"
   echo "== ${ref} -> ${db}"
   create_db "${db}"
@@ -192,16 +199,21 @@ for state in "${STATES[@]}"; do
     echo "  could not load ${ref}:sql/schema.sql" >&2
     exit 2
   fi
-  sql "${db}" <"${FIXTURE}"
+  # The fixture holds v0.1.0 rows that only from-v0.1.0.sql rewrites.
+  if [[ "${release}" == run ]]; then
+    sql "${db}" <"${FIXTURE}"
+  fi
 
   ok=1
   for pass in 1 2; do
     echo "  upgrade pass ${pass}"
-    apply_upgrades "${db}" || { ok=0; break; }
+    apply_upgrades "${db}" "${release}" || { ok=0; break; }
   done
-  if [[ ${ok} -eq 1 ]]; then
+  if [[ ${ok} -eq 1 && "${release}" == run ]]; then
     echo "  rewritten rows"
     check_rows "${db}" || ok=0
+  fi
+  if [[ ${ok} -eq 1 ]]; then
     echo "  conformance"
     bash "${ROOT}/sql/core/conformance/run.sh" --dsn "$(dsn_of "${db}")" --mode all || ok=0
     echo "  equivalence with ${fresh}"

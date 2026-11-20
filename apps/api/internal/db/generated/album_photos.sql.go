@@ -585,16 +585,6 @@ func (q *Queries) SoftDeleteAlbumPhoto(ctx context.Context, id uint32) (sql.Resu
 	return q.db.ExecContext(ctx, softDeleteAlbumPhoto, id)
 }
 
-const softDeleteAlbumPhotosByCalendar = `-- name: SoftDeleteAlbumPhotosByCalendar :exec
-UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
-WHERE calendar_id = ? AND enabled = TRUE
-`
-
-func (q *Queries) SoftDeleteAlbumPhotosByCalendar(ctx context.Context, calendarID uint32) error {
-	_, err := q.db.ExecContext(ctx, softDeleteAlbumPhotosByCalendar, calendarID)
-	return err
-}
-
 const updateAlbumPhotoMeta = `-- name: UpdateAlbumPhotoMeta :exec
 UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ? AND enabled = TRUE
 `

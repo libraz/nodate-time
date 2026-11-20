@@ -122,9 +122,9 @@ BEGIN
   SET @tc_so_refs = NULL;
   SET @tc_so_sql = NULL;
 
-  -- Same body as sql/time/views/storage_objects_unreferenced.sql, which
-  -- scripts/check-upgrade-path.sh holds this to. A reservation is no longer
-  -- listed: only the unconfirmed sweep reclaims one.
+  -- The view as of this release; calendar-covers.sql replaces it afterwards.
+  -- A reservation is no longer listed: only the unconfirmed sweep reclaims
+  -- one.
   CREATE OR REPLACE VIEW storage_objects_unreferenced AS
   SELECT so.id
   FROM storage_objects so

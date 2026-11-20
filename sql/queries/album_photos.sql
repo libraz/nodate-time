@@ -103,10 +103,6 @@ UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE
 DELETE FROM album_photos
 WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE AND retired_at IS NULL;
 
--- name: SoftDeleteAlbumPhotosByCalendar :exec
-UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3)
-WHERE calendar_id = ? AND enabled = TRUE;
-
 -- ListAbandonedAlbumPhotoStorageKeys walks rows that are out of use: enabled
 -- covers both a reservation whose upload never landed and a photo the user
 -- deleted, and both are collected the same way.

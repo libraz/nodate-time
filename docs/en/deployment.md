@@ -65,28 +65,33 @@ docker compose -f compose.prod.yml exec -T mysql \
 
 ## Upgrading
 
-Back up both volumes first, as described in [Backups](#backups). A database that holds data is never rebuilt: `sql/schema.sql` and `sql/core/tools/build-schema.sh` drop every table they create, so applying either to a live database wipes it. It is brought forward by upgrade files instead, in this order, with the API stopped:
+Back up both volumes first, as described in [Backups](#backups). A database that holds data is never rebuilt: `sql/schema.sql` and `sql/core/tools/build-schema.sh` drop every table they create, so applying either to a live database wipes it. It is brought forward by upgrade files instead, in this order, with the API and every other product writing the same database stopped:
 
 1. `sql/core/upgrades/*.sql`, every file, in number order. These change the tables shared with other products and always come first; the next step refuses to run until they have.
-2. `sql/time/upgrades/from-<release>.sql`, for each release between yours and the one you are moving to, oldest first.
-3. The conformance check, which confirms the result matches the contract.
+2. `sql/time/upgrades/from-v0.1.0.sql`, only on a database that has not had it, which is one without the `album_photos.retired_at` column. Once the new API has served a request it is never run again.
+3. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 2.
+4. `sql/time/upgrades/triggers.sql`, last. It drops and recreates every trigger of this layer. MySQL cannot replace a trigger atomically, so a delete running in between would miss it; this is why every writer is stopped.
+5. The conformance check, which confirms the result matches the contract.
 
 ```sh
 docker compose -f compose.prod.yml stop api
 docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
 docker compose -f compose.prod.yml exec -T mysql bash -euc '
   export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
-  for f in /tmp/upgrade-sql/core/upgrades/*.sql /tmp/upgrade-sql/time/upgrades/from-v0.1.0.sql; do
-    echo "applying ${f#/tmp/upgrade-sql/}"
-    mysql -uroot "$MYSQL_DATABASE" < "$f"
-  done
+  up=/tmp/upgrade-sql/time/upgrades
+  apply() { echo "applying ${1#/tmp/upgrade-sql/}"; mysql -uroot "$MYSQL_DATABASE" < "$1"; }
+  for f in /tmp/upgrade-sql/core/upgrades/*.sql; do apply "$f"; done
+  if ! mysql -uroot "$MYSQL_DATABASE" -e "SELECT retired_at FROM album_photos LIMIT 0" 2>/dev/null; then
+    apply "$up/from-v0.1.0.sql"
+  fi
+  for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
     --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
   rm -rf /tmp/upgrade-sql
 ' && docker compose -f compose.prod.yml up -d --build
 ```
 
-The password and database name are read inside the container, from the values `.env` gave it, so nothing has to be exported on the host. The loop stops at the first file that fails, and the rebuild runs only if every file and the check succeeded. Stop the old API first: a row it deletes after the upgrade has run would read as an upload still awaiting confirmation. Each step checks what is already there, so a run that stopped partway can be repeated, as long as the new API has not yet served a request.
+The password and database name are read inside the container, from the values `.env` gave it, so nothing has to be exported on the host. The script stops at the first file that fails, and the rebuild runs only if every file and the check succeeded. Stop the old API first: a row it deletes after the upgrade has run would read as an upload still awaiting confirmation. Each step checks what is already there, so a run that stopped partway can be repeated, as long as the new API has not yet served a request.
 
 ### Allowed sign-in addresses turn the restriction on
 

@@ -44,6 +44,7 @@ db-down:
 
 db-schema:
 	bash sql/core/tools/build-schema.sh core time > sql/schema.sql
+	bash scripts/gen-layer-triggers-upgrade.sh time > sql/time/upgrades/triggers.sql
 
 db-apply: db-schema
 	docker run --rm -i --network host mysql:26.10.0 \
@@ -73,10 +74,12 @@ sqlc:
 	@bash scripts/check-codegen-drift.sh --check-tool
 	cd sql && sqlc generate
 
-# Fail when the composed schema or the sqlc output no longer matches the
-# layered sources they are generated from.
+# Fail when the composed schema, the trigger upgrade or the sqlc output no
+# longer matches the layered sources they are generated from.
 verify-codegen:
 	bash scripts/check-codegen-drift.sh
+	@bash scripts/gen-layer-triggers-upgrade.sh time | diff -u sql/time/upgrades/triggers.sql - \
+		|| { echo "sql/time/upgrades/triggers.sql is out of date: run make db-schema"; exit 1; }
 	bash scripts/check-error-messages.sh
 
 # API

@@ -53,13 +53,14 @@ comments, so a comment-only edit still leaves the generated files stale.
 So a change under `sql/` runs both generators before it is done:
 
 ```sh
-make db-schema   # layered sources -> schema.sql
+make db-schema   # layered sources -> schema.sql, time/upgrades/triggers.sql
 make sqlc        # schema + queries -> apps/api/internal/db/generated/
 ```
 
 `make verify-codegen` checks the pairing without writing anything: it runs
-`scripts/check-codegen-drift.sh` and `scripts/check-error-messages.sh`, and CI
-runs it. The pre-commit hook (`.githooks/pre-commit`) runs
+`scripts/check-codegen-drift.sh`, compares `time/upgrades/triggers.sql` with
+`scripts/gen-layer-triggers-upgrade.sh time`, and runs
+`scripts/check-error-messages.sh`; CI runs it. The pre-commit hook (`.githooks/pre-commit`) runs
 `check-codegen-drift.sh --staged`, plus
 `sql/core/tools/check-vendored.sh sql/core --mode local` when `sql/core/` is
 staged; it does not run the error-message check. The hook is
@@ -69,32 +70,45 @@ reached through `core.hooksPath`, so it only runs where that is configured.
 
 `schema.sql` creates a database from nothing, dropping every table of its
 layers first, so it is never run against one that holds data. An existing
-database reaches the current schema through two sets of upgrades, applied
-in this order with every application stopped:
+database reaches the current schema through upgrades, applied in this order
+with the writers of every product on the database stopped:
 
 1. `core/upgrades/NNNN-<slug>.sql`, all of them in number order. They
    reshape the shared tables and are vendored from upstream with the rest
    of `core/`.
-2. `time/upgrades/from-<release>.sql`, the one for the release the
-   database was created by. It changes this layer's tables and rewrites the
-   rows this application wrote, and refuses to run before the core upgrades.
-3. `bash sql/core/conformance/run.sh --mode schema` against the database.
+2. `time/upgrades/from-v0.1.0.sql`, only when its marker is absent: it has
+   been applied iff `album_photos.retired_at` exists. It changes this
+   layer's tables, rewrites the rows this application wrote, and refuses to
+   run before the core upgrades.
+3. The feature files, in this order: `time/upgrades/schedule-polls.sql`,
+   `time/upgrades/calendar-covers.sql`.
+4. `time/upgrades/triggers.sql`, last.
+5. `bash sql/core/conformance/run.sh --mode schema` against the database.
 
-A change under `time/` that has not been released yet goes into the upgrade
-file from the latest tag, written as the statements an existing database
-needs rather than the definition a new one gets. A change to a core table is
-made upstream and arrives as a new core upgrade. When a change alters what
-an existing row means, the file says how to tell the old rows apart and sets
-them accordingly, the way `from-v0.1.0.sql` marks the rows v0.1.0 had
-already deleted. Each step checks what the database already has, so a run
-that stopped partway can be repeated, and so can a whole run.
+A release file (`from-<release>.sql`) is the step from that tag. It is
+applied once, never re-run after the new API has served, and frozen once a
+database past it has served. A layer object added after that goes into a
+feature file (`<feature>.sql`), listed in step 3: idempotent, written as
+`CREATE TABLE IF NOT EXISTS` with a copy of the table file,
+`CREATE OR REPLACE VIEW`, and information_schema-guarded steps. A change to
+a core table is made upstream and arrives as a new core upgrade. When a
+change alters what an existing row means, the file says how to tell the old
+rows apart and sets them accordingly, the way `from-v0.1.0.sql` marks the
+rows v0.1.0 had already deleted, and the fixture gains rows for it.
 
-`bash scripts/check-upgrade-path.sh` proves it. It loads the v0.1.0 schema,
-and the one main carried before the core upgrades existed, each with
-`scripts/fixtures/v0.1.0-data.sql`, applies both sets of upgrades twice,
-then checks the rewritten rows, runs the conformance suite and compares
-`information_schema` against a fresh `build-schema.sh core time`. A new
-rewrite adds rows for it to the fixture.
+`time/upgrades/triggers.sql` is generated from `time/triggers/` by
+`make db-schema` and is never edited by hand. It drops and recreates every
+trigger under a fixed `sql_mode`. MySQL has no atomic trigger replace, so it
+runs with the writers stopped. A trigger removed from `time/triggers/`
+keeps its `DROP` through the generator's `RETIRED` list.
+
+`bash scripts/check-upgrade-path.sh` proves it. It loads three starting
+schemas: v0.1.0 and the one main carried before the core upgrades existed,
+each with `scripts/fixtures/v0.1.0-data.sql`, and f3c4d681, a database
+already past `from-v0.1.0.sql`, which skips it. It applies the upgrades
+twice, checks the rewritten rows on the fixture states, runs the
+conformance suite and compares `information_schema` against a fresh load of
+the working tree's `schema.sql`.
 
 ## Queries
 

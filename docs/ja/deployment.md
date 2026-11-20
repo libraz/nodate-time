@@ -65,28 +65,33 @@ docker compose -f compose.prod.yml exec -T mysql \
 
 ## 既存環境の更新
 
-先に[バックアップ](#バックアップ)のとおり 2 つのボリュームを保存します。データの入った DB は作り直しません。`sql/schema.sql` も `sql/core/tools/build-schema.sh` も、作るテーブルをすべて DROP してから作り直すので、稼働中の DB に流すとデータが消えます。既存の DB は更新用の SQL で上げます。API を止めたうえで、次の順に当てます。
+先に[バックアップ](#バックアップ)のとおり 2 つのボリュームを保存します。データの入った DB は作り直しません。`sql/schema.sql` も `sql/core/tools/build-schema.sh` も、作るテーブルをすべて DROP してから作り直すので、稼働中の DB に流すとデータが消えます。既存の DB は更新用の SQL で上げます。API と、同じ DB に書き込む他のプロダクトをすべて止めたうえで、次の順に当てます。
 
 1. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てます。これが済むまで次の手順は実行を拒否します。
-2. `sql/time/upgrades/from-<リリース>.sql` を、今のリリースから移行先までの各リリースについて古い順に。
-3. 適合性検査。結果が契約どおりになっているかを確かめます。
+2. `sql/time/upgrades/from-v0.1.0.sql` を、まだ当てていない DB にだけ。`album_photos.retired_at` 列がなければ未適用です。新しい API が一度でもリクエストを処理したら、二度と流しません。
+3. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 2 を済ませたどの DB にも当てられます。
+4. `sql/time/upgrades/triggers.sql` を最後に。この層のトリガーをすべて DROP して作り直します。MySQL はトリガーを不可分に置き換えられないので、その間に走った削除はトリガーを通りません。書き込む側をすべて止めるのはこのためです。
+5. 適合性検査。結果が契約どおりになっているかを確かめます。
 
 ```sh
 docker compose -f compose.prod.yml stop api
 docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
 docker compose -f compose.prod.yml exec -T mysql bash -euc '
   export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
-  for f in /tmp/upgrade-sql/core/upgrades/*.sql /tmp/upgrade-sql/time/upgrades/from-v0.1.0.sql; do
-    echo "applying ${f#/tmp/upgrade-sql/}"
-    mysql -uroot "$MYSQL_DATABASE" < "$f"
-  done
+  up=/tmp/upgrade-sql/time/upgrades
+  apply() { echo "applying ${1#/tmp/upgrade-sql/}"; mysql -uroot "$MYSQL_DATABASE" < "$1"; }
+  for f in /tmp/upgrade-sql/core/upgrades/*.sql; do apply "$f"; done
+  if ! mysql -uroot "$MYSQL_DATABASE" -e "SELECT retired_at FROM album_photos LIMIT 0" 2>/dev/null; then
+    apply "$up/from-v0.1.0.sql"
+  fi
+  for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
     --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
   rm -rf /tmp/upgrade-sql
 ' && docker compose -f compose.prod.yml up -d --build
 ```
 
-パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はありません。ループは失敗したファイルで止まり、再ビルドはすべてのファイルと検査が成功したときだけ走ります。旧版の API は先に止めてください。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまいます。各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せます。
+パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はありません。スクリプトは失敗したファイルで止まり、再ビルドはすべてのファイルと検査が成功したときだけ走ります。旧版の API は先に止めてください。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまいます。各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せます。
 
 ### 許可したメールアドレスがあるとサインインの制限が有効になる
 
