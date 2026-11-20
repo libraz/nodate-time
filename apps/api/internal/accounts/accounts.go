@@ -19,7 +19,7 @@ import (
 
 // Params describes the account to create.
 type Params struct {
-	// Email is stored as given.
+	// Email is stored lower-cased and trimmed, as auth.NormalizeEmail returns it.
 	Email string
 	// Name defaults to the local part of Email.
 	Name string
@@ -47,6 +47,7 @@ type Result struct {
 // Create writes the account, its workspace membership and, where the
 // deployment calls for them, the allow-list entry and admin grant.
 func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Result, error) {
+	email := auth.NormalizeEmail(p.Email)
 	// An account this package writes is one the API then has to live with, so
 	// the password it accepts is the one /auth/register would have accepted.
 	var hash string
@@ -82,7 +83,7 @@ func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Resu
 	queries := generated.New(db)
 
 	if p.SkipExisting {
-		existing, err := queries.GetUserByEmail(ctx, p.Email)
+		existing, err := queries.GetUserByEmail(ctx, email)
 		switch {
 		case err == nil:
 			return Result{User: existing, Created: false}, nil
@@ -104,7 +105,7 @@ func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Resu
 	err = dbtx.Run(ctx, db, func(q *generated.Queries) error {
 		res, err := q.CreateUser(ctx, generated.CreateUserParams{
 			PublicID:    pubID[:],
-			Email:       p.Email,
+			Email:       email,
 			DisplayName: name,
 			Locale:      locale,
 			Timezone:    timezone,
@@ -127,7 +128,7 @@ func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Resu
 				PublicID:     identityPubID[:],
 				UserID:       userID,
 				Provider:     generated.IdentitiesProviderLocal,
-				Subject:      p.Email,
+				Subject:      email,
 				PasswordHash: sql.NullString{String: hash, Valid: true},
 			}); err != nil {
 				return fmt.Errorf("create identity: %w", err)
@@ -157,7 +158,7 @@ func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Resu
 			}
 			if err := q.UpsertOauthSigninAllowlistEmail(ctx, generated.UpsertOauthSigninAllowlistEmailParams{
 				PublicID:   allowPubID[:],
-				EntryValue: strings.ToLower(strings.TrimSpace(p.Email)),
+				EntryValue: email,
 				Notes:      sql.NullString{String: p.AllowlistNote, Valid: true},
 			}); err != nil {
 				return fmt.Errorf("allow-list address: %w", err)
