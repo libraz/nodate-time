@@ -1,7 +1,7 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "13be9fedfe8ab0746ccafe3d295e9e81727ac99c",
+  "ref": "e651abd6697652c600f04dd66c1f36563add560c",
   "files": [
     {
       "path": "PROTOCOL.md",
@@ -249,7 +249,7 @@
     },
     {
       "path": "tools/build-schema.sh",
-      "sha256": "2bda2e5510bbbf165b78b41dfab9dae98465fa125a1be09b437029db7ebec6c5"
+      "sha256": "9f51066a1de5d18ab999f141b1d2c96c9372d1b516fbcda664a09e0f76ca598b"
     },
     {
       "path": "tools/check-layer-equivalence.sh",

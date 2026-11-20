@@ -202,13 +202,23 @@ emit_views() {
   done
 }
 
-# Trigger files use DELIMITER $$ ... DELIMITER ; themselves.
+# Trigger files use DELIMITER $$ ... DELIMITER ; themselves. Every trigger a
+# file creates is dropped first, not only the one named after the file: a
+# trigger on another layer's table survives this layer's DROP TABLE, so a
+# re-applied layer would otherwise fail on it.
 emit_triggers() {
-  local dir="$1" f
+  local dir="$1" f names name
   [[ -d "${dir}" ]] || return 0
   for f in "${dir}"/*.sql; do
     [[ -e "${f}" ]] || continue
-    echo "DROP TRIGGER IF EXISTS \`$(basename "${f}" .sql)\`;"
+    names="$(sed -nE 's/^[[:space:]]*CREATE[[:space:]]+TRIGGER[[:space:]]+`?([A-Za-z0-9_]+)`?.*/\1/p' "${f}")"
+    if [[ -z "${names}" ]]; then
+      echo "build-schema.sh: no CREATE TRIGGER in ${f}" >&2
+      exit 1
+    fi
+    for name in ${names}; do
+      echo "DROP TRIGGER IF EXISTS \`${name}\`;"
+    done
   done
   echo
   emit_files "${dir}"

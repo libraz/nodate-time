@@ -3,14 +3,14 @@
 #
 #   bash scripts/gen-layer-triggers-upgrade.sh <layer> > sql/<layer>/upgrades/triggers.sql
 #
-# Emits DROP TRIGGER IF EXISTS + the trigger file for every file under
-# sql/<layer>/triggers/, under a fixed sql_mode, so an existing database gets
-# exactly the triggers a fresh build has. A trigger removed from that
-# directory keeps its DROP through RETIRED below.
+# For every file under sql/<layer>/triggers/, emits DROP TRIGGER IF EXISTS for
+# each trigger it creates and then the file, under a fixed sql_mode, so an
+# existing database gets exactly the triggers a fresh build has. A trigger
+# removed from that directory keeps its DROP through RETIRED below.
 #
 # `make db-schema` writes the file and `make verify-codegen` fails on drift.
 #
-# Exit codes: 0 ok, 2 bad usage.
+# Exit codes: 0 ok, 1 a file creates no trigger, 2 bad usage.
 
 set -euo pipefail
 
@@ -61,7 +61,15 @@ done
 for f in "${dir}"/*.sql; do
   [[ -e "${f}" ]] || continue
   echo "-- >>> $(basename "${f}")"
-  echo "DROP TRIGGER IF EXISTS \`$(basename "${f}" .sql)\`;"
+  # Every trigger the file creates, the same rule build-schema.sh follows.
+  names="$(sed -nE 's/^[[:space:]]*CREATE[[:space:]]+TRIGGER[[:space:]]+`?([A-Za-z0-9_]+)`?.*/\1/p' "${f}")"
+  if [[ -z "${names}" ]]; then
+    echo "gen-layer-triggers-upgrade.sh: no CREATE TRIGGER in ${f}" >&2
+    exit 1
+  fi
+  for name in ${names}; do
+    echo "DROP TRIGGER IF EXISTS \`${name}\`;"
+  done
   cat "${f}"
   echo
 done
