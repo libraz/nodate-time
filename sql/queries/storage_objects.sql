@@ -14,6 +14,9 @@ ON DUPLICATE KEY UPDATE id = id;
 -- name: GetStorageObjectByID :one
 SELECT * FROM storage_objects WHERE id = ? AND enabled = TRUE;
 
+-- name: GetStorageObjectByIDForUpdate :one
+SELECT * FROM storage_objects WHERE id = ? AND enabled = TRUE FOR UPDATE;
+
 -- GetStorageObjectByWorkspaceDigest and GetStorageObjectByOwnerDigest find the
 -- row that content addressing deduplicated onto. (scope, sha256) is the unique
 -- key the upsert collides on, so it answers whatever key the row carries: an
@@ -42,6 +45,10 @@ FOR UPDATE;
 -- name: MarkStorageObjectUploaded :exec
 UPDATE storage_objects
 SET byte_size = ?, content_type = ?, uploaded_at = CURRENT_TIMESTAMP(3)
+WHERE id = ? AND uploaded_at IS NULL;
+
+-- name: TouchUnconfirmedStorageObject :exec
+UPDATE storage_objects SET updated_at = CURRENT_TIMESTAMP(3)
 WHERE id = ? AND uploaded_at IS NULL;
 
 -- name: IncrementStorageObjectRefs :exec

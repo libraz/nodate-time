@@ -3,11 +3,15 @@ package calendars
 import "time"
 
 type CalendarResponse struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Color     string    `json:"color"`
-	CoverURL  string    `json:"coverUrl"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	// CoverImageURL is a short-lived, signed URL for an uploaded cover image.
+	CoverImageURL string `json:"coverImageUrl,omitempty"`
+	// CoverUploadAllowed is true only for shared, user-created personal
+	// calendars when signed blob storage is configured.
+	CoverUploadAllowed bool      `json:"coverUploadAllowed"`
+	CreatedAt          time.Time `json:"createdAt"`
 	// PublicShared is true when an active public (read-only embed) link exists,
 	// so the UI can flag the calendar as externally exposed.
 	PublicShared bool `json:"publicShared"`
@@ -67,9 +71,8 @@ type CreateCalendarOutput struct {
 type UpdateCalendarInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
-		Name     *string `json:"name,omitempty" minLength:"1" maxLength:"200" required:"false"`
-		Color    *string `json:"color,omitempty" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
-		CoverURL *string `json:"coverUrl,omitempty" maxLength:"500" required:"false"`
+		Name  *string `json:"name,omitempty" minLength:"1" maxLength:"200" required:"false"`
+		Color *string `json:"color,omitempty" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
 	}
 }
 type UpdateCalendarOutput struct {
@@ -80,6 +83,21 @@ type DeleteCalendarInput struct {
 	CalendarID string `path:"calendarId"`
 }
 type DeleteCalendarOutput struct{}
+
+type PutCalendarCoverInput struct {
+	CalendarID string `path:"calendarId"`
+	RawBody    []byte `contentType:"application/octet-stream"`
+}
+type PutCalendarCoverOutput struct {
+	Body CalendarResponse
+}
+
+type DeleteCalendarCoverInput struct {
+	CalendarID string `path:"calendarId"`
+}
+type DeleteCalendarCoverOutput struct {
+	Body CalendarResponse
+}
 
 // Members
 

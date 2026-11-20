@@ -15,6 +15,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/memberpalette"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -78,7 +79,6 @@ func mapCalendar(c generated.Calendar, role generated.CalendarMembersRole, membe
 		ID:          pubIDToHex(c.PublicID),
 		Name:        c.Name,
 		Color:       c.Color,
-		CoverURL:    nullStringValue(c.CoverURL),
 		CreatedAt:   c.CreatedAt,
 		Role:        string(role),
 		MemberColor: memberColor,
@@ -148,17 +148,34 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 		}
 
 		out := &ListCalendarsOutput{Body: make([]CalendarResponse, 0, len(rows))}
+		coverKeys := map[uint32]string{}
+		if len(rows) > 0 {
+			calendarIDs := make([]uint32, 0, len(rows))
+			for _, c := range rows {
+				calendarIDs = append(calendarIDs, c.ID)
+			}
+			coverRows, err := deps.Queries.ListCalendarCoverKeys(ctx, calendarIDs)
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+			coverKeys = make(map[uint32]string, len(coverRows))
+			for _, cover := range coverRows {
+				coverKeys[cover.CalendarID] = cover.StorageKey
+			}
+		}
 		for _, c := range rows {
-			out.Body = append(out.Body, CalendarResponse{
-				ID:           pubIDToHex(c.PublicID),
-				Name:         c.Name,
-				Color:        c.Color,
-				CoverURL:     nullStringValue(c.CoverURL),
-				CreatedAt:    c.CreatedAt,
-				PublicShared: publicSet[c.ID],
-				Role:         string(c.MemberRole),
-				MemberColor:  c.MemberColor,
-			})
+			calendar := generated.Calendar{
+				ID:          c.ID,
+				PublicID:    c.PublicID,
+				Kind:        c.Kind,
+				Name:        c.Name,
+				Color:       c.Color,
+				OwnerUserID: c.OwnerUserID,
+				CreatedAt:   c.CreatedAt,
+			}
+			response := mapCalendarWithCover(deps, calendar, c.MemberRole, c.MemberColor, coverKeys[c.ID])
+			response.PublicShared = publicSet[c.ID]
+			out.Body = append(out.Body, response)
 		}
 		return out, nil
 	}
@@ -171,7 +188,11 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		resp := mapCalendar(cal, member.Role, member.MemberColor)
+		coverKey, err := calendarCoverKey(ctx, deps.Queries, cal.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		resp := mapCalendarWithCover(deps, cal, member.Role, member.MemberColor, coverKey)
 		resp.PublicShared = publicShared(ctx, deps, cal.ID)
 		return &GetCalendarOutput{Body: resp}, nil
 	}
@@ -250,7 +271,7 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 		// with. Nothing has had the chance to share it yet, so publicShared
 		// is false by construction rather than by omission.
 		return &CreateCalendarOutput{
-			Body: mapCalendar(created, generated.CalendarMembersRoleOwner, color),
+			Body: mapCalendarWithCover(deps, created, generated.CalendarMembersRoleOwner, color, ""),
 		}, nil
 	}
 }
@@ -291,16 +312,10 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			if in.Body.Color != nil {
 				color = *in.Body.Color
 			}
-			coverURL := current.CoverURL
-			if in.Body.CoverURL != nil {
-				coverURL = nullString(*in.Body.CoverURL)
-			}
-
 			if err := q.UpdateCalendar(ctx, generated.UpdateCalendarParams{
-				Name:     name,
-				Color:    color,
-				CoverURL: coverURL,
-				ID:       cal.ID,
+				Name:  name,
+				Color: color,
+				ID:    cal.ID,
 			}); err != nil {
 				return err
 			}
@@ -325,7 +340,11 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		// share state is read rather than left at its zero value: a client
 		// that merges this response over the one it holds would otherwise take
 		// the omission for a calendar that had stopped being shared.
-		resp := mapCalendar(updated, member.Role, member.MemberColor)
+		coverKey, err := calendarCoverKey(ctx, deps.Queries, cal.ID)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		resp := mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, coverKey)
 		resp.PublicShared = publicShared(ctx, deps, cal.ID)
 		return &UpdateCalendarOutput{Body: resp}, nil
 	}
@@ -745,12 +764,8 @@ func releaseMemberEvents(ctx context.Context, q *generated.Queries, calendarID, 
 // labelPalette builds the colour list, one entry per colour, with the name as
 // an i18n key so the client can localize it.
 func labelPalette() []LabelResponse {
-	colors := []string{
-		"#47B2F7", "#F35F8C", "#B38BDC", "#FDC02D", "#E73B3B",
-		"#2ECC87", "#F5A623", "#8F8F8F", "#42A5F5", "#FF7043",
-	}
-	labels := make([]LabelResponse, len(colors))
-	for i, c := range colors {
+	labels := make([]LabelResponse, len(memberpalette.Colors))
+	for i, c := range memberpalette.Colors {
 		id := strconv.Itoa(i + 1)
 		labels[i] = LabelResponse{ID: id, NameKey: "label." + id, Color: c}
 	}

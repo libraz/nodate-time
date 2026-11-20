@@ -190,6 +190,33 @@ func (q *Queries) GetStorageObjectByID(ctx context.Context, id uint32) (StorageO
 	return i, err
 }
 
+const getStorageObjectByIDForUpdate = `-- name: GetStorageObjectByIDForUpdate :one
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects WHERE id = ? AND enabled = TRUE FOR UPDATE
+`
+
+func (q *Queries) GetStorageObjectByIDForUpdate(ctx context.Context, id uint32) (StorageObject, error) {
+	row := q.db.QueryRowContext(ctx, getStorageObjectByIDForUpdate, id)
+	var i StorageObject
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.OwnerUserID,
+		&i.Sha256,
+		&i.ByteSize,
+		&i.ContentType,
+		&i.StorageKey,
+		&i.RefCount,
+		&i.UploadedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getStorageObjectByOwnerDigest = `-- name: GetStorageObjectByOwnerDigest :one
 SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
 WHERE owner_user_id = ? AND sha256 = ? AND enabled = TRUE
@@ -473,5 +500,15 @@ ON DUPLICATE KEY UPDATE storage_key = VALUES(storage_key)
 // row.
 func (q *Queries) QueueStorageBlobRemoval(ctx context.Context, storageKey string) error {
 	_, err := q.db.ExecContext(ctx, queueStorageBlobRemoval, storageKey)
+	return err
+}
+
+const touchUnconfirmedStorageObject = `-- name: TouchUnconfirmedStorageObject :exec
+UPDATE storage_objects SET updated_at = CURRENT_TIMESTAMP(3)
+WHERE id = ? AND uploaded_at IS NULL
+`
+
+func (q *Queries) TouchUnconfirmedStorageObject(ctx context.Context, id uint32) error {
+	_, err := q.db.ExecContext(ctx, touchUnconfirmedStorageObject, id)
 	return err
 }

@@ -1200,6 +1200,12 @@ type Calendar struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Uploaded cover images for shared calendars
+type CalendarCoverImage struct {
+	CalendarID      uint32 `json:"calendarId"`
+	StorageObjectID uint32 `json:"storageObjectId"`
+}
+
 // Calendar events with kind/visibility/show_as classification; nullable start/end for planning-stage placeholders; task_role links to task projection. Soft-delete is signalled solely by enabled=FALSE (no deleted_at column); consumer views must propagate enabled=TRUE on every JOIN to honour soft-delete.
 type CalendarEvent struct {
 	// Internal PK, never exposed
@@ -2204,6 +2210,12 @@ type UserRecoveryCode struct {
 	UsedAt    sql.NullTime `json:"usedAt"`
 	UpdatedAt sql.NullTime `json:"updatedAt"`
 	CreatedAt time.Time    `json:"createdAt"`
+}
+
+type VCalendarCoverImage struct {
+	WorkspaceID uint32 `json:"workspaceId"`
+	CalendarID  uint32 `json:"calendarId"`
+	StorageKey  string `json:"storageKey"`
 }
 
 // Tenant boundary

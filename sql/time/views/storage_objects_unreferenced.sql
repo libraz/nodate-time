@@ -31,5 +31,8 @@ WHERE so.ref_count = 0
     SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
   )
   AND NOT EXISTS (
+    SELECT 1 FROM calendar_cover_images ci WHERE ci.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar_storage_object_id = so.id
   );

@@ -22,6 +22,10 @@ SELECT c.*, cm.role AS member_role, cm.member_color
 FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
+  AND EXISTS (
+    SELECT 1 FROM workspace_members wm
+    WHERE wm.workspace_id = c.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+  )
 ORDER BY c.created_at DESC;
 
 -- CreateCalendar leaves owner_user_id NULL: these are calendars a group
@@ -32,7 +36,7 @@ INSERT INTO calendars (public_id, workspace_id, kind, name, color)
 VALUES (?, ?, 'personal', ?, ?);
 
 -- name: UpdateCalendar :exec
-UPDATE calendars SET name = ?, color = ?, cover_url = ? WHERE id = ?;
+UPDATE calendars SET name = ?, color = ? WHERE id = ?;
 
 -- name: SoftDeleteCalendar :exec
 UPDATE calendars SET enabled = FALSE WHERE id = ?;

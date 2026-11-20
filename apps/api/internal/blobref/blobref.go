@@ -86,6 +86,27 @@ func Reserve(ctx context.Context, q *generated.Queries, b Blob) (generated.Stora
 	return object, nil
 }
 
+// Stage finds or creates the object for b's digest without taking a
+// reference. It refreshes the unconfirmed reservation while its digest row is
+// locked so the sweeper's grace period starts at this upload attempt.
+//
+// The caller must attach the object only after its bytes have been verified.
+// q must be transaction-bound: findOrCreate reads the digest row FOR UPDATE,
+// and the refreshed reservation must commit before the caller starts the
+// storage write.
+func Stage(ctx context.Context, q *generated.Queries, b Blob) (generated.StorageObject, error) {
+	object, err := findOrCreate(ctx, q, b)
+	if err != nil {
+		return generated.StorageObject{}, err
+	}
+	if !Verified(object) {
+		if err := q.TouchUnconfirmedStorageObject(ctx, object.ID); err != nil {
+			return generated.StorageObject{}, err
+		}
+	}
+	return object, nil
+}
+
 // findOrCreate is Reserve without the reference, for callers whose row points
 // at the object only once its bytes are verified.
 func findOrCreate(ctx context.Context, q *generated.Queries, b Blob) (generated.StorageObject, error) {

@@ -129,6 +129,10 @@ SELECT c.id, c.public_id, c.workspace_id, c.kind, c.name, c.description, c.color
 FROM calendars c
 INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
+  AND EXISTS (
+    SELECT 1 FROM workspace_members wm
+    WHERE wm.workspace_id = c.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+  )
 ORDER BY c.created_at DESC
 `
 
@@ -228,22 +232,16 @@ func (q *Queries) SoftDeleteCalendar(ctx context.Context, id uint32) error {
 }
 
 const updateCalendar = `-- name: UpdateCalendar :exec
-UPDATE calendars SET name = ?, color = ?, cover_url = ? WHERE id = ?
+UPDATE calendars SET name = ?, color = ? WHERE id = ?
 `
 
 type UpdateCalendarParams struct {
-	Name     string         `json:"name"`
-	Color    string         `json:"color"`
-	CoverURL sql.NullString `json:"coverUrl"`
-	ID       uint32         `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	ID    uint32 `json:"id"`
 }
 
 func (q *Queries) UpdateCalendar(ctx context.Context, arg UpdateCalendarParams) error {
-	_, err := q.db.ExecContext(ctx, updateCalendar,
-		arg.Name,
-		arg.Color,
-		arg.CoverURL,
-		arg.ID,
-	)
+	_, err := q.db.ExecContext(ctx, updateCalendar, arg.Name, arg.Color, arg.ID)
 	return err
 }

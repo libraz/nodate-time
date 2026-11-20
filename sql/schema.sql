@@ -37,6 +37,7 @@ DROP TABLE IF EXISTS `workspace_members`;
 DROP TABLE IF EXISTS `workspaces`;
 DROP TABLE IF EXISTS `album_photos`;
 DROP TABLE IF EXISTS `avatar_uploads`;
+DROP TABLE IF EXISTS `calendar_cover_images`;
 DROP TABLE IF EXISTS `calendar_invites`;
 DROP TABLE IF EXISTS `calendar_schedule_poll_answers`;
 DROP TABLE IF EXISTS `calendar_schedule_poll_members`;
@@ -1531,6 +1532,17 @@ CREATE TABLE avatar_uploads (
   CONSTRAINT fk_avatar_uploads_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='In-flight avatar upload reservations';
 
+-- >>> calendar_cover_images.sql
+-- The active uploaded cover for a shared calendar.
+CREATE TABLE calendar_cover_images (
+  calendar_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  storage_object_id INT UNSIGNED NOT NULL,
+  CONSTRAINT fk_calendar_cover_images_calendar
+    FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE,
+  CONSTRAINT fk_calendar_cover_images_object
+    FOREIGN KEY (storage_object_id) REFERENCES storage_objects(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Uploaded cover images for shared calendars';
+
 -- >>> calendar_invites.sql
 -- ====================================
 -- calendar_invites
@@ -1849,6 +1861,7 @@ ALTER TABLE calendar_schedule_poll_answers
 DROP PROCEDURE IF EXISTS nf_drop_fk_if_exists;
 
 DROP VIEW IF EXISTS `storage_objects_unreferenced`;
+DROP VIEW IF EXISTS `v_calendar_cover_images`;
 
 -- >>> storage_objects_unreferenced.sql
 -- ====================================
@@ -1884,8 +1897,20 @@ WHERE so.ref_count = 0
     SELECT 1 FROM album_photos ap WHERE ap.thumbnail_object_id = so.id
   )
   AND NOT EXISTS (
+    SELECT 1 FROM calendar_cover_images ci WHERE ci.storage_object_id = so.id
+  )
+  AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar_storage_object_id = so.id
   );
+
+-- >>> v_calendar_cover_images.sql
+-- Only verified objects in the calendar's own workspace can be displayed.
+CREATE VIEW v_calendar_cover_images AS
+SELECT c.workspace_id, c.id AS calendar_id, so.storage_key
+FROM calendar_cover_images ci
+JOIN calendars c ON c.id = ci.calendar_id AND c.enabled = TRUE
+JOIN storage_objects so ON so.id = ci.storage_object_id AND so.workspace_id = c.workspace_id
+WHERE so.enabled = TRUE AND so.uploaded_at IS NOT NULL;
 
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_del`;
 DROP TRIGGER IF EXISTS `trg_calendar_events_projection_guard_ins`;
@@ -2066,6 +2091,48 @@ BEGIN
   END IF;
 END$$
 
+DELIMITER ;
+
+DROP TRIGGER IF EXISTS `calendar_cover_image_disable`;
+DROP TRIGGER IF EXISTS `workspace_calendar_cover_teardown`;
+
+-- >>> calendar_cover_image_disable.sql
+-- Both applications can disable a shared calendar. Release its uploaded
+-- cover when that happens, using the same calendar-before-object lock order
+-- as the cover API. The normal storage sweep reclaims the unreferenced blob.
+DELIMITER $$
+CREATE TRIGGER calendar_cover_image_disable
+BEFORE UPDATE ON calendars FOR EACH ROW
+BEGIN
+  IF OLD.enabled AND NOT NEW.enabled THEN
+    UPDATE storage_objects so
+    INNER JOIN calendar_cover_images ci ON ci.storage_object_id = so.id
+    SET so.ref_count = GREATEST(so.ref_count, 1) - 1
+    WHERE ci.calendar_id = OLD.id;
+
+    DELETE FROM calendar_cover_images WHERE calendar_id = OLD.id;
+  END IF;
+END$$
+DELIMITER ;
+
+-- >>> workspace_calendar_cover_teardown.sql
+-- A cover upload may commit after Flow lists workspace storage keys. Queue
+-- cover keys again under the workspace delete lock before their rows cascade.
+-- The unique queue key makes this safe when the caller already queued one.
+DELIMITER $$
+CREATE TRIGGER workspace_calendar_cover_teardown
+BEFORE DELETE ON workspaces FOR EACH ROW
+BEGIN
+  INSERT INTO storage_blob_removals (storage_key)
+  SELECT so.storage_key
+  FROM storage_objects so
+  WHERE so.workspace_id = OLD.id AND so.storage_key LIKE 'calendar-covers/%'
+  ON DUPLICATE KEY UPDATE storage_key = VALUES(storage_key);
+
+  DELETE ci FROM calendar_cover_images ci
+  INNER JOIN calendars c ON c.id = ci.calendar_id
+  WHERE c.workspace_id = OLD.id;
+END$$
 DELIMITER ;
 
 SET UNIQUE_CHECKS = 1;

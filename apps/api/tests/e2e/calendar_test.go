@@ -38,7 +38,7 @@ func TestCalendarLifecycle(t *testing.T) {
 		Color string `json:"color"`
 	}
 	helpers.DoJSON(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
-		map[string]any{"name": "更新後", "color": "#F35F8C", "coverUrl": ""},
+		map[string]any{"name": "更新後", "color": "#F35F8C"},
 		&updated)
 	require.Equal(t, "更新後", updated.Name)
 	require.Equal(t, "#F35F8C", updated.Color)

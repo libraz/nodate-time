@@ -73,9 +73,13 @@ var (
 // --- Calendar errors ---
 
 var (
-	CalendarNotFound     = &Spec{Status: 404, Code: "CALENDAR.NOT_FOUND", Message: "Calendar not found"}
-	CalendarAccessDenied = &Spec{Status: 403, Code: "CALENDAR.ACCESS_DENIED", Message: "You do not have access to this calendar"}
-	CalendarRoleRequired = &Spec{Status: 403, Code: "CALENDAR.ROLE_REQUIRED", Message: "Insufficient role for this action"}
+	CalendarNotFound       = &Spec{Status: 404, Code: "CALENDAR.NOT_FOUND", Message: "Calendar not found"}
+	CalendarAccessDenied   = &Spec{Status: 403, Code: "CALENDAR.ACCESS_DENIED", Message: "You do not have access to this calendar"}
+	CalendarRoleRequired   = &Spec{Status: 403, Code: "CALENDAR.ROLE_REQUIRED", Message: "Insufficient role for this action"}
+	CalendarCoverForbidden = &Spec{Status: 403, Code: "CALENDAR.COVER_FORBIDDEN", Message: "Uploaded covers are available only on shared personal calendars"}
+	CalendarCoverTooLarge  = &Spec{Status: 413, Code: "CALENDAR.COVER_TOO_LARGE", Message: "Cover image exceeds the maximum size of 5 MB"}
+	CalendarCoverInvalid   = &Spec{Status: 400, Code: "CALENDAR.COVER_INVALID", Message: "Only valid JPEG, PNG, and WebP cover images are accepted"}
+	CalendarCoverConflict  = &Spec{Status: 409, Code: "CALENDAR.COVER_CONFLICT", Message: "The cover image conflicts with an unfinished upload"}
 )
 
 // --- Event errors ---

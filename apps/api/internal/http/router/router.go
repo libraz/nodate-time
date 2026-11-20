@@ -430,6 +430,23 @@ func Build(deps Deps) http.Handler {
 		}, calendars.UpdateCalendar(calDeps))
 
 		huma.Register(api, huma.Operation{
+			OperationID:  "put-calendar-cover",
+			Method:       http.MethodPut,
+			Path:         "/calendars/{calendarId}/cover",
+			Summary:      "Upload a shared calendar cover image",
+			Tags:         []string{"Calendar"},
+			MaxBodyBytes: calendars.MaxCalendarCoverSize + 1,
+		}, calendars.PutCalendarCover(calDeps))
+
+		huma.Register(api, huma.Operation{
+			OperationID: "delete-calendar-cover",
+			Method:      http.MethodDelete,
+			Path:        "/calendars/{calendarId}/cover",
+			Summary:     "Remove a calendar cover image",
+			Tags:        []string{"Calendar"},
+		}, calendars.DeleteCalendarCover(calDeps))
+
+		huma.Register(api, huma.Operation{
 			OperationID: "delete-calendar",
 			Method:      http.MethodDelete,
 			Path:        "/calendars/{calendarId}",
