@@ -920,7 +920,7 @@ func Build(deps Deps) http.Handler {
 		huma.Register(api, huma.Operation{
 			OperationID:   "delete-allowed-email",
 			Method:        http.MethodDelete,
-			Path:          "/admin/allowed-emails/{id}",
+			Path:          "/admin/allowed-emails/{emailId}",
 			Summary:       "Remove an individually allowed email (admin only)",
 			Tags:          []string{"Admin"},
 			DefaultStatus: 204,

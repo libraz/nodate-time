@@ -91,10 +91,10 @@ func loadAttendees(ctx context.Context, deps Deps, eventIDs []uint32) (attendeeS
 func (s attendeeSet) apply(resp *EventResponse, eventID uint32) {
 	entry, ok := s[eventID]
 	if !ok || len(entry.ids) == 0 {
-		resp.Participants, resp.Attendees = []string{}, []AttendeeResponse{}
+		resp.ParticipantIDs, resp.Attendees = []string{}, []AttendeeResponse{}
 		return
 	}
-	resp.Participants, resp.Attendees = entry.ids, entry.attendees
+	resp.ParticipantIDs, resp.Attendees = entry.ids, entry.attendees
 }
 
 // setAttendees fills both attendee-derived fields of a response from one read.
@@ -103,7 +103,7 @@ func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID u
 	if err != nil {
 		return err
 	}
-	resp.Participants, resp.Attendees = participants, attendees
+	resp.ParticipantIDs, resp.Attendees = participants, attendees
 	return nil
 }
 

@@ -53,7 +53,7 @@ type CreateAllowedEmailOutput struct {
 }
 
 type DeleteAllowedEmailInput struct {
-	ID string `path:"id"`
+	EmailID string `path:"emailId"`
 }
 
 type DeleteAllowedEmailOutput struct{}
@@ -153,7 +153,7 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 
 func DeleteAllowedEmail(deps Deps) func(context.Context, *DeleteAllowedEmailInput) (*DeleteAllowedEmailOutput, error) {
 	return func(ctx context.Context, in *DeleteAllowedEmailInput) (*DeleteAllowedEmailOutput, error) {
-		pub, err := uuid.Parse(in.ID)
+		pub, err := uuid.Parse(in.EmailID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.NotFound)
 		}

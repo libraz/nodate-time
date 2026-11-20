@@ -199,7 +199,6 @@ func mxRows() []mxRow {
 		{method: "DELETE", path: cal + "/cover", group: mxProtected, allow: mxManage, storage: true},
 
 		{method: "GET", path: polls, group: mxProtected, allow: mxRead},
-		{method: "GET", path: polls + "/members", group: mxProtected, allow: mxManage},
 		{method: "GET", path: polls + "/availability-sharing", group: mxProtected, allow: mxManage},
 		{method: "PUT", path: polls + "/availability-sharing", group: mxProtected, allow: mxManage, body: mxJSON(map[string]any{"enabled": false})},
 		{method: "POST", path: polls + "/availability", group: mxProtected, allow: mxManage, body: func(w *mxWorld) any { return availabilityRequest(w) }},
@@ -275,7 +274,7 @@ func mxRows() []mxRow {
 		{method: "DELETE", path: "/admin/instance-admins/{userId}", group: mxAdmin},
 		{method: "GET", path: "/admin/allowed-emails", group: mxAdmin},
 		{method: "POST", path: "/admin/allowed-emails", group: mxAdmin},
-		{method: "DELETE", path: "/admin/allowed-emails/{id}", group: mxAdmin},
+		{method: "DELETE", path: "/admin/allowed-emails/{emailId}", group: mxAdmin},
 	}
 }
 
@@ -341,7 +340,7 @@ func (w *mxWorld) createEvent(title string, participants []string) string {
 	w.t.Helper()
 	body := map[string]any{"title": title, "allDay": false, "startAt": mxEventStart, "endAt": mxEventEnd}
 	if participants != nil {
-		body["participants"] = participants
+		body["participantIds"] = participants
 	}
 	var e struct {
 		ID string `json:"id"`
@@ -770,14 +769,14 @@ func runPollRow(t *testing.T, actors *mxActors, row mxRow) {
 	case strings.HasSuffix(row.path, "/response"):
 		var ballot schedulePollBody
 		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
-		body["responseVersion"] = ballot.ResponseVersion
+		body["answerVersion"] = *ballot.AnswerVersion
 		body["answers"] = answers
 		organizerOnly = false
 	case strings.HasSuffix(row.path, "/finalize"):
 		var ballot schedulePollBody
 		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
 		helpers.DoJSON(t, http.MethodPut, base+"/"+poll.ID+"/response", respondent.AccessToken, map[string]any{
-			"version": poll.Version, "responseVersion": ballot.ResponseVersion, "answers": answers,
+			"version": poll.Version, "answerVersion": *ballot.AnswerVersion, "answers": answers,
 		}, nil)
 		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, w.owner(), nil, &poll)
 		body["reviewVersion"] = poll.ReviewVersion

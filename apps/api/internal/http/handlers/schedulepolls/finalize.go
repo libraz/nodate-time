@@ -8,6 +8,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 )
@@ -61,7 +62,7 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 				if !samePublicID(slotPublicID, poll.SelectedSlotPublicID) || !poll.ConfirmedEventPublicID.Valid {
 					return apierrors.SchedulePollConflict
 				}
-				result, err = detailResponse(ctx, q, poll, cal.PublicID, member.Role, actor)
+				result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), poll, cal.PublicID, member.Role, actor)
 				return err
 			}
 			if poll.Status != generated.CalendarSchedulePollsStatusOpen {
@@ -232,7 +233,7 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			if err != nil {
 				return err
 			}
-			result, err = detailResponse(ctx, q, updated, cal.PublicID, member.Role, actor)
+			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
 			return err
 		})
 		if err != nil {

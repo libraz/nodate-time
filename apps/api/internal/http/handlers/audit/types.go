@@ -2,22 +2,16 @@ package audit
 
 import "time"
 
-// ActorBrief identifies the user who performed an audited action.
-type ActorBrief struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-
-	AvatarURL string `json:"avatarUrl,omitempty"`
-}
-
 // HistoryItem is one audit-log entry for a single entity's history.
 type HistoryItem struct {
-	ID          string      `json:"id"`
-	Action      string      `json:"action"`
-	Summary     string      `json:"summary"`
-	CreatedAt   time.Time   `json:"createdAt"`
-	Actor       *ActorBrief `json:"actor"`
-	SystemActor bool        `json:"systemActor,omitempty"`
+	ID             string    `json:"id"`
+	Action         string    `json:"action"`
+	Summary        string    `json:"summary"`
+	CreatedAt      time.Time `json:"createdAt"`
+	ActorID        string    `json:"actorId,omitempty"`
+	ActorName      string    `json:"actorName,omitempty"`
+	ActorAvatarURL string    `json:"actorAvatarUrl,omitempty"`
+	SystemActor    bool      `json:"systemActor,omitempty"`
 }
 
 // FeedItem is one audit-log entry in a calendar's activity feed, carrying the

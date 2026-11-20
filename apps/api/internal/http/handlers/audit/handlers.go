@@ -91,20 +91,16 @@ func resolveCalendar(ctx context.Context, deps Deps, calPubID string, userID uin
 }
 
 // resolveActor builds the actor identity from the joined log row fields,
-// returning nil for a system action or an actor who no longer exists.
+// returning empty strings for a system action or an actor who no longer exists.
 //
 // The avatar's storage key rides along on the row and the resolver signs one
 // URL per distinct key, so a page of two hundred entries by a handful of
 // people costs a handful of signatures and no extra reads.
-func resolveActor(ctx context.Context, av *avatars.Resolver, publicID, name, avatarStorageKey, avatarURL sql.NullString) *ActorBrief {
+func resolveActor(ctx context.Context, av *avatars.Resolver, publicID, name, avatarStorageKey, avatarURL sql.NullString) (id, actorName, avatarOut string) {
 	if !publicID.Valid {
-		return nil
+		return "", "", ""
 	}
-	return &ActorBrief{
-		ID:        pubIDToHex([]byte(publicID.String)),
-		Name:      name.String,
-		AvatarURL: av.FromKey(ctx, avatarStorageKey, avatarURL),
-	}
+	return pubIDToHex([]byte(publicID.String)), name.String, av.FromKey(ctx, avatarStorageKey, avatarURL)
 }
 
 // payloadFields pulls the label and the subject entity's id back out of a log
@@ -229,13 +225,16 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 	av := avatars.New(deps.Queries, deps.Storage)
 	for _, r := range rows {
 		payload := readPayload(r.PayloadJSON)
+		actorID, actorName, actorAvatarURL := resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL)
 		items = append(items, HistoryItem{
-			ID:          pubIDToHex(r.PublicID),
-			Action:      r.Type,
-			Summary:     payload.label(),
-			CreatedAt:   r.OccurredAt,
-			Actor:       resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
-			SystemActor: r.ActorSystemSource.Valid,
+			ID:             pubIDToHex(r.PublicID),
+			Action:         r.Type,
+			Summary:        payload.label(),
+			CreatedAt:      r.OccurredAt,
+			ActorID:        actorID,
+			ActorName:      actorName,
+			ActorAvatarURL: actorAvatarURL,
+			SystemActor:    r.ActorSystemSource.Valid,
 		})
 	}
 	return items, nil
@@ -285,14 +284,17 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		av := avatars.New(deps.Queries, deps.Storage)
 		for _, r := range rows {
 			payload := readPayload(r.PayloadJSON)
+			actorID, actorName, actorAvatarURL := resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL)
 			out.Body.Items = append(out.Body.Items, FeedItem{
 				HistoryItem: HistoryItem{
-					ID:          pubIDToHex(r.PublicID),
-					Action:      r.Type,
-					Summary:     payload.label(),
-					CreatedAt:   r.OccurredAt,
-					Actor:       resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
-					SystemActor: r.ActorSystemSource.Valid,
+					ID:             pubIDToHex(r.PublicID),
+					Action:         r.Type,
+					Summary:        payload.label(),
+					CreatedAt:      r.OccurredAt,
+					ActorID:        actorID,
+					ActorName:      actorName,
+					ActorAvatarURL: actorAvatarURL,
+					SystemActor:    r.ActorSystemSource.Valid,
 				},
 				EntityType: entityTypeOf(r.Type),
 				EntityID:   payload.entityID(),

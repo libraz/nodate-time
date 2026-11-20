@@ -27,18 +27,16 @@ import (
 // internal id, and answering with that would break the same rule this type
 // exists to keep.
 type InstanceAdmin struct {
-	UserID      string    `json:"userId"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"displayName"`
-	GrantedAt   time.Time `json:"grantedAt"`
+	UserID    string    `json:"userId"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	GrantedAt time.Time `json:"grantedAt"`
 }
 
 type ListInstanceAdminsInput struct{}
 
 type ListInstanceAdminsOutput struct {
-	Body struct {
-		Admins []InstanceAdmin `json:"admins"`
-	}
+	Body []InstanceAdmin
 }
 
 // RevokeInstanceAdminInput names the user losing the rights by their public id,
@@ -62,14 +60,13 @@ func ListInstanceAdmins(deps Deps) func(context.Context, *ListInstanceAdminsInpu
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		out := &ListInstanceAdminsOutput{}
-		out.Body.Admins = make([]InstanceAdmin, 0, len(rows))
+		out := &ListInstanceAdminsOutput{Body: make([]InstanceAdmin, 0, len(rows))}
 		for _, r := range rows {
-			out.Body.Admins = append(out.Body.Admins, InstanceAdmin{
-				UserID:      calresolve.PublicIDString(r.UserPublicID),
-				Email:       r.Email,
-				DisplayName: r.DisplayName,
-				GrantedAt:   r.GrantedAt,
+			out.Body = append(out.Body, InstanceAdmin{
+				UserID:    calresolve.PublicIDString(r.UserPublicID),
+				Email:     r.Email,
+				Name:      r.DisplayName,
+				GrantedAt: r.GrantedAt,
 			})
 		}
 		return out, nil

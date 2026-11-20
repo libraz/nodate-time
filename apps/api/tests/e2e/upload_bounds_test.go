@@ -46,6 +46,33 @@ func TestAttachmentPresignRejectsASizeItCannotBind(t *testing.T) {
 	require.Empty(t, attachments, "and it must not leave a reservation behind")
 }
 
+// A file past the ceiling is refused as a limit, not as a malformed request.
+func TestAttachmentPresignRefusesAnOversizedFile(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + tt.CalendarID
+
+	var evt struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
+		map[string]any{
+			"title": "Wants a big file", "allDay": false,
+			"startAt": "2026-06-02T09:00:00+09:00", "endAt": "2026-06-02T10:00:00+09:00",
+		}, &evt)
+
+	status, body := helpers.DoJSONStatus(t, http.MethodPost,
+		calURL+"/events/"+evt.ID+"/attachments/presign", tt.AccessToken,
+		map[string]any{
+			"filename": "huge.bin", "contentType": "application/octet-stream",
+			"byteSize": 101 * 1024 * 1024, "sha256": helpers.SHA256Hex([]byte("huge")),
+		})
+	require.Equal(t, http.StatusUnprocessableEntity, status, string(body))
+	require.Contains(t, string(body), "ATTACHMENT.TOO_LARGE")
+}
+
 // A listing signs a URL for every photo on the page, but the browser fetches
 // only the thumbnails the reader scrolls to. A signature that dies while the
 // album is still open leaves the rest of the grid broken, so these have to

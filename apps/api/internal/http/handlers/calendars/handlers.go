@@ -387,12 +387,12 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 				email = m.UserEmail
 			}
 			out.Body = append(out.Body, MemberResponse{
-				ID:     pubIDToHex(m.UserPublicID),
-				Name:   m.UserDisplayName,
-				Email:  email,
-				Avatar: av.FromKey(ctx, m.UserAvatarStorageKey, m.UserAvatarURL),
-				Role:   string(m.Role),
-				Color:  m.MemberColor,
+				ID:        pubIDToHex(m.UserPublicID),
+				Name:      m.UserDisplayName,
+				Email:     email,
+				AvatarURL: av.FromKey(ctx, m.UserAvatarStorageKey, m.UserAvatarURL),
+				Role:      string(m.Role),
+				Color:     m.MemberColor,
 			})
 		}
 		return out, nil
@@ -426,10 +426,10 @@ func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidates
 		av := avatars.New(deps.Queries, deps.Storage)
 		for _, r := range rows {
 			out.Body.Items = append(out.Body.Items, MemberCandidateResponse{
-				ID:     pubIDToHex(r.UserPublicID),
-				Name:   r.UserDisplayName,
-				Email:  r.UserEmail,
-				Avatar: av.FromKey(ctx, r.UserAvatarStorageKey, r.UserAvatarURL),
+				ID:        pubIDToHex(r.UserPublicID),
+				Name:      r.UserDisplayName,
+				Email:     r.UserEmail,
+				AvatarURL: av.FromKey(ctx, r.UserAvatarStorageKey, r.UserAvatarURL),
 			})
 		}
 		return out, nil
@@ -466,12 +466,12 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 		}
 
 		return &AddMemberOutput{Body: MemberResponse{
-			ID:     pubIDToHex(target.PublicID),
-			Name:   target.DisplayName,
-			Email:  target.Email,
-			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
-			Role:   string(role),
-			Color:  color,
+			ID:        pubIDToHex(target.PublicID),
+			Name:      target.DisplayName,
+			Email:     target.Email,
+			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
+			Role:      string(role),
+			Color:     color,
 		}}, nil
 	}
 }
@@ -568,12 +568,12 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		}
 
 		return &UpdateMemberRoleOutput{Body: MemberResponse{
-			ID:     pubIDToHex(target.PublicID),
-			Name:   target.DisplayName,
-			Email:  target.Email,
-			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
-			Role:   in.Body.Role,
-			Color:  memberColor,
+			ID:        pubIDToHex(target.PublicID),
+			Name:      target.DisplayName,
+			Email:     target.Email,
+			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
+			Role:      in.Body.Role,
+			Color:     memberColor,
 		}}, nil
 	}
 }
@@ -648,12 +648,12 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 			email = target.Email
 		}
 		return &UpdateMemberColorOutput{Body: MemberResponse{
-			ID:     pubIDToHex(target.PublicID),
-			Name:   target.DisplayName,
-			Email:  email,
-			Avatar: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
-			Role:   string(current.Role),
-			Color:  in.Body.Color,
+			ID:        pubIDToHex(target.PublicID),
+			Name:      target.DisplayName,
+			Email:     email,
+			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
+			Role:      string(current.Role),
+			Color:     in.Body.Color,
 		}}, nil
 	}
 }

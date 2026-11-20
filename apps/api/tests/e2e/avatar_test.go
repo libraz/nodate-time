@@ -75,7 +75,7 @@ func TestAvatarTooLarge(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, body := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/user/avatar/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/png", "byteSize": 6 * 1024 * 1024, "sha256": helpers.SHA256Hex([]byte("oversized"))})
-	assert.Equal(t, 400, status)
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
 	assert.True(t, strings.Contains(string(body), "5MB") || strings.Contains(string(body), "exceeds"),
 		"expected size-limit message, got %s", string(body))
 }

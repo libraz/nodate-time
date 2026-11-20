@@ -15,7 +15,7 @@ type readEvent struct {
 	Title        string   `json:"title"`
 	StartAt      string   `json:"startAt"`
 	EndAt        string   `json:"endAt"`
-	Participants []string `json:"participants"`
+	Participants []string `json:"participantIds"`
 	OwnerID      string   `json:"ownerId"`
 	Attendees    []struct {
 		UserID  string `json:"userId"`
@@ -77,21 +77,21 @@ func TestRemovedMemberNoLongerHoldsTheirEvents(t *testing.T) {
 	// One event the leaver owns and attends with somebody staying.
 	var theirs readEvent
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", leaver.AccessToken, map[string]any{
-		"title":        "Their plan",
-		"allDay":       false,
-		"startAt":      "2026-04-07T10:00:00+09:00",
-		"endAt":        "2026-04-07T11:00:00+09:00",
-		"participants": []string{leaver.UserID, stayer.UserID},
+		"title":          "Their plan",
+		"allDay":         false,
+		"startAt":        "2026-04-07T10:00:00+09:00",
+		"endAt":          "2026-04-07T11:00:00+09:00",
+		"participantIds": []string{leaver.UserID, stayer.UserID},
 	}, &theirs)
 
 	// One the owner made, on which the leaver holds an edit grant.
 	var shared readEvent
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken, map[string]any{
-		"title":        "Shared plan",
-		"allDay":       false,
-		"startAt":      "2026-04-08T10:00:00+09:00",
-		"endAt":        "2026-04-08T11:00:00+09:00",
-		"participants": []string{leaver.UserID},
+		"title":          "Shared plan",
+		"allDay":         false,
+		"startAt":        "2026-04-08T10:00:00+09:00",
+		"endAt":          "2026-04-08T11:00:00+09:00",
+		"participantIds": []string{leaver.UserID},
 	}, &shared)
 	grant, _ := helpers.DoJSONStatus(t, http.MethodPut,
 		calURL+"/events/"+shared.ID+"/attendees/"+leaver.UserID, owner.AccessToken,
@@ -156,11 +156,11 @@ func TestMemberWhoLeavesNoLongerBlocksTheirEvents(t *testing.T) {
 
 	var evt readEvent
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", leaver.AccessToken, map[string]any{
-		"title":        "Before leaving",
-		"allDay":       false,
-		"startAt":      "2026-04-14T10:00:00+09:00",
-		"endAt":        "2026-04-14T11:00:00+09:00",
-		"participants": []string{leaver.UserID, owner.UserID},
+		"title":          "Before leaving",
+		"allDay":         false,
+		"startAt":        "2026-04-14T10:00:00+09:00",
+		"endAt":          "2026-04-14T11:00:00+09:00",
+		"participantIds": []string{leaver.UserID, owner.UserID},
 	}, &evt)
 
 	left, body := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+leaver.UserID, leaver.AccessToken, nil)

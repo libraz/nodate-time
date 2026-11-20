@@ -84,7 +84,7 @@ func TestConcurrentFirstEditsAcrossSeriesDoNotDeadlock(t *testing.T) {
 					"memo":               "",
 					"url":                "",
 					"notificationOffset": nil,
-					"participants":       []string{guest.UserID},
+					"participantIds":     []string{guest.UserID},
 					"ownerId":            nil,
 					"recurrenceRule":     nil,
 				})
@@ -145,7 +145,7 @@ func TestSecondEditOfAnOccurrenceReplacesItsParticipants(t *testing.T) {
 				"memo":               "",
 				"url":                "",
 				"notificationOffset": nil,
-				"participants":       []string{participant},
+				"participantIds":     []string{participant},
 				"ownerId":            nil,
 				"recurrenceRule":     nil,
 			}, nil)
@@ -153,7 +153,7 @@ func TestSecondEditOfAnOccurrenceReplacesItsParticipants(t *testing.T) {
 	participantsOf := func() []string {
 		t.Helper()
 		var got struct {
-			Participants []string `json:"participants"`
+			Participants []string `json:"participantIds"`
 		}
 		helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+target, owner.AccessToken, nil, &got)
 		return got.Participants

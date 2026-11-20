@@ -15,8 +15,10 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
 const (
@@ -32,6 +34,7 @@ type Deps struct {
 	DB          *sql.DB
 	Queries     *generated.Queries
 	WorkspaceID uint32
+	Storage     *storage.Client
 }
 
 func actorID(ctx context.Context) (uint32, error) {
@@ -150,7 +153,7 @@ func currentPollMember(ctx context.Context, q *generated.Queries, pollID, userID
 	return member, err == nil, err
 }
 
-func detailResponse(ctx context.Context, q *generated.Queries, poll generated.CalendarSchedulePoll, calendarPublicID []byte, role generated.CalendarMembersRole, actor uint32) (PollDetailResponse, error) {
+func detailResponse(ctx context.Context, q *generated.Queries, av *avatars.Resolver, poll generated.CalendarSchedulePoll, calendarPublicID []byte, role generated.CalendarMembersRole, actor uint32) (PollDetailResponse, error) {
 	memberRows, err := q.ListSchedulePollMembersCurrent(ctx, poll.ID)
 	if err != nil {
 		return PollDetailResponse{}, err
@@ -204,22 +207,20 @@ func detailResponse(ctx context.Context, q *generated.Queries, poll generated.Ca
 	canRespond := isTarget && poll.Status == generated.CalendarSchedulePollsStatusOpen && len(activeSlotIDs) > 0
 
 	response := PollDetailResponse{
-		ID:              calresolve.PublicIDString(poll.PublicID),
-		CalendarID:      calresolve.PublicIDString(calendarPublicID),
-		Title:           poll.Title,
-		Timezone:        poll.Timezone,
-		Status:          string(poll.Status),
-		Version:         poll.Version,
-		ResponseVersion: poll.ResponseVersion,
-		ReviewVersion:   poll.ResponseVersion,
-		CanManage:       canManage,
-		CanTakeOver:     canTakeOver,
-		CanRespond:      canRespond,
-		Slots:           slots,
-		Members:         []PollMemberResponse{},
-		MyAnswers:       []PollAnswerResponse{},
-		RespondedCount:  respondedCount,
-		MemberCount:     memberCount,
+		ID:             calresolve.PublicIDString(poll.PublicID),
+		CalendarID:     calresolve.PublicIDString(calendarPublicID),
+		Title:          poll.Title,
+		Timezone:       poll.Timezone,
+		Status:         string(poll.Status),
+		Version:        poll.Version,
+		ReviewVersion:  poll.ResponseVersion,
+		CanManage:      canManage,
+		CanTakeOver:    canTakeOver,
+		CanRespond:     canRespond,
+		Slots:          slots,
+		MyAnswers:      []PollAnswerResponse{},
+		RespondedCount: respondedCount,
+		MemberCount:    memberCount,
 	}
 	if poll.ConfirmedEventPublicID.Valid {
 		response.ConfirmedEventID = calresolve.PublicIDString([]byte(poll.ConfirmedEventPublicID.String))
@@ -230,7 +231,11 @@ func detailResponse(ctx context.Context, q *generated.Queries, poll generated.Ca
 
 	if canManage {
 		for _, member := range memberRows {
-			response.Members = append(response.Members, PollMemberResponse{ID: calresolve.PublicIDString(member.PublicID), Name: member.DisplayName})
+			response.Members = append(response.Members, PersonResponse{
+				ID:        calresolve.PublicIDString(member.PublicID),
+				Name:      member.DisplayName,
+				AvatarURL: av.FromKey(ctx, member.UserAvatarStorageKey, member.UserAvatarURL),
+			})
 		}
 		responseRows, err := q.ListSchedulePollAnswersForManager(ctx, poll.ID)
 		if err != nil {
@@ -258,7 +263,7 @@ func detailResponse(ctx context.Context, q *generated.Queries, poll generated.Ca
 		if err != nil {
 			return PollDetailResponse{}, err
 		}
-		response.ResponseVersion = pollMember.AnswerVersion
+		response.AnswerVersion = &pollMember.AnswerVersion
 		answers, err := q.ListSchedulePollAnswersForUser(ctx, generated.ListSchedulePollAnswersForUserParams{PollID: poll.ID, UserID: callerMember.UserID})
 		if err != nil {
 			return PollDetailResponse{}, err
@@ -284,37 +289,6 @@ func loadAuthorizedPoll(ctx context.Context, deps Deps, q *generated.Queries, ca
 	}
 	poll, err := pollByPublicID(ctx, q, deps.WorkspaceID, cal.ID, pollPublicID)
 	return cal, member, poll, err
-}
-
-// ListCalendarMembers returns the complete eligible roster or an explicit
-// error if a calendar exceeds the poll's supported size.
-func ListCalendarMembers(deps Deps) func(context.Context, *CalendarMembersInput) (*CalendarMembersOutput, error) {
-	return func(ctx context.Context, in *CalendarMembersInput) (*CalendarMembersOutput, error) {
-		actor, err := actorID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out := &CalendarMembersOutput{}
-		err = withReadSnapshot(ctx, deps.DB, func(q *generated.Queries) error {
-			cal, err := calresolve.Manage(ctx, q, deps.WorkspaceID, in.CalendarID, actor)
-			if err != nil {
-				return err
-			}
-			rows, err := listCalendarMembers(ctx, q, deps.WorkspaceID, cal.ID, maxPollMembers+1)
-			if err != nil {
-				return err
-			}
-			out.Body.Members = make([]PollMemberResponse, 0, len(rows))
-			for _, row := range rows {
-				out.Body.Members = append(out.Body.Members, PollMemberResponse{ID: calresolve.PublicIDString(row.PublicID), Name: row.DisplayName})
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, apiError(err)
-		}
-		return out, nil
-	}
 }
 
 func withReadSnapshot(ctx context.Context, db *sql.DB, fn func(*generated.Queries) error) error {
@@ -605,7 +579,7 @@ func CreatePoll(deps Deps) func(context.Context, *CreatePollInput) (*CreatePollO
 			if err != nil {
 				return err
 			}
-			detail, err = detailResponse(ctx, q, poll, cal.PublicID, actorMember.Role, actor)
+			detail, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), poll, cal.PublicID, actorMember.Role, actor)
 			return err
 		})
 		if err != nil {
@@ -629,7 +603,7 @@ func GetPoll(deps Deps) func(context.Context, *GetPollInput) (*GetPollOutput, er
 			if err != nil {
 				return err
 			}
-			detail, err = detailResponse(ctx, q, poll, cal.PublicID, member.Role, actor)
+			detail, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), poll, cal.PublicID, member.Role, actor)
 			return err
 		})
 		if err != nil {
@@ -667,13 +641,14 @@ func ListPolls(deps Deps) func(context.Context, *ListPollsInput) (*ListPollsOutp
 			if len(polls) > maxPollHistory {
 				return apierrors.SchedulePollTooMuchHistory
 			}
-			out.Body.Polls = make([]PollDetailResponse, 0, len(polls))
+			out.Body = make([]PollDetailResponse, 0, len(polls))
+			av := avatars.New(q, deps.Storage)
 			for _, poll := range polls {
-				detail, err := detailResponse(ctx, q, poll, cal.PublicID, member.Role, actor)
+				detail, err := detailResponse(ctx, q, av, poll, cal.PublicID, member.Role, actor)
 				if err != nil {
 					return err
 				}
-				out.Body.Polls = append(out.Body.Polls, detail)
+				out.Body = append(out.Body, detail)
 			}
 			return nil
 		})
@@ -824,7 +799,7 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 			if err != nil {
 				return err
 			}
-			result, err = detailResponse(ctx, q, updated, cal.PublicID, member.Role, actor)
+			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
 			return err
 		})
 		if err != nil {
@@ -892,7 +867,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 				if err != nil {
 					return err
 				}
-				result, err = detailResponse(ctx, q, updated, cal.PublicID, member.Role, actor)
+				result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
 				return err
 			}
 			pollMember, eligible, err := currentPollMember(ctx, q, poll.ID, actor)
@@ -902,7 +877,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 			if !eligible {
 				return apierrors.SchedulePollNotFound
 			}
-			if poll.Version != in.Body.Version || pollMember.AnswerVersion != in.Body.ResponseVersion {
+			if poll.Version != in.Body.Version || pollMember.AnswerVersion != in.Body.AnswerVersion {
 				return apierrors.SchedulePollStale
 			}
 			slots, err := q.ListSchedulePollSlots(ctx, poll.ID)
@@ -977,7 +952,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 			if err != nil {
 				return err
 			}
-			result, err = detailResponse(ctx, q, updated, cal.PublicID, member.Role, actor)
+			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
 			return err
 		})
 		if err != nil {

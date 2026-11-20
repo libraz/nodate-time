@@ -46,9 +46,9 @@ type EventResponse struct {
 	// details, and confidential is not published at all.
 	Visibility         string   `json:"visibility" enum:"default,public,private,confidential"`
 	NotificationOffset *int     `json:"notificationOffset"`
-	Participants       []string `json:"participants"`
-	// Attendees carries what Participants cannot: each participant's answer
-	// and whether the owner has trusted them to change the event. Participants
+	ParticipantIDs     []string `json:"participantIds"`
+	// Attendees carries what ParticipantIDs cannot: each participant's answer
+	// and whether the owner has trusted them to change the event. ParticipantIDs
 	// stays as the id-only list because it is also the write format.
 	Attendees        []AttendeeResponse      `json:"attendees"`
 	OwnerID          string                  `json:"ownerId" doc:"public user ID of the member whose layer this event sits on"`
@@ -58,7 +58,7 @@ type EventResponse struct {
 	TaskOwned        bool                    `json:"taskOwned" doc:"true when a task projects this event; its title, dates and recurrence then change on the task"`
 	IsRecurrence     bool                    `json:"isRecurrence"`
 	RecurrenceDate   *string                 `json:"recurrenceDate,omitempty"`
-	CreatedBy        string                  `json:"createdBy" doc:"public user ID of the creator"`
+	CreatorID        string                  `json:"creatorId" doc:"public user ID of the creator"`
 	CreatorName      string                  `json:"creatorName"`
 	CreatorAvatarURL string                  `json:"creatorAvatarUrl,omitempty"`
 	CreatedAt        time.Time               `json:"createdAt"`
@@ -99,12 +99,12 @@ type SetAttendeeCanEditOutput struct {
 }
 
 type CommentResponse struct {
-	ID           string    `json:"id"`
-	UserPublicID string    `json:"userPublicId"`
-	UserName     string    `json:"userName"`
-	UserAvatar   string    `json:"userAvatar,omitempty"`
-	Body         string    `json:"body"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID              string    `json:"id"`
+	AuthorID        string    `json:"authorId"`
+	AuthorName      string    `json:"authorName"`
+	AuthorAvatarURL string    `json:"authorAvatarUrl,omitempty"`
+	Body            string    `json:"body"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 // --- Inputs/Outputs ---
@@ -153,7 +153,7 @@ type CreateEventInput struct {
 		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"defaults to fixed"`
 		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"defaults to the calendar's setting; omitted on update keeps the current value"`
 		NotificationOffset *int             `json:"notificationOffset,omitempty" required:"false"`
-		Participants       []string         `json:"participants,omitempty" required:"false"`
+		ParticipantIDs     []string         `json:"participantIds,omitempty" required:"false"`
 		OwnerID            *string          `json:"ownerId,omitempty" required:"false" doc:"public user ID of the owning member; defaults to the caller"`
 		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false" doc:"Weekly rules with interval > 1 use a fixed Sunday week start (WKST=SU)."`
 	}
@@ -191,7 +191,7 @@ type UpdateEventInput struct {
 		Flexibility        string           `json:"flexibility,omitempty" enum:"fixed,negotiable,conditional" required:"false" doc:"omitted keeps the current value"`
 		Visibility         string           `json:"visibility,omitempty" enum:"default,public,private,confidential" required:"false" doc:"omitted keeps the current value"`
 		NotificationOffset *int             `json:"notificationOffset" doc:"null clears the notification"`
-		Participants       []string         `json:"participants" doc:"full participant list; an empty array removes all participants"`
+		ParticipantIDs     []string         `json:"participantIds" doc:"full participant list; an empty array removes all participants"`
 		OwnerID            *string          `json:"ownerId" doc:"public user ID of the owning member; null leaves the owner unchanged"`
 		RecurrenceRule     *json.RawMessage `json:"recurrenceRule" doc:"full recurrence rule; null makes the event non-recurring. Weekly rules with interval > 1 use a fixed Sunday week start (WKST=SU)."`
 	}

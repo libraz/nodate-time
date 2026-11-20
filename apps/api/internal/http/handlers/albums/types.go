@@ -2,25 +2,21 @@ package albums
 
 import "time"
 
-type AlbumUploader struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatarUrl,omitempty"`
-}
-
 type AlbumPhotoResponse struct {
-	ID          string        `json:"id"`
-	CalendarID  string        `json:"calendarId"`
-	Caption     string        `json:"caption"`
-	ContentType string        `json:"contentType"`
-	ByteSize    int64         `json:"byteSize"`
-	Width       *int          `json:"width,omitempty"`
-	Height      *int          `json:"height,omitempty"`
-	EventID     string        `json:"eventId,omitempty"`
-	TakenAt     time.Time     `json:"takenAt"`
-	CreatedAt   time.Time     `json:"createdAt"`
-	UploadedBy  AlbumUploader `json:"uploadedBy"`
-	ImageURL    string        `json:"imageUrl"`
+	ID                string    `json:"id"`
+	CalendarID        string    `json:"calendarId"`
+	Caption           string    `json:"caption"`
+	ContentType       string    `json:"contentType"`
+	ByteSize          int64     `json:"byteSize"`
+	Width             *int      `json:"width,omitempty"`
+	Height            *int      `json:"height,omitempty"`
+	EventID           string    `json:"eventId,omitempty"`
+	TakenAt           time.Time `json:"takenAt"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UploaderID        string    `json:"uploaderId"`
+	UploaderName      string    `json:"uploaderName"`
+	UploaderAvatarURL string    `json:"uploaderAvatarUrl,omitempty"`
+	ImageURL          string    `json:"imageUrl"`
 	// ThumbnailURL is the grid-sized rendering, absent when the photo has
 	// none. A caller that wants a small picture asks for this and falls back
 	// to ImageURL; one that wants the picture itself -- a lightbox, a

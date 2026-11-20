@@ -125,13 +125,15 @@ WHERE poll_id = ?
 ORDER BY user_id;
 
 -- name: ListSchedulePollMembersCurrent :many
-SELECT pm.id, pm.user_id, u.public_id, u.display_name
+SELECT pm.id, pm.user_id, u.public_id, u.display_name, u.avatar_url AS user_avatar_url,
+       so.storage_key AS user_avatar_storage_key
 FROM calendar_schedule_poll_members pm
 JOIN calendar_schedule_polls p ON p.id = pm.poll_id
 JOIN calendar_members cm ON cm.workspace_id = p.workspace_id AND cm.calendar_id = p.calendar_id
   AND cm.user_id = pm.user_id AND cm.enabled = TRUE
 JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = pm.user_id AND wm.enabled = TRUE
 JOIN users u ON u.id = pm.user_id AND u.enabled = TRUE
+LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
 WHERE pm.poll_id = ? AND pm.enabled = TRUE
 ORDER BY u.display_name, pm.user_id;
 

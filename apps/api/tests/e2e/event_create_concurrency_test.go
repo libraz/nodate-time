@@ -52,11 +52,11 @@ func TestConcurrentEventCreationDoesNotDeadlock(t *testing.T) {
 			start.Wait()
 			status, body := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events",
 				owner.AccessToken, map[string]any{
-					"title":        fmt.Sprintf("Concurrent %d", i),
-					"allDay":       false,
-					"startAt":      "2026-04-22T12:00:00+09:00",
-					"endAt":        "2026-04-22T13:00:00+09:00",
-					"participants": []string{guest.UserID},
+					"title":          fmt.Sprintf("Concurrent %d", i),
+					"allDay":         false,
+					"startAt":        "2026-04-22T12:00:00+09:00",
+					"endAt":          "2026-04-22T13:00:00+09:00",
+					"participantIds": []string{guest.UserID},
 				})
 			statuses[i] = status
 			bodies[i] = string(body)

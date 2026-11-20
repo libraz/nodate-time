@@ -146,12 +146,12 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 		av := avatars.New(deps.Queries, deps.Storage)
 		for _, c := range rows {
 			out.Body.Items = append(out.Body.Items, CommentResponse{
-				ID:           pubIDToHex(c.publicID),
-				UserPublicID: pubIDToHex(c.userPublicID),
-				UserName:     c.userName,
-				UserAvatar:   av.FromKey(ctx, c.userAvatarStorageKey, c.userAvatarURL),
-				Body:         c.body,
-				CreatedAt:    c.createdAt,
+				ID:              pubIDToHex(c.publicID),
+				AuthorID:        pubIDToHex(c.userPublicID),
+				AuthorName:      c.userName,
+				AuthorAvatarURL: av.FromKey(ctx, c.userAvatarStorageKey, c.userAvatarURL),
+				Body:            c.body,
+				CreatedAt:       c.createdAt,
 			})
 		}
 		return out, nil
@@ -202,12 +202,12 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 // mapComment renders a stored comment with its author.
 func mapComment(ctx context.Context, deps Deps, c generated.GetEventCommentByPublicIDRow) CommentResponse {
 	return CommentResponse{
-		ID:           pubIDToHex(c.PublicID),
-		UserPublicID: pubIDToHex(c.UserPublicID),
-		UserName:     c.UserDisplayName,
-		UserAvatar:   avatars.New(deps.Queries, deps.Storage).FromKey(ctx, c.UserAvatarStorageKey, c.UserAvatarURL),
-		Body:         c.Body,
-		CreatedAt:    c.CreatedAt,
+		ID:              pubIDToHex(c.PublicID),
+		AuthorID:        pubIDToHex(c.UserPublicID),
+		AuthorName:      c.UserDisplayName,
+		AuthorAvatarURL: avatars.New(deps.Queries, deps.Storage).FromKey(ctx, c.UserAvatarStorageKey, c.UserAvatarURL),
+		Body:            c.Body,
+		CreatedAt:       c.CreatedAt,
 	}
 }
 

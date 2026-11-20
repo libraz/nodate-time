@@ -198,7 +198,7 @@ func idSet(v any) []string {
 func participantsOfEvent(t *testing.T, eventURL, token string) []string {
 	t.Helper()
 	var got struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, eventURL, token, nil, &got)
 	return got.Participants

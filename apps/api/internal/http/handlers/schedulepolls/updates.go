@@ -10,6 +10,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 )
 
@@ -373,7 +374,7 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 			if err != nil {
 				return err
 			}
-			result, err = detailResponse(ctx, q, updated, cal.PublicID, actorMember.Role, actor)
+			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, actorMember.Role, actor)
 			return err
 		})
 		if err != nil {

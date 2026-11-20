@@ -1069,10 +1069,10 @@ func TestICalImportDropsOrganizerAndAttendees(t *testing.T) {
 	require.Len(t, listed, 1)
 
 	var evt struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 		Attendees    []any    `json:"attendees"`
 		OwnerID      string   `json:"ownerId"`
-		CreatedBy    string   `json:"createdBy"`
+		CreatedBy    string   `json:"creatorId"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+listed[0].ID, tt.AccessToken, nil, &evt)
 	require.Empty(t, evt.Participants)

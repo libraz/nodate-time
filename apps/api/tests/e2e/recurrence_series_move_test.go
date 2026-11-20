@@ -20,7 +20,7 @@ func seriesBody(title, startAt, endAt string) map[string]any {
 		"memo":               "",
 		"url":                "",
 		"notificationOffset": nil,
-		"participants":       []string{},
+		"participantIds":     []string{},
 		"ownerId":            nil,
 		"recurrenceRule": map[string]any{
 			"freq":     "weekly",
@@ -118,7 +118,7 @@ func TestMovingASeriesAcrossDSTKeepsItsEditedOccurrenceAttached(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &override)

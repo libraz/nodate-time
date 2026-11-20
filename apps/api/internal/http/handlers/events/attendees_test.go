@@ -32,8 +32,8 @@ func TestAttendeeReadFailureIsNotAnEmptyGuestList(t *testing.T) {
 	require.Nil(t, attendees)
 
 	// And the response filler refuses to write the emptiness into a response.
-	resp := EventResponse{Participants: []string{"someone"}}
+	resp := EventResponse{ParticipantIDs: []string{"someone"}}
 	require.Error(t, setAttendees(context.Background(), deps, &resp, 1))
-	require.Equal(t, []string{"someone"}, resp.Participants,
+	require.Equal(t, []string{"someone"}, resp.ParticipantIDs,
 		"a failed read must leave the response untouched rather than blanking it")
 }

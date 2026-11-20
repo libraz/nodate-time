@@ -84,7 +84,7 @@ func answerRequests(t *testing.T, owner *helpers.TestTenant, poll schedulePollBo
 		requests = append(requests, concurrentPollRequest{
 			method: http.MethodPut, url: pollURL + "/response", token: m.AccessToken,
 			body: map[string]any{
-				"version": ballot.Version, "responseVersion": ballot.ResponseVersion,
+				"version": ballot.Version, "answerVersion": *ballot.AnswerVersion,
 				"answers": []map[string]string{
 					{"slotId": ballot.Slots[0].ID, "value": "yes"},
 					{"slotId": ballot.Slots[1].ID, "value": "maybe"},

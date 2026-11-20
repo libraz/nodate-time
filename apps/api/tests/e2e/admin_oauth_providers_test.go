@@ -144,12 +144,10 @@ func TestAdminOAuthListingOmitsUpdatedAtWithoutAStoredRow(t *testing.T) {
 	list := func() map[string]map[string]any {
 		status, raw := helpers.DoJSONStatus(t, http.MethodGet, srv.URL+"/admin/oauth-providers", admin.AccessToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var out struct {
-			Providers []map[string]any `json:"providers"`
-		}
+		var out []map[string]any
 		require.NoError(t, json.Unmarshal(raw, &out))
 		byName := map[string]map[string]any{}
-		for _, p := range out.Providers {
+		for _, p := range out {
 			byName[p["provider"].(string)] = p
 		}
 		return byName

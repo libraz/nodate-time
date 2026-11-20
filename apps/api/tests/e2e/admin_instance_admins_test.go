@@ -12,19 +12,15 @@ import (
 )
 
 type instanceAdminRow struct {
-	UserID      string    `json:"userId"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"displayName"`
-	GrantedAt   time.Time `json:"grantedAt"`
+	UserID    string    `json:"userId"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	GrantedAt time.Time `json:"grantedAt"`
 }
 
-type instanceAdminList struct {
-	Admins []instanceAdminRow `json:"admins"`
-}
-
-func listInstanceAdmins(t *testing.T, token string) instanceAdminList {
+func listInstanceAdmins(t *testing.T, token string) []instanceAdminRow {
 	t.Helper()
-	var list instanceAdminList
+	var list []instanceAdminRow
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/admin/instance-admins", token, nil, &list)
 	return list
 }
@@ -46,14 +42,14 @@ func TestInstanceAdminListingNamesWhoHoldsTheRights(t *testing.T) {
 	list := listInstanceAdmins(t, admin.AccessToken)
 
 	var found *instanceAdminRow
-	for i := range list.Admins {
-		if list.Admins[i].UserID == admin.UserID {
-			found = &list.Admins[i]
+	for i := range list {
+		if list[i].UserID == admin.UserID {
+			found = &list[i]
 		}
 	}
 	require.NotNil(t, found, "the caller holds the rights and should appear in the list of who does")
 	require.Equal(t, admin.Email, found.Email, "an administrator is identified by address, not by id alone")
-	require.Equal(t, admin.Name, found.DisplayName)
+	require.Equal(t, admin.Name, found.Name)
 	require.False(t, found.GrantedAt.IsZero(), "the grant records when it was made and the listing should say so")
 }
 
@@ -69,20 +65,18 @@ func TestInstanceAdminListingExposesNoInternalIDs(t *testing.T) {
 	admin := helpers.NewTenant(t, testServerURL)
 	helpers.MakeInstanceAdmin(t, testDB, admin.UserID)
 
-	var raw struct {
-		Admins []map[string]any `json:"admins"`
-	}
+	var raw []map[string]any
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/admin/instance-admins",
 		admin.AccessToken, nil, &raw)
-	require.NotEmpty(t, raw.Admins)
+	require.NotEmpty(t, raw)
 
-	for _, entry := range raw.Admins {
+	for _, entry := range raw {
 		keys := make([]string, 0, len(entry))
 		for k := range entry {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		require.Equal(t, []string{"displayName", "email", "grantedAt", "userId"}, keys,
+		require.Equal(t, []string{"email", "grantedAt", "name", "userId"}, keys,
 			"the listing serves exactly these fields; an internal id must not arrive by accident")
 
 		id, _ := entry["userId"].(string)
@@ -138,7 +132,7 @@ func TestRevokingAnotherAdminTakesTheirRightsAway(t *testing.T) {
 		"a revoked administrator must lose the admin surface, body: %s", string(body))
 
 	// And they are gone from the listing, not merely refused at the door.
-	for _, entry := range listInstanceAdmins(t, keeper.AccessToken).Admins {
+	for _, entry := range listInstanceAdmins(t, keeper.AccessToken) {
 		require.NotEqual(t, leaver.UserID, entry.UserID,
 			"a revoked grant must leave the listing of who holds the rights")
 	}

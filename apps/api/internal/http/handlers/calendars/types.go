@@ -31,12 +31,12 @@ type CalendarResponse struct {
 }
 
 type MemberResponse struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Avatar string `json:"avatar,omitempty"`
-	Role   string `json:"role"`
-	Color  string `json:"color"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email,omitempty"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Role      string `json:"role"`
+	Color     string `json:"color"`
 }
 
 type LabelResponse struct {
@@ -120,10 +120,10 @@ type ListMemberCandidatesInput struct {
 // MemberCandidateResponse is a workspace member who is not on the calendar
 // yet and can be added to it directly.
 type MemberCandidateResponse struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Avatar string `json:"avatar,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 type ListMemberCandidatesPage struct {
 	Items []MemberCandidateResponse `json:"items"`

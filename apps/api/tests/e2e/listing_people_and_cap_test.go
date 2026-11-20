@@ -36,7 +36,7 @@ func TestListingCostDoesNotFollowTheNumberOfPeople(t *testing.T) {
 		t.Helper()
 		var listed []struct {
 			OwnerID   string `json:"ownerId"`
-			CreatedBy string `json:"createdBy"`
+			CreatedBy string `json:"creatorId"`
 			Color     string `json:"color"`
 		}
 		counter.Reset()

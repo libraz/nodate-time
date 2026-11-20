@@ -49,7 +49,7 @@ func TestExportCostDoesNotFollowTheNumberOfSeries(t *testing.T) {
 					"startAt":  fmt.Sprintf("2026-10-%02dT15:00:00Z", day),
 					"endAt":    fmt.Sprintf("2026-10-%02dT16:00:00Z", day),
 					"location": "", "memo": "", "url": "", "notificationOffset": nil,
-					"participants": []string{}, "ownerId": nil, "recurrenceRule": nil,
+					"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
 				}, nil)
 		}
 	}

@@ -32,11 +32,11 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 	for i := range plain {
 		helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 			map[string]any{
-				"title":        fmt.Sprintf("単発 %d", i),
-				"allDay":       false,
-				"startAt":      fmt.Sprintf("2026-10-%02dT10:00:00+09:00", i+1),
-				"endAt":        fmt.Sprintf("2026-10-%02dT11:00:00+09:00", i+1),
-				"participants": []string{guest.UserID},
+				"title":          fmt.Sprintf("単発 %d", i),
+				"allDay":         false,
+				"startAt":        fmt.Sprintf("2026-10-%02dT10:00:00+09:00", i+1),
+				"endAt":          fmt.Sprintf("2026-10-%02dT11:00:00+09:00", i+1),
+				"participantIds": []string{guest.UserID},
 			}, nil)
 	}
 	for i := range series {
@@ -46,7 +46,7 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 				"allDay":         false,
 				"startAt":        fmt.Sprintf("2026-10-%02dT14:00:00+09:00", i+1),
 				"endAt":          fmt.Sprintf("2026-10-%02dT15:00:00+09:00", i+1),
-				"participants":   []string{guest.UserID},
+				"participantIds": []string{guest.UserID},
 				"recurrenceRule": map[string]any{"freq": "weekly", "interval": 1, "count": 4},
 			}, nil)
 	}
@@ -56,7 +56,7 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 		counter.Reset()
 		var listed []struct {
 			ID           string   `json:"id"`
-			Participants []string `json:"participants"`
+			Participants []string `json:"participantIds"`
 		}
 		helpers.DoJSON(t, http.MethodGet,
 			calURL+"/events?start=2026-10-01&end=2026-10-31&tz=Asia/Tokyo",
@@ -77,11 +77,11 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 	for i := range plain {
 		helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 			map[string]any{
-				"title":        fmt.Sprintf("追加 %d", i),
-				"allDay":       false,
-				"startAt":      fmt.Sprintf("2026-10-%02dT18:00:00+09:00", i+1),
-				"endAt":        fmt.Sprintf("2026-10-%02dT19:00:00+09:00", i+1),
-				"participants": []string{guest.UserID},
+				"title":          fmt.Sprintf("追加 %d", i),
+				"allDay":         false,
+				"startAt":        fmt.Sprintf("2026-10-%02dT18:00:00+09:00", i+1),
+				"endAt":          fmt.Sprintf("2026-10-%02dT19:00:00+09:00", i+1),
+				"participantIds": []string{guest.UserID},
 			}, nil)
 	}
 	for i := range series {
@@ -91,7 +91,7 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 				"allDay":         false,
 				"startAt":        fmt.Sprintf("2026-10-%02dT20:00:00+09:00", i+1),
 				"endAt":          fmt.Sprintf("2026-10-%02dT21:00:00+09:00", i+1),
-				"participants":   []string{guest.UserID},
+				"participantIds": []string{guest.UserID},
 				"recurrenceRule": map[string]any{"freq": "weekly", "interval": 1, "count": 4},
 			}, nil)
 	}

@@ -38,9 +38,7 @@ func TestActivityDistinguishesSystemAndMissingActors(t *testing.T) {
 	type item struct {
 		Summary     string `json:"summary"`
 		SystemActor bool   `json:"systemActor"`
-		Actor       *struct {
-			ID string `json:"id"`
-		} `json:"actor"`
+		ActorID     string `json:"actorId"`
 	}
 	checkActors := func(t *testing.T, list []item) {
 		t.Helper()
@@ -49,12 +47,11 @@ func TestActivityDistinguishesSystemAndMissingActors(t *testing.T) {
 			items[entry.Summary] = entry
 		}
 		require.True(t, items["System setup"].SystemActor)
-		require.Nil(t, items["System setup"].Actor)
+		require.Empty(t, items["System setup"].ActorID)
 		require.Contains(t, items, "Unknown historical actor")
 		require.False(t, items["Unknown historical actor"].SystemActor)
-		require.Nil(t, items["Unknown historical actor"].Actor)
-		require.NotNil(t, items["Owner created this event"].Actor)
-		require.Equal(t, owner.UserID, items["Owner created this event"].Actor.ID)
+		require.Empty(t, items["Unknown historical actor"].ActorID)
+		require.Equal(t, owner.UserID, items["Owner created this event"].ActorID)
 		require.False(t, items["Owner created this event"].SystemActor)
 	}
 	t.Run("activity", func(t *testing.T) {

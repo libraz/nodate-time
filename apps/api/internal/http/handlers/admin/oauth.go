@@ -48,9 +48,7 @@ type ProviderInfo struct {
 type ListProvidersInput struct{}
 
 type ListProvidersOutput struct {
-	Body struct {
-		Providers []ProviderInfo `json:"providers"`
-	}
+	Body []ProviderInfo
 }
 
 type UpdateProviderInput struct {
@@ -79,8 +77,7 @@ var supportedProviders = []string{"google", "line"}
 
 func ListOAuthProviders(deps Deps) func(context.Context, *ListProvidersInput) (*ListProvidersOutput, error) {
 	return func(ctx context.Context, _ *ListProvidersInput) (*ListProvidersOutput, error) {
-		out := &ListProvidersOutput{}
-		out.Body.Providers = make([]ProviderInfo, 0, len(supportedProviders))
+		out := &ListProvidersOutput{Body: make([]ProviderInfo, 0, len(supportedProviders))}
 		for _, p := range supportedProviders {
 			info := ProviderInfo{Provider: p, Source: "none"}
 			row, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(p))
@@ -97,7 +94,7 @@ func ListOAuthProviders(deps Deps) func(context.Context, *ListProvidersInput) (*
 				info.Enabled = true
 				info.Source = "env"
 			}
-			out.Body.Providers = append(out.Body.Providers, info)
+			out.Body = append(out.Body, info)
 		}
 		return out, nil
 	}

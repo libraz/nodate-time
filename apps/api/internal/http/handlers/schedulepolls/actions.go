@@ -7,6 +7,7 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 )
 
@@ -51,7 +52,7 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 				poll.Status = generated.CalendarSchedulePollsStatusCancelled
 				poll.Version++
 			}
-			result, err = detailResponse(ctx, q, poll, cal.PublicID, member.Role, actor)
+			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), poll, cal.PublicID, member.Role, actor)
 			return err
 		})
 		if err != nil {
@@ -67,8 +68,7 @@ func SchedulePollActions(deps Deps) func(context.Context, *PollActionsInput) (*P
 		if err != nil {
 			return nil, err
 		}
-		out := &PollActionsOutput{}
-		out.Body.Actions = make([]PollAction, 0)
+		out := &PollActionsOutput{Body: make([]PollAction, 0)}
 		err = withReadSnapshot(ctx, deps.DB, func(q *generated.Queries) error {
 			rows, err := q.ListSchedulePollActionPolls(ctx, generated.ListSchedulePollActionPollsParams{
 				UserID:        actor,
@@ -104,7 +104,7 @@ func SchedulePollActions(deps Deps) func(context.Context, *PollActionsInput) (*P
 					}
 					if pending > 0 {
 						action.Kind = "answer"
-						out.Body.Actions = append(out.Body.Actions, action)
+						out.Body = append(out.Body, action)
 					}
 				}
 				if !row.ManagerUserID.Valid || uint32(row.ManagerUserID.Int32) != actor {
@@ -128,7 +128,7 @@ func SchedulePollActions(deps Deps) func(context.Context, *PollActionsInput) (*P
 					}
 					if kind != "" {
 						action.Kind = kind
-						out.Body.Actions = append(out.Body.Actions, action)
+						out.Body = append(out.Body, action)
 					}
 				}
 			}

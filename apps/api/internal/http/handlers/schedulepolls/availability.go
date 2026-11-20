@@ -205,9 +205,7 @@ func SearchAvailability(deps Deps) func(context.Context, *SearchAvailabilityInpu
 		if err != nil {
 			return nil, mapAvailabilityHandlerError(ctx, err)
 		}
-		out := &SearchAvailabilityOutput{}
-		out.Body.Slots = toCandidateSlots(slots, states)
-		return out, nil
+		return &SearchAvailabilityOutput{Body: toCandidateSlots(slots, states)}, nil
 	}
 }
 

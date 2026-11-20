@@ -33,19 +33,17 @@ type albumPresignResp struct {
 }
 
 type albumPhotoResp struct {
-	ID           string `json:"id"`
-	CalendarID   string `json:"calendarId"`
-	Caption      string `json:"caption"`
-	ContentType  string `json:"contentType"`
-	EventID      string `json:"eventId"`
-	ByteSize     int64  `json:"byteSize"`
-	ImageURL     string `json:"imageUrl"`
-	ThumbnailURL string `json:"thumbnailUrl"`
-	UploadedBy   struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		AvatarURL string `json:"avatarUrl"`
-	} `json:"uploadedBy"`
+	ID                string `json:"id"`
+	CalendarID        string `json:"calendarId"`
+	Caption           string `json:"caption"`
+	ContentType       string `json:"contentType"`
+	EventID           string `json:"eventId"`
+	ByteSize          int64  `json:"byteSize"`
+	ImageURL          string `json:"imageUrl"`
+	ThumbnailURL      string `json:"thumbnailUrl"`
+	UploaderID        string `json:"uploaderId"`
+	UploaderName      string `json:"uploaderName"`
+	UploaderAvatarURL string `json:"uploaderAvatarUrl"`
 }
 
 type albumListResp struct {
@@ -97,7 +95,7 @@ func TestAlbumPhotoLifecycle(t *testing.T) {
 	assert.Equal(t, pres.PhotoID, got.ID)
 	assert.Equal(t, "hello", got.Caption)
 	assert.NotEmpty(t, got.ImageURL)
-	assert.Equal(t, tt.UserID, got.UploadedBy.ID)
+	assert.Equal(t, tt.UserID, got.UploaderID)
 
 	// Verify the imageUrl actually returns bytes.
 	bs := helpers.FetchURL(t, got.ImageURL)
@@ -234,7 +232,7 @@ func TestAlbumPhotoTooLarge(t *testing.T) {
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
 		map[string]any{"contentType": "image/jpeg", "byteSize": 21 * 1024 * 1024})
-	assert.Equal(t, 400, status)
+	assert.Equal(t, http.StatusUnprocessableEntity, status)
 }
 
 func TestAlbumPagination(t *testing.T) {

@@ -65,7 +65,7 @@ func TestICalRoundTripPreservesASeriesAndItsDepartures(t *testing.T) {
 			"title": "Moved to the evening", "allDay": false,
 			"startAt": "2026-04-17T20:00:00+09:00", "endAt": "2026-04-17T21:00:00+09:00",
 			"location": "", "memo": "", "url": "", "notificationOffset": nil,
-			"participants": []string{}, "ownerId": nil, "recurrenceRule": nil,
+			"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
 		}, nil)
 
 	exported := fetchICS(t, sourceURL, tt.AccessToken)
@@ -103,7 +103,7 @@ func TestICalRoundTripLeavesTheSameOccurrencesOnTheCalendar(t *testing.T) {
 			"title": "Moved to the evening", "allDay": false,
 			"startAt": "2026-04-17T20:00:00+09:00", "endAt": "2026-04-17T21:00:00+09:00",
 			"location": "", "memo": "", "url": "", "notificationOffset": nil,
-			"participants": []string{}, "ownerId": nil, "recurrenceRule": nil,
+			"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
 		}, nil)
 
 	targetURL := testServerURL + "/calendars/" + newCalendar(t, tt, "Imported")

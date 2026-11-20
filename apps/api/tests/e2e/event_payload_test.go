@@ -24,7 +24,7 @@ func spaCreateBody() map[string]any {
 		"memo":               "議題：Q2計画",
 		"url":                "",
 		"notificationOffset": nil,
-		"participants":       []string{},
+		"participantIds":     []string{},
 		"ownerId":            nil,
 		"flexibility":        "negotiable",
 		"showAs":             "busy",

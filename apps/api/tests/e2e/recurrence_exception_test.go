@@ -69,7 +69,7 @@ func TestRecurringEditSingleOccurrence(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
@@ -152,7 +152,7 @@ func TestRecurringDeleteAllPurgesOverrides(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -191,7 +191,7 @@ func TestRecurringEditAllFromOccurrencePreservesPastInstances(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
@@ -239,7 +239,7 @@ func TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
@@ -290,7 +290,7 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -306,7 +306,7 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
@@ -352,7 +352,7 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -368,7 +368,7 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -396,15 +396,15 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 
 	var master struct {
 		ID           string   `json:"id"`
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":        "Weekly with participants",
-			"allDay":       false,
-			"startAt":      "2026-04-03T15:00:00+09:00",
-			"endAt":        "2026-04-03T16:00:00+09:00",
-			"participants": []string{guest.UserID},
+			"title":          "Weekly with participants",
+			"allDay":         false,
+			"startAt":        "2026-04-03T15:00:00+09:00",
+			"endAt":          "2026-04-03T16:00:00+09:00",
+			"participantIds": []string{guest.UserID},
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",
 				"interval": 1,
@@ -415,7 +415,7 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 
 	var instances []struct {
 		ID           string   `json:"id"`
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &instances)
 	require.Len(t, instances, 4)
@@ -424,13 +424,13 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 	}
 
 	var got struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+instances[1].ID, owner.AccessToken, nil, &got)
 	require.Equal(t, []string{guest.UserID}, got.Participants)
 
 	var updated struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+instances[1].ID+"?scope=this", owner.AccessToken,
 		map[string]any{
@@ -442,7 +442,7 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{owner.UserID},
+			"participantIds":     []string{owner.UserID},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)

@@ -76,10 +76,8 @@ func TestManagerAddsAWorkspaceMemberWithoutALink(t *testing.T) {
 	// The addition shows up in the calendar's activity, attributed to the owner.
 	var activity struct {
 		Items []struct {
-			Action string `json:"action"`
-			Actor  *struct {
-				ID string `json:"id"`
-			} `json:"actor"`
+			Action  string `json:"action"`
+			ActorID string `json:"actorId"`
 		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity", owner.AccessToken, nil, &activity)
@@ -87,8 +85,7 @@ func TestManagerAddsAWorkspaceMemberWithoutALink(t *testing.T) {
 	for _, a := range activity.Items {
 		if a.Action == "calendar.member.added" {
 			found = true
-			require.NotNil(t, a.Actor)
-			require.Equal(t, owner.UserID, a.Actor.ID)
+			require.Equal(t, owner.UserID, a.ActorID)
 		}
 	}
 	require.True(t, found, "the addition is recorded")

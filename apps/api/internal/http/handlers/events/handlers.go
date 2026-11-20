@@ -185,7 +185,7 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 		Flexibility:        string(e.Flexibility),
 		Visibility:         string(e.Visibility),
 		NotificationOffset: nullInt32ToPtr(e.NotificationOffset),
-		Participants:       []string{},
+		ParticipantIDs:     []string{},
 		Attendees:          []AttendeeResponse{},
 		RecurrenceRule:     mapRecurrenceRule(e.RecurrenceRule),
 		TaskOwned:          e.TaskID.Valid,
@@ -477,7 +477,7 @@ func actorTimezone(ctx context.Context, deps Deps, userID uint32) string {
 
 // applyCreator copies an already-resolved brief onto resp.
 func applyCreator(resp *EventResponse, b userBrief) {
-	resp.CreatedBy = b.publicID
+	resp.CreatorID = b.publicID
 	resp.CreatorName = b.name
 	resp.CreatorAvatarURL = b.avatarURL
 }
@@ -725,7 +725,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			if spec != nil {
 				return spec
 			}
-			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.Participants)
+			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
 			if spec != nil {
 				return spec
 			}
@@ -824,7 +824,7 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 			if spec != nil {
 				return spec
 			}
-			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.Participants)
+			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
 			if spec != nil {
 				return spec
 			}

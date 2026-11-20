@@ -57,15 +57,15 @@ func TestUploadedAvatarShowsWhereverAUserIsRendered(t *testing.T) {
 
 	// The member sheet.
 	var members []struct {
-		ID     string `json:"id"`
-		Avatar string `json:"avatar"`
+		ID        string `json:"id"`
+		AvatarURL string `json:"avatarUrl"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/members", owner.AccessToken, nil, &members)
 	found := false
 	for _, m := range members {
 		if m.ID == member.UserID {
 			found = true
-			requireShowsPicture(t, "the member list", m.Avatar, png)
+			requireShowsPicture(t, "the member list", m.AvatarURL, png)
 		}
 	}
 	require.True(t, found, "the member who uploaded should be in the list")
@@ -84,44 +84,42 @@ func TestUploadedAvatarShowsWhereverAUserIsRendered(t *testing.T) {
 
 	// A comment, both as the write answers and as the thread reads back.
 	var created struct {
-		UserAvatar string `json:"userAvatar"`
+		AuthorAvatarURL string `json:"authorAvatarUrl"`
 	}
 	helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", member.AccessToken,
 		map[string]any{"content": "資料を持っていきます"}, &created)
-	requireShowsPicture(t, "the comment that was just posted", created.UserAvatar, png)
+	requireShowsPicture(t, "the comment that was just posted", created.AuthorAvatarURL, png)
 
 	var thread struct {
 		Items []struct {
-			UserPublicID string `json:"userPublicId"`
-			UserAvatar   string `json:"userAvatar"`
+			AuthorID        string `json:"authorId"`
+			AuthorAvatarURL string `json:"authorAvatarUrl"`
 		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, eventURL+"/activities", owner.AccessToken, nil, &thread)
 	require.Len(t, thread.Items, 1)
-	requireShowsPicture(t, "the comment thread", thread.Items[0].UserAvatar, png)
+	requireShowsPicture(t, "the comment thread", thread.Items[0].AuthorAvatarURL, png)
 
 	// The album listing.
 	uploadOnePhotoAs(t, calURL, member, map[string]any{"caption": "現地の写真"})
 	var album albumListResp
 	helpers.DoJSON(t, http.MethodGet, calURL+"/albums", owner.AccessToken, nil, &album)
 	require.Len(t, album.Items, 1)
-	requireShowsPicture(t, "the album listing", album.Items[0].UploadedBy.AvatarURL, png)
+	requireShowsPicture(t, "the album listing", album.Items[0].UploaderAvatarURL, png)
 
 	// The activity feed.
 	var feed struct {
 		Items []struct {
-			Actor *struct {
-				ID        string `json:"id"`
-				AvatarURL string `json:"avatarUrl"`
-			} `json:"actor"`
+			ActorID        string `json:"actorId"`
+			ActorAvatarURL string `json:"actorAvatarUrl"`
 		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/activity", owner.AccessToken, nil, &feed)
 	seen := false
 	for _, item := range feed.Items {
-		if item.Actor != nil && item.Actor.ID == member.UserID {
+		if item.ActorID == member.UserID {
 			seen = true
-			requireShowsPicture(t, "the activity feed", item.Actor.AvatarURL, png)
+			requireShowsPicture(t, "the activity feed", item.ActorAvatarURL, png)
 		}
 	}
 	require.True(t, seen, "the member's actions should appear in the feed")
@@ -169,12 +167,12 @@ func TestMemberListAvatarsCostAFixedNumberOfQueries(t *testing.T) {
 		t.Helper()
 		counter.Reset()
 		var members []struct {
-			Avatar string `json:"avatar"`
+			AvatarURL string `json:"avatarUrl"`
 		}
 		helpers.DoJSON(t, http.MethodGet, calURL+"/members", owner.AccessToken, nil, &members)
 		queries = counter.Count()
 		for _, m := range members {
-			if m.Avatar != "" {
+			if m.AvatarURL != "" {
 				withAvatars++
 			}
 		}

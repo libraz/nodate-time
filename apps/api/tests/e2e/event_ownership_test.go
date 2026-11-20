@@ -23,7 +23,7 @@ func eventBody(title, startAt, endAt string, participants ...string) map[string]
 		"memo":               "",
 		"url":                "",
 		"notificationOffset": nil,
-		"participants":       participants,
+		"participantIds":     participants,
 		"ownerId":            nil,
 		"recurrenceRule":     nil,
 	}
@@ -122,11 +122,11 @@ func TestDelegatedAttendeeCanEdit(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":        "Hospital visit",
-			"allDay":       false,
-			"startAt":      "2026-06-20T10:00:00+09:00",
-			"endAt":        "2026-06-20T11:00:00+09:00",
-			"participants": []string{delegate.UserID, bystander.UserID},
+			"title":          "Hospital visit",
+			"allDay":         false,
+			"startAt":        "2026-06-20T10:00:00+09:00",
+			"endAt":          "2026-06-20T11:00:00+09:00",
+			"participantIds": []string{delegate.UserID, bystander.UserID},
 		}, &evt)
 	require.Len(t, evt.Attendees, 2)
 	for _, a := range evt.Attendees {
@@ -189,11 +189,11 @@ func TestRsvpRoundTrip(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":        "Dinner",
-			"allDay":       false,
-			"startAt":      "2026-06-25T18:00:00+09:00",
-			"endAt":        "2026-06-25T20:00:00+09:00",
-			"participants": []string{guest.UserID},
+			"title":          "Dinner",
+			"allDay":         false,
+			"startAt":        "2026-06-25T18:00:00+09:00",
+			"endAt":          "2026-06-25T20:00:00+09:00",
+			"participantIds": []string{guest.UserID},
 		}, &evt)
 
 	// A read-only member still answers for themselves.

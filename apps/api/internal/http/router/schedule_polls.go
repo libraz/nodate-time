@@ -8,7 +8,7 @@ import (
 )
 
 func registerSchedulePolls(api huma.API, deps Deps) {
-	polls := schedulepolls.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID}
+	polls := schedulepolls.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID, Storage: deps.Storage}
 	const base = "/calendars/{calendarId}/schedule-polls"
 	const detail = base + "/{pollId}"
 	operation := func(id, method, path, summary string) huma.Operation {
@@ -21,7 +21,6 @@ func registerSchedulePolls(api huma.API, deps Deps) {
 		}
 	}
 
-	huma.Register(api, operation("list-schedule-poll-members", http.MethodGet, base+"/members", "List eligible recipients"), schedulepolls.ListCalendarMembers(polls))
 	huma.Register(api, operation("get-schedule-availability-sharing", http.MethodGet, base+"/availability-sharing", "Get calendar availability sharing"), schedulepolls.GetAvailabilitySharing(polls))
 	huma.Register(api, operation("set-schedule-availability-sharing", http.MethodPut, base+"/availability-sharing", "Set calendar availability sharing"), schedulepolls.SetAvailabilitySharing(polls))
 	huma.Register(api, operation("search-schedule-availability", http.MethodPost, base+"/availability", "Find available candidate times"), schedulepolls.SearchAvailability(polls))

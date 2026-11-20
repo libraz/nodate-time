@@ -2,9 +2,11 @@ package schedulepolls
 
 import "time"
 
-type PollMemberResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+// PersonResponse is one person in a list.
+type PersonResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
 type PollSlotResponse struct {
@@ -26,19 +28,20 @@ type PollMemberAnswersResponse struct {
 }
 
 type PollDetailResponse struct {
-	ID               string                      `json:"id"`
-	CalendarID       string                      `json:"calendarId"`
-	Title            string                      `json:"title"`
-	Timezone         string                      `json:"timezone"`
-	Status           string                      `json:"status" enum:"open,finalized,cancelled"`
-	Version          uint32                      `json:"version"`
-	ResponseVersion  uint32                      `json:"responseVersion"`
+	ID         string `json:"id"`
+	CalendarID string `json:"calendarId"`
+	Title      string `json:"title"`
+	Timezone   string `json:"timezone"`
+	Status     string `json:"status" enum:"open,finalized,cancelled"`
+	Version    uint32 `json:"version"`
+	// AnswerVersion is the caller's own answer revision; present only for recipients.
+	AnswerVersion    *uint32                     `json:"answerVersion,omitempty"`
 	ReviewVersion    uint32                      `json:"reviewVersion"`
 	CanManage        bool                        `json:"canManage"`
 	CanTakeOver      bool                        `json:"canTakeOver,omitempty"`
 	CanRespond       bool                        `json:"canRespond"`
 	Slots            []PollSlotResponse          `json:"slots"`
-	Members          []PollMemberResponse        `json:"members"`
+	Members          []PersonResponse            `json:"members,omitempty"`
 	MyAnswers        []PollAnswerResponse        `json:"myAnswers"`
 	Responses        []PollMemberAnswersResponse `json:"responses,omitempty"`
 	RespondedCount   int64                       `json:"respondedCount"`
@@ -73,12 +76,6 @@ type CalendarMembersInput struct {
 	CalendarID string `path:"calendarId"`
 }
 
-type CalendarMembersOutput struct {
-	Body struct {
-		Members []PollMemberResponse `json:"members"`
-	}
-}
-
 type AvailabilitySharingInput struct {
 	CalendarID string `path:"calendarId"`
 	Body       struct {
@@ -107,9 +104,7 @@ type SearchAvailabilityInput struct {
 }
 
 type SearchAvailabilityOutput struct {
-	Body struct {
-		Slots []CandidateSlotResponse `json:"slots"`
-	}
+	Body []CandidateSlotResponse
 }
 
 type CreatePollInput struct {
@@ -128,9 +123,7 @@ type ListPollsInput struct {
 	CalendarID string `path:"calendarId"`
 }
 type ListPollsOutput struct {
-	Body struct {
-		Polls []PollDetailResponse `json:"polls"`
-	}
+	Body []PollDetailResponse
 }
 
 type GetPollInput struct {
@@ -161,9 +154,7 @@ type PollAction struct {
 }
 
 type PollActionsOutput struct {
-	Body struct {
-		Actions []PollAction `json:"actions"`
-	}
+	Body []PollAction
 }
 
 type PollMutationInput struct {
@@ -177,9 +168,9 @@ type SetResponseInput struct {
 	CalendarID string `path:"calendarId"`
 	PollID     string `path:"pollId"`
 	Body       struct {
-		Version         uint32            `json:"version"`
-		ResponseVersion uint32            `json:"responseVersion"`
-		Answers         []PollAnswerInput `json:"answers"`
+		Version       uint32            `json:"version"`
+		AnswerVersion uint32            `json:"answerVersion"`
+		Answers       []PollAnswerInput `json:"answers"`
 	}
 }
 

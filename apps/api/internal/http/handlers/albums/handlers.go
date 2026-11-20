@@ -223,16 +223,15 @@ func eventPubIDForResponse(ctx context.Context, deps Deps, evtID sql.NullInt32) 
 	return pubIDToHex(evt.PublicID)
 }
 
-func uploaderForResponse(ctx context.Context, deps Deps, userID uint32) AlbumUploader {
+// setUploader fills the uploader fields, leaving them empty when the user is gone.
+func setUploader(ctx context.Context, deps Deps, resp *AlbumPhotoResponse, userID uint32) {
 	u, err := deps.Queries.GetUserByID(ctx, userID)
 	if err != nil {
-		return AlbumUploader{ID: ""}
+		return
 	}
-	return AlbumUploader{
-		ID:        pubIDToHex(u.PublicID),
-		Name:      u.DisplayName,
-		AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u),
-	}
+	resp.UploaderID = pubIDToHex(u.PublicID)
+	resp.UploaderName = u.DisplayName
+	resp.UploaderAvatarURL = avatars.New(deps.Queries, deps.Storage).ForUser(ctx, u)
 }
 
 type albumPhotoListRow struct {
@@ -310,18 +309,16 @@ func afterPagePhotoRows(rows []generated.ListAlbumPhotosAfterRow) []albumPhotoLi
 
 func mapListPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p albumPhotoListRow, av *avatars.Resolver) AlbumPhotoResponse {
 	resp := AlbumPhotoResponse{
-		ID:          pubIDToHex(p.publicID),
-		CalendarID:  pubIDToHex(cal.PublicID),
-		Caption:     p.caption,
-		ContentType: p.contentType,
-		ByteSize:    int64(p.byteSize),
-		TakenAt:     p.takenAt,
-		CreatedAt:   p.createdAt,
-		UploadedBy: AlbumUploader{
-			ID:        pubIDToHex(p.uploaderPublicID),
-			Name:      p.uploaderName,
-			AvatarURL: av.FromKey(ctx, p.uploaderAvatarStorageKey, p.uploaderAvatarURL),
-		},
+		ID:                pubIDToHex(p.publicID),
+		CalendarID:        pubIDToHex(cal.PublicID),
+		Caption:           p.caption,
+		ContentType:       p.contentType,
+		ByteSize:          int64(p.byteSize),
+		TakenAt:           p.takenAt,
+		CreatedAt:         p.createdAt,
+		UploaderID:        pubIDToHex(p.uploaderPublicID),
+		UploaderName:      p.uploaderName,
+		UploaderAvatarURL: av.FromKey(ctx, p.uploaderAvatarStorageKey, p.uploaderAvatarURL),
 	}
 	if p.eventPublicID.Valid {
 		resp.EventID = pubIDToHex([]byte(p.eventPublicID.String))
@@ -361,8 +358,8 @@ func mapPhoto(ctx context.Context, deps Deps, cal generated.Calendar, p generate
 		TakenAt:     p.TakenAt,
 		CreatedAt:   p.CreatedAt,
 		EventID:     eventPubIDForResponse(ctx, deps, p.CalendarEventID),
-		UploadedBy:  uploaderForResponse(ctx, deps, p.UploadedByUserID),
 	}
+	setUploader(ctx, deps, &resp, p.UploadedByUserID)
 	if p.Width.Valid {
 		w := int(p.Width.Int32)
 		resp.Width = &w

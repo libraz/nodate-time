@@ -73,7 +73,7 @@ func TestEventLifecycle(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
@@ -131,7 +131,7 @@ func TestEventComments(t *testing.T) {
 	// Create comment
 	var comment struct {
 		ID       string `json:"id"`
-		UserName string `json:"userName"`
+		UserName string `json:"authorName"`
 		Body     string `json:"body"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt.AccessToken,
@@ -301,7 +301,7 @@ func TestRecurringEventUpdate(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule": map[string]any{
 				"freq":     "weekly",

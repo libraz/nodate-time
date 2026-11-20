@@ -272,7 +272,7 @@ func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		})
@@ -399,7 +399,7 @@ func TestEventHistoryIsNewestFirst(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -466,7 +466,7 @@ func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, nil)
@@ -658,9 +658,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 		Action     string `json:"action"`
 		ID         string `json:"id"`
 		Summary    string `json:"summary"`
-		Actor      *struct {
-			ID string `json:"id"`
-		} `json:"actor"`
+		ActorID    string `json:"actorId"`
 	}
 	type activityPage struct {
 		Items      []activityFeedItem `json:"items"`
@@ -675,8 +673,7 @@ func TestMemberAndInviteChangesAppearInActivity(t *testing.T) {
 		seen[key] = true
 		if key == "member:calendar.member.role_changed" {
 			require.Contains(t, item.Summary, "owner")
-			require.NotNil(t, item.Actor)
-			require.Equal(t, owner.UserID, item.Actor.ID)
+			require.Equal(t, owner.UserID, item.ActorID)
 		}
 	}
 	require.True(t, seen["invite:calendar.invite.created"], "invite creation must be recorded")

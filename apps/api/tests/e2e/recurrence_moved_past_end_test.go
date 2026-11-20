@@ -56,7 +56,7 @@ func TestMovingTheLastOccurrencePastTheSeriesEndKeepsItVisible(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &moved)

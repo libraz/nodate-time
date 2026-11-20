@@ -53,7 +53,7 @@ func TestEventURLField(t *testing.T) {
 			"memo":               "",
 			"url":                "https://zoom.us/j/123",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
@@ -113,7 +113,7 @@ func TestEventNotificationOffset(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
@@ -149,15 +149,15 @@ func TestEventParticipants(t *testing.T) {
 	// tt1 creates an event with tt2 as participant
 	var evt struct {
 		ID           string   `json:"id"`
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt1.AccessToken,
 		map[string]any{
-			"title":        "Team lunch",
-			"allDay":       false,
-			"startAt":      "2026-04-22T12:00:00+09:00",
-			"endAt":        "2026-04-22T13:00:00+09:00",
-			"participants": []string{tt2.UserID},
+			"title":          "Team lunch",
+			"allDay":         false,
+			"startAt":        "2026-04-22T12:00:00+09:00",
+			"endAt":          "2026-04-22T13:00:00+09:00",
+			"participantIds": []string{tt2.UserID},
 		}, &evt)
 	require.NotEmpty(t, evt.ID)
 	require.Len(t, evt.Participants, 1)
@@ -165,7 +165,7 @@ func TestEventParticipants(t *testing.T) {
 
 	// Get the event, verify participants
 	var got struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID, tt1.AccessToken, nil, &got)
 	require.Len(t, got.Participants, 1)
@@ -173,7 +173,7 @@ func TestEventParticipants(t *testing.T) {
 
 	// Update event with empty participants
 	var updated struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt1.AccessToken,
 		map[string]any{
@@ -185,7 +185,7 @@ func TestEventParticipants(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{},
+			"participantIds":     []string{},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		}, &updated)
@@ -193,7 +193,7 @@ func TestEventParticipants(t *testing.T) {
 
 	// Get again, verify participants is empty
 	var got2 struct {
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID, tt1.AccessToken, nil, &got2)
 	assert.Empty(t, got2.Participants)
@@ -219,11 +219,11 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":        "Original title",
-			"allDay":       false,
-			"startAt":      "2026-05-01T12:00:00+09:00",
-			"endAt":        "2026-05-01T13:00:00+09:00",
-			"participants": []string{guest.UserID},
+			"title":          "Original title",
+			"allDay":         false,
+			"startAt":        "2026-05-01T12:00:00+09:00",
+			"endAt":          "2026-05-01T13:00:00+09:00",
+			"participantIds": []string{guest.UserID},
 		}, &event)
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+event.ID, owner.AccessToken,
@@ -236,7 +236,7 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 			"memo":               "",
 			"url":                "",
 			"notificationOffset": nil,
-			"participants":       []string{"not-a-uuid"},
+			"participantIds":     []string{"not-a-uuid"},
 			"ownerId":            nil,
 			"recurrenceRule":     nil,
 		})
@@ -244,7 +244,7 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 
 	var got struct {
 		Title        string   `json:"title"`
-		Participants []string `json:"participants"`
+		Participants []string `json:"participantIds"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+event.ID, owner.AccessToken, nil, &got)
 	assert.Equal(t, "Original title", got.Title)
@@ -252,11 +252,11 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 
 	status, _ = helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		map[string]any{
-			"title":        "Must not be created",
-			"allDay":       false,
-			"startAt":      "2026-05-01T14:00:00+09:00",
-			"endAt":        "2026-05-01T15:00:00+09:00",
-			"participants": []string{"not-a-uuid"},
+			"title":          "Must not be created",
+			"allDay":         false,
+			"startAt":        "2026-05-01T14:00:00+09:00",
+			"endAt":          "2026-05-01T15:00:00+09:00",
+			"participantIds": []string{"not-a-uuid"},
 		})
 	assert.Equal(t, http.StatusBadRequest, status)
 }
@@ -620,14 +620,14 @@ func TestNewFieldsInListEvents(t *testing.T) {
 			"startAt": "2026-04-20T10:00:00+09:00", "endAt": "2026-04-20T11:00:00+09:00",
 			"url":                "https://example.com/meet",
 			"notificationOffset": 60,
-			"participants":       []string{tt2.UserID},
+			"participantIds":     []string{tt2.UserID},
 		}, nil)
 
 	// List events
 	type listEvent struct {
 		URL                string   `json:"url"`
 		NotificationOffset *int     `json:"notificationOffset"`
-		Participants       []string `json:"participants"`
+		Participants       []string `json:"participantIds"`
 	}
 	var evts []listEvent
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt1.AccessToken, nil, &evts)

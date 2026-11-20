@@ -105,11 +105,11 @@ func TestDemotedOwnerCannotGrantEditOnTheirEvent(t *testing.T) {
 
 	var evt readEvent
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", demoted.AccessToken, map[string]any{
-		"title":        "Made while an editor",
-		"allDay":       false,
-		"startAt":      "2026-05-12T10:00:00+09:00",
-		"endAt":        "2026-05-12T11:00:00+09:00",
-		"participants": []string{guest.UserID},
+		"title":          "Made while an editor",
+		"allDay":         false,
+		"startAt":        "2026-05-12T10:00:00+09:00",
+		"endAt":          "2026-05-12T11:00:00+09:00",
+		"participantIds": []string{guest.UserID},
 	}, &evt)
 	require.Equal(t, 200, promote(t, calURL, owner.AccessToken, demoted, "viewer"))
 

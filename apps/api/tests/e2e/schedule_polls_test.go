@@ -16,7 +16,7 @@ type schedulePollBody struct {
 	Status           string `json:"status"`
 	ConfirmedEventID string `json:"confirmedEventId"`
 	Version          int    `json:"version"`
-	ResponseVersion  int    `json:"responseVersion"`
+	AnswerVersion    *int   `json:"answerVersion"`
 	ReviewVersion    int    `json:"reviewVersion"`
 	CanManage        bool   `json:"canManage"`
 	CanRespond       bool   `json:"canRespond"`
@@ -87,9 +87,9 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	type action struct{ PollID, Kind string }
 	assertAction := func(token string, expected ...action) {
 		t.Helper()
-		var body struct{ Actions []action }
+		var body []action
 		helpers.DoJSON(t, http.MethodGet, testServerURL+"/me/schedule-poll-actions", token, nil, &body)
-		require.ElementsMatch(t, expected, body.Actions)
+		require.ElementsMatch(t, expected, body)
 	}
 	assertAction(login.Token, action{PollID: poll.ID, Kind: "answer"})
 	var recipient schedulePollBody
@@ -102,7 +102,7 @@ func TestSchedulePollLifecycle(t *testing.T) {
 		t.Helper()
 		var saved schedulePollBody
 		helpers.DoJSON(t, http.MethodPut, pollURL+"/response", login.Token, map[string]any{
-			"version": current.Version, "responseVersion": current.ResponseVersion, "answers": answers,
+			"version": current.Version, "answerVersion": *current.AnswerVersion, "answers": answers,
 		}, &saved)
 		return saved
 	}
@@ -111,7 +111,7 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	partial := save(recipient, yes)
 	require.Len(t, partial.MyAnswers, 1)
 	code, raw = helpers.DoJSONStatus(t, http.MethodPut, pollURL+"/response", login.Token, map[string]any{
-		"version": recipient.Version, "responseVersion": recipient.ResponseVersion,
+		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
 		"answers": []map[string]string{{"slotId": poll.Slots[0].ID, "value": "no"}},
 	})
 	require.Equal(t, http.StatusConflict, code, string(raw))
@@ -124,7 +124,7 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	var other schedulePollBody
 	helpers.DoJSON(t, http.MethodGet, pollURL, secondRespondent.AccessToken, nil, &other)
 	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", secondRespondent.AccessToken, map[string]any{
-		"version": other.Version, "responseVersion": other.ResponseVersion,
+		"version": other.Version, "answerVersion": *other.AnswerVersion,
 		"answers": []map[string]string{yes, {"slotId": poll.Slots[1].ID, "value": "yes"}},
 	}, nil)
 	assertAction(owner.AccessToken, action{PollID: poll.ID, Kind: "finalize"})
@@ -171,14 +171,14 @@ func TestSchedulePollLifecycle(t *testing.T) {
 
 	var created struct {
 		ID, Title, Visibility, OwnerID string
-		Participants                   []string
+		ParticipantIDs                 []string
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+confirmedID, secondRespondent.AccessToken, nil, &created)
 	require.Equal(t, confirmedID, created.ID)
 	require.Equal(t, "Studio booking", created.Title)
 	require.Equal(t, "confidential", created.Visibility)
 	require.Equal(t, respondent.UserID, created.OwnerID)
-	require.ElementsMatch(t, []string{respondent.UserID, secondRespondent.UserID}, created.Participants)
+	require.ElementsMatch(t, []string{respondent.UserID, secondRespondent.UserID}, created.ParticipantIDs)
 	var eventCount int
 	require.NoError(t, testDB.QueryRow(`SELECT COUNT(*) FROM calendar_events e JOIN calendars c ON c.id=e.calendar_id
 		WHERE c.public_id=UUID_TO_BIN(?) AND e.title=?`, owner.CalendarID, created.Title).Scan(&eventCount))
@@ -207,14 +207,14 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 	addEvent := func(when time.Time, flexibility string) {
 		t.Helper()
 		body := map[string]any{
-			"title":        "Private source event",
-			"allDay":       false,
-			"timezone":     "UTC",
-			"startAt":      scheduleSlot(when)["startAt"],
-			"endAt":        scheduleSlot(when)["endAt"],
-			"participants": []string{participant.UserID},
-			"flexibility":  flexibility,
-			"visibility":   "confidential",
+			"title":          "Private source event",
+			"allDay":         false,
+			"timezone":       "UTC",
+			"startAt":        scheduleSlot(when)["startAt"],
+			"endAt":          scheduleSlot(when)["endAt"],
+			"participantIds": []string{participant.UserID},
+			"flexibility":    flexibility,
+			"visibility":     "confidential",
 		}
 		helpers.DoJSON(t, http.MethodPost, sourceURL+"/events", sourceOwner.AccessToken, body, nil)
 	}
@@ -222,11 +222,9 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 	addEvent(soft, "negotiable")
 	preview := func() map[time.Time]string {
 		t.Helper()
-		var result struct {
-			Slots []struct {
-				StartAt      time.Time
-				Availability string
-			}
+		var result []struct {
+			StartAt      time.Time
+			Availability string
 		}
 		status, raw := helpers.DoJSONStatus(t, http.MethodPost, pollsURL+"/availability", organizer.AccessToken, map[string]any{
 			"timezone": "UTC", "memberIds": []string{participant.UserID},
@@ -237,8 +235,8 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.NotContains(t, string(raw), "Private source event")
 		require.NoError(t, json.Unmarshal(raw, &result))
-		slots := make(map[time.Time]string, len(result.Slots))
-		for _, slot := range result.Slots {
+		slots := make(map[time.Time]string, len(result))
+		for _, slot := range result {
 			slots[slot.StartAt.UTC()] = slot.Availability
 		}
 		return slots
@@ -258,7 +256,7 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 	var recipient schedulePollBody
 	helpers.DoJSON(t, http.MethodGet, pollURL, participant.AccessToken, nil, &recipient)
 	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", participant.AccessToken, map[string]any{
-		"version": recipient.Version, "responseVersion": recipient.ResponseVersion,
+		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
 		"answers": []map[string]string{
 			{"slotId": poll.Slots[0].ID, "value": "yes"},
 			{"slotId": poll.Slots[1].ID, "value": "yes"},
@@ -282,7 +280,7 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 
 	helpers.DoJSON(t, http.MethodGet, pollURL, participant.AccessToken, nil, &recipient)
 	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", participant.AccessToken, map[string]any{
-		"version": recipient.Version, "responseVersion": recipient.ResponseVersion,
+		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
 		"answers": []map[string]string{{"slotId": poll.Slots[0].ID, "value": "maybe"}},
 	}, nil)
 	status, raw = helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice)
@@ -318,7 +316,7 @@ func TestSchedulePollParallelConfirmationsOnlyBookOnePoll(t *testing.T) {
 		pollURL := pollsURL + "/" + polls[i].ID
 		helpers.DoJSON(t, http.MethodGet, pollURL, member.AccessToken, nil, &target)
 		helpers.DoJSON(t, http.MethodPut, pollURL+"/response", member.AccessToken, map[string]any{
-			"version": target.Version, "responseVersion": target.ResponseVersion,
+			"version": target.Version, "answerVersion": *target.AnswerVersion,
 			"answers": []map[string]string{
 				{"slotId": target.Slots[0].ID, "value": "yes"},
 				{"slotId": target.Slots[1].ID, "value": "no"},
