@@ -297,8 +297,8 @@ func requestAllowsRemoval(ctx context.Context, q *generated.Queries, location st
 // that has now committed, and drops their queue rows, so a request that
 // orphaned bytes does not leave them in the way until the next cleanup tick.
 // The checks are the drainer's: nothing is removed until the bucket matches
-// the recorded location (left queued instead), and a key a confirmed object
-// claims is not removed. Anything that fails stays queued for the drainer.
+// the recorded location (left queued instead), and a key any storage object
+// row holds, confirmed or reserved, is not removed. Anything that fails stays queued for the drainer.
 // Best-effort by design; failures are returned joined for the caller to log.
 func RemoveQueued(ctx context.Context, q *generated.Queries, store Remover, keys ...string) error {
 	if len(keys) == 0 {
@@ -315,12 +315,12 @@ func RemoveQueued(ctx context.Context, q *generated.Queries, store Remover, keys
 		if key == "" {
 			continue
 		}
-		claimed, err := q.CountConfirmedStorageObjectsByKey(ctx, key)
+		held, err := q.CountStorageObjectsByKey(ctx, key)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if claimed == 0 {
+		if held == 0 {
 			if err := store.DeleteObject(ctx, key); err != nil {
 				errs = append(errs, err)
 				continue

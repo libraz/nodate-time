@@ -3,8 +3,13 @@ package cleanup
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -100,4 +105,51 @@ func TestPageByIDStopsOnAListingError(t *testing.T) {
 		return nil, errors.New("down")
 	}, func(candidate) { t.Fatal("nothing listed, nothing reclaimed") })
 	require.Equal(t, 1, calls)
+}
+
+// A queued key that a storage object row still holds, confirmed or reserved,
+// keeps its blob; the queue row goes either way. Written in a transaction
+// that is rolled back, against a fake store, so no other test's blobs move.
+func TestDrainBlobRemovalsKeepsKeysAnObjectHolds(t *testing.T) {
+	if os.Getenv("TC_TEST_INTEGRATION") == "" {
+		t.Skip("set TC_TEST_INTEGRATION=1 to run")
+	}
+	ctx := context.Background()
+	db := helpers.OpenTestDB(t)
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	id, err := uuid.NewV7()
+	require.NoError(t, err)
+	ws, err := tx.ExecContext(ctx, `INSERT INTO workspaces (public_id, slug, name) VALUES (?, ?, ?)`,
+		id[:], "drain-"+id.String(), "Drain test")
+	require.NoError(t, err)
+	workspaceID, err := ws.LastInsertId()
+	require.NoError(t, err)
+
+	prefix := "drain-test/" + id.String() + "/"
+	confirmed, reserved, unheld := prefix+"confirmed", prefix+"reserved", prefix+"unheld"
+	_, err = tx.ExecContext(ctx, `INSERT INTO storage_objects
+		(public_id, workspace_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at)
+		VALUES (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 1, CURRENT_TIMESTAMP(3)),
+		       (UUID_TO_BIN(UUID()), ?, UNHEX(SHA2(?, 256)), 1, 'image/png', ?, 0, NULL)`,
+		workspaceID, confirmed, confirmed, workspaceID, reserved, reserved)
+	require.NoError(t, err)
+	for _, key := range []string{confirmed, reserved, unheld} {
+		_, err = tx.ExecContext(ctx, `INSERT INTO storage_blob_removals (storage_key) VALUES (?)`, key)
+		require.NoError(t, err)
+	}
+
+	store := &fakeObjectDeleter{}
+	drainBlobRemovals(ctx, generated.New(db).WithTx(tx), store)
+
+	assert.True(t, slices.Contains(store.deleted, unheld), "a key nothing holds is removed")
+	assert.False(t, slices.Contains(store.deleted, confirmed), "a confirmed object's key is kept")
+	assert.False(t, slices.Contains(store.deleted, reserved), "a reserved object's key is kept")
+	var queued int
+	require.NoError(t, tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM storage_blob_removals WHERE storage_key IN (?, ?, ?)`,
+		confirmed, reserved, unheld).Scan(&queued))
+	assert.Zero(t, queued, "every queue row is dropped")
 }

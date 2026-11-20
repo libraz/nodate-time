@@ -10,22 +10,6 @@ import (
 	"database/sql"
 )
 
-const countConfirmedStorageObjectsByKey = `-- name: CountConfirmedStorageObjectsByKey :one
-SELECT COUNT(*) FROM storage_objects WHERE storage_key = ? AND uploaded_at IS NOT NULL
-`
-
-// CountConfirmedStorageObjectsByKey answers whether verified bytes at a key
-// belong to a live object. A queued removal for such a key is stale -- the
-// key was claimed again after it was queued -- and the drainer drops it
-// without touching the blob. An unconfirmed claim does not protect the key:
-// nothing has vouched for the bytes there.
-func (q *Queries) CountConfirmedStorageObjectsByKey(ctx context.Context, storageKey string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countConfirmedStorageObjectsByKey, storageKey)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countStorageObjectsByKey = `-- name: CountStorageObjectsByKey :one
 SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?
 `

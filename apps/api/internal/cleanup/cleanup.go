@@ -144,7 +144,7 @@ func runOnce(ctx context.Context, db DB, storageClient *storage.Client, albumCur
 	sweepUnconfirmedObjects(ctx, db, q, storageClient, now.Add(-reservationTTL))
 	backfillAlbumPhotoObjects(ctx, db, q, storageClient, albumCursor)
 	sweepUnreferencedObjects(ctx, db, q, storageClient)
-	if drain(ctx, q) {
+	if storageClient != nil && drain(ctx, q) {
 		drainBlobRemovals(ctx, q, storageClient)
 	}
 }
@@ -625,16 +625,13 @@ func sweepUnreferencedObjects(ctx context.Context, db DB, q *generated.Queries, 
 
 // drainBlobRemovals removes the blobs queued in storage_blob_removals: the
 // blob first, the queue row second, so a failed removal is retried on the
-// next pass. Removing a key that is already gone is not an error. A key a
-// confirmed object claims again since it was queued is dropped without
-// touching the blob.
+// next pass. Removing a key that is already gone is not an error. A key any
+// storage object row holds, confirmed or reserved, is dropped without touching
+// the blob: that row's own lifecycle removes it.
 //
 // Both products drain the same queue, which is safe only while they write to
 // the same bucket; Run checks that before letting this run.
-func drainBlobRemovals(ctx context.Context, q *generated.Queries, storageClient *storage.Client) {
-	if storageClient == nil {
-		return
-	}
+func drainBlobRemovals(ctx context.Context, q *generated.Queries, storageClient objectDeleter) {
 	var cursor uint32
 	for range maxBatches {
 		rows, err := q.ListStorageBlobRemovals(ctx, generated.ListStorageBlobRemovalsParams{
@@ -647,12 +644,12 @@ func drainBlobRemovals(ctx context.Context, q *generated.Queries, storageClient 
 		}
 		for _, row := range rows {
 			cursor = row.ID
-			claimed, err := q.CountConfirmedStorageObjectsByKey(ctx, row.StorageKey)
+			held, err := q.CountStorageObjectsByKey(ctx, row.StorageKey)
 			if err != nil {
 				slog.Warn("cleanup: count objects for queued key failed", "key", row.StorageKey, "error", err)
 				continue
 			}
-			if claimed == 0 {
+			if held == 0 {
 				if err := storageClient.DeleteObject(ctx, row.StorageKey); err != nil {
 					slog.Warn("cleanup: queued blob removal failed; kept for retry", "key", row.StorageKey, "error", err)
 					continue

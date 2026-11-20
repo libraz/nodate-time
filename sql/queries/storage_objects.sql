@@ -115,14 +115,6 @@ DELETE FROM storage_objects WHERE id = ? AND uploaded_at IS NULL;
 -- name: CountStorageObjectsByKey :one
 SELECT COUNT(*) FROM storage_objects WHERE storage_key = ?;
 
--- CountConfirmedStorageObjectsByKey answers whether verified bytes at a key
--- belong to a live object. A queued removal for such a key is stale -- the
--- key was claimed again after it was queued -- and the drainer drops it
--- without touching the blob. An unconfirmed claim does not protect the key:
--- nothing has vouched for the bytes there.
--- name: CountConfirmedStorageObjectsByKey :one
-SELECT COUNT(*) FROM storage_objects WHERE storage_key = ? AND uploaded_at IS NOT NULL;
-
 -- QueueStorageBlobRemoval records a key whose blob is to be removed, in the
 -- transaction that deletes the rows naming it. A key already queued stays one
 -- row.
