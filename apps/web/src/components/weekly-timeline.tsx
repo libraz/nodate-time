@@ -19,6 +19,7 @@ import {
   jsDayOfWeek,
   nowInZone,
 } from '@/lib/date-utils';
+import { isGroupEvent } from '@/lib/event-group';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
 import {
@@ -350,6 +351,7 @@ export function WeeklyTimeline() {
                       avatarUrl={evt.ownerAvatarUrl}
                       color={evt.color}
                       size={14}
+                      group={isGroupEvent(evt)}
                     />
                     <span className="truncate">{evt.title}</span>
                   </button>
@@ -535,6 +537,7 @@ export function WeeklyTimeline() {
                           avatarUrl={evt.ownerAvatarUrl}
                           color={evt.color}
                           size={14}
+                          group={isGroupEvent(evt)}
                         />
                         <span className="truncate">{evt.title}</span>
                       </p>
@@ -579,6 +582,7 @@ export function WeeklyTimeline() {
               avatarUrl={drag.event.ownerAvatarUrl}
               color={drag.event.color}
               size={14}
+              group={isGroupEvent(drag.event)}
             />
             <span className="truncate">{drag.event.title}</span>
           </p>

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { OwnerMark } from '@/components/owner-mark';
 import { Highlight, handleResultListKeys } from '@/components/search-results';
 import { useT } from '@/i18n';
+import { isGroupEvent } from '@/lib/event-group';
 import {
   filterEventsForSearch,
   searchedMonths,
@@ -107,6 +108,7 @@ export function SearchPanel() {
                   avatarUrl={evt.ownerAvatarUrl}
                   color={evt.color}
                   size={22}
+                  group={isGroupEvent(evt)}
                   className="mt-0.5"
                 />
                 <div className="min-w-0 flex-1">

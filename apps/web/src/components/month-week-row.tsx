@@ -3,6 +3,7 @@ import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, useMe
 import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { fromISOInZone, isToday, jsDayOfWeek } from '@/lib/date-utils';
+import { isGroupEvent } from '@/lib/event-group';
 import { getHoliday } from '@/lib/holidays';
 import { readableInk } from '@/lib/member-color';
 import {
@@ -361,6 +362,7 @@ function MonthWeekRowImpl({
                           avatarUrl={evt.ownerAvatarUrl}
                           color={evt.color}
                           size={style.markSize}
+                          group={isGroupEvent(evt)}
                         />
                       ) : (
                         <span
@@ -450,6 +452,7 @@ function MonthWeekRowImpl({
                   avatarUrl={p.event.ownerAvatarUrl}
                   color={p.event.color}
                   size={style.markSize}
+                  group={isGroupEvent(p.event)}
                   inverse
                 />
               )}

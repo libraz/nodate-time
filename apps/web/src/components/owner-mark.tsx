@@ -5,7 +5,7 @@ import { readableInk } from '@/lib/member-color';
  * picture when they have one, their initial otherwise. Colour alone cannot
  * tell members apart once two of them pick the same one, so the person is
  * shown as well. An event whose owner has left carries no name and falls back
- * to a plain dot.
+ * to a plain dot, as does a group event, which has no single person to show.
  */
 export function OwnerMark({
   name,
@@ -13,6 +13,7 @@ export function OwnerMark({
   color,
   size,
   inverse = false,
+  group = false,
   className = '',
 }: {
   name?: string | undefined;
@@ -22,11 +23,13 @@ export function OwnerMark({
   size: number;
   /** Swap fill and ink, for a mark sitting on a bar already filled with the colour. */
   inverse?: boolean;
+  /** The event is shared by several people, so no one person's mark is shown. */
+  group?: boolean;
   className?: string;
 }) {
   const initial = name?.trim().slice(0, 1);
   const ink = readableInk(color);
-  if (!initial) {
+  if (group || !initial) {
     const dot = Math.max(4, Math.round(size / 2.5));
     return (
       <span

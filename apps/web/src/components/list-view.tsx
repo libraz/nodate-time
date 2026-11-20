@@ -5,6 +5,7 @@ import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
 import { formatMonthYear, fromISOInZone, isToday, nowInZone } from '@/lib/date-utils';
+import { isGroupEvent } from '@/lib/event-group';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -112,6 +113,7 @@ export function ListView() {
                             avatarUrl={evt.ownerAvatarUrl}
                             color={evt.color}
                             size={22}
+                            group={isGroupEvent(evt)}
                           />
                           <div className="min-w-0 flex-1">
                             <p className="event-block-title truncate text-default font-semibold">

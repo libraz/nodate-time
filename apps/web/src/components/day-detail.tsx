@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { isGroupEvent } from '@/lib/event-group';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { eventOccupiesDay } from '@/lib/week-layout';
@@ -140,6 +141,7 @@ export function DayDetail() {
                         avatarUrl={evt.ownerAvatarUrl}
                         color={evt.color}
                         size={24}
+                        group={isGroupEvent(evt)}
                         className="mt-0.5"
                       />
                       <span className="min-w-0 flex-1">
