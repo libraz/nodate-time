@@ -70,6 +70,7 @@ interface ServerFeedItem {
   summary: string;
   createdAt: string;
   actor: { id: string; name: string; avatarUrl?: string } | null;
+  systemActor?: boolean;
   entityType: string;
   entityId: string;
 }
@@ -170,6 +171,24 @@ describe('ActivityPanel', () => {
     expect(screen.getByText('Dinner with Rin')).toBeInTheDocument();
     // The dotted name is an internal identifier and must never reach the page.
     expect(screen.queryByText('calendar.event.created')).not.toBeInTheDocument();
+  });
+
+  it('labels a marked system entry as the system', async () => {
+    mockApi.get.mockResolvedValue({ items: [feedItem({ actor: null, systemActor: true })] });
+
+    render(<ActivityPanel open onClose={() => {}} />);
+
+    expect(await screen.findByText('history.systemActor')).toBeInTheDocument();
+    expect(screen.queryByText('history.deletedUser')).not.toBeInTheDocument();
+  });
+
+  it('keeps the deleted-user label for an unmarked entry without an actor', async () => {
+    mockApi.get.mockResolvedValue({ items: [feedItem({ actor: null })] });
+
+    render(<ActivityPanel open onClose={() => {}} />);
+
+    expect(await screen.findByText('history.deletedUser')).toBeInTheDocument();
+    expect(screen.queryByText('history.systemActor')).not.toBeInTheDocument();
   });
 
   it.each(ENTITIES)('badges a $action row as $label', async ({ action, entityType, label }) => {

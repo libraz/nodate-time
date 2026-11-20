@@ -12,11 +12,12 @@ type ActorBrief struct {
 
 // HistoryItem is one audit-log entry for a single entity's history.
 type HistoryItem struct {
-	ID        string      `json:"id"`
-	Action    string      `json:"action"`
-	Summary   string      `json:"summary"`
-	CreatedAt time.Time   `json:"createdAt"`
-	Actor     *ActorBrief `json:"actor"`
+	ID          string      `json:"id"`
+	Action      string      `json:"action"`
+	Summary     string      `json:"summary"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	Actor       *ActorBrief `json:"actor"`
+	SystemActor bool        `json:"systemActor,omitempty"`
 }
 
 // FeedItem is one audit-log entry in a calendar's activity feed, carrying the

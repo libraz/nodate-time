@@ -21,6 +21,7 @@ export interface HistoryItem {
   summary: string;
   createdAt: string;
   actor: HistoryActor | null;
+  systemActor?: boolean;
 }
 
 interface HistoryTimelineProps {
@@ -87,36 +88,40 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
 
   return (
     <div className="space-y-3">
-      {items.map((item) => (
-        <div key={item.id} className="flex gap-2">
-          <span
-            className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: activityColor(item.action) }}
-          />
-          <Avatar src={item.actor?.avatarUrl} name={item.actor?.name ?? t('history.deletedUser')} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-baseline gap-x-2">
-              <span className="text-body font-medium text-[var(--color-text-primary)]">
-                {item.actor?.name ?? t('history.deletedUser')}
-              </span>
-              <span
-                className="text-caption font-medium"
-                style={{ color: activityColor(item.action) }}
-              >
-                {t(activityLabelKey(item.action))}
-              </span>
-              <span className="text-caption text-[var(--color-text-tertiary)]">
-                {formatRelativeTime(item.createdAt, locale)}
-              </span>
+      {items.map((item) => {
+        const actorName =
+          item.actor?.name ?? t(item.systemActor ? 'history.systemActor' : 'history.deletedUser');
+        return (
+          <div key={item.id} className="flex gap-2">
+            <span
+              className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: activityColor(item.action) }}
+            />
+            <Avatar src={item.actor?.avatarUrl} name={actorName} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="text-body font-medium text-[var(--color-text-primary)]">
+                  {actorName}
+                </span>
+                <span
+                  className="text-caption font-medium"
+                  style={{ color: activityColor(item.action) }}
+                >
+                  {t(activityLabelKey(item.action))}
+                </span>
+                <span className="text-caption text-[var(--color-text-tertiary)]">
+                  {formatRelativeTime(item.createdAt, locale)}
+                </span>
+              </div>
+              {item.summary && (
+                <p className="mt-0.5 break-words text-caption text-[var(--color-text-secondary)]">
+                  {item.summary}
+                </p>
+              )}
             </div>
-            {item.summary && (
-              <p className="mt-0.5 break-words text-caption text-[var(--color-text-secondary)]">
-                {item.summary}
-              </p>
-            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

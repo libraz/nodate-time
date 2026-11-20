@@ -519,6 +519,7 @@ export const en: Record<TranslationKey, string> = {
   'history.updated': 'Edited',
   'history.deleted': 'Deleted',
   'history.deletedUser': 'Deleted user',
+  'history.systemActor': 'System',
   'history.empty': 'No history yet',
   'history.loading': 'Loading...',
 

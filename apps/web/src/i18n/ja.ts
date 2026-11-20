@@ -537,6 +537,7 @@ export const ja = {
   'history.updated': '編集',
   'history.deleted': '削除',
   'history.deletedUser': '削除されたユーザー',
+  'history.systemActor': 'システム',
   'history.empty': '履歴はありません',
   'history.loading': '読み込み中...',
 

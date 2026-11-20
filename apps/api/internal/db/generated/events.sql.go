@@ -77,6 +77,7 @@ func (q *Queries) GetEventIDByPublicID(ctx context.Context, arg GetEventIDByPubl
 
 const listEventsByCalendar = `-- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       e.actor_system_source,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url,
        so.storage_key AS actor_avatar_storage_key
@@ -103,6 +104,7 @@ type ListEventsByCalendarRow struct {
 	Type                  string          `json:"type"`
 	PayloadJSON           json.RawMessage `json:"payloadJson"`
 	OccurredAt            time.Time       `json:"occurredAt"`
+	ActorSystemSource     sql.NullString  `json:"actorSystemSource"`
 	ActorPublicID         sql.NullString  `json:"actorPublicId"`
 	ActorDisplayName      sql.NullString  `json:"actorDisplayName"`
 	ActorAvatarURL        sql.NullString  `json:"actorAvatarUrl"`
@@ -147,6 +149,7 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 			&i.Type,
 			&i.PayloadJSON,
 			&i.OccurredAt,
+			&i.ActorSystemSource,
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
 			&i.ActorAvatarURL,
@@ -167,6 +170,7 @@ func (q *Queries) ListEventsByCalendar(ctx context.Context, arg ListEventsByCale
 
 const listEventsBySubject = `-- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       e.actor_system_source,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url,
        so.storage_key AS actor_avatar_storage_key
@@ -193,6 +197,7 @@ type ListEventsBySubjectRow struct {
 	Type                  string          `json:"type"`
 	PayloadJSON           json.RawMessage `json:"payloadJson"`
 	OccurredAt            time.Time       `json:"occurredAt"`
+	ActorSystemSource     sql.NullString  `json:"actorSystemSource"`
 	ActorPublicID         sql.NullString  `json:"actorPublicId"`
 	ActorDisplayName      sql.NullString  `json:"actorDisplayName"`
 	ActorAvatarURL        sql.NullString  `json:"actorAvatarUrl"`
@@ -228,6 +233,7 @@ func (q *Queries) ListEventsBySubject(ctx context.Context, arg ListEventsBySubje
 			&i.Type,
 			&i.PayloadJSON,
 			&i.OccurredAt,
+			&i.ActorSystemSource,
 			&i.ActorPublicID,
 			&i.ActorDisplayName,
 			&i.ActorAvatarURL,

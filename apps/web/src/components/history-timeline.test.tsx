@@ -34,6 +34,7 @@ interface ServerHistoryItem {
   summary: string;
   createdAt: string;
   actor: { id: string; name: string; avatarUrl?: string } | null;
+  systemActor?: boolean;
 }
 
 function item(overrides: Partial<ServerHistoryItem> = {}): ServerHistoryItem {
@@ -166,6 +167,15 @@ describe('HistoryTimeline', () => {
     expect(await screen.findByText('Rin')).toBeInTheDocument();
     // Both the avatar and the name fall back, so the label appears twice.
     expect(screen.getAllByText('history.deletedUser').length).toBeGreaterThan(0);
+  });
+
+  it('labels a marked system entry as the system', async () => {
+    mockApi.get.mockResolvedValue([item({ actor: null, systemActor: true })]);
+
+    render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
+
+    expect(await screen.findByText('history.systemActor')).toBeInTheDocument();
+    expect(screen.queryByText('history.deletedUser')).not.toBeInTheDocument();
   });
 
   // Most log entries carry no summary at all -- the payload only has one when

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Avatar } from '@/components/avatar';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
-import type { HistoryActor } from '@/components/history-timeline';
+import type { HistoryItem } from '@/components/history-timeline';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { SidePanel } from '@/components/side-panel';
 import { type TranslationKey, useT } from '@/i18n';
@@ -13,14 +13,7 @@ import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useUiStore } from '@/stores/ui-store';
 
-interface FeedItem {
-  id: string;
-  /** The server's dotted name, e.g. `calendar.event.created`. Read through
-   *  the helpers in lib/activity rather than matched literally. */
-  action: string;
-  summary: string;
-  createdAt: string;
-  actor: HistoryActor | null;
+interface FeedItem extends HistoryItem {
   entityType: string;
   entityId: string;
 }
@@ -107,40 +100,42 @@ export function ActivityPanel({ open, onClose }: ActivityPanelProps) {
 
             {items.length > 0 && (
               <div className="space-y-3">
-                {items.map((item) => (
-                  <div key={item.id} className="flex gap-2">
-                    <Avatar
-                      src={item.actor?.avatarUrl}
-                      name={item.actor?.name ?? t('history.deletedUser')}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="text-body font-medium text-[var(--color-text-primary)]">
-                          {item.actor?.name ?? t('history.deletedUser')}
-                        </span>
-                        <span className="rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-text-secondary)]">
-                          {entityLabel(item.entityType)
-                            ? t(entityLabel(item.entityType) as TranslationKey)
-                            : item.entityType}
-                        </span>
-                        <span
-                          className="text-caption font-medium"
-                          style={{ color: activityColor(item.action) }}
-                        >
-                          {t(activityLabelKey(item.action))}
-                        </span>
-                        <span className="text-caption text-[var(--color-text-tertiary)]">
-                          {formatRelativeTime(item.createdAt, locale)}
-                        </span>
+                {items.map((item) => {
+                  const actorName =
+                    item.actor?.name ??
+                    t(item.systemActor ? 'history.systemActor' : 'history.deletedUser');
+                  return (
+                    <div key={item.id} className="flex gap-2">
+                      <Avatar src={item.actor?.avatarUrl} name={actorName} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-body font-medium text-[var(--color-text-primary)]">
+                            {actorName}
+                          </span>
+                          <span className="rounded-full bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-micro font-medium text-[var(--color-text-secondary)]">
+                            {entityLabel(item.entityType)
+                              ? t(entityLabel(item.entityType) as TranslationKey)
+                              : item.entityType}
+                          </span>
+                          <span
+                            className="text-caption font-medium"
+                            style={{ color: activityColor(item.action) }}
+                          >
+                            {t(activityLabelKey(item.action))}
+                          </span>
+                          <span className="text-caption text-[var(--color-text-tertiary)]">
+                            {formatRelativeTime(item.createdAt, locale)}
+                          </span>
+                        </div>
+                        {item.summary && (
+                          <p className="mt-0.5 break-words text-caption text-[var(--color-text-secondary)]">
+                            {item.summary}
+                          </p>
+                        )}
                       </div>
-                      {item.summary && (
-                        <p className="mt-0.5 break-words text-caption text-[var(--color-text-secondary)]">
-                          {item.summary}
-                        </p>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {nextCursor && (
                   <button
                     type="button"

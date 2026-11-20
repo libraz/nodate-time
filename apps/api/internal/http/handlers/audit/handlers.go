@@ -230,11 +230,12 @@ func subjectHistory(ctx context.Context, deps Deps, calendarID uint32, subjectID
 	for _, r := range rows {
 		payload := readPayload(r.PayloadJSON)
 		items = append(items, HistoryItem{
-			ID:        pubIDToHex(r.PublicID),
-			Action:    r.Type,
-			Summary:   payload.label(),
-			CreatedAt: r.OccurredAt,
-			Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
+			ID:          pubIDToHex(r.PublicID),
+			Action:      r.Type,
+			Summary:     payload.label(),
+			CreatedAt:   r.OccurredAt,
+			Actor:       resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
+			SystemActor: r.ActorSystemSource.Valid,
 		})
 	}
 	return items, nil
@@ -286,11 +287,12 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 			payload := readPayload(r.PayloadJSON)
 			out.Body.Items = append(out.Body.Items, FeedItem{
 				HistoryItem: HistoryItem{
-					ID:        pubIDToHex(r.PublicID),
-					Action:    r.Type,
-					Summary:   payload.label(),
-					CreatedAt: r.OccurredAt,
-					Actor:     resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
+					ID:          pubIDToHex(r.PublicID),
+					Action:      r.Type,
+					Summary:     payload.label(),
+					CreatedAt:   r.OccurredAt,
+					Actor:       resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL),
+					SystemActor: r.ActorSystemSource.Valid,
 				},
 				EntityType: entityTypeOf(r.Type),
 				EntityID:   payload.entityID(),

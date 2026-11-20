@@ -30,6 +30,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 -- reads every other calendar's rows on the way to this one's.
 -- name: ListEventsByCalendar :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       e.actor_system_source,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url,
        so.storage_key AS actor_avatar_storage_key
@@ -64,6 +65,7 @@ WHERE workspace_id = ? AND calendar_id = ? AND public_id = ?;
 -- calendar had ever produced -- and LIMIT applies after the scan, not to it.
 -- name: ListEventsBySubject :many
 SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
+       e.actor_system_source,
        u.public_id AS actor_public_id, u.display_name AS actor_display_name,
        u.avatar_url AS actor_avatar_url,
        so.storage_key AS actor_avatar_storage_key
