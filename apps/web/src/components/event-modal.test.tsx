@@ -941,14 +941,17 @@ describe('EventModal who and availability', () => {
 
     render(<EventModal />);
     fireEvent.change(titleField(), { target: { value: 'Dentist' } });
-    const whose = screen.getByRole('group', { name: 'event.whose' });
-    expect(within(whose).getByRole('button', { name: 'event.memberMe' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    fireEvent.click(within(whose).getByRole('button', { name: 'Bob' }));
+    const whose = screen.getByRole('button', { name: 'event.whose' });
+    expect(whose).toHaveTextContent('event.memberMe');
+    fireEvent.click(whose);
+    fireEvent.click(await screen.findByRole('option', { name: 'Bob' }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.addParticipant' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Bob' }));
+    // Only the people taking part are drawn, each with a way to take them off.
     const people = screen.getByRole('group', { name: 'event.participants' });
-    fireEvent.click(within(people).getByRole('button', { name: 'Bob' }));
+    expect(within(people).getByText('Bob')).toBeInTheDocument();
+    expect(within(people).queryByText('event.memberMe')).toBeNull();
+    expect(within(people).getByRole('button', { name: 'event.removeParticipant' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'event.showAsTentative' }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -966,7 +969,7 @@ describe('EventModal who and availability', () => {
 
     render(<EventModal />);
 
-    expect(screen.queryByRole('group', { name: 'event.whose' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'event.whose' })).toBeNull();
     expect(screen.getByRole('group', { name: 'event.showAs' })).toBeInTheDocument();
   });
 });

@@ -1,6 +1,7 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { isToday } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -462,6 +463,11 @@ interface SelectOption {
    * and the many-calendar case look like different things.
    */
   color?: string;
+  /**
+   * Marks the option as a person: their picture, or their initial on
+   * `color`, takes the swatch's place in the trigger and the list.
+   */
+  person?: { name: string; avatarUrl?: string | undefined };
 }
 
 interface CustomSelectProps {
@@ -484,6 +490,8 @@ interface CustomSelectProps {
    * countries holiday data covers — is only usable if it can be narrowed.
    */
   searchable?: boolean;
+  /** Shown in the trigger while no option matches `value`. */
+  placeholder?: string;
 }
 
 /** Dot marking which calendar an option belongs to. */
@@ -496,6 +504,23 @@ function Swatch({ color }: { color: string }) {
   );
 }
 
+/** What leads an option: a person's picture, else the swatch of its colour. */
+function OptionMark({ option }: { option: SelectOption }) {
+  if (option.person) {
+    return (
+      <Avatar
+        src={option.person.avatarUrl}
+        name={option.person.name}
+        color={option.color}
+        round
+        size="h-5 w-5"
+        className="text-micro"
+      />
+    );
+  }
+  return option.color ? <Swatch color={option.color} /> : null;
+}
+
 let selectSeq = 0;
 
 export function CustomSelect({
@@ -506,6 +531,7 @@ export function CustomSelect({
   triggerClassName,
   ariaLabel,
   searchable,
+  placeholder,
 }: CustomSelectProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -652,8 +678,8 @@ export function CustomSelect({
         style={triggerClassName ? undefined : { borderRadius: 'var(--radius-sm)' }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          {selected?.color && <Swatch color={selected.color} />}
-          <span className="truncate">{selected?.label ?? value}</span>
+          {selected && <OptionMark option={selected} />}
+          <span className="truncate">{selected?.label ?? placeholder ?? value}</span>
         </span>
         <svg
           width="12"
@@ -760,7 +786,7 @@ export function CustomSelect({
                         </svg>
                       )}
                     </span>
-                    {opt.color && <Swatch color={opt.color} />}
+                    <OptionMark option={opt} />
                     <span>{opt.label}</span>
                   </button>
                 );
