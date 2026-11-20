@@ -13,14 +13,15 @@ import (
 
 // fakeLookup is an in-memory deployment.
 type fakeLookup struct {
-	users   map[string]uint32 // normalized email → id
-	outside map[uint32]bool   // ids removed from the workspace
-	owned   map[uint32][]generated.ListCalendarsByUserRow
+	users    map[string]uint32 // normalized email → id
+	disabled map[uint32]bool   // ids of disabled accounts
+	outside  map[uint32]bool   // ids removed from the workspace
+	owned    map[uint32][]generated.ListCalendarsByUserRow
 }
 
 func (f fakeLookup) user(_ context.Context, email string) (generated.User, bool, error) {
 	id, ok := f.users[norm(email)]
-	return generated.User{ID: id}, ok, nil
+	return generated.User{ID: id, Enabled: !f.disabled[id]}, ok, nil
 }
 
 func (f fakeLookup) workspaceMember(_ context.Context, id uint32) (bool, error) {
@@ -32,7 +33,10 @@ func (f fakeLookup) calendars(_ context.Context, id uint32) ([]generated.ListCal
 }
 
 func cal(id uint32, name string, personal bool) generated.ListCalendarsByUserRow {
-	return generated.ListCalendarsByUserRow{ID: id, Name: name, OwnerUserID: sql.NullInt32{Int32: 7, Valid: personal}}
+	return generated.ListCalendarsByUserRow{
+		ID: id, Name: name, OwnerUserID: sql.NullInt32{Int32: 7, Valid: personal},
+		MemberRole: generated.CalendarMembersRoleOwner,
+	}
 }
 
 var (
@@ -171,4 +175,37 @@ func TestResolveCalendarNamesMustBeDistinctAfterDefaulting(t *testing.T) {
 	res := resolveWith(t, m, existing())
 	require.Len(t, res.Errors, 1)
 	assert.Contains(t, res.Errors[0], "same name")
+}
+
+func TestResolveRefusesAnExistingCalendarTheImporterCannotManage(t *testing.T) {
+	for _, role := range []generated.CalendarMembersRole{generated.CalendarMembersRoleEditor, generated.CalendarMembersRoleViewer} {
+		lk := existing()
+		c := cal(50, "Team", false)
+		c.MemberRole = role
+		lk.owned = map[uint32][]generated.ListCalendarsByUserRow{1: {c}}
+		res := resolveWith(t, mustParse(t, goodMapping), lk)
+		require.Len(t, res.Errors, 1, string(role))
+		assert.Contains(t, res.Errors[0], "cannot manage")
+		assert.Zero(t, res.Plans[0].ExistingID, string(role))
+	}
+
+	lk := existing()
+	c := cal(50, "Team", false)
+	c.MemberRole = generated.CalendarMembersRoleManager
+	lk.owned = map[uint32][]generated.ListCalendarsByUserRow{1: {c}}
+	res := resolveWith(t, mustParse(t, goodMapping), lk)
+	assert.Empty(t, res.Errors)
+	assert.Equal(t, uint32(50), res.Plans[0].ExistingID)
+}
+
+func TestResolveRefusesAddressesHeldByADisabledAccount(t *testing.T) {
+	for id, who := range map[uint32]string{1: "ops@example.com", 2: "hanako@example.com"} {
+		lk := existing()
+		lk.disabled = map[uint32]bool{id: true}
+		res := resolveWith(t, mustParse(t, goodMapping), lk)
+		require.NotEmpty(t, res.Errors, who)
+		assert.Contains(t, res.Errors[0], who)
+		assert.Contains(t, res.Errors[0], "belongs to a disabled account")
+		assert.Empty(t, res.NewUsers, "a disabled holder is not an absent address")
+	}
 }

@@ -17,6 +17,10 @@ SELECT * FROM users WHERE public_id = ? AND enabled = TRUE;
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = ? AND enabled = TRUE;
 
+-- Includes disabled accounts: users.email is unique across all rows, so a disabled holder still owns the address.
+-- name: GetUserByEmailAnyState :one
+SELECT * FROM users WHERE email = ?;
+
 -- name: CreateUser :execresult
 INSERT INTO users (public_id, email, display_name, avatar_url, locale, timezone)
 VALUES (?, ?, ?, ?, ?, ?);

@@ -85,6 +85,48 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const getUserByEmailAnyState = `-- name: GetUserByEmailAnyState :one
+SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE email = ?
+`
+
+// Includes disabled accounts: users.email is unique across all rows, so a disabled holder still owns the address.
+func (q *Queries) GetUserByEmailAnyState(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmailAnyState, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Email,
+		&i.EmailVerifiedAt,
+		&i.DisplayName,
+		&i.AvatarURL,
+		&i.AvatarStorageObjectID,
+		&i.Locale,
+		&i.Timezone,
+		&i.Country,
+		&i.WeekStart,
+		&i.WorkingDays,
+		&i.WorkingHoursStart,
+		&i.WorkingHoursEnd,
+		&i.SnapToWorkingDay,
+		&i.TreatHolidaysAsNonWorking,
+		&i.ThemePreference,
+		&i.CalendarShiftDefault,
+		&i.LastLoginAt,
+		&i.NotifEmailDigestEnabled,
+		&i.NotifEmailMentionEnabled,
+		&i.NotifEmailAssignmentEnabled,
+		&i.NotifEmailDueSoonEnabled,
+		&i.NotifWebPushEnabled,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 
 SELECT id, public_id, email, email_verified_at, display_name, avatar_url, avatar_storage_object_id, locale, timezone, country, week_start, working_days, working_hours_start, working_hours_end, snap_to_working_day, treat_holidays_as_non_working, theme_preference, calendar_shift_default, last_login_at, notif_email_digest_enabled, notif_email_mention_enabled, notif_email_assignment_enabled, notif_email_due_soon_enabled, notif_web_push_enabled, sort_weight, notes, enabled, updated_at, created_at FROM users WHERE id = ? AND enabled = TRUE

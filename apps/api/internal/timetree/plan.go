@@ -8,11 +8,12 @@ import (
 	"slices"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 )
 
 // lookup reads the deployment's current state for the pre-write checks.
 type lookup interface {
-	// user finds an enabled account by address.
+	// user finds an account by address, disabled ones included.
 	user(ctx context.Context, email string) (generated.User, bool, error)
 	// workspaceMember reports whether the account belongs to the workspace.
 	workspaceMember(ctx context.Context, userID uint32) (bool, error)
@@ -31,7 +32,7 @@ func (d dbLookup) user(ctx context.Context, email string) (generated.User, bool,
 	if !d.found {
 		return generated.User{}, false, nil
 	}
-	u, err := d.q.GetUserByEmail(ctx, email)
+	u, err := d.q.GetUserByEmailAnyState(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		return generated.User{}, false, nil
 	}
@@ -136,6 +137,13 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		if key == norm(m.Importer) {
 			importerID, importerExists = u.ID, exists
 		}
+		if exists && !u.Enabled {
+			add("%s %q belongs to a disabled account", r.what, r.email)
+			if key == norm(m.Importer) {
+				importerExists = false
+			}
+			continue
+		}
 		if !exists {
 			if !inUsers[key] {
 				add("%s %q is not in users and is not an existing account", r.what, r.email)
@@ -164,18 +172,22 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 	}
 	for i := range res.Plans {
 		p := &res.Plans[i]
-		var ids []uint32
+		var hits []generated.ListCalendarsByUserRow
 		for _, c := range owned {
 			if c.Name == p.Name && !c.OwnerUserID.Valid {
-				ids = append(ids, c.ID)
+				hits = append(hits, c)
 			}
 		}
-		switch len(ids) {
+		switch len(hits) {
 		case 0:
 		case 1:
-			p.ExistingID = ids[0]
+			if !calresolve.CanManage(hits[0].MemberRole) {
+				add("calendar %q: the importer cannot manage the existing shared calendar", p.Name)
+				continue
+			}
+			p.ExistingID = hits[0].ID
 		default:
-			add("calendar %q: the importer is a member of %d shared calendars with that name", p.Name, len(ids))
+			add("calendar %q: the importer is a member of %d shared calendars with that name", p.Name, len(hits))
 		}
 	}
 	return res, nil
