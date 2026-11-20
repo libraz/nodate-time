@@ -652,7 +652,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		// upload is abandoned never becomes a real photo, so it must not
 		// appear in the feed.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if _, err := calresolve.LockWrite(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
 			res, err := q.ConfirmAlbumPhoto(ctx, generated.ConfirmAlbumPhotoParams{
