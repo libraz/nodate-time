@@ -77,7 +77,6 @@ beforeEach(() => {
     showSearch: false,
     searchQuery: '',
     mobileTab: 'calendar',
-    showSettings: false,
     showMobileMenu: false,
     showActivity: false,
   });
@@ -162,7 +161,6 @@ describe('logout', () => {
       showSearch: true,
       searchQuery: 'draft',
       mobileTab: 'memo',
-      showSettings: true,
       showMobileMenu: true,
       showActivity: true,
     });
@@ -200,7 +198,6 @@ describe('logout', () => {
       showSearch: false,
       searchQuery: '',
       mobileTab: 'calendar',
-      showSettings: false,
       showMobileMenu: false,
       showActivity: false,
     });

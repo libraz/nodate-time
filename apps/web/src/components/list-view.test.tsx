@@ -44,6 +44,8 @@ const newYear: CalendarEvent = {
 const calendarState = {
   events: [newYear] as CalendarEvent[],
   activeCalendarIds: ['cal-1'],
+  calendars: [{ id: 'cal-1' }],
+  eventsLoading: false,
 };
 
 vi.mock('@/stores/calendar-store', () => ({

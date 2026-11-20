@@ -66,9 +66,9 @@ export function YearView() {
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4">
         {months.map((m) => {
           const days = getMonthDays(currentMonth.year, m, timezone);
-          const monthLabel = dayInZone(currentMonth.year, m + 1, 1, timezone).toFormat(
-            locale === 'ja' ? 'M月' : 'MMM',
-          );
+          const monthLabel = dayInZone(currentMonth.year, m + 1, 1, timezone)
+            .setLocale(locale)
+            .toFormat(locale === 'ja' ? 'M月' : 'MMM');
           const monthHasToday = days.some((d) => d.month === m + 1 && isToday(d, timezone));
           return (
             <button

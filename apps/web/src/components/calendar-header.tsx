@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { SchedulePollNavDesktop, SchedulePollNavMobile } from '@/components/schedule-poll-actions';
 import { useT } from '@/i18n';
+import { startCreateEvent } from '@/lib/create-event';
 import { formatMonthYear } from '@/lib/date-utils';
 import { shortcutProps } from '@/lib/shortcuts';
 import { useAuthStore } from '@/stores/auth-store';
@@ -139,7 +140,6 @@ export function CalendarHeader() {
   const calendarView = useUiStore((s) => s.calendarView);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const setShowMobileMenu = useUiStore((s) => s.setShowMobileMenu);
-  const openEventModal = useUiStore((s) => s.openEventModal);
   const mobileTab = useUiStore((s) => s.mobileTab);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const navigate = useNavigate();
@@ -155,6 +155,13 @@ export function CalendarHeader() {
   const desktopProfileMenuRef = useRef<HTMLDivElement>(null);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  const stepLabels =
+    calendarView === 'week'
+      ? { prev: t('calendar.prevWeek'), next: t('calendar.nextWeek') }
+      : calendarView === 'year'
+        ? { prev: t('calendar.prevYear'), next: t('calendar.nextYear') }
+        : { prev: t('calendar.prevMonth'), next: t('calendar.nextMonth') };
 
   const VIEWS = [
     { value: 'month', label: t('calendar.monthly') },
@@ -203,8 +210,22 @@ export function CalendarHeader() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showViewMenu]);
 
+  useEffect(() => {
+    if (!showProfileMenu && !showViewMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setShowProfileMenu(false);
+      setShowViewMenu(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showProfileMenu, showViewMenu]);
+
   const profileDropdown = showProfileMenu && (
-    <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-[var(--radius-md)] py-2 ring-1 ring-[var(--color-border)]">
+    <div
+      role="menu"
+      className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-[var(--radius-md)] py-2 ring-1 ring-[var(--color-border)]"
+    >
       {user && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
@@ -228,6 +249,7 @@ export function CalendarHeader() {
       )}
       <button
         type="button"
+        role="menuitem"
         onClick={goToProfile}
         className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
       >
@@ -247,6 +269,7 @@ export function CalendarHeader() {
       </button>
       <button
         type="button"
+        role="menuitem"
         onClick={() => {
           setShowProfileMenu(false);
           navigate({ to: '/settings' });
@@ -270,6 +293,7 @@ export function CalendarHeader() {
       </button>
       <button
         type="button"
+        role="menuitem"
         onClick={() => {
           setShowProfileMenu(false);
           navigate({ to: '/help' });
@@ -295,6 +319,7 @@ export function CalendarHeader() {
       </button>
       <button
         type="button"
+        role="menuitem"
         onClick={() => {
           setShowProfileMenu(false);
           logout();
@@ -363,11 +388,15 @@ export function CalendarHeader() {
               <ChevronDown />
             </button>
             {showViewMenu && (
-              <div className="glass-surface-heavy absolute left-0 top-full z-50 mt-1 w-40 rounded-[var(--radius-md)] py-1.5 ring-1 ring-[var(--color-border)]">
+              <div
+                role="menu"
+                className="glass-surface-heavy absolute left-0 top-full z-50 mt-1 w-40 rounded-[var(--radius-md)] py-1.5 ring-1 ring-[var(--color-border)]"
+              >
                 {VIEWS.map((v) => (
                   <button
                     key={v.value}
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       setCalendarView(v.value);
                       setShowViewMenu(false);
@@ -393,7 +422,7 @@ export function CalendarHeader() {
               type="button"
               onClick={() => stepView(-1)}
               className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
-              aria-label={t('calendar.prevMonth')}
+              aria-label={stepLabels.prev}
             >
               <ChevronLeft />
             </button>
@@ -401,7 +430,7 @@ export function CalendarHeader() {
               type="button"
               onClick={() => stepView(1)}
               className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
-              aria-label={t('calendar.nextMonth')}
+              aria-label={stepLabels.next}
             >
               <ChevronRight />
             </button>
@@ -426,7 +455,7 @@ export function CalendarHeader() {
           {mobileTab !== 'calendar' && (
             <button
               type="button"
-              onClick={() => openEventModal()}
+              onClick={startCreateEvent}
               className="icon-btn icon-btn-accent h-8 w-8"
               aria-label={t('event.createEvent')}
             >
@@ -467,8 +496,8 @@ export function CalendarHeader() {
             type="button"
             onClick={() => stepView(-1)}
             className="icon-btn h-8 w-8 rounded-full text-[var(--color-text-primary)]"
-            aria-label={t('calendar.prevMonth')}
-            {...shortcutProps('prev', t('calendar.prevMonth'))}
+            aria-label={stepLabels.prev}
+            {...shortcutProps('prev', stepLabels.prev)}
           >
             <ChevronLeft />
           </button>
@@ -477,8 +506,8 @@ export function CalendarHeader() {
             type="button"
             onClick={() => stepView(1)}
             className="icon-btn h-8 w-8 rounded-full text-[var(--color-text-primary)]"
-            aria-label={t('calendar.nextMonth')}
-            {...shortcutProps('next', t('calendar.nextMonth'))}
+            aria-label={stepLabels.next}
+            {...shortcutProps('next', stepLabels.next)}
           >
             <ChevronRight />
           </button>
@@ -547,7 +576,7 @@ export function CalendarHeader() {
 
           <button
             type="button"
-            onClick={() => openEventModal()}
+            onClick={startCreateEvent}
             data-tour="add-event"
             className="flex h-9 items-center justify-center px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
             style={{

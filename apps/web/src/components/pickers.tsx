@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
-import { isToday } from '@/lib/date-utils';
+import { formatMonthYear, getWeekdayLabel, isToday } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
 /* ============================================
@@ -121,9 +121,6 @@ function handlePopupKeys(e: React.KeyboardEvent<HTMLElement>, close: () => void)
    DatePicker — inline calendar for date selection
    ============================================ */
 
-const WEEKDAYS_JA = ['日', '月', '火', '水', '木', '金', '土'];
-const WEEKDAYS_EN = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-
 interface DatePickerDropdownProps {
   value: DateTime;
   onChange: (date: DateTime) => void;
@@ -194,7 +191,10 @@ function DatePickerDropdown({
     if (next) moveFocus(e, next);
   };
 
-  const weekdays = locale === 'ja' ? WEEKDAYS_JA : WEEKDAYS_EN;
+  const weekdays = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const label = getWeekdayLabel(i, locale);
+    return locale === 'ja' ? label : label.slice(0, 2);
+  });
 
   const { emptySlots, calendarDays } = useMemo(() => {
     const first = viewMonth.startOf('month');
@@ -205,8 +205,7 @@ function DatePickerDropdown({
     return { emptySlots: startOffset, calendarDays: days };
   }, [viewMonth]);
 
-  const monthLabel =
-    locale === 'ja' ? `${viewMonth.year}年${viewMonth.month}月` : viewMonth.toFormat('MMMM yyyy');
+  const monthLabel = formatMonthYear(viewMonth, locale);
 
   const handleSelect = (day: DateTime) => {
     if (minDate && day < minDate.startOf('day')) return;
@@ -905,8 +904,8 @@ export function DateTimeField({
   const timeFloating = useFloating(showTimePicker, 100);
 
   const dateLabel = useMemo(() => {
-    if (locale === 'en') return dateValue.toFormat('EEE, MMM d, yyyy');
-    const dow = ['日', '月', '火', '水', '木', '金', '土'][dateValue.weekday % 7] ?? '';
+    if (locale === 'en') return dateValue.setLocale('en').toFormat('EEE, MMM d, yyyy');
+    const dow = getWeekdayLabel(dateValue.weekday % 7, locale);
     return `${dateValue.year}年${dateValue.month}月${dateValue.day}日(${dow})`;
   }, [dateValue, locale]);
 

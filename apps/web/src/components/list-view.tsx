@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { type CSSProperties, useLayoutEffect, useMemo, useRef } from 'react';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
+import { LoadingRows } from '@/components/loading-rows';
 import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
@@ -17,6 +18,9 @@ export function ListView() {
   const t = useT();
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const calendars = useCalendarStore((s) => s.calendars);
+  const eventsLoading = useCalendarStore((s) => s.eventsLoading);
+  const setActiveCalendarIds = useCalendarStore((s) => s.setActiveCalendarIds);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const timezone = useUiStore((s) => s.timezone);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
@@ -35,6 +39,9 @@ export function ListView() {
   // the load is enough and the revision itself has no reader.
   useHolidayLoader(holidaysCountry, holidayYears);
 
+  const allHidden =
+    calendars.length > 0 && !calendars.some((c) => activeCalendarIds.includes(c.id));
+
   const todayKey = nowInZone(timezone).toFormat('yyyy-MM-dd');
   // The first day still ahead: an agenda is read from now on, so it opens there
   // with the days already past above it rather than at the top of the month.
@@ -48,15 +55,30 @@ export function ListView() {
 
   return (
     <div ref={scrollRef} className="relative flex h-full flex-col overflow-y-auto">
-      {grouped.length === 0 && (
-        <div className="flex flex-1 items-center justify-center py-10">
-          <EmptyState
-            icon={GUIDE_ICONS.calendar}
-            title={t('empty.eventsTitle')}
-            description={t('empty.eventsDesc')}
-          />
-        </div>
-      )}
+      {grouped.length === 0 &&
+        (eventsLoading ? (
+          <LoadingRows rows={5} />
+        ) : allHidden ? (
+          <div className="flex flex-1 items-center justify-center py-10">
+            <EmptyState
+              icon={GUIDE_ICONS.calendar}
+              title={t('calendar.allHidden')}
+              description={t('calendar.allHiddenDesc')}
+              action={{
+                label: t('calendar.showAll'),
+                onClick: () => setActiveCalendarIds(calendars.map((c) => c.id)),
+              }}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center py-10">
+            <EmptyState
+              icon={GUIDE_ICONS.calendar}
+              title={t('empty.eventsTitle')}
+              description={t('empty.eventsDesc')}
+            />
+          </div>
+        ))}
       {grouped.map(([dateStr, evts], index) => {
         const dt = DateTime.fromISO(dateStr, { zone: timezone });
         const today = isToday(dt, timezone);

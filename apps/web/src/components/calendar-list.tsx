@@ -26,6 +26,8 @@ export function CalendarList() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // A calendar is only shared once someone is invited, so the one just made
   // offers that next step in place.
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
@@ -65,13 +67,27 @@ export function CalendarList() {
 
   // Deleting takes the calendar's events, memos and album with it for every
   // member, so the trash icon only opens the confirmation sheet.
-  const handleDeleteCalendar = async (id: string) => {
-    setPendingDeleteId(null);
+  const handleDeleteCalendar = async (id: string, name: string) => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
       await deleteCalendar(id);
+      setPendingDeleteId(null);
+      toast.success(t('calendar.deleted', { name }));
     } catch (e) {
-      toast.error(errorMessage(e));
+      const message = errorMessage(e);
+      setDeleteError(message);
+      toast.error(message);
+    } finally {
+      setDeleting(false);
     }
+  };
+
+  const closeDeleteSheet = () => {
+    if (deleting) return;
+    setPendingDeleteId(null);
+    setDeleteError(null);
   };
 
   const pendingDeleteCalendar = calendars.find((c) => c.id === pendingDeleteId);
@@ -172,6 +188,7 @@ export function CalendarList() {
                 <button
                   type="button"
                   onClick={() => toggleCalendarFilter(cal.id)}
+                  aria-pressed={isActive}
                   className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
                 >
                   <CalendarCoverImage
@@ -328,10 +345,16 @@ export function CalendarList() {
       <ConfirmSheet
         open={pendingDeleteCalendar !== undefined}
         title={t('confirm.deleteCalendar')}
-        hint={t('calendar.deleteWarning', { name: pendingDeleteCalendar?.name ?? '' })}
+        hint={
+          deleteError ?? t('calendar.deleteWarning', { name: pendingDeleteCalendar?.name ?? '' })
+        }
         confirmLabel={t('common.delete')}
-        onConfirm={() => pendingDeleteCalendar && handleDeleteCalendar(pendingDeleteCalendar.id)}
-        onCancel={() => setPendingDeleteId(null)}
+        busy={deleting}
+        onConfirm={() =>
+          pendingDeleteCalendar &&
+          handleDeleteCalendar(pendingDeleteCalendar.id, pendingDeleteCalendar.name)
+        }
+        onCancel={closeDeleteSheet}
       />
     </div>
   );

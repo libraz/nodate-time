@@ -42,6 +42,10 @@ export function SharePanel() {
   const calendarId = target?.id ?? '';
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // Every link copied or shared since the panel opened. A join link is shown
+  // only once, so closing with one outside this set loses it for good.
+  const [handedOff, setHandedOff] = useState<ReadonlySet<string>>(new Set());
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
   // Bounded by default: a link that never expires and admits anyone is the
   // one you cannot take back once it has been forwarded.
@@ -66,7 +70,11 @@ export function SharePanel() {
   // A copied-link acknowledgement outlives neither the panel nor the link it
   // was shown against.
   useEffect(() => {
-    if (!presence.mounted) setCopiedKey(null);
+    if (!presence.mounted) {
+      setCopiedKey(null);
+      setHandedOff(new Set());
+      setConfirmingClose(false);
+    }
   }, [presence.mounted]);
 
   const handleCreateInvite = useCallback(
@@ -81,17 +89,38 @@ export function SharePanel() {
         return;
       }
       setCopiedKey(key);
+      setHandedOff((prev) => new Set(prev).add(key));
       setTimeout(() => setCopiedKey(null), 2000);
     },
     [t],
   );
+
+  const share = useCallback(
+    async (key: string, url: string) => {
+      try {
+        await navigator.share({ title: t('panel.share'), url });
+        setHandedOff((prev) => new Set(prev).add(key));
+      } catch {
+        // Dismissing the system share sheet is not a failure.
+      }
+    },
+    [t],
+  );
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const hasUncopiedLink = joinInvites.some(
+    (inv) => inv.token && !handedOff.has(`invite-${inv.id}`),
+  );
+  const requestClose = () => {
+    if (hasUncopiedLink) setConfirmingClose(true);
+    else toggleRightPanel('share');
+  };
 
   if (!presence.mounted) return null;
 
   return (
     <SidePanel
       presence={presence}
-      onClose={() => toggleRightPanel('share')}
+      onClose={requestClose}
       title={t('panel.share')}
       helpTopic="invite"
     >
@@ -219,6 +248,15 @@ export function SharePanel() {
                               copyLabel={t('common.copy')}
                               copiedLabel={t('common.copied')}
                             />
+                            {canShare && (
+                              <button
+                                type="button"
+                                onClick={() => share(key, url)}
+                                className="btn-secondary h-9 w-full px-4 text-body"
+                              >
+                                {t('invites.shareLink')}
+                              </button>
+                            )}
                             <p className="text-caption text-[var(--color-text-tertiary)]">
                               {t('invites.linkShownOnce')}
                             </p>
@@ -369,6 +407,17 @@ export function SharePanel() {
         )}
       </div>
 
+      <ConfirmSheet
+        open={confirmingClose}
+        title={t('invites.closeTitle')}
+        hint={t('invites.linkShownOnce')}
+        confirmLabel={t('invites.closeAnyway')}
+        onConfirm={() => {
+          setConfirmingClose(false);
+          toggleRightPanel('share');
+        }}
+        onCancel={() => setConfirmingClose(false)}
+      />
       <ConfirmSheet
         open={confirmingPublic}
         title={t('confirm.publicLinkTitle')}

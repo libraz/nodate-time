@@ -50,6 +50,7 @@ export function MembersPanel() {
   } = useCalendarMembers(presence.mounted ? calendarId : '');
   const { loading, error: loadError } = useMembersState(calendarId);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
+  const myRow = members.find((m) => m.id === me?.id);
 
   const confirmRemove = async (member: Member) => {
     setRemoving(true);
@@ -274,6 +275,19 @@ export function MembersPanel() {
               })}
             </ul>
           )}
+          {myRow &&
+            memberRowRules(myRow, { meId: me?.id, canManageMembers, amOwner, ownerCount })
+              .canRemove && (
+              <div className="px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setPendingRemove(myRow)}
+                  className="btn-secondary h-9 w-full px-4 text-body text-[var(--color-danger)]"
+                >
+                  {t('members.leaveButton')}
+                </button>
+              </div>
+            )}
           {members.length === 1 && (
             <p className="px-5 py-4 text-caption text-[var(--color-text-tertiary)]">
               {t('members.soloHint')}

@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import type { Locale } from '@/i18n';
-import { MONTH_NAMES_EN } from '@/i18n';
+import { MONTH_NAMES_EN, translate } from '@/i18n';
 import type { CalendarView } from '@/types/calendar';
 
 const WEEKDAY_LABELS_JA = ['日', '月', '火', '水', '木', '金', '土'] as const;
@@ -118,16 +118,12 @@ export function formatTime(iso: string, zone?: string): string {
 export function formatRelativeTime(iso: string, locale: Locale = 'ja'): string {
   const dt = DateTime.fromISO(iso);
   const diff = nowInZone().diff(dt, ['days', 'hours', 'minutes']);
-  if (locale === 'en') {
-    if (diff.days >= 1) return `${Math.floor(diff.days)}d ago`;
-    if (diff.hours >= 1) return `${Math.floor(diff.hours)}h ago`;
-    if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}m ago`;
-    return 'just now';
+  if (diff.days >= 1) return translate(locale, 'time.days_ago', { n: Math.floor(diff.days) });
+  if (diff.hours >= 1) return translate(locale, 'time.hours_ago', { n: Math.floor(diff.hours) });
+  if (diff.minutes >= 1) {
+    return translate(locale, 'time.minutes_ago', { n: Math.floor(diff.minutes) });
   }
-  if (diff.days >= 1) return `${Math.floor(diff.days)}日前`;
-  if (diff.hours >= 1) return `${Math.floor(diff.hours)}時間前`;
-  if (diff.minutes >= 1) return `${Math.floor(diff.minutes)}分前`;
-  return 'たった今';
+  return translate(locale, 'time.just_now');
 }
 
 /**
@@ -141,6 +137,7 @@ export function fromISOInZone(iso: string, zone?: string): DateTime {
   return DateTime.fromISO(iso);
 }
 
+/** Weekday label for a Sunday-first index; the shared source for every weekday header. */
 export function getWeekdayLabel(dayIndex: number, locale: Locale = 'ja'): string {
   const labels = locale === 'en' ? WEEKDAY_LABELS_EN : WEEKDAY_LABELS_JA;
   return labels[dayIndex] ?? '';

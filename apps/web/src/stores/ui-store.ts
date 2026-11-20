@@ -34,7 +34,6 @@ interface UiState {
   showSearch: boolean;
   searchQuery: string;
   mobileTab: MobileTab;
-  showSettings: boolean;
   /** Mobile-only slide-in drawer holding the calendar list and panel triggers. */
   showMobileMenu: boolean;
   /** Activity (history) feed overlay; reachable from both desktop and mobile. */
@@ -69,7 +68,6 @@ interface UiState {
   toggleSearch: () => void;
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
-  toggleSettings: () => void;
   setShowMobileMenu: (show: boolean) => void;
   setShowActivity: (show: boolean) => void;
   triggerScrollToToday: () => void;
@@ -108,7 +106,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   showSearch: false,
   searchQuery: '',
   mobileTab: 'calendar' as MobileTab,
-  showSettings: false,
   showMobileMenu: false,
   showActivity: false,
   scrollToTodaySignal: 0,
@@ -181,7 +178,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   toggleSearch: () => set((s) => ({ showSearch: !s.showSearch, searchQuery: '' })),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setMobileTab: (tab) => set({ mobileTab: tab }),
-  toggleSettings: () => set((s) => ({ showSettings: !s.showSettings })),
   setShowMobileMenu: (show) => set({ showMobileMenu: show }),
   setShowActivity: (show) => set({ showActivity: show }),
   triggerScrollToToday: () => set((s) => ({ scrollToTodaySignal: s.scrollToTodaySignal + 1 })),
@@ -235,7 +231,6 @@ export const useUiStore = create<UiState>((set, get) => ({
       showSearch: false,
       searchQuery: '',
       mobileTab: 'calendar',
-      showSettings: false,
       showMobileMenu: false,
       showActivity: false,
     })),

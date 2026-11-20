@@ -9,6 +9,7 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
+  translate: (_locale: string, key: string) => key,
 }));
 
 vi.mock('@/stores/ui-store', () => ({

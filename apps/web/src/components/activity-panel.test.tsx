@@ -13,6 +13,7 @@ import type { Calendar } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
+  translate: (_locale: string, key: string) => key,
 }));
 
 vi.mock('@/lib/api', () => ({

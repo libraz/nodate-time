@@ -117,7 +117,7 @@ describe('CalendarHeader profile menu', () => {
     expect(triggers.length).toBe(2);
     await user.click(triggers[0] as HTMLElement);
 
-    const logoutButtons = screen.getAllByRole('button', { name: 'Log out' });
+    const logoutButtons = screen.getAllByRole('menuitem', { name: 'Log out' });
     await user.click(logoutButtons[0] as HTMLElement);
     expect(logout).toHaveBeenCalledTimes(1);
   });
@@ -129,7 +129,7 @@ describe('CalendarHeader profile menu', () => {
     const triggers = screen.getAllByRole('button', { name: 'Profile' });
     await user.click(triggers[1] as HTMLElement);
 
-    const logoutButtons = screen.getAllByRole('button', { name: 'Log out' });
+    const logoutButtons = screen.getAllByRole('menuitem', { name: 'Log out' });
     await user.click(logoutButtons[logoutButtons.length - 1] as HTMLElement);
     expect(logout).toHaveBeenCalledTimes(1);
   });
@@ -145,9 +145,9 @@ describe('CalendarHeader profile menu', () => {
 
     const triggers = screen.getAllByRole('button', { name: 'Profile' });
     await user.click(triggers[0] as HTMLElement);
-    expect(screen.getAllByRole('button', { name: 'Log out' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('menuitem', { name: 'Log out' }).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'elsewhere' }));
-    expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Log out' })).toBeNull();
   });
 });

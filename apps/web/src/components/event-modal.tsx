@@ -15,6 +15,7 @@ import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
+import { writableVisibleCalendars } from '@/lib/create-event';
 import { seriesId } from '@/lib/event-move';
 import {
   eventTimesForSave,
@@ -32,6 +33,8 @@ import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useSheetDrag } from '@/lib/use-sheet-drag';
+import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
 import { useAuthStore } from '@/stores/auth-store';
 import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -121,6 +124,36 @@ function formEqual(a: FormState, b: FormState): boolean {
   return pa.length === setB.size && pa.every((id) => setB.has(id)) && sameData(restA, restB);
 }
 
+/** The form an existing event opens on, with its dates read in the zone they are edited in. */
+function eventToForm(ev: CalendarEvent, timezone: string): FormState {
+  const anchorZone = ev.timezone || timezone;
+  const rule = ev.recurrenceRule ?? null;
+  const startDt = DateTime.fromISO(ev.startAt, { zone: anchorZone });
+  return {
+    title: ev.title,
+    allDay: ev.allDay,
+    startAt: ev.allDay
+      ? toLocalDatetime(ev.startAt, anchorZone)
+      : toLocalDatetime(ev.startAt, timezone),
+    endAt: ev.allDay
+      ? toAllDayInclusiveEndInput(ev.endAt, anchorZone)
+      : toLocalDatetime(ev.endAt, timezone),
+    color: ev.color,
+    calendarId: ev.calendarId,
+    location: ev.location,
+    memo: ev.memo,
+    url: ev.url ?? '',
+    notificationOffset: ev.notificationOffset ?? null,
+    participantIds: ev.participantIds ?? [],
+    ownerId: ev.ownerId ?? null,
+    visibility: ev.visibility ?? 'default',
+    showAs: ev.showAs ?? 'busy',
+    flexibility: ev.flexibility ?? 'fixed',
+    recurrenceRule: rule,
+    recurrencePreset: ruleToPreset(rule, startDt),
+  };
+}
+
 export function EventModal() {
   const t = useT();
   const timezone = useUiStore((s) => s.timezone);
@@ -188,36 +221,6 @@ export function EventModal() {
     },
     [],
   );
-
-  // Swipe-down-to-dismiss for the mobile bottom sheet, driven from its top handle.
-  // The sheet tracks the finger 1:1 while held, then resolves on release. Window
-  // listeners (not pointer capture) guarantee the release is caught even when the
-  // finger drifts off the handle, so the sheet never rests at a partial offset.
-  const [sheetDragY, setSheetDragY] = useState(0);
-  const onSheetDown = (e: React.PointerEvent) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const start = { startY: e.clientY, lastY: e.clientY, lastT: e.timeStamp, vy: 0 };
-    const ctrl = new AbortController();
-    const move = (ev: globalThis.PointerEvent) => {
-      const dt = ev.timeStamp - start.lastT;
-      if (dt > 0) start.vy = (ev.clientY - start.lastY) / dt;
-      start.lastY = ev.clientY;
-      start.lastT = ev.timeStamp;
-      const dy = ev.clientY - start.startY;
-      setSheetDragY(dy > 0 ? dy : 0);
-    };
-    const end = () => {
-      ctrl.abort();
-      const dy = start.lastY - start.startY;
-      // Dismiss on a long pull or a quick downward flick; otherwise snap back.
-      // The sheet snaps back first, so a discard question is asked over a sheet at rest.
-      setSheetDragY(0);
-      if (dy > 160 || (dy > 48 && start.vy > 0.55)) guardedClose();
-    };
-    window.addEventListener('pointermove', move, { signal: ctrl.signal });
-    window.addEventListener('pointerup', end, { signal: ctrl.signal });
-    window.addEventListener('pointercancel', end, { signal: ctrl.signal });
-  };
 
   // Drive the sheet's spring entrance: mount off-screen, then settle on next frame.
   const [sheetIn, setSheetIn] = useState(false);
@@ -299,6 +302,10 @@ export function EventModal() {
     }
     requestClose();
   };
+  useUnsavedGuard(isDirty, false);
+  // The sheet snaps back before dismissing, so a discard question is asked over a sheet at rest.
+  const sheetDrag = useSheetDrag(guardedClose);
+  const sheetDragY = sheetDrag.style.transform;
   // Mirrors the API: on create any writer may file the plan under anyone; on
   // edit only a manager or the event's owner may move it, and only they may
   // take off a participant trusted to edit it.
@@ -314,10 +321,10 @@ export function EventModal() {
 
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
-    () => calendars.filter((c) => activeCalendarIds.includes(c.id) && canEdit(c.role)),
+    () => writableVisibleCalendars(calendars, activeCalendarIds),
     [calendars, activeCalendarIds],
   );
-  const defaultCalendarId = postableCalendars[0]?.id ?? calendars[0]?.id ?? '';
+  const defaultCalendarId = postableCalendars[0]?.id ?? '';
 
   // The participant picker names the people on the calendar being edited, so
   // that one list is fetched when the modal opens rather than every
@@ -358,37 +365,25 @@ export function EventModal() {
     void fetchEvents(start, end);
   };
 
+  // The form is built once per opening (or per event being edited), never from
+  // a refetch: the store replaces the event object whenever the month reloads,
+  // and rebuilding then would throw away what the user has typed.
+  const populatedFor = useRef<string | null>(null);
+  const [remoteChanged, setRemoteChanged] = useState(false);
   useEffect(() => {
-    if (!showEventModal) return;
-    if (editingEvent) {
-      const rule = editingEvent.recurrenceRule ?? null;
-      const startDt = DateTime.fromISO(editingEvent.startAt, { zone: anchorZone });
-      const preset = ruleToPreset(rule, startDt);
-      const opened: FormState = {
-        title: editingEvent.title,
-        allDay: editingEvent.allDay,
-        startAt: editingEvent.allDay
-          ? toLocalDatetime(editingEvent.startAt, anchorZone)
-          : toLocalDatetime(editingEvent.startAt, timezone),
-        endAt: editingEvent.allDay
-          ? toAllDayInclusiveEndInput(editingEvent.endAt, anchorZone)
-          : toLocalDatetime(editingEvent.endAt, timezone),
-        color: editingEvent.color,
-        calendarId: editingEvent.calendarId,
-        location: editingEvent.location,
-        memo: editingEvent.memo,
-        url: editingEvent.url ?? '',
-        notificationOffset: editingEvent.notificationOffset ?? null,
-        participantIds: editingEvent.participantIds ?? [],
-        ownerId: editingEvent.ownerId ?? null,
-        visibility: editingEvent.visibility ?? 'default',
-        showAs: editingEvent.showAs ?? 'busy',
-        flexibility: editingEvent.flexibility ?? 'fixed',
-        recurrenceRule: rule,
-        recurrencePreset: preset,
-      };
+    if (!showEventModal) {
+      populatedFor.current = null;
+      return;
+    }
+    const key = editingEventId ?? 'new';
+    if (populatedFor.current === key) return;
+    if (editingEventId) {
+      if (!editingEvent) return;
+      populatedFor.current = key;
+      const opened = eventToForm(editingEvent, timezone);
       setForm(opened);
       initialForm.current = opened;
+      setRemoteChanged(false);
       setShowMore(
         !!(
           editingEvent.location ||
@@ -399,49 +394,94 @@ export function EventModal() {
           (editingEvent.flexibility && editingEvent.flexibility !== 'fixed')
         ),
       );
-    } else {
-      // A draft start (e.g. a clicked weekly slot) creates a timed event at that
-      // hour; otherwise default to an all-day event on the selected day.
-      const timed = eventDraftStart != null;
-      const base = (eventDraftStart ?? selectedDate).setZone(timezone, { keepLocalTime: true });
-      const start = timed
-        ? base.set({ second: 0, millisecond: 0 })
-        : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
-      const draftEnd = eventDraftEnd?.setZone(timezone, { keepLocalTime: true });
-      const end = timed && draftEnd && draftEnd > start ? draftEnd : start.plus({ hours: 1 });
-      const opened: FormState = {
-        title: '',
-        allDay: !timed,
-        startAt: start.toFormat("yyyy-MM-dd'T'HH:mm"),
-        endAt: end.toFormat("yyyy-MM-dd'T'HH:mm"),
-        color: FALLBACK_LABEL_COLOR,
-        calendarId: defaultCalendarId,
-        location: '',
-        memo: '',
-        url: '',
-        notificationOffset: null,
-        participantIds: [],
-        ownerId: null,
-        visibility: 'default',
-        showAs: 'busy',
-        flexibility: 'fixed',
-        recurrencePreset: 'none',
-        recurrenceRule: null,
-      };
-      setForm(opened);
-      initialForm.current = opened;
-      setShowMore(false);
+      return;
     }
+    // Calendars are known and none can take a new event: there is no form to offer.
+    if (calendars.length > 0 && !defaultCalendarId) {
+      toast.error(t('event.noWritableCalendar'));
+      closeEventModal();
+      return;
+    }
+    populatedFor.current = key;
+    // A draft start (e.g. a clicked weekly slot) creates a timed event at that
+    // hour; otherwise default to an all-day event on the selected day.
+    const timed = eventDraftStart != null;
+    const base = (eventDraftStart ?? selectedDate).setZone(timezone, { keepLocalTime: true });
+    const start = timed
+      ? base.set({ second: 0, millisecond: 0 })
+      : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+    const draftEnd = eventDraftEnd?.setZone(timezone, { keepLocalTime: true });
+    const end = timed && draftEnd && draftEnd > start ? draftEnd : start.plus({ hours: 1 });
+    const opened: FormState = {
+      title: '',
+      allDay: !timed,
+      startAt: start.toFormat("yyyy-MM-dd'T'HH:mm"),
+      endAt: end.toFormat("yyyy-MM-dd'T'HH:mm"),
+      color: FALLBACK_LABEL_COLOR,
+      calendarId: defaultCalendarId,
+      location: '',
+      memo: '',
+      url: '',
+      notificationOffset: null,
+      participantIds: [],
+      ownerId: null,
+      visibility: 'default',
+      showAs: 'busy',
+      flexibility: 'fixed',
+      recurrencePreset: 'none',
+      recurrenceRule: null,
+    };
+    setForm(opened);
+    initialForm.current = opened;
+    setShowMore(false);
   }, [
     editingEvent,
+    editingEventId,
     showEventModal,
     selectedDate,
     eventDraftStart,
     eventDraftEnd,
     defaultCalendarId,
+    calendars.length,
+    closeEventModal,
     timezone,
-    anchorZone,
+    t,
   ]);
+
+  // Calendars that arrive after a new event's form opened still fill in its calendar.
+  useEffect(() => {
+    if (!showEventModal || editingEventId || !defaultCalendarId) return;
+    setForm((f) => (f.calendarId ? f : { ...f, calendarId: defaultCalendarId }));
+    if (initialForm.current && !initialForm.current.calendarId) {
+      initialForm.current = { ...initialForm.current, calendarId: defaultCalendarId };
+    }
+  }, [showEventModal, editingEventId, defaultCalendarId]);
+
+  // The stored copy of the event being edited changed under the editor. Untouched
+  // forms follow it; one with unsaved edits is left alone and offers a reload.
+  const dirtyRef = useRef(false);
+  dirtyRef.current = isDirty;
+  useEffect(() => {
+    if (!showEventModal || !editingEvent || populatedFor.current !== editingEvent.id) return;
+    const base = initialForm.current;
+    if (!base) return;
+    const fresh = eventToForm(editingEvent, timezone);
+    if (formEqual(fresh, base)) return;
+    if (dirtyRef.current) {
+      setRemoteChanged(true);
+      return;
+    }
+    setForm(fresh);
+    initialForm.current = fresh;
+  }, [showEventModal, editingEvent, timezone]);
+
+  const reloadRemote = () => {
+    if (!editingEvent) return;
+    const fresh = eventToForm(editingEvent, timezone);
+    setForm(fresh);
+    initialForm.current = fresh;
+    setRemoteChanged(false);
+  };
 
   // Ask the server which revision this edit starts from. Saving is a full
   // replace, so without it two people with the editor open overwrite each
@@ -630,12 +670,37 @@ export function EventModal() {
           ref={titleRef}
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          onKeyDown={(e) => {
+            // Enter confirms the title instead of breaking the line; a key that
+            // commits an IME composition is not an Enter.
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.metaKey || e.ctrlKey) return;
+            e.preventDefault();
+            void handleSave();
+          }}
           readOnly={!editable || taskOwned}
           placeholder={t('event.titlePlaceholder')}
           rows={1}
           className="w-full resize-none border-b-2 border-transparent bg-transparent text-display font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
         />
       </div>
+
+      {remoteChanged && editingEvent && (
+        <div
+          role="status"
+          className="mx-6 mb-3 flex items-center justify-between gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5 text-footnote text-[var(--color-text-secondary)]"
+          style={{ borderRadius: 'var(--radius-md)' }}
+        >
+          <span>{t('event.remoteChanged')}</span>
+          <button
+            type="button"
+            onClick={reloadRemote}
+            className="shrink-0 font-medium text-[var(--color-accent)]"
+          >
+            {t('event.reloadRemote')}
+          </button>
+        </div>
+      )}
 
       {/* Identity: which calendar + which color (event's visual identity) */}
       {/* An event has no colour of its own: it sits on its owner's layer, and
@@ -1105,33 +1170,35 @@ export function EventModal() {
         </div>
       )}
 
-      {/* Checklist (edit mode only) */}
-      {editingEvent && (
-        <ChecklistSection
-          calendarId={editingEvent.calendarId}
-          eventId={editingEvent.id}
-          editable={editable}
-        />
-      )}
+      <div data-saves-immediately>
+        {/* Checklist (edit mode only) */}
+        {editingEvent && (
+          <ChecklistSection
+            calendarId={editingEvent.calendarId}
+            eventId={editingEvent.id}
+            editable={editable}
+          />
+        )}
 
-      {/* Attachments (edit mode only) */}
-      {editingEvent && (
-        <AttachmentsSection
-          calendarId={editingEvent.calendarId}
-          eventId={editingEvent.id}
-          editable={editable}
-        />
-      )}
+        {/* Attachments (edit mode only) */}
+        {editingEvent && (
+          <AttachmentsSection
+            calendarId={editingEvent.calendarId}
+            eventId={editingEvent.id}
+            editable={editable}
+          />
+        )}
 
-      {/* Comments (edit mode only) */}
-      {editingEvent && (
-        <CommentsSection
-          calendarId={editingEvent.calendarId}
-          eventId={editingEvent.id}
-          canPost={canEdit(myRole)}
-          moderatorRole={myRole}
-        />
-      )}
+        {/* Comments (edit mode only) */}
+        {editingEvent && (
+          <CommentsSection
+            calendarId={editingEvent.calendarId}
+            eventId={editingEvent.id}
+            canPost={canEdit(myRole)}
+            moderatorRole={myRole}
+          />
+        )}
+      </div>
 
       {/* History (edit mode only) */}
       {editingEvent && (
@@ -1198,6 +1265,14 @@ export function EventModal() {
           role="dialog"
           aria-modal="true"
           aria-label={editingEvent ? t('event.editEvent') : t('event.createEvent')}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            // The sections that save as they change keep Enter for themselves.
+            if ((e.target as HTMLElement).closest('[data-saves-immediately]')) return;
+            e.preventDefault();
+            void handleSave();
+          }}
           className={`glass-surface-heavy pointer-events-auto flex w-full flex-col overflow-hidden ${
             isDesktop
               ? `modal-panel ${
@@ -1215,7 +1290,7 @@ export function EventModal() {
                   transform: closing
                     ? 'translateY(100%)'
                     : sheetDragY
-                      ? `translateY(${sheetDragY}px)`
+                      ? sheetDragY
                       : sheetIn
                         ? 'none'
                         : 'translateY(100%)',
@@ -1232,7 +1307,7 @@ export function EventModal() {
           {/* Grab zone: drag down to hold/dismiss. Generous height for easy grab. */}
           <div
             className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing sm:hidden"
-            onPointerDown={onSheetDown}
+            onPointerDown={sheetDrag.onPointerDown}
           >
             <div className="drag-handle mx-auto h-1.5 w-11 rounded-full bg-[var(--color-text-tertiary)] opacity-40" />
           </div>
@@ -1302,8 +1377,9 @@ export function EventModal() {
                 disabled={saving}
                 onClick={() => (scopePrompt === 'delete' ? handleDelete('all') : handleSave('all'))}
                 className="btn-secondary py-3 text-default font-medium disabled:opacity-50"
+                style={scopePrompt === 'delete' ? { color: 'var(--color-danger)' } : undefined}
               >
-                {t('event.scopeAll')}
+                {scopePrompt === 'delete' ? t('event.scopeAllDelete') : t('event.scopeAll')}
               </button>
               <button
                 type="button"

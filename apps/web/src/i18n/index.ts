@@ -29,6 +29,15 @@ export function useT(): TranslateFn {
   return createTranslateFn(locale);
 }
 
+/** Translates `key` in an explicit locale, for code that is handed the locale rather than reading the store. */
+export function translate(
+  locale: Locale,
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+): string {
+  return createTranslateFn(locale)(key, params);
+}
+
 /** Non-reactive getter for use outside React (e.g. Zustand stores) */
 export function getT(): TranslateFn {
   const locale = useUiStore.getState().locale;

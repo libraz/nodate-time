@@ -342,13 +342,22 @@ export function ProfileSection() {
   const [resendingVerification, setResendingVerification] = useState(false);
   const authConfig = useAuthConfig();
 
+  // The name last loaded from the account; a reload (an avatar upload, say)
+  // only overwrites the field when the user has not typed over it.
+  const loadedName = useRef<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   useEffect(() => {
-    if (user) {
-      setName(user.name);
-    }
+    if (!user) return;
+    setName((current) =>
+      loadedName.current === null || current === loadedName.current ? user.name : current,
+    );
+    loadedName.current = user.name;
   }, [user]);
 
   const dirty = !!user && name !== user.name;
+  useEffect(() => {
+    if (dirty) setJustSaved(false);
+  }, [dirty]);
 
   const handleAvatarFile = useCallback(
     async (file: File) => {
@@ -381,6 +390,7 @@ export function ProfileSection() {
     setSaving(true);
     try {
       await updateProfile({ name });
+      setJustSaved(true);
       toast.success(t('panel.updated'));
     } catch (e) {
       toast.error(errorMessage(e));
@@ -535,7 +545,7 @@ export function ProfileSection() {
           >
             {saving ? t('common.saving') : t('common.save')}
           </button>
-          {!dirty && !saving && (
+          {justSaved && !dirty && !saving && (
             <span className="text-footnote text-[var(--color-text-tertiary)]">
               {t('panel.updated')}
             </span>
@@ -834,6 +844,7 @@ export function AppearanceSection() {
             ariaLabel={t('settings.timezone')}
             className="w-full max-w-[420px]"
             triggerClassName="input-modern"
+            searchable
             options={Array.from(new Set([detectedTz, ...TIMEZONE_OPTIONS])).map((tz) => ({
               value: tz,
               label: tz,

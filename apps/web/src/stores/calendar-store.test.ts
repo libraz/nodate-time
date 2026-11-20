@@ -237,7 +237,7 @@ describe('fetchEvents', () => {
     await useCalendarStore.getState().fetchEvents('2026-04-01', '2026-04-30');
 
     expect(useCalendarStore.getState().events.map((e) => e.id)).toEqual(['e1']);
-    expect(mockToast.error).toHaveBeenCalledWith('cal-2 failed');
+    expect(useCalendarStore.getState().eventsError).toBe('cal-2 failed');
   });
 
   it('leaves a calendar that did not answer showing what it had', async () => {

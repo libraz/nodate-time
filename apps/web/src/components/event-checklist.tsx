@@ -69,10 +69,30 @@ export function ChecklistSection({
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (item: ChecklistItem) => {
     try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/checklist/${id}`);
+      await api.delete(`/calendars/${calendarId}/events/${eventId}/checklist/${item.id}`);
       await fetchItems();
+      // The item comes back as a new row carrying the same title, state and
+      // sort order; its id and creation time are the server's to assign.
+      toast.info(t('checklist.deleted'), {
+        label: t('common.undo'),
+        run: () => {
+          void (async () => {
+            try {
+              const base = `/calendars/${calendarId}/events/${eventId}/checklist`;
+              const created = await api.post<ChecklistItem>(base, {
+                title: item.title,
+                sortOrder: item.sortOrder,
+              });
+              if (item.done) await api.put(`${base}/${created.id}`, { done: true });
+              await fetchItems();
+            } catch (err) {
+              toast.error(errorMessage(err));
+            }
+          })();
+        },
+      });
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -147,7 +167,7 @@ export function ChecklistSection({
               {editable && (
                 <LabelledButton
                   label={t('common.delete')}
-                  onClick={() => handleDelete(item.id)}
+                  onClick={() => handleDelete(item)}
                   className="reveal-on-hover text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg

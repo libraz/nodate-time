@@ -65,6 +65,18 @@ interface CalendarState {
    * would otherwise read the missing tail of the window as free time.
    */
   truncatedCalendarIds: string[];
+  /** True while an event listing is in flight and no newer one has replaced it. */
+  eventsLoading: boolean;
+  /** True while a memo listing is in flight and no newer one has replaced it. */
+  memosLoading: boolean;
+  /**
+   * Why the last event listing came back incomplete, when it did. One message
+   * for the whole listing: a month change fans out one request per calendar,
+   * and one notice per failed calendar buried the screen in repeats.
+   */
+  eventsError: string | null;
+  /** As `eventsError`, for the memo listing. */
+  memosError: string | null;
 
   fetchCalendars: () => Promise<void>;
   /**
@@ -190,6 +202,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   loadError: null,
   memberErrors: {},
   truncatedCalendarIds: [],
+  eventsLoading: false,
+  memosLoading: false,
+  eventsError: null,
+  memosError: null,
 
   async fetchCalendars() {
     const requestGeneration = ++calendarRequestGeneration;
@@ -265,6 +281,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const requestGeneration = ++eventRequestGeneration;
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
+    set({ eventsLoading: true });
     const allEvents: CalendarEvent[] = [];
     // Calendars that answered. Only their events are replaced: a calendar that
     // did not answer is one we have no news about, and treating silence as an
@@ -296,16 +313,17 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       currentAccountGeneration !== accountGeneration
     )
       return;
-    for (const result of results) {
-      // A request the caller superseded is not a failure anyone should be
-      // told about. It stays out of `answered` either way, so the calendar
-      // keeps showing what it had rather than being blanked.
-      if (result.status === 'rejected' && !isAbortError(result.reason)) {
-        toast.error(errorMessage(result.reason));
-      }
-    }
+    // A request the caller superseded is not a failure anyone should be
+    // told about. It stays out of `answered` either way, so the calendar
+    // keeps showing what it had rather than being blanked.
+    const failures = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected' && !isAbortError(r.reason),
+    );
+    const aborted = results.some((r) => r.status === 'rejected' && isAbortError(r.reason));
     const known = new Set(calendars.map((c) => c.id));
     set((s) => ({
+      eventsLoading: false,
+      eventsError: failures[0] ? errorMessage(failures[0].reason) : aborted ? s.eventsError : null,
       events: [
         ...s.events.filter((e) => known.has(e.calendarId) && !answered.has(e.calendarId)),
         ...allEvents,
@@ -321,6 +339,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const requestGeneration = ++memoRequestGeneration;
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
+    set({ memosLoading: true });
     const allMemos: Memo[] = [];
     // As in fetchEvents: a calendar that did not answer keeps what it had.
     const answered = new Set<string>();
@@ -350,13 +369,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       currentAccountGeneration !== accountGeneration
     )
       return;
-    for (const result of results) {
-      if (result.status === 'rejected' && !isAbortError(result.reason)) {
-        toast.error(errorMessage(result.reason));
-      }
-    }
+    const failures = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected' && !isAbortError(r.reason),
+    );
+    const aborted = results.some((r) => r.status === 'rejected' && isAbortError(r.reason));
     const known = new Set(calendars.map((c) => c.id));
     set((s) => ({
+      memosLoading: false,
+      memosError: failures[0] ? errorMessage(failures[0].reason) : aborted ? s.memosError : null,
       memos: [
         ...s.memos.filter((m) => known.has(m.calendarId) && !answered.has(m.calendarId)),
         ...allMemos,
@@ -409,7 +429,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       return;
     }
     const failed = Object.keys(get().memberErrors);
-    await Promise.all(failed.map((id) => get().fetchMembers(id)));
+    const { start, end } = get().visibleRange();
+    await Promise.all([
+      ...failed.map((id) => get().fetchMembers(id)),
+      ...(get().eventsError ? [get().fetchEvents(start, end)] : []),
+      ...(get().memosError ? [get().fetchMemos()] : []),
+    ]);
   },
 
   async addCalendar(cal) {
@@ -429,7 +454,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async updateCalendar(id, patch) {
+    const currentAccountGeneration = accountGeneration;
     const updated = await api.put<Calendar>(`/calendars/${id}`, patch);
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
     }));
@@ -456,12 +483,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async deleteCalendar(id) {
+    const currentAccountGeneration = accountGeneration;
     await api.delete(`/calendars/${id}`);
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => forgetCalendar(s, id));
   },
 
   async leaveCalendar(calendarId, memberId) {
+    const currentAccountGeneration = accountGeneration;
     await api.delete(`/calendars/${calendarId}/members/${memberId}`);
+    if (currentAccountGeneration !== accountGeneration) return;
     // Everything this calendar contributed goes with the membership. Refetching
     // its members instead -- which is what the generic remove path does -- asks
     // a calendar the caller has just left, and the 403 that comes back reads as
@@ -506,6 +537,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async updateEvent(calendarId, eventId, evt, scope, revision) {
+    const currentAccountGeneration = accountGeneration;
     const query = scope ? `?scope=${scope}` : '';
     // The update replaces every field, so a save from a copy read before
     // someone else's save erases theirs rather than merging with it. Naming
@@ -515,6 +547,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       evt,
       revision ? { 'If-Match': revision } : undefined,
     );
+    if (currentAccountGeneration !== accountGeneration) return;
     const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
     if (updated.recurrenceRule || wasRecurring) {
       // Recurring event: expanded instances change, so re-fetch the visible
@@ -530,8 +563,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   async deleteEvent(calendarId, eventId, scope) {
+    const currentAccountGeneration = accountGeneration;
     const query = scope ? `?scope=${scope}` : '';
     await api.delete(`/calendars/${calendarId}/events/${eventId}${query}`);
+    if (currentAccountGeneration !== accountGeneration) return;
     if (eventId.includes('_')) {
       // Recurring instance: re-fetch the visible range so a single-occurrence
       // delete leaves the rest of the series intact. The answer replaces the
@@ -563,25 +598,31 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   // stored value, and sending a remembered one would let a stale copy of the
   // list reorder a memo that someone else had already moved.
   async updateMemo(calendarId, memoId, patch) {
+    const currentAccountGeneration = accountGeneration;
     const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
       title: patch.title,
       body: patch.body,
       done: patch.done,
     });
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
     }));
   },
 
   async toggleMemo(calendarId, memoId, done) {
+    const currentAccountGeneration = accountGeneration;
     const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, { done });
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
     }));
   },
 
   async deleteMemo(calendarId, memoId) {
+    const currentAccountGeneration = accountGeneration;
     await api.delete(`/calendars/${calendarId}/memos/${memoId}`);
+    if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: s.memos.filter((m) => m.id !== memoId),
     }));
@@ -620,6 +661,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       loadError: null,
       memberErrors: {},
       truncatedCalendarIds: [],
+      eventsLoading: false,
+      memosLoading: false,
+      eventsError: null,
+      memosError: null,
     });
   },
 

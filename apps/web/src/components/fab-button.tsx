@@ -1,4 +1,5 @@
 import { useT } from '@/i18n';
+import { startCreateEvent } from '@/lib/create-event';
 import { useUiStore } from '@/stores/ui-store';
 
 /**
@@ -10,7 +11,6 @@ import { useUiStore } from '@/stores/ui-store';
  */
 export function FabButton() {
   const t = useT();
-  const openEventModal = useUiStore((s) => s.openEventModal);
   const mobileTab = useUiStore((s) => s.mobileTab);
 
   if (mobileTab !== 'calendar') return null;
@@ -18,7 +18,7 @@ export function FabButton() {
   return (
     <button
       type="button"
-      onClick={() => openEventModal()}
+      onClick={startCreateEvent}
       data-tour="add-event"
       className="fab-button fixed z-30 flex h-[56px] w-[56px] items-center justify-center transition-transform hover:scale-105 active:scale-90 sm:hidden"
       style={{

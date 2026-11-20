@@ -37,9 +37,20 @@ function RootLayout() {
     }
   }, [isAuthenticated, user, fetchMe]);
 
-  // Show nothing while verifying token on page reload
+  // A bare splash while the token is verified on page reload
   if (isInitializing && !isPublic) {
-    return null;
+    return (
+      <>
+        <ThemeInitializer />
+        <output className="app-bg flex min-h-screen items-center justify-center">
+          <span
+            className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]"
+            aria-hidden="true"
+          />
+          <span className="sr-only">{t('common.loading')}</span>
+        </output>
+      </>
+    );
   }
 
   if (!isAuthenticated && !isPublic) {

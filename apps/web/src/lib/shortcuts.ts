@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { startCreateEvent } from '@/lib/create-event';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarView } from '@/types/calendar';
 
@@ -60,7 +61,7 @@ export function useCalendarShortcuts(enabled: boolean) {
       else if (action === 'prev') ui.stepView(-1);
       else if (action === 'next') ui.stepView(1);
       else if (action === 'today') ui.goToToday();
-      else if (action === 'create') ui.openEventModal();
+      else if (action === 'create') startCreateEvent();
       else if (action === 'search' && !ui.showSearch) ui.toggleSearch();
       e.preventDefault();
     };

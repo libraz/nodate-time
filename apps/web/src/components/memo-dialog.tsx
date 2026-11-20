@@ -9,6 +9,8 @@ import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useSheetDrag } from '@/lib/use-sheet-drag';
+import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
 import { useCalendarStore } from '@/stores/calendar-store';
 import type { Calendar } from '@/types/calendar';
 
@@ -84,7 +86,9 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
     (form.title !== initialForm.current.title ||
       form.body !== initialForm.current.body ||
       form.done !== initialForm.current.done);
+  const unsavedGuard = useUnsavedGuard(isDirty);
   const guardedClose = () => (isDirty ? setConfirmingDiscard(true) : onClose());
+  const sheetDrag = useSheetDrag(guardedClose);
   const dialogRef = useModalA11y<HTMLDivElement>(true, guardedClose);
   const isDesktop = useIsDesktop();
 
@@ -326,12 +330,18 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={heading}>
       {backdrop}
       <ConfirmSheet
-        open={confirmingDiscard}
+        open={confirmingDiscard || unsavedGuard.blocked}
         title={t('common.discardTitle')}
         confirmLabel={t('common.discard')}
         cancelLabel={t('common.keepEditing')}
-        onConfirm={onClose}
-        onCancel={() => setConfirmingDiscard(false)}
+        onConfirm={() => {
+          if (unsavedGuard.blocked) unsavedGuard.proceed();
+          else onClose();
+        }}
+        onCancel={() => {
+          if (unsavedGuard.blocked) unsavedGuard.stay();
+          setConfirmingDiscard(false);
+        }}
       />
       <ConfirmSheet
         open={confirmingDelete}
@@ -349,8 +359,16 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           </div>
         </div>
       ) : (
-        <div className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden">
-          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+        <div
+          className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden"
+          style={sheetDrag.style}
+        >
+          <div
+            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing"
+            onPointerDown={sheetDrag.onPointerDown}
+          >
+            <div className="drag-handle mx-auto h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+          </div>
           <div className="flex-1 overflow-y-auto">{formContent}</div>
           {actionBar}
         </div>

@@ -28,6 +28,7 @@ import {
 } from '@/lib/schedule-polls';
 import { toast } from '@/lib/toast';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
+import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
@@ -477,6 +478,7 @@ function SchedulePollDetailPage() {
       const saved = poll.myAnswers.find((answer) => answer.slotId === slot.id)?.value;
       return (draftAnswers[slot.id] ?? undefined) !== saved;
     });
+  const unsavedGuard = useUnsavedGuard(hasDraftChanges);
   const allResponded = !!poll && poll.memberCount > 0 && poll.respondedCount >= poll.memberCount;
   const responseFor = (memberId: string, slotId: string) =>
     poll?.responses
@@ -655,6 +657,14 @@ function SchedulePollDetailPage() {
 
   return (
     <SchedulePollFrame title={poll.title} eyebrow={t('schedulePoll.eyebrow')}>
+      <ConfirmSheet
+        open={unsavedGuard.blocked}
+        title={t('common.discardTitle')}
+        confirmLabel={t('common.discard')}
+        cancelLabel={t('common.keepEditing')}
+        onConfirm={unsavedGuard.proceed}
+        onCancel={unsavedGuard.stay}
+      />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <SchedulePollStatus status={poll.status} />
@@ -835,7 +845,7 @@ function SchedulePollDetailPage() {
                 </SchedulePollNotice>
               ) : (
                 <>
-                  <div className="page-card hidden overflow-x-auto md:block">
+                  <div className="page-card hidden overflow-x-auto sm:block">
                     <table className="w-full border-collapse text-left">
                       <thead>
                         <tr className="border-b border-[var(--color-separator)]">
@@ -923,7 +933,7 @@ function SchedulePollDetailPage() {
                     </table>
                   </div>
 
-                  <ul className="page-card divide-y divide-[var(--color-separator)] md:hidden">
+                  <ul className="page-card divide-y divide-[var(--color-separator)] sm:hidden">
                     {poll.slots.map((slot) => {
                       const best = slot.id === bestSlotId;
                       return (

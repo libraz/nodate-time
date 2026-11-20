@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
 import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
+import { writableVisibleCalendars } from '@/lib/create-event';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { isGroupEvent } from '@/lib/event-group';
 import { flexibilityLabelKey } from '@/lib/event-style';
-import { canEdit, roleOnCalendar, showAsLabelKey } from '@/lib/permissions';
+import { showAsLabelKey } from '@/lib/permissions';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useSheetDrag } from '@/lib/use-sheet-drag';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -30,13 +32,14 @@ export function DayDetail() {
   const showDayDetail = useUiStore((s) => s.showDayDetail);
   const closeDayDetail = useUiStore((s) => s.closeDayDetail);
   const sheetRef = useModalA11y<HTMLDivElement>(showDayDetail, closeDayDetail);
+  const sheetDrag = useSheetDrag(closeDayDetail);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const events = useCalendarStore((s) => s.events);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const calendars = useCalendarStore((s) => s.calendars);
 
   // Allow adding when the user can edit at least one active calendar.
-  const canAdd = activeCalendarIds.some((id) => canEdit(roleOnCalendar(calendars, id)));
+  const canAdd = writableVisibleCalendars(calendars, activeCalendarIds).length > 0;
 
   const timezone = useUiStore((s) => s.timezone);
   const dayEvents = useMemo(
@@ -57,7 +60,7 @@ export function DayDetail() {
   // Locale-aware header date
   const headerDate =
     locale === 'en'
-      ? `${dayLabel}, ${selectedDate.toFormat('MMM d')}`
+      ? `${dayLabel}, ${selectedDate.setLocale(locale).toFormat('MMM d')}`
       : `${month}\u6708${date}\u65E5(${dayLabel})`;
 
   return (
@@ -80,9 +83,15 @@ export function DayDetail() {
           aria-modal="true"
           aria-label={headerDate}
           className="glass-surface-heavy bottom-sheet pointer-events-auto flex max-h-[85vh] w-full flex-col overflow-hidden sm:max-w-[420px] sm:rounded-b-[var(--radius-xl)]"
+          style={sheetDrag.style}
         >
-          {/* Drag handle */}
-          <div className="drag-handle mx-auto mt-2 mb-1 h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30 sm:hidden" />
+          {/* Grab zone: drag down to dismiss */}
+          <div
+            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing sm:hidden"
+            onPointerDown={sheetDrag.onPointerDown}
+          >
+            <div className="drag-handle mx-auto h-1 w-10 rounded-full bg-[var(--color-text-tertiary)] opacity-30" />
+          </div>
 
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-3">

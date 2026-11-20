@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({
@@ -16,8 +16,6 @@ vi.mock('@/lib/toast', () => ({
 }));
 
 const uiState = {
-  showSettings: true,
-  toggleSettings: vi.fn(),
   theme: 'glass',
   colorMode: 'light',
   locale: 'ja',
@@ -53,18 +51,7 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { MemoSection, SettingsModal } from './right-panel';
-
-/** jsdom reports no layout, so focusable elements have to look painted. */
-function rectList(): DOMRectList {
-  const rects = [new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList;
-  rects.item = (index: number) => rects[index] ?? null;
-  return rects;
-}
-
-beforeEach(() => {
-  uiState.showSettings = true;
-});
+import { MemoSection } from './right-panel';
 
 afterEach(() => {
   cleanup();
@@ -74,79 +61,6 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   document.body.style.overflow = '';
-});
-
-// The dialog was reachable only with a pointer: no scroll lock, no Escape, and
-// Tab carried on into the calendar it was covering.
-describe('SettingsModal keyboard', () => {
-  it('locks the page behind it and closes on Escape', () => {
-    render(<SettingsModal />);
-
-    expect(document.body.style.overflow).toBe('hidden');
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-
-    expect(uiState.toggleSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps Tab inside the dialog', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
-    render(<SettingsModal />);
-
-    const dialog = await screen.findByRole('dialog');
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button'));
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    expect(first).toBeDefined();
-    expect(last).toBeDefined();
-    if (!first || !last) return;
-
-    last.focus();
-    fireEvent.keyDown(document, { key: 'Tab' });
-    expect(document.activeElement).toBe(first);
-
-    first.focus();
-    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(last);
-  });
-
-  it('returns focus to whatever opened it', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
-    uiState.showSettings = false;
-    function Harness() {
-      return (
-        <>
-          <button type="button" data-testid="trigger">
-            open
-          </button>
-          <SettingsModal />
-        </>
-      );
-    }
-    const { rerender } = render(<Harness />);
-    const trigger = screen.getByTestId('trigger');
-    trigger.focus();
-
-    uiState.showSettings = true;
-    rerender(<Harness />);
-    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
-
-    uiState.showSettings = false;
-    rerender(<Harness />);
-
-    expect(document.activeElement).toBe(trigger);
-  });
-});
-
-describe('SettingsModal controls', () => {
-  it('names its close button', () => {
-    render(<SettingsModal />);
-
-    const close = within(screen.getByRole('dialog')).getByRole('button', { name: 'common.close' });
-    fireEvent.click(close);
-
-    expect(uiState.toggleSettings).toHaveBeenCalledTimes(1);
-  });
 });
 
 // With a single calendar on screen nothing named the calendar a memo lived in,

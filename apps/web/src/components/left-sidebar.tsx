@@ -1,10 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
 import { BrandRow } from '@/components/brand-mark';
 import { CalendarList } from '@/components/calendar-list';
 import { GuideCard } from '@/components/guide';
-import { LabelledButton } from '@/components/labelled-button';
-import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -12,7 +9,6 @@ export function LeftSidebar() {
   const t = useT();
   const navigate = useNavigate();
   const setShowActivity = useUiStore((s) => s.setShowActivity);
-  const [memoExpanded, setMemoExpanded] = useState(true);
 
   return (
     <div className="glass-surface app-sidebar hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
@@ -22,45 +18,6 @@ export function LeftSidebar() {
 
       {/* Calendars section */}
       <CalendarList />
-
-      {/* Divider */}
-      <div className="mx-4 border-t border-[var(--color-border)]" />
-
-      {/* Memo section */}
-      <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
-          {t('tabs.memo')}
-        </span>
-        <LabelledButton
-          label={t('tabs.memo')}
-          expanded={memoExpanded}
-          onClick={() => setMemoExpanded((v) => !v)}
-          className="icon-btn h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{
-              transform: memoExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.28s var(--ease-press)',
-            }}
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </LabelledButton>
-      </div>
-
-      {memoExpanded && (
-        <div className="reveal-in flex-1 overflow-hidden">
-          <MemoSection />
-        </div>
-      )}
 
       <GuideCard className="mx-3 mt-2 mb-3" />
 

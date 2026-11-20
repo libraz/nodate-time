@@ -8,7 +8,7 @@ import { LeftSidebar } from '@/components/left-sidebar';
 import { LoadFailure, LoadFailureBanner } from '@/components/load-failure';
 import { MonthScroll } from '@/components/month-scroll';
 import { OnboardingWizard } from '@/components/onboarding-wizard';
-import { MemoSection, SettingsModal } from '@/components/right-panel';
+import { MemoSection } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
 import { SchedulePollActionNotice } from '@/components/schedule-poll-actions';
 import { Highlight } from '@/components/search-results';
@@ -26,6 +26,7 @@ import { useCalendarShortcuts } from '@/lib/shortcuts';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
+import { useOnlineStatus } from '@/lib/use-online-status';
 import { useLatch, usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -420,7 +421,6 @@ export function App() {
   const showEventModal = useUiStore((s) => s.showEventModal);
   const showMobileMenu = useUiStore((s) => s.showMobileMenu);
   const showSearch = useUiStore((s) => s.showSearch);
-  const showSettings = useUiStore((s) => s.showSettings);
   const rightPanel = useUiStore((s) => s.rightPanel);
   const setShowActivity = useUiStore((s) => s.setShowActivity);
   // Each side panel loads on first open and then stays mounted, so closing
@@ -448,6 +448,12 @@ export function App() {
   const truncatedCalendarIds = useCalendarStore((s) => s.truncatedCalendarIds);
   const shownCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const retryFailedLoads = useCalendarStore((s) => s.retryFailedLoads);
+  const eventsLoading = useCalendarStore((s) => s.eventsLoading);
+  const eventsError = useCalendarStore((s) => s.eventsError);
+  const memosError = useCalendarStore((s) => s.memosError);
+  const hasEvents = useCalendarStore((s) => s.events.length > 0);
+  const setActiveCalendarIds = useCalendarStore((s) => s.setActiveCalendarIds);
+  const online = useOnlineStatus();
   const initDone = useRef(false);
   const rangeLoaded = useRef(false);
   const eventModalLoaded = useRef(false);
@@ -539,6 +545,33 @@ export function App() {
   const membersFailed = Object.keys(memberErrors).length > 0;
   const eventsTruncated = truncatedCalendarIds.some((id) => shownCalendarIds.includes(id));
 
+  const allHidden = calendars.length > 0 && !calendars.some((c) => shownCalendarIds.includes(c.id));
+  // The list view words this itself, in place of its empty message.
+  const hiddenNotice =
+    allHidden && calendarView !== 'list' ? (
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 bg-[var(--color-surface-inset)] px-4 py-2 text-footnote text-[var(--color-text-secondary)]">
+        <span>{t('calendar.allHidden')}</span>
+        <button
+          type="button"
+          onClick={() => setActiveCalendarIds(calendars.map((c) => c.id))}
+          className="shrink-0 font-medium text-[var(--color-accent-ink)] underline"
+        >
+          {t('calendar.showAll')}
+        </button>
+      </div>
+    ) : null;
+  // Only while the grid has nothing yet to show; a refresh over events stays quiet.
+  const loadingNotice =
+    eventsLoading && !hasEvents && !allHidden ? (
+      <output className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+        <span
+          className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--color-border)] border-t-[var(--color-accent)]"
+          aria-hidden="true"
+        />
+        <span className="sr-only">{t('common.loading')}</span>
+      </output>
+    ) : null;
+
   const calendarContent = loadError ? (
     <LoadFailure
       title={t('error.calendarsUnavailable')}
@@ -547,6 +580,8 @@ export function App() {
     />
   ) : (
     <div className="relative flex-1 overflow-hidden">
+      {hiddenNotice}
+      {loadingNotice}
       <Suspense fallback={null}>
         {calendarView === 'month' && (
           <div className="h-full">
@@ -569,6 +604,8 @@ export function App() {
     />
   ) : (
     <div className="relative flex-1 overflow-hidden">
+      {hiddenNotice}
+      {loadingNotice}
       <Suspense fallback={null}>
         {calendarView === 'month' ? (
           <MonthScroll />
@@ -594,6 +631,18 @@ export function App() {
       {membersFailed && (
         <div className="relative z-[1]">
           <LoadFailureBanner title={t('error.membersUnavailable')} onRetry={retryFailedLoads} />
+        </div>
+      )}
+
+      {!online && (
+        <output className="relative z-[1] block bg-[var(--color-surface-inset)] px-4 py-2 text-footnote text-[var(--color-text-secondary)]">
+          {t('error.offline')}
+        </output>
+      )}
+
+      {(eventsError || memosError) && (
+        <div className="relative z-[1]">
+          <LoadFailureBanner title={t('error.listingsUnavailable')} onRetry={retryFailedLoads} />
         </div>
       )}
 
@@ -647,13 +696,6 @@ export function App() {
       <FabButton />
 
       <OnboardingWizard />
-
-      {/* Settings modal (PC) */}
-      {showSettings && (
-        <Deferred>
-          <SettingsModal />
-        </Deferred>
-      )}
 
       {/* Day detail overlay */}
       {showDayDetail && (
