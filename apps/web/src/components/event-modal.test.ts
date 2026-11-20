@@ -27,9 +27,9 @@ describe('event comment API contract', () => {
       eventCommentText({
         id: 'comment-1',
         body: 'Visible comment',
-        userName: 'Alice',
-        userAvatar: 'A',
-        userPublicId: 'user-1',
+        authorName: 'Alice',
+        authorAvatarUrl: 'A',
+        authorId: 'user-1',
         createdAt: '2026-07-16T00:00:00Z',
       }),
     ).toBe('Visible comment');

@@ -34,7 +34,7 @@ function makeEvent(
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     recurrenceRule: null,
     isRecurrence: false,
     recurrenceDate: null,

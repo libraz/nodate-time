@@ -39,7 +39,7 @@ function makeEvent(overrides: Partial<CalendarEvent> & { startAt: string; endAt:
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     recurrenceRule: null,
     isRecurrence: false,
     recurrenceDate: null,

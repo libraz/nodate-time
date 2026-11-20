@@ -6,12 +6,6 @@ import { api, errorMessage } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
-export interface HistoryActor {
-  id: string;
-  name: string;
-  avatarUrl?: string;
-}
-
 export interface HistoryItem {
   id: string;
   /** The server's dotted name, e.g. `calendar.event.updated`. Read through the
@@ -20,7 +14,10 @@ export interface HistoryItem {
   action: string;
   summary: string;
   createdAt: string;
-  actor: HistoryActor | null;
+  /** The actor fields are absent when the account is gone. */
+  actorId?: string;
+  actorName?: string;
+  actorAvatarUrl?: string;
   systemActor?: boolean;
 }
 
@@ -90,14 +87,14 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
     <div className="space-y-3">
       {items.map((item) => {
         const actorName =
-          item.actor?.name ?? t(item.systemActor ? 'history.systemActor' : 'history.deletedUser');
+          item.actorName ?? t(item.systemActor ? 'history.systemActor' : 'history.deletedUser');
         return (
           <div key={item.id} className="flex gap-2">
             <span
               className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
               style={{ backgroundColor: activityColor(item.action) }}
             />
-            <Avatar src={item.actor?.avatarUrl} name={actorName} />
+            <Avatar src={item.actorAvatarUrl} name={actorName} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2">
                 <span className="text-body font-medium text-[var(--color-text-primary)]">

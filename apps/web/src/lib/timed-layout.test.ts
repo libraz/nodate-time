@@ -23,7 +23,7 @@ function makeEvent(id: string, startAt: string, endAt: string): CalendarEvent {
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     recurrenceRule: null,
     isRecurrence: false,
     recurrenceDate: null,

@@ -4,12 +4,7 @@ import type { ReactNode } from 'react';
 import { Avatar } from '@/components/avatar';
 import { BrandRow } from '@/components/brand-mark';
 import { useT } from '@/i18n';
-import type {
-  PollAnswer,
-  PollAvailability,
-  PollMemberListItem,
-  SchedulePoll,
-} from '@/lib/schedule-polls';
+import type { PollAnswer, PollAvailability, SchedulePoll } from '@/lib/schedule-polls';
 import { useUiStore } from '@/stores/ui-store';
 
 export function SchedulePollFrame({
@@ -332,7 +327,7 @@ export function InviteeGrid({
   selectedIds,
   onToggle,
 }: {
-  members: PollMemberListItem[];
+  members: Array<{ id: string; name: string; avatarUrl?: string | undefined }>;
   selectedIds: string[];
   onToggle: (memberId: string, checked: boolean) => void;
 }) {
@@ -349,7 +344,13 @@ export function InviteeGrid({
             onChange={(event) => onToggle(member.id, event.target.checked)}
             className="check-input"
           />
-          <Avatar name={member.name} size="h-7 w-7" round className="text-footnote" />
+          <Avatar
+            src={member.avatarUrl}
+            name={member.name}
+            size="h-7 w-7"
+            round
+            className="text-footnote"
+          />
           <span className="min-w-0 truncate text-body text-[var(--color-text-primary)]">
             {member.name}
           </span>

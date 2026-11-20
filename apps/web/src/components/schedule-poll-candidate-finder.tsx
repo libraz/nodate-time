@@ -92,7 +92,7 @@ export function SchedulePollCandidateFinder({
           : []
         ).map((candidate) => [candidateKey(candidate), candidate]),
       );
-      for (const candidate of result.slots ?? []) merged.set(candidateKey(candidate), candidate);
+      for (const candidate of result) merged.set(candidateKey(candidate), candidate);
       const nextSuggestions = [...merged.values()];
       setSuggestions(nextSuggestions);
       const byKey = new Map(

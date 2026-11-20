@@ -20,7 +20,7 @@ function event(id: string, overrides: Partial<CalendarEvent> = {}): CalendarEven
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     recurrenceRule: null,
     isRecurrence: false,
     recurrenceDate: null,

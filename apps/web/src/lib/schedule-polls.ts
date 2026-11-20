@@ -22,6 +22,7 @@ export interface PollAnswerEntry {
 export interface PollMember {
   id: string;
   name: string;
+  avatarUrl?: string;
 }
 
 export interface PollResponse {
@@ -37,12 +38,14 @@ export interface SchedulePoll {
   status: PollStatus;
   version: number;
   reviewVersion: number;
-  responseVersion: number;
+  /** The caller's own answer version; present only for recipients. */
+  answerVersion?: number;
   canManage: boolean;
   canTakeOver?: boolean;
   canRespond: boolean;
   slots: PollSlot[];
-  members: PollMember[];
+  /** Absent for callers who may not manage the poll. */
+  members?: PollMember[];
   myAnswers: PollAnswerEntry[];
   responses?: PollResponse[];
   respondedCount: number;
@@ -77,11 +80,6 @@ export interface SchedulePollAvailabilityInput {
   slots?: Array<{ startAt: string; endAt: string }>;
 }
 
-export interface PollMemberListItem {
-  id: string;
-  name: string;
-}
-
 export interface SchedulePollCreateInput {
   title: string;
   timezone: string;
@@ -96,42 +94,23 @@ const pollPath = (calendarId: string, pollId: string) =>
 
 export const schedulePollApi = {
   async actions(signal?: AbortSignal): Promise<SchedulePollAction[]> {
-    const result = await api.get<{ actions: SchedulePollAction[] }>(
-      '/me/schedule-poll-actions',
-      false,
-      signal,
-    );
-    return result.actions ?? [];
+    return api.get<SchedulePollAction[]>('/me/schedule-poll-actions', false, signal);
   },
 
   async list(calendarId: string, signal?: AbortSignal): Promise<SchedulePoll[]> {
-    const result = await api.get<{ polls: SchedulePoll[] }>(
-      calendarPollsPath(calendarId),
-      false,
-      signal,
-    );
-    return result.polls ?? [];
+    return api.get<SchedulePoll[]>(calendarPollsPath(calendarId), false, signal);
   },
 
   get(calendarId: string, pollId: string, signal?: AbortSignal): Promise<SchedulePoll> {
     return api.get<SchedulePoll>(pollPath(calendarId, pollId), false, signal);
   },
 
-  async members(calendarId: string, signal?: AbortSignal): Promise<PollMemberListItem[]> {
-    const result = await api.get<{ members: PollMemberListItem[] }>(
-      `${calendarPollsPath(calendarId)}/members`,
-      false,
-      signal,
-    );
-    return result.members ?? [];
-  },
-
   availability(
     calendarId: string,
     input: SchedulePollAvailabilityInput,
     signal?: AbortSignal,
-  ): Promise<{ slots: SchedulePollCandidate[] }> {
-    return api.post<{ slots: SchedulePollCandidate[] }>(
+  ): Promise<SchedulePollCandidate[]> {
+    return api.post<SchedulePollCandidate[]>(
       `${calendarPollsPath(calendarId)}/availability`,
       input,
       signal,
@@ -163,7 +142,7 @@ export const schedulePollApi = {
   respond(
     calendarId: string,
     pollId: string,
-    input: { version: number; responseVersion: number; answers: PollAnswerEntry[] },
+    input: { version: number; answerVersion: number; answers: PollAnswerEntry[] },
   ): Promise<SchedulePoll> {
     return api.put<SchedulePoll>(`${pollPath(calendarId, pollId)}/response`, input);
   },

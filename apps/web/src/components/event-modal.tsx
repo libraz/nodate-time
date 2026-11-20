@@ -79,7 +79,7 @@ interface FormState {
   memo: string;
   url: string;
   notificationOffset: number | null;
-  participants: string[];
+  participantIds: string[];
   ownerId: string | null;
   visibility: Visibility;
   showAs: ShowAs;
@@ -221,7 +221,7 @@ export function EventModal() {
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     ownerId: null,
     visibility: 'default',
     showAs: 'busy',
@@ -312,7 +312,7 @@ export function EventModal() {
         memo: editingEvent.memo,
         url: editingEvent.url ?? '',
         notificationOffset: editingEvent.notificationOffset ?? null,
-        participants: editingEvent.participants ?? [],
+        participantIds: editingEvent.participantIds ?? [],
         ownerId: editingEvent.ownerId ?? null,
         visibility: editingEvent.visibility ?? 'default',
         showAs: editingEvent.showAs ?? 'busy',
@@ -351,7 +351,7 @@ export function EventModal() {
         memo: '',
         url: '',
         notificationOffset: null,
-        participants: [],
+        participantIds: [],
         ownerId: null,
         visibility: 'default',
         showAs: 'busy',
@@ -426,7 +426,7 @@ export function EventModal() {
         memo: form.memo,
         url: form.url,
         notificationOffset: normalizeNotificationOffset(form.notificationOffset),
-        participants: form.participants,
+        participantIds: form.participantIds,
         ownerId: form.ownerId,
         visibility: form.visibility,
         showAs: form.showAs,
@@ -632,7 +632,7 @@ export function EventModal() {
       {editingEvent &&
         (() => {
           const member = (membersMap[editingEvent.calendarId] ?? []).find(
-            (m) => m.id === editingEvent.createdBy,
+            (m) => m.id === editingEvent.creatorId,
           );
           const name = editingEvent.creatorName || member?.name;
           if (!name) return null;
@@ -701,10 +701,10 @@ export function EventModal() {
             members={membersMap[formCalendarId] ?? []}
             myId={me?.id}
             ownerId={form.ownerId}
-            participants={form.participants}
+            participants={form.participantIds}
             disabled={!editable}
             onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
-            onParticipantsChange={(ids) => setForm((f) => ({ ...f, participants: ids }))}
+            onParticipantsChange={(ids) => setForm((f) => ({ ...f, participantIds: ids }))}
           />
         </div>
       )}

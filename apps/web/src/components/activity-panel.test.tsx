@@ -70,7 +70,9 @@ interface ServerFeedItem {
   action: string;
   summary: string;
   createdAt: string;
-  actor: { id: string; name: string; avatarUrl?: string } | null;
+  actorId?: string | undefined;
+  actorName?: string | undefined;
+  actorAvatarUrl?: string;
   systemActor?: boolean;
   entityType: string;
   entityId: string;
@@ -82,7 +84,8 @@ function feedItem(overrides: Partial<ServerFeedItem> = {}): ServerFeedItem {
     action: 'calendar.event.created',
     summary: 'Dinner',
     createdAt: '2026-04-20T10:00:00+09:00',
-    actor: { id: '00000000-0000-7000-8000-0000000000a1', name: 'Rin' },
+    actorId: '00000000-0000-7000-8000-0000000000a1',
+    actorName: 'Rin',
     entityType: 'event',
     entityId: '00000000-0000-7000-8000-0000000000e1',
     ...overrides,
@@ -175,7 +178,9 @@ describe('ActivityPanel', () => {
   });
 
   it('labels a marked system entry as the system', async () => {
-    mockApi.get.mockResolvedValue({ items: [feedItem({ actor: null, systemActor: true })] });
+    mockApi.get.mockResolvedValue({
+      items: [feedItem({ actorId: undefined, actorName: undefined, systemActor: true })],
+    });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -184,7 +189,9 @@ describe('ActivityPanel', () => {
   });
 
   it('keeps the deleted-user label for an unmarked entry without an actor', async () => {
-    mockApi.get.mockResolvedValue({ items: [feedItem({ actor: null })] });
+    mockApi.get.mockResolvedValue({
+      items: [feedItem({ actorId: undefined, actorName: undefined })],
+    });
 
     render(<ActivityPanel open onClose={() => {}} />);
 

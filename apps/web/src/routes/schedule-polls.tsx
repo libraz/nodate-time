@@ -16,13 +16,13 @@ import { useT } from '@/i18n';
 import { errorMessage, isAbortError } from '@/lib/api';
 import { canManage as roleCanManage } from '@/lib/permissions';
 import {
-  type PollMemberListItem,
   type SchedulePoll,
   type SchedulePollAction,
   type SchedulePollCandidate,
   schedulePollApi,
 } from '@/lib/schedule-polls';
 import { toast } from '@/lib/toast';
+import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useEnsureCalendars } from '@/lib/use-ensure-calendars';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -122,9 +122,6 @@ function SchedulePollIndexPage() {
   const [pollsLoading, setPollsLoading] = useState(false);
   const [pollsError, setPollsError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [members, setMembers] = useState<PollMemberListItem[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [membersError, setMembersError] = useState<string | null>(null);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [candidateSlots, setCandidateSlots] = useState<SchedulePollCandidate[]>([]);
@@ -165,30 +162,17 @@ function SchedulePollIndexPage() {
     return () => controller.abort();
   }, [selectedCalendarId]);
 
+  const pickerCalendarId = creating && canManage ? selectedCalendarId : '';
+  const { members: calendarMembers } = useCalendarMembers(pickerCalendarId);
+  const members = [...calendarMembers].sort((a, b) => a.name.localeCompare(b.name));
+  const membersLoaded = useCalendarStore((state) => pickerCalendarId in state.membersMap);
+  const membersError = useCalendarStore((state) => state.memberErrors[pickerCalendarId] ?? null);
+  const membersLoading = !!pickerCalendarId && !membersLoaded && !membersError;
+  const memberKey = members.map((member) => member.id).join(',');
+
   useEffect(() => {
-    if (!creating || !canManage || !selectedCalendarId) {
-      setMembers([]);
-      setMemberIds([]);
-      setMembersError(null);
-      return;
-    }
-    const controller = new AbortController();
-    setMembersLoading(true);
-    setMembersError(null);
-    schedulePollApi
-      .members(selectedCalendarId, controller.signal)
-      .then((result) => {
-        setMembers(result);
-        setMemberIds(result.map((member) => member.id));
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) setMembersError(errorMessage(reason));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setMembersLoading(false);
-      });
-    return () => controller.abort();
-  }, [canManage, creating, selectedCalendarId]);
+    setMemberIds(memberKey ? memberKey.split(',') : []);
+  }, [memberKey]);
 
   useEffect(() => {
     if (userId) void refreshActions(userId);

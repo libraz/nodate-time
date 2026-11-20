@@ -19,14 +19,15 @@ import { useT } from '@/i18n';
 import { ApiError, errorMessage } from '@/lib/api';
 import {
   type PollAnswer,
-  type PollMemberListItem,
   type PollSlot,
   type SchedulePoll,
   type SchedulePollCandidate,
   schedulePollApi,
 } from '@/lib/schedule-polls';
 import { toast } from '@/lib/toast';
+import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useAuthStore } from '@/stores/auth-store';
+import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
@@ -88,7 +89,6 @@ function SchedulePollDetailPage() {
   const [draftAnswers, setDraftAnswers] = useState<Record<string, PollAnswer>>({});
   const [savingAnswers, setSavingAnswers] = useState(false);
   const [stale, setStale] = useState(false);
-  const [roster, setRoster] = useState<PollMemberListItem[]>([]);
   const [memberIdsDraft, setMemberIdsDraft] = useState<string[]>([]);
   const [savingMembers, setSavingMembers] = useState(false);
   const [keptSlotIds, setKeptSlotIds] = useState<string[]>([]);
@@ -121,7 +121,7 @@ function SchedulePollDetailPage() {
     setDraftAnswers(
       Object.fromEntries(latest.myAnswers.map((answer) => [answer.slotId, answer.value])),
     );
-    setMemberIdsDraft(latest.members.map((member) => member.id));
+    setMemberIdsDraft((latest.members ?? []).map((member) => member.id));
     setKeptSlotIds(latest.slots.filter((slot) => slot.active).map((slot) => slot.id));
     setSelectedSlotId((currentSlot) =>
       latest.slots.some((slot) => slot.id === currentSlot && slot.active)
@@ -131,10 +131,10 @@ function SchedulePollDetailPage() {
           ''),
     );
     setOwnerId((currentOwner) =>
-      latest.members.some((member) => member.id === currentOwner)
+      latest.members?.some((member) => member.id === currentOwner)
         ? currentOwner
-        : (latest.members.find((member) => member.id === userId)?.id ??
-          latest.members[0]?.id ??
+        : (latest.members?.find((member) => member.id === userId)?.id ??
+          latest.members?.[0]?.id ??
           ''),
     );
     setNewCandidates([]);
@@ -173,7 +173,7 @@ function SchedulePollDetailPage() {
         setDraftAnswers(
           Object.fromEntries(latest.myAnswers.map((answer) => [answer.slotId, answer.value])),
         );
-        setMemberIdsDraft(latest.members.map((member) => member.id));
+        setMemberIdsDraft((latest.members ?? []).map((member) => member.id));
         setKeptSlotIds(latest.slots.filter((slot) => slot.active).map((slot) => slot.id));
         setSelectedSlotId(
           latest.selectedSlotId ??
@@ -181,7 +181,9 @@ function SchedulePollDetailPage() {
             '',
         );
         setOwnerId(
-          latest.members.find((member) => member.id === userId)?.id ?? latest.members[0]?.id ?? '',
+          latest.members?.find((member) => member.id === userId)?.id ??
+            latest.members?.[0]?.id ??
+            '',
         );
         if (requestedView === 'event' && latest.confirmedEventId) {
           try {
@@ -210,20 +212,10 @@ function SchedulePollDetailPage() {
     };
   }, [calendarId, pollId, requestedView, userId]);
 
-  useEffect(() => {
-    if (!poll?.canManage || poll.status !== 'open' || view === 'event') {
-      setRoster([]);
-      return;
-    }
-    const controller = new AbortController();
-    schedulePollApi
-      .members(calendarId, controller.signal)
-      .then(setRoster)
-      .catch(() => {
-        if (!controller.signal.aborted) setRoster([]);
-      });
-    return () => controller.abort();
-  }, [calendarId, poll?.canManage, poll?.status, view]);
+  const rosterCalendarId =
+    poll?.canManage && poll.status === 'open' && view !== 'event' ? calendarId : '';
+  const { members: calendarMembers } = useCalendarMembers(rosterCalendarId);
+  const roster = [...calendarMembers].sort((a, b) => a.name.localeCompare(b.name));
 
   const navigateView = (next: PollView) => {
     void navigate({
@@ -238,7 +230,7 @@ function SchedulePollDetailPage() {
   };
 
   const saveResponse = async () => {
-    if (poll?.status !== 'open') return;
+    if (poll?.status !== 'open' || poll.answerVersion === undefined) return;
     setSavingAnswers(true);
     setStale(false);
     const savedAnswers = new Map(poll.myAnswers.map((answer) => [answer.slotId, answer.value]));
@@ -251,7 +243,7 @@ function SchedulePollDetailPage() {
     try {
       const updated = await schedulePollApi.respond(calendarId, pollId, {
         version: poll.version,
-        responseVersion: poll.responseVersion,
+        answerVersion: poll.answerVersion,
         answers,
       });
       setPoll(updated);
@@ -290,7 +282,7 @@ function SchedulePollDetailPage() {
 
   const saveMembers = async () => {
     if (!poll) return;
-    const initiallySelected = new Set(poll.members.map((member) => member.id));
+    const initiallySelected = new Set((poll.members ?? []).map((member) => member.id));
     const requestedMemberIds = [...memberIdsDraft];
     setSavingMembers(true);
     try {
@@ -300,7 +292,7 @@ function SchedulePollDetailPage() {
       });
       setPoll(updated);
       setAcknowledged(false);
-      setMemberIdsDraft(updated.members.map((member) => member.id));
+      setMemberIdsDraft((updated.members ?? []).map((member) => member.id));
       setDraftAnswers(
         Object.fromEntries(updated.myAnswers.map((answer) => [answer.slotId, answer.value])),
       );
@@ -310,18 +302,14 @@ function SchedulePollDetailPage() {
       if (staleError(reason)) {
         try {
           const latest = await reload();
-          let currentRoster = roster;
-          try {
-            currentRoster = await schedulePollApi.members(calendarId);
-            setRoster(currentRoster);
-          } catch {
-            // Keep the roster already on screen if it could not be refreshed.
-          }
+          // A failed refresh leaves the roster already on screen.
+          await useCalendarStore.getState().fetchMembers(calendarId);
+          const currentRoster = useCalendarStore.getState().membersMap[calendarId] ?? roster;
           const eligibleMemberIds = new Set(currentRoster.map((member) => member.id));
           const explicitlyRemoved = new Set(
             [...initiallySelected].filter((id) => !requestedMemberIds.includes(id)),
           );
-          const mergedMemberIds = latest.members
+          const mergedMemberIds = (latest.members ?? [])
             .map((member) => member.id)
             .filter((id) => !explicitlyRemoved.has(id));
           for (const id of requestedMemberIds) {
@@ -633,6 +621,7 @@ function SchedulePollDetailPage() {
     );
   }
 
+  const pollMembers = poll.members ?? [];
   const showTabs = poll.status === 'open' && poll.canRespond && poll.canManage;
   const takeOver = async () => {
     try {
@@ -656,8 +645,8 @@ function SchedulePollDetailPage() {
     }
   };
   const inviteesChanged = !(
-    memberIdsDraft.length === poll.members.length &&
-    poll.members.every((member) => memberIdsDraft.includes(member.id))
+    memberIdsDraft.length === pollMembers.length &&
+    pollMembers.every((member) => memberIdsDraft.includes(member.id))
   );
 
   return (
@@ -858,7 +847,7 @@ function SchedulePollDetailPage() {
                           >
                             {t('schedulePoll.tally')}
                           </th>
-                          {poll.members.map((member) => (
+                          {pollMembers.map((member) => (
                             <th
                               key={member.id}
                               scope="col"
@@ -912,7 +901,7 @@ function SchedulePollDetailPage() {
                               <td className="whitespace-nowrap px-3 py-2.5">
                                 <Tally tally={tally} />
                               </td>
-                              {poll.members.map((member) => {
+                              {pollMembers.map((member) => {
                                 const value = responseFor(member.id, slot.id);
                                 return (
                                   <td key={member.id} className="px-2 py-2.5 text-center">
@@ -954,7 +943,7 @@ function SchedulePollDetailPage() {
                           </div>
                           <div className="mt-2.5 flex items-center justify-between gap-3">
                             <ul className="flex min-w-0 flex-wrap gap-x-3 gap-y-1.5">
-                              {poll.members.map((member) => {
+                              {pollMembers.map((member) => {
                                 const value = responseFor(member.id, slot.id);
                                 return (
                                   <li
@@ -1060,7 +1049,7 @@ function SchedulePollDetailPage() {
                         ariaLabel={t('schedulePoll.eventOwner')}
                         className="w-full"
                         triggerClassName="input-modern"
-                        options={poll.members.map((member) => ({
+                        options={pollMembers.map((member) => ({
                           value: member.id,
                           label: member.name,
                         }))}

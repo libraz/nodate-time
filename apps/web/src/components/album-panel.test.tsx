@@ -67,7 +67,8 @@ function photo(imageUrl: string, id = 'photo-1') {
     imageUrl,
     createdAt: '2026-04-20T10:00:00+09:00',
     takenAt: '2026-04-20T10:00:00+09:00',
-    uploadedBy: { id: 'u1', name: 'User 1' },
+    uploaderId: 'u1',
+    uploaderName: 'User 1',
   };
 }
 

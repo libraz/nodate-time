@@ -60,7 +60,7 @@ function event(id: string, calendarId: string, title: string): CalendarEvent {
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
     recurrenceRule: null,
     isRecurrence: false,
     recurrenceDate: null,

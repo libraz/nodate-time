@@ -29,7 +29,7 @@ export function buildMovedEvent(evt: CalendarEvent, newStart: DateTime): EventIn
     memo: evt.memo,
     url: evt.url,
     notificationOffset: evt.notificationOffset,
-    participants: evt.participants,
+    participantIds: evt.participantIds,
     ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
     // A move is a move. Carrying these forward is what keeps a drag from
@@ -77,7 +77,7 @@ export function buildResizedEvent(evt: CalendarEvent, newEnd: DateTime): EventIn
     memo: evt.memo,
     url: evt.url,
     notificationOffset: evt.notificationOffset,
-    participants: evt.participants,
+    participantIds: evt.participantIds,
     ownerId: evt.ownerId,
     recurrenceRule: evt.recurrenceRule,
     // A move is a move. Carrying these forward is what keeps a drag from

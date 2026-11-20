@@ -179,11 +179,11 @@ export function CommentsSection({
           )}
           {comments.map((c) => (
             <div key={c.id} className="group flex gap-2">
-              <Avatar src={c.userAvatar} name={c.userName} className="mt-0.5" />
+              <Avatar src={c.authorAvatarUrl} name={c.authorName} className="mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
                   <span className="text-body font-medium text-[var(--color-text-primary)]">
-                    {c.userName}
+                    {c.authorName}
                   </span>
                   <span className="text-caption text-[var(--color-text-tertiary)]">
                     {formatRelativeTime(c.createdAt, locale)}

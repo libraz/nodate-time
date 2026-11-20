@@ -29,7 +29,7 @@ function ParticipantChip({
   return (
     <span className="flex h-8 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] pr-1 pl-1 text-footnote text-[var(--color-text-primary)]">
       <Avatar
-        src={member.avatar}
+        src={member.avatarUrl}
         name={member.name}
         color={member.color}
         round
@@ -99,7 +99,7 @@ export function EventPeople({
     value: m.id,
     label: nameOf(m),
     color: m.color,
-    person: { name: m.name, avatarUrl: m.avatar },
+    person: { name: m.name, avatarUrl: m.avatarUrl },
   });
   const owner = ordered.find((m) => m.id === (ownerId ?? myId));
   const taking = participants
@@ -118,7 +118,7 @@ export function EventPeople({
           owner && (
             <span className="flex min-w-0 items-center gap-2 text-default text-[var(--color-text-primary)]">
               <Avatar
-                src={owner.avatar}
+                src={owner.avatarUrl}
                 name={owner.name}
                 color={owner.color}
                 round

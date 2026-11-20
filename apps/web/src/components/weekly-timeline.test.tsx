@@ -70,7 +70,7 @@ const probe: CalendarEvent = {
   flexibility: 'fixed',
   visibility: 'default',
   notificationOffset: null,
-  participants: [],
+  participantIds: [],
   recurrenceRule: null,
   isRecurrence: false,
   recurrenceDate: null,

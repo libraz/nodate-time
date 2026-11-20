@@ -112,7 +112,7 @@ export function canManage(role: string | undefined | null): boolean {
  * server's rule.
  */
 export function canDeleteComment(
-  comment: { userPublicId: string },
+  comment: { authorId: string },
   role: string | undefined | null,
   myUserId: string | undefined,
 ): boolean {
@@ -127,11 +127,11 @@ export function canDeleteComment(
  * included. This mirrors the server's rule.
  */
 export function canEditComment(
-  comment: { userPublicId: string },
+  comment: { authorId: string },
   role: string | undefined | null,
   myUserId: string | undefined,
 ): boolean {
-  return canEdit(role) && !!myUserId && comment.userPublicId === myUserId;
+  return canEdit(role) && !!myUserId && comment.authorId === myUserId;
 }
 
 /**

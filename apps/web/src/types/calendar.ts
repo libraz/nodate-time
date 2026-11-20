@@ -22,13 +22,14 @@ export interface Calendar {
 export interface Member {
   id: string;
   name: string;
-  email: string;
+  /** Absent on rows the caller may not see an address for. */
+  email?: string;
   role: string;
   /** The colour this member is identified by on the calendar. Agreed by the
    *  calendar rather than chosen per viewer, and what an event on their
    *  layer is drawn in. */
   color: string;
-  avatar?: string;
+  avatarUrl?: string;
 }
 
 export interface RecurrenceRule {
@@ -74,9 +75,9 @@ export interface EventAttachment {
 export interface EventComment {
   id: string;
   body: string;
-  userName: string;
-  userAvatar?: string;
-  userPublicId: string;
+  authorName: string;
+  authorAvatarUrl?: string;
+  authorId: string;
   createdAt: string;
 }
 
@@ -157,7 +158,7 @@ export interface CalendarEvent {
   flexibility: Flexibility;
   visibility: Visibility;
   notificationOffset: number | null;
-  participants: string[];
+  participantIds: string[];
   /** Per-participant state: their answer, and whether the owner has trusted
    *  them to change the event. Absent on events read from a public share. */
   attendees?: Attendee[];
@@ -167,7 +168,7 @@ export interface CalendarEvent {
   taskOwned?: boolean;
   isRecurrence: boolean;
   recurrenceDate: string | null;
-  createdBy?: string;
+  creatorId?: string;
   creatorName?: string;
   creatorAvatarUrl?: string;
   createdAt: string;

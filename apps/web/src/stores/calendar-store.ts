@@ -28,7 +28,7 @@ export interface EventInput {
   memo?: string | undefined;
   url?: string | undefined;
   notificationOffset?: number | null | undefined;
-  participants?: string[] | undefined;
+  participantIds?: string[] | undefined;
   ownerId?: string | null | undefined;
   recurrenceRule?: RecurrenceRule | null | undefined;
   // showAs, flexibility and visibility are omitted-means-unchanged on the

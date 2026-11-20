@@ -44,7 +44,7 @@ const members: Member[] = [
     email: 'hanako@example.com',
     role: 'reader',
     color: '#ff0000',
-    avatar: 'https://storage.example/avatars/u1?signature=abc',
+    avatarUrl: 'https://storage.example/avatars/u1?signature=abc',
   },
   {
     id: 'u2',
@@ -52,7 +52,7 @@ const members: Member[] = [
     email: 'taro@example.com',
     role: 'owner',
     color: '#00ff00',
-    avatar: 'https://storage.example/avatars/u2?signature=def',
+    avatarUrl: 'https://storage.example/avatars/u2?signature=def',
   },
   { id: 'u3', name: 'Jiro', email: 'jiro@example.com', role: 'writer', color: '#0000ff' },
 ];
@@ -125,7 +125,7 @@ describe('MembersPanel', () => {
     const sources = Array.from(container.querySelectorAll('img')).map((img) =>
       img.getAttribute('src'),
     );
-    expect(sources).toEqual([members[0]?.avatar, members[1]?.avatar]);
+    expect(sources).toEqual([members[0]?.avatarUrl, members[1]?.avatarUrl]);
   });
 
   it('stands in with the initial for a member who has no picture', () => {

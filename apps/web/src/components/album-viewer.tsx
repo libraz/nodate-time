@@ -409,12 +409,12 @@ export function AlbumViewer({
               <dt className="w-16 shrink-0 text-white/60">{t('album.addedBy')}</dt>
               <dd className="flex min-w-0 items-center gap-2">
                 <Avatar
-                  src={photo.uploadedBy.avatarUrl}
-                  name={photo.uploadedBy.name}
+                  src={photo.uploaderAvatarUrl}
+                  name={photo.uploaderName}
                   size="h-5 w-5"
                   round
                 />
-                <span className="truncate">{photo.uploadedBy.name}</span>
+                <span className="truncate">{photo.uploaderName}</span>
               </dd>
             </div>
           </dl>

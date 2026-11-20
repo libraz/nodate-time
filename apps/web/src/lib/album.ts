@@ -15,7 +15,9 @@ export interface AlbumPhoto {
   takenAt: string;
   /** Public id of the event this photo belongs to, empty when it belongs to none. */
   eventId?: string;
-  uploadedBy: { id: string; name: string; avatarUrl?: string };
+  uploaderId: string;
+  uploaderName: string;
+  uploaderAvatarUrl?: string;
 }
 
 export interface AlbumDay {

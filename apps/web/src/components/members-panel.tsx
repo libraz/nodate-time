@@ -157,7 +157,7 @@ export function MembersPanel() {
                           className="member-color-trigger relative shrink-0 rounded-full"
                         >
                           <Avatar
-                            src={m.avatar}
+                            src={m.avatarUrl}
                             name={m.name}
                             size="h-9 w-9"
                             color={m.color}
@@ -170,7 +170,13 @@ export function MembersPanel() {
                           />
                         </button>
                       ) : (
-                        <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
+                        <Avatar
+                          src={m.avatarUrl}
+                          name={m.name}
+                          size="h-9 w-9"
+                          color={m.color}
+                          round
+                        />
                       )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">

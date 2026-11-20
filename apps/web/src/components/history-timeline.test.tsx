@@ -33,7 +33,9 @@ interface ServerHistoryItem {
   action: string;
   summary: string;
   createdAt: string;
-  actor: { id: string; name: string; avatarUrl?: string } | null;
+  actorId?: string | undefined;
+  actorName?: string | undefined;
+  actorAvatarUrl?: string;
   systemActor?: boolean;
 }
 
@@ -43,7 +45,8 @@ function item(overrides: Partial<ServerHistoryItem> = {}): ServerHistoryItem {
     action: 'calendar.event.updated',
     summary: 'Dinner',
     createdAt: '2026-04-20T10:00:00+09:00',
-    actor: { id: '00000000-0000-7000-8000-0000000000a1', name: 'Rin' },
+    actorId: '00000000-0000-7000-8000-0000000000a1',
+    actorName: 'Rin',
     ...overrides,
   };
 }
@@ -158,8 +161,8 @@ describe('HistoryTimeline', () => {
 
   it('names the actor, and stands in for one the server no longer knows', async () => {
     mockApi.get.mockResolvedValue([
-      item({ id: 'id-1', actor: { id: 'u1', name: 'Rin' } }),
-      item({ id: 'id-2', actor: null }),
+      item({ id: 'id-1', actorId: 'u1', actorName: 'Rin' }),
+      item({ id: 'id-2', actorId: undefined, actorName: undefined }),
     ]);
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
@@ -170,7 +173,9 @@ describe('HistoryTimeline', () => {
   });
 
   it('labels a marked system entry as the system', async () => {
-    mockApi.get.mockResolvedValue([item({ actor: null, systemActor: true })]);
+    mockApi.get.mockResolvedValue([
+      item({ actorId: undefined, actorName: undefined, systemActor: true }),
+    ]);
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 

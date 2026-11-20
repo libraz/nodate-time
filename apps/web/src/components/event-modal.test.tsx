@@ -62,11 +62,11 @@ const event: CalendarEvent = {
   flexibility: 'fixed',
   visibility: 'default',
   notificationOffset: null,
-  participants: [],
+  participantIds: [],
   recurrenceRule: null,
   isRecurrence: false,
   recurrenceDate: null,
-  createdBy: 'u1',
+  creatorId: 'u1',
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
 };
@@ -191,8 +191,8 @@ describe('EventModal body', () => {
               {
                 id: 'c1',
                 body: 'first thing',
-                userName: 'Someone',
-                userPublicId: 'u2',
+                authorName: 'Someone',
+                authorId: 'u2',
                 createdAt: '2026-04-20T10:00:00Z',
               },
             ],
@@ -213,8 +213,8 @@ describe('EventModal body', () => {
       const comment = (id: string, body: string) => ({
         id,
         body,
-        userName: 'Someone',
-        userPublicId: 'u2',
+        authorName: 'Someone',
+        authorId: 'u2',
         createdAt: '2026-04-20T10:00:00Z',
       });
       return path.includes('cursor=')
@@ -232,7 +232,7 @@ describe('EventModal body', () => {
     expect(rendered).toEqual(['older thing', 'newer thing']);
   });
 
-  // userAvatar is a URL, and rendering it as the contents of the avatar box
+  // authorAvatarUrl is a URL, and rendering it as the contents of the avatar box
   // put the signed link on screen as text where the face should be.
   it('draws a comment author as their picture, not as the URL of it', async () => {
     const avatar = 'https://storage.example/avatars/u2?signature=abc';
@@ -243,9 +243,9 @@ describe('EventModal body', () => {
               {
                 id: 'c1',
                 body: 'first thing',
-                userName: 'Someone',
-                userPublicId: 'u2',
-                userAvatar: avatar,
+                authorName: 'Someone',
+                authorId: 'u2',
+                authorAvatarUrl: avatar,
                 createdAt: '2026-04-20T10:00:00Z',
               },
             ],
@@ -271,8 +271,8 @@ describe('EventModal body', () => {
               {
                 id: 'c1',
                 body: 'first thing',
-                userName: 'Someone',
-                userPublicId: 'u2',
+                authorName: 'Someone',
+                authorId: 'u2',
                 createdAt: '2026-04-20T10:00:00Z',
               },
             ],
@@ -539,7 +539,7 @@ describe('EventModal save payload', () => {
     'memo',
     'notificationOffset',
     'ownerId',
-    'participants',
+    'participantIds',
     'recurrenceRule',
     'showAs',
     'startAt',
@@ -699,7 +699,7 @@ describe('EventModal recurrence end', () => {
 describe('EventModal RSVP', () => {
   const invited: CalendarEvent = {
     ...event,
-    participants: ['u1'],
+    participantIds: ['u1'],
     attendees: [{ userId: 'u1', rsvp: 'pending', canEdit: false }],
   };
 
@@ -958,7 +958,7 @@ describe('EventModal who and availability', () => {
     await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
     expect(calendarState.addEvent.mock.calls[0]?.[1]).toMatchObject({
       ownerId: 'u2',
-      participants: ['u2'],
+      participantIds: ['u2'],
       showAs: 'tentative',
     });
   });

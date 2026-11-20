@@ -19,7 +19,7 @@ function evt(id: string, startAt: string, endAt: string, allDay = false): Calend
     memo: '',
     url: '',
     notificationOffset: null,
-    participants: [],
+    participantIds: [],
   } as unknown as CalendarEvent;
 }
 

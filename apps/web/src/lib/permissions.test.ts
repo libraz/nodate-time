@@ -177,8 +177,8 @@ describe('membershipFor', () => {
 });
 
 describe('comment moderation', () => {
-  const theirs = { userPublicId: 'u-them' };
-  const mine = { userPublicId: 'u-me' };
+  const theirs = { authorId: 'u-them' };
+  const mine = { authorId: 'u-me' };
 
   it('lets the author edit and remove their own comment', () => {
     expect(canEditComment(mine, 'editor', 'u-me')).toBe(true);

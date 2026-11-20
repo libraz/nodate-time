@@ -1552,12 +1552,7 @@ function AdminSection() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await api.get<{ providers: OAuthProviderInfo[] }>(
-        '/admin/oauth-providers',
-        false,
-        signal,
-      );
-      setProviders(res.providers);
+      setProviders(await api.get<OAuthProviderInfo[]>('/admin/oauth-providers', false, signal));
     } catch (e) {
       if (isAbortError(e)) return;
       toast.error(errorMessage(e));

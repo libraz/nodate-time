@@ -16,7 +16,7 @@ interface Candidate {
   id: string;
   name: string;
   email: string;
-  avatar?: string;
+  avatarUrl?: string;
 }
 
 interface CandidatePage {
@@ -201,7 +201,7 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
                   aria-label={t('members.addUnselect', { name: c.name || c.email })}
                   className="inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-full bg-[var(--color-accent-bg)] pr-2 pl-0.5 text-footnote font-medium text-[var(--color-accent-ink)] hover:brightness-95 disabled:opacity-60"
                 >
-                  <Avatar src={c.avatar} name={c.name || c.email} size="h-6 w-6" round />
+                  <Avatar src={c.avatarUrl} name={c.name || c.email} size="h-6 w-6" round />
                   <span className="truncate">{c.name || c.email}</span>
                   <svg
                     width="10"
@@ -254,7 +254,7 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
                       disabled={busy}
                       onChange={() => toggle(c)}
                     />
-                    <Avatar src={c.avatar} name={c.name || c.email} size="h-9 w-9" round />
+                    <Avatar src={c.avatarUrl} name={c.name || c.email} size="h-9 w-9" round />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-body font-medium text-[var(--color-text-primary)]">
                         {c.name || c.email}

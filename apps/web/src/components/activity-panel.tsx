@@ -102,11 +102,11 @@ export function ActivityPanel({ open, onClose }: ActivityPanelProps) {
               <div className="space-y-3">
                 {items.map((item) => {
                   const actorName =
-                    item.actor?.name ??
+                    item.actorName ??
                     t(item.systemActor ? 'history.systemActor' : 'history.deletedUser');
                   return (
                     <div key={item.id} className="flex gap-2">
-                      <Avatar src={item.actor?.avatarUrl} name={actorName} />
+                      <Avatar src={item.actorAvatarUrl} name={actorName} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-baseline gap-x-2">
                           <span className="text-body font-medium text-[var(--color-text-primary)]">
