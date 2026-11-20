@@ -30,9 +30,6 @@ type Deps struct {
 	AppName string
 }
 
-// defaultCalendarColor is applied when a client sends no colour.
-const defaultCalendarColor = "#4CAF50"
-
 // maxMembersListed caps one membership response. Callers want the whole list
 // -- a participant picker that cannot offer somebody who is in the calendar
 // is worse than a ceiling -- so this is a ceiling on cost rather than a page
@@ -221,67 +218,12 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*CreateCalendarOutput, error) {
 	return func(ctx context.Context, in *CreateCalendarInput) (*CreateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		pubID, err := uuid.NewV7()
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		memberPubID, err := uuid.NewV7()
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		color := in.Body.Color
-		if color == "" {
-			color = defaultCalendarColor
-		}
 
 		var created generated.Calendar
-		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			// owner_user_id is deliberately left NULL. The column cascades on
-			// delete, so naming an owner would mean removing that one person
-			// deletes the calendar and every event in it -- which is the
-			// opposite of what a calendar a group shares is for. Who may
-			// administer it is a calendar_members role, not this column.
-			result, err := q.CreateCalendar(ctx, generated.CreateCalendarParams{
-				PublicID:    pubID[:],
-				WorkspaceID: deps.WorkspaceID,
-				Name:        in.Body.Name,
-				Color:       color,
-			})
-			if err != nil {
-				return err
-			}
-			calID64, err := result.LastInsertId()
-			if err != nil {
-				return err
-			}
-			calID := uint32(calID64)
-
-			// The creator becomes the owning member, which is what actually
-			// grants them administration.
-			if _, err := q.AddCalendarMember(ctx, generated.AddCalendarMemberParams{
-				PublicID:    memberPubID[:],
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  calID,
-				UserID:      userID,
-				Role:        generated.CalendarMembersRoleOwner,
-				MemberColor: color,
-			}); err != nil {
-				return err
-			}
-
-			created, err = q.GetCalendarByID(ctx, calID)
-			if err != nil {
-				return err
-			}
-			return eventlog.Append(ctx, q, eventlog.Entry{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  calID,
-				ActorUserID: userID,
-				Type:        eventlog.TypeCalendarSetUp,
-				Summary:     in.Body.Name,
-				Extra:       map[string]any{"calendarId": eventlog.UUID(pubID[:])},
-			})
+		err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			var err error
+			created, err = calresolve.SetUp(ctx, q, deps.WorkspaceID, userID, in.Body.Name, in.Body.Color)
+			return err
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -290,7 +232,7 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 		// The creator owns the calendar, in the colour it was just created
 		// with. Nothing has had the chance to share it yet, so the creator is
 		// its only member and publicShared is false by construction.
-		resp := mapCalendarWithCover(deps, created, generated.CalendarMembersRoleOwner, color, "")
+		resp := mapCalendarWithCover(deps, created, generated.CalendarMembersRoleOwner, created.Color, "")
 		resp.MemberCount = 1
 		return &CreateCalendarOutput{Body: resp}, nil
 	}
@@ -521,40 +463,8 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 
 		var color string
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			members, err := calresolve.LockMembers(ctx, q, cal.ID, actorID, target.ID)
-			if err != nil {
-				return err
-			}
-			actorMember, ok := members[actorID]
-			if !ok {
-				return apierrors.CalendarAccessDenied
-			}
-			if !calresolve.CanManage(actorMember.Role) {
-				return apierrors.CalendarRoleRequired
-			}
-			if _, ok := members[target.ID]; ok {
-				return apierrors.MemberAlreadyAdded
-			}
-			// Only someone already in the workspace can be added this way; a
-			// removed workspace member is not brought back through a calendar
-			// (sql/core/PROTOCOL.md, Identity rule 8). Whether the person
-			// exists at all is not disclosed separately.
-			if _, err := q.GetWorkspaceMember(ctx, generated.GetWorkspaceMemberParams{
-				WorkspaceID: cal.WorkspaceID,
-				UserID:      target.ID,
-			}); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return apierrors.MemberNotFound
-				}
-				return err
-			}
-			color, err = calresolve.Grant(ctx, q, calresolve.GrantInput{
-				Calendar:  cal,
-				User:      target,
-				Role:      role,
-				Actor:     actorID,
-				InvitedBy: actorID,
-			})
+			var err error
+			color, err = calresolve.AddMember(ctx, q, cal, actorID, target, role)
 			return err
 		})
 		if err != nil {

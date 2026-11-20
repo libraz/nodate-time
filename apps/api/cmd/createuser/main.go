@@ -22,16 +22,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/accounts"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
-	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
-	"github.com/libraz/nodate-time/apps/api/internal/workspace"
 )
 
 func main() {
@@ -85,12 +83,6 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 			return err
 		}
 	}
-	if name == "" {
-		name = email
-		if at := strings.IndexByte(email, '@'); at > 0 {
-			name = email[:at]
-		}
-	}
 
 	// This command writes rows; it signs nothing, serves nothing and sends
 	// nothing. Loading the serving configuration would make it refuse to start
@@ -130,125 +122,31 @@ func run(email, password, name, locale, timezone string, admin, skipExisting boo
 		return fmt.Errorf("connect db: %w", err)
 	}
 
-	var hash string
-	if password != "" {
-		if hash, err = auth.HashPassword(password); err != nil {
-			return fmt.Errorf("hash password: %w", err)
-		}
-	}
-
-	pubID, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("generate id: %w", err)
-	}
-
-	queries := generated.New(db)
-
-	if skipExisting {
-		existing, err := queries.GetUserByEmail(ctx, email)
-		switch {
-		case err == nil:
-			return reportSkipped(ctx, queries, existing, admin)
-		case !errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("look up existing user: %w", err)
-		}
-	}
-
-	// The account is spread across several tables and only makes sense as a
-	// whole: a user outside the workspace can reach no calendar, and an admin
-	// grant without a user is an orphan. One transaction is what keeps a half-created account from
-	// existing.
-	ws, err := workspace.Ensure(ctx, queries, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, cfg.WorkspaceCountry)
-	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
-	}
-
-	var userID uint32
-	err = dbtx.Run(ctx, db, func(q *generated.Queries) error {
-		res, err := q.CreateUser(ctx, generated.CreateUserParams{
-			PublicID:    pubID[:],
-			Email:       email,
-			DisplayName: name,
-			Locale:      locale,
-			Timezone:    timezone,
-		})
-		if err != nil {
-			return fmt.Errorf("create user (email may already exist): %w", err)
-		}
-		insertID, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		userID = uint32(insertID)
-
-		if hash != "" {
-			identityPubID, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
-			if _, err := q.CreateIdentity(ctx, generated.CreateIdentityParams{
-				PublicID:     identityPubID[:],
-				UserID:       userID,
-				Provider:     generated.IdentitiesProviderLocal,
-				Subject:      email,
-				PasswordHash: sql.NullString{String: hash, Valid: true},
-			}); err != nil {
-				return fmt.Errorf("create identity: %w", err)
-			}
-		}
-
-		if _, err := workspace.Join(ctx, q, ws.ID, userID); err != nil {
-			return fmt.Errorf("add workspace member: %w", err)
-		}
-
-		// Under a restriction, an account the operator created by hand is a
-		// deliberate exception to it, so its address joins the allowlist. On
-		// an open deployment a row would itself switch the restriction on and
-		// close sign-in to everyone else, so none is written.
-		restricted := len(cfg.GoogleAllowedDomainList()) > 0
-		if !restricted {
-			entries, err := q.CountEnabledOauthSigninAllowlistEntries(ctx)
-			if err != nil {
-				return fmt.Errorf("read allow-list: %w", err)
-			}
-			restricted = entries > 0
-		}
-		if restricted {
-			allowPubID, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
-			if err := q.UpsertOauthSigninAllowlistEmail(ctx, generated.UpsertOauthSigninAllowlistEmailParams{
-				PublicID:   allowPubID[:],
-				EntryValue: strings.ToLower(strings.TrimSpace(email)),
-				Notes:      sql.NullString{String: "created with createuser", Valid: true},
-			}); err != nil {
-				return fmt.Errorf("allow-list address: %w", err)
-			}
-		}
-
-		if admin {
-			grantPubID, err := uuid.NewV7()
-			if err != nil {
-				return err
-			}
-			if err := q.GrantInstanceAdmin(ctx, generated.GrantInstanceAdminParams{
-				PublicID: grantPubID[:],
-				UserID:   userID,
-			}); err != nil {
-				return fmt.Errorf("grant instance admin: %w", err)
-			}
-		}
-		return nil
+	res, err := accounts.Create(ctx, db, cfg, accounts.Params{
+		Email:         email,
+		Name:          name,
+		Password:      password,
+		Locale:        locale,
+		Timezone:      timezone,
+		Admin:         admin,
+		SkipExisting:  skipExisting,
+		AllowlistNote: "created with createuser",
 	})
 	if err != nil {
 		return err
+	}
+	if !res.Created {
+		return reportSkipped(ctx, generated.New(db), res.User, admin)
 	}
 
 	role := "user"
 	if admin {
 		role = "admin"
 	}
-	fmt.Printf("created %s (id=%d, public_id=%s, role=%s)\n", email, userID, pubID.String(), role)
+	pubID, err := uuid.FromBytes(res.User.PublicID)
+	if err != nil {
+		return fmt.Errorf("read public id: %w", err)
+	}
+	fmt.Printf("created %s (id=%d, public_id=%s, role=%s)\n", email, res.User.ID, pubID.String(), role)
 	return nil
 }
