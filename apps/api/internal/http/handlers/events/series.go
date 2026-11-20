@@ -270,10 +270,14 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 	// Edits of one series cannot reach this: they queue on the parent row
 	// first. That is why it needs its own test, and why that test puts
 	// every series on its own calendar.
+	pl := participantLog{
+		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
+		Title: e.body.Body.Title, Extra: participantLogExtra(w),
+	}
 	if bytes.Equal(child.PublicID, overridePubID[:]) {
-		err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants)
+		err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants, pl)
 	} else {
-		err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, e.participants)
+		err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, e.participants, pl)
 	}
 	if err != nil {
 		return editedRows{}, err
@@ -307,7 +311,7 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 // series. Until it was edited the occurrence showed the series' attendees;
 // editing its title must not reset an answer already given or take back a
 // grant.
-func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspaceID, seriesID, overrideID uint32, participants []eventParticipant) error {
+func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspaceID, seriesID, overrideID uint32, participants []eventParticipant, log participantLog) error {
 	rows, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(seriesID), Valid: true})
 	if err != nil {
 		return err
@@ -340,7 +344,7 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 			return err
 		}
 	}
-	return nil
+	return logParticipantDiff(ctx, q, workspaceID, log, rows, participants)
 }
 
 // editSeries rewrites the series row itself. w must come from
@@ -387,7 +391,11 @@ func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdi
 	}); err != nil {
 		return editedRows{}, err
 	}
-	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants); err != nil {
+	pl := participantLog{
+		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
+		Title: e.body.Body.Title, Extra: participantLogExtra(w),
+	}
+	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
 		return editedRows{}, err
 	}
 	after, err := q.GetCalendarEventByID(ctx, current.ID)
@@ -443,7 +451,11 @@ func editProjected(ctx context.Context, q *generated.Queries, deps Deps, e event
 	}); err != nil {
 		return editedRows{}, err
 	}
-	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants); err != nil {
+	pl := participantLog{
+		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
+		Title: current.Title, Extra: participantLogExtra(w),
+	}
+	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
 		return editedRows{}, err
 	}
 	updated, err := q.GetCalendarEventByID(ctx, current.ID)

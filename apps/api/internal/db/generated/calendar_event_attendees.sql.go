@@ -170,10 +170,12 @@ const listEventAttendees = `-- name: ListEventAttendees :many
 SELECT a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
        u.display_name, u.avatar_url
 FROM calendar_event_attendees a
-INNER JOIN users u ON u.id = a.user_id
+INNER JOIN users u ON u.id = a.user_id AND u.enabled = TRUE
 INNER JOIN calendar_events e ON e.id = a.event_id
 INNER JOIN calendar_members cm
   ON cm.calendar_id = e.calendar_id AND cm.user_id = a.user_id AND cm.enabled = TRUE
+INNER JOIN workspace_members wm
+  ON wm.workspace_id = cm.workspace_id AND wm.user_id = a.user_id AND wm.enabled = TRUE
 WHERE a.event_id = ? AND a.enabled = TRUE
 ORDER BY a.created_at
 `
@@ -187,9 +189,10 @@ type ListEventAttendeesRow struct {
 	AvatarURL    sql.NullString             `json:"avatarUrl"`
 }
 
-// Attendee reads name current members only. The participant list is also the
-// write format, and a write accepts members only, so a list naming somebody
-// who has left the calendar could never be saved back.
+// Attendee reads name current members only: an enabled calendar member with
+// an enabled workspace membership and account. The participant list is also
+// the write format, and a write accepts members only, so a list naming
+// somebody who has left could never be saved back.
 func (q *Queries) ListEventAttendees(ctx context.Context, eventID sql.NullInt32) ([]ListEventAttendeesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEventAttendees, eventID)
 	if err != nil {
@@ -224,10 +227,12 @@ const listEventAttendeesByEvents = `-- name: ListEventAttendeesByEvents :many
 SELECT a.event_id, a.user_id, a.rsvp, a.can_edit, u.public_id AS user_public_id,
        u.display_name, u.avatar_url
 FROM calendar_event_attendees a
-INNER JOIN users u ON u.id = a.user_id
+INNER JOIN users u ON u.id = a.user_id AND u.enabled = TRUE
 INNER JOIN calendar_events e ON e.id = a.event_id
 INNER JOIN calendar_members cm
   ON cm.calendar_id = e.calendar_id AND cm.user_id = a.user_id AND cm.enabled = TRUE
+INNER JOIN workspace_members wm
+  ON wm.workspace_id = cm.workspace_id AND wm.user_id = a.user_id AND wm.enabled = TRUE
 WHERE a.event_id IN (/*SLICE:event_ids*/?) AND a.enabled = TRUE
 ORDER BY a.event_id, a.created_at
 `
