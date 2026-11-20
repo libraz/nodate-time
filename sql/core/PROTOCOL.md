@@ -391,9 +391,11 @@ sit inside workspace membership.
   the blob first and the queue row second, and treats removing a missing
   key as success, so drainers from both products can run side by side.
   A drainer removes a queued key only when no `storage_objects` row holds
-  that key, confirmed or reserved. Otherwise it deletes the queue row and
-  leaves the blob to that row's lifecycle: a confirmed object's release, or
-  the unconfirmed sweep.
+  that key. A row holds its key when it is confirmed, or when it is a
+  reservation with `ref_count > 0`; a reservation nothing references, such
+  as one whose bytes failed their digest, holds nothing. Otherwise the
+  drainer deletes the queue row and leaves the blob to that row's
+  lifecycle: a confirmed object's release, or the unconfirmed sweep.
 - **Bucket identity.** On start-up each drainer compares its configured
   location, `<endpoint>/<bucket>`, with the `instance_settings` key
   `storage.location`. It inserts the row when it is missing. On a mismatch
