@@ -574,7 +574,6 @@ export const ja = {
   'album.deleteOne': '写真を削除',
   'album.deleteMany': '{count} 枚の写真を削除',
   'album.deleteHint': '{name} のメンバー全員のアルバムから削除されます',
-  'album.deleting': '削除中...',
   'album.info': '情報',
   'album.prev': '前の写真',
   'album.next': '次の写真',

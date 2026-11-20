@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlbumDeleteSheet, AlbumViewer, TrashIcon } from '@/components/album-viewer';
+import { AlbumViewer, TrashIcon } from '@/components/album-viewer';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { EmptyState, GUIDE_ICONS, TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { type AlbumPhoto, formatAlbumDay, groupByDay } from '@/lib/album';
 import { api, errorMessage } from '@/lib/api';
+import { startDownload } from '@/lib/download';
 import { readCaptureTime } from '@/lib/exif';
 import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
+import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarPages } from '@/lib/use-calendar-pages';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
@@ -238,10 +241,10 @@ export function AlbumPanel() {
       if (removed.size > 0) {
         updateItems(activeCalendarId, (cur) => cur.filter((p) => !removed.has(p.id)));
       }
-      if (failure) setError(errorMessage(failure));
+      if (failure) toast.error(errorMessage(failure));
       return removed;
     },
-    [activeCalendarId, updateItems, setError],
+    [activeCalendarId, updateItems],
   );
 
   const handleViewerDelete = useCallback(
@@ -270,10 +273,11 @@ export function AlbumPanel() {
           cur.map((p) => (p.id === photoId ? { ...p, ...updated } : p)),
         );
       } catch (e) {
-        setError(errorMessage(e));
+        toast.error(errorMessage(e));
+        throw e;
       }
     },
-    [activeCalendarId, updateItems, setError],
+    [activeCalendarId, updateItems],
   );
 
   const handleSaveCaption = useCallback(
@@ -298,12 +302,12 @@ export function AlbumPanel() {
         const { downloadUrl } = await api.get<{ downloadUrl: string }>(
           `/calendars/${activeCalendarId}/albums/${photo.id}/download`,
         );
-        window.open(downloadUrl, '_blank', 'noopener');
+        startDownload(downloadUrl);
       } catch (e) {
-        setError(errorMessage(e));
+        toast.error(errorMessage(e));
       }
     },
-    [activeCalendarId, setError],
+    [activeCalendarId],
   );
 
   function endSelecting() {
@@ -521,16 +525,15 @@ export function AlbumPanel() {
           </div>
         )}
 
-        {confirmingDelete && (
-          <AlbumDeleteSheet
-            title={t('album.deleteMany', { count: selected.size })}
-            hint={t('album.deleteHint', { name: target?.name ?? '' })}
-            busy={deleting}
-            tone="theme"
-            onConfirm={handleBulkDelete}
-            onCancel={() => setConfirmingDelete(false)}
-          />
-        )}
+        <ConfirmSheet
+          open={confirmingDelete}
+          title={t('album.deleteMany', { count: selected.size })}
+          hint={t('album.deleteHint', { name: target?.name ?? '' })}
+          confirmLabel={t('common.delete')}
+          busy={deleting}
+          onConfirm={handleBulkDelete}
+          onCancel={() => setConfirmingDelete(false)}
+        />
       </SidePanel>
 
       {viewerId && (

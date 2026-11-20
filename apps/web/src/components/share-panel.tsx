@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
@@ -46,6 +47,11 @@ export function SharePanel() {
   // one you cannot take back once it has been forwarded.
   const [inviteExpiry, setInviteExpiry] = useState<number>(168);
   const [inviteUses, setInviteUses] = useState<number>(1);
+  const [confirmingPublic, setConfirmingPublic] = useState(false);
+  const [pendingRevoke, setPendingRevoke] = useState<{ id: string; isPublic: boolean } | null>(
+    null,
+  );
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   // Several single-use invite links may coexist; the public link is at most one.
   const { joinInvites, publicLink, busy, createInvite, createPublicLink, revokeInvite } =
@@ -166,6 +172,7 @@ export function SharePanel() {
               <CustomSelect
                 value={inviteRole}
                 onChange={(role) => setInviteRole(role as Role)}
+                ariaLabel={t('members.role')}
                 options={INVITE_ROLE_OPTIONS.map((role) => ({
                   value: role,
                   label: t(roleLabelKey(role)),
@@ -177,6 +184,7 @@ export function SharePanel() {
                   className="flex-1"
                   value={String(inviteExpiry)}
                   onChange={(v) => setInviteExpiry(Number(v))}
+                  ariaLabel={t('invites.expiry')}
                   options={INVITE_EXPIRY_HOURS.map((h) => ({
                     value: String(h),
                     label: t(inviteExpiryLabelKey(h)),
@@ -187,6 +195,7 @@ export function SharePanel() {
                   className="flex-1"
                   value={String(inviteUses)}
                   onChange={(v) => setInviteUses(Number(v))}
+                  ariaLabel={t('invites.uses')}
                   options={INVITE_MAX_USES.map((u) => ({
                     value: String(u),
                     label: t(inviteUsesLabelKey(u)),
@@ -241,7 +250,7 @@ export function SharePanel() {
                           </span>
                           <button
                             type="button"
-                            onClick={() => revokeInvite(inv.id)}
+                            onClick={() => setPendingRevoke({ id: inv.id, isPublic: false })}
                             className="text-footnote text-[var(--color-danger)] hover:underline"
                           >
                             {t('share.revokeLink')}
@@ -300,7 +309,7 @@ export function SharePanel() {
               {!publicLink ? (
                 <button
                   type="button"
-                  onClick={createPublicLink}
+                  onClick={() => setConfirmingPublic(true)}
                   disabled={busy === 'public'}
                   className="btn-secondary w-full text-body disabled:opacity-50"
                 >
@@ -348,7 +357,7 @@ export function SharePanel() {
                   )}
                   <button
                     type="button"
-                    onClick={() => revokeInvite(publicLink.id)}
+                    onClick={() => setPendingRevoke({ id: publicLink.id, isPublic: true })}
                     className="text-footnote text-[var(--color-danger)] hover:underline"
                   >
                     {t('share.revokeLink')}
@@ -359,6 +368,36 @@ export function SharePanel() {
           </div>
         )}
       </div>
+
+      <ConfirmSheet
+        open={confirmingPublic}
+        title={t('confirm.publicLinkTitle')}
+        hint={t('share.publicConfirm')}
+        confirmLabel={t('common.create')}
+        destructive={false}
+        busy={confirmBusy}
+        onConfirm={async () => {
+          setConfirmBusy(true);
+          await createPublicLink();
+          setConfirmBusy(false);
+          setConfirmingPublic(false);
+        }}
+        onCancel={() => setConfirmingPublic(false)}
+      />
+      <ConfirmSheet
+        open={pendingRevoke !== null}
+        title={pendingRevoke?.isPublic ? t('confirm.revokeLink') : t('confirm.revokeInvite')}
+        confirmLabel={t('confirm.revoke')}
+        busy={confirmBusy}
+        onConfirm={async () => {
+          if (!pendingRevoke) return;
+          setConfirmBusy(true);
+          await revokeInvite(pendingRevoke.id);
+          setConfirmBusy(false);
+          setPendingRevoke(null);
+        }}
+        onCancel={() => setPendingRevoke(null)}
+      />
     </SidePanel>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ShareStateIcon } from '@/components/calendar-list';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
@@ -72,17 +73,27 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   const calendar = calendars.find((c) => c.id === calendarId);
   const heading = !editable ? t('panel.memo') : editing ? t('memo.edit') : t('memo.add');
   const titleRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useModalA11y<HTMLDivElement>(true, onClose);
-  const isDesktop = useIsDesktop();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ title: '', body: '', done: false });
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // The form as it was loaded, to tell unsaved edits from an untouched dialog.
+  const initialForm = useRef({ title: '', body: '', done: false });
+  const isDirty =
+    editable &&
+    (form.title !== initialForm.current.title ||
+      form.body !== initialForm.current.body ||
+      form.done !== initialForm.current.done);
+  const guardedClose = () => (isDirty ? setConfirmingDiscard(true) : onClose());
+  const dialogRef = useModalA11y<HTMLDivElement>(true, guardedClose);
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
-    if (editing) {
-      setForm({ title: editing.title, body: editing.body ?? '', done: editing.done });
-    } else {
-      setForm({ title: '', body: '', done: false });
-    }
+    const loaded = editing
+      ? { title: editing.title, body: editing.body ?? '', done: editing.done }
+      : { title: '', body: '', done: false };
+    initialForm.current = loaded;
+    setForm(loaded);
   }, [editing]);
 
   useEffect(() => {
@@ -122,6 +133,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       toast.error(errorMessage(e, t('error.deleteFailed')));
     } finally {
       setSaving(false);
+      setConfirmingDelete(false);
     }
   }, [editing, saving, calendarId, deleteMemo, onClose, t]);
 
@@ -131,7 +143,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       <div className="flex items-center justify-between px-6 py-3">
         <button
           type="button"
-          onClick={onClose}
+          onClick={guardedClose}
           aria-label={t('common.close')}
           className="icon-btn h-10 w-10 bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
         >
@@ -246,7 +258,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
         <div className="px-6 pt-3 pb-1">
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirmingDelete(true)}
             disabled={saving}
             className="inline-flex items-center gap-1.5 text-footnote font-medium text-[var(--color-danger)] transition-opacity hover:opacity-70 disabled:opacity-50"
           >
@@ -274,7 +286,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
     <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
       <button
         type="button"
-        onClick={onClose}
+        onClick={guardedClose}
         className="btn-secondary flex-1 py-3 text-default font-medium"
       >
         {editable ? t('common.cancel') : t('common.close')}
@@ -304,7 +316,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       type="button"
       aria-label={t('common.close')}
       className="modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)]"
-      onClick={onClose}
+      onClick={guardedClose}
     />
   );
 
@@ -313,6 +325,22 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   return createPortal(
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={heading}>
       {backdrop}
+      <ConfirmSheet
+        open={confirmingDiscard}
+        title={t('common.discardTitle')}
+        confirmLabel={t('common.discard')}
+        cancelLabel={t('common.keepEditing')}
+        onConfirm={onClose}
+        onCancel={() => setConfirmingDiscard(false)}
+      />
+      <ConfirmSheet
+        open={confirmingDelete}
+        title={t('confirm.deleteMemo')}
+        confirmLabel={t('common.delete')}
+        busy={saving}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
       {isDesktop ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
           <div className="glass-surface-heavy modal-panel pointer-events-auto flex w-full max-w-[480px] max-h-[90vh] flex-col overflow-hidden ring-1 ring-[var(--color-border)]">

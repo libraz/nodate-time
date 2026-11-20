@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
+import { startDownload } from '@/lib/download';
 import { toast } from '@/lib/toast';
 import { uploadViaPresign } from '@/lib/upload';
 import type { EventAttachment } from '@/types/calendar';
@@ -18,6 +20,8 @@ export function AttachmentsSection({
   const t = useT();
   const [attachments, setAttachments] = useState<EventAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // A listing that could not be read says so where the files would be: an
   // empty section otherwise claims the event has no attachments.
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -72,18 +76,22 @@ export function AttachmentsSection({
       const { downloadUrl } = await api.get<{ downloadUrl: string }>(
         `/calendars/${calendarId}/events/${eventId}/attachments/${att.id}/download`,
       );
-      window.open(downloadUrl, '_blank');
+      startDownload(downloadUrl);
     } catch (err) {
       toast.error(errorMessage(err));
     }
   };
 
   const handleDelete = async (id: string) => {
+    setDeleting(true);
     try {
       await api.delete(`/calendars/${calendarId}/events/${eventId}/attachments/${id}`);
       await fetchAttachments();
     } catch (err) {
       toast.error(errorMessage(err));
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
   };
 
@@ -153,7 +161,7 @@ export function AttachmentsSection({
               {editable && (
                 <LabelledButton
                   label={t('common.delete')}
-                  onClick={() => handleDelete(att.id)}
+                  onClick={() => setPendingDelete(att.id)}
                   className="reveal-on-hover shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg
@@ -199,6 +207,15 @@ export function AttachmentsSection({
           </button>
         </>
       )}
+
+      <ConfirmSheet
+        open={pendingDelete !== null}
+        title={t('confirm.deleteAttachment')}
+        confirmLabel={t('common.delete')}
+        busy={deleting}
+        onConfirm={() => pendingDelete && handleDelete(pendingDelete)}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

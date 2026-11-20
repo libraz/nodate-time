@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { CalendarCoverImage } from '@/components/calendar-cover-image';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
@@ -63,8 +64,7 @@ export function CalendarList() {
   };
 
   // Deleting takes the calendar's events, memos and album with it for every
-  // member, so the trash icon only arms the confirmation -- the second press
-  // is the one that deletes.
+  // member, so the trash icon only opens the confirmation sheet.
   const handleDeleteCalendar = async (id: string) => {
     setPendingDeleteId(null);
     try {
@@ -73,6 +73,8 @@ export function CalendarList() {
       toast.error(errorMessage(e));
     }
   };
+
+  const pendingDeleteCalendar = calendars.find((c) => c.id === pendingDeleteId);
 
   useEffect(() => {
     if (showNewForm) inputRef.current?.focus();
@@ -163,7 +165,6 @@ export function CalendarList() {
         )}
         {calendars.map((cal) => {
           const isActive = activeCalendarIds.includes(cal.id);
-          const confirming = pendingDeleteId === cal.id;
           const offerInvite = justCreatedId === cal.id && canManage(cal.role);
           return (
             <div key={cal.id}>
@@ -236,13 +237,10 @@ export function CalendarList() {
                 {canOwn(cal.role) && (
                   <button
                     type="button"
-                    onClick={() => setPendingDeleteId(confirming ? null : cal.id)}
+                    onClick={() => setPendingDeleteId(cal.id)}
                     aria-label={t('calendar.deleteCalendar')}
-                    aria-expanded={confirming}
                     title={t('calendar.deleteCalendar')}
-                    className={`icon-btn icon-btn-danger mr-1 h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)] ${
-                      confirming ? '' : 'reveal-on-hover'
-                    }`}
+                    className="icon-btn icon-btn-danger reveal-on-hover mr-1 h-7 w-7 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                   >
                     <svg
                       width="14"
@@ -257,30 +255,6 @@ export function CalendarList() {
                   </button>
                 )}
               </div>
-
-              {confirming && (
-                <div className="reveal-in mx-2 mb-1 rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-3 py-2">
-                  <p className="text-caption text-[var(--color-text-secondary)]">
-                    {t('calendar.deleteWarning', { name: cal.name })}
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPendingDeleteId(null)}
-                      className="btn-secondary h-8 flex-1 text-footnote"
-                    >
-                      {t('common.cancel')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCalendar(cal.id)}
-                      className="h-8 flex-1 rounded-[var(--radius-sm)] bg-[var(--color-danger-bg)] text-footnote font-medium text-[var(--color-danger)]"
-                    >
-                      {t('common.delete')}
-                    </button>
-                  </div>
-                </div>
-              )}
 
               {offerInvite && (
                 <div className="callout reveal-in mx-2 mb-1 flex-col gap-0 px-3 py-2">
@@ -350,6 +324,15 @@ export function CalendarList() {
           </div>
         )}
       </div>
+
+      <ConfirmSheet
+        open={pendingDeleteCalendar !== undefined}
+        title={t('confirm.deleteCalendar')}
+        hint={t('calendar.deleteWarning', { name: pendingDeleteCalendar?.name ?? '' })}
+        confirmLabel={t('common.delete')}
+        onConfirm={() => pendingDeleteCalendar && handleDeleteCalendar(pendingDeleteCalendar.id)}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 }

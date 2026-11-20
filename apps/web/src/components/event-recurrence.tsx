@@ -121,6 +121,7 @@ export function RecurrenceEditor({
         </span>
         <CustomSelect
           value={preset}
+          ariaLabel={t('event.recurrence')}
           options={(() => {
             const dayLabel = weekdayName(jsDayOfWeek(start), locale);
             const nth = getNthWeekday(start);
@@ -186,6 +187,7 @@ export function RecurrenceEditor({
               />
               <CustomSelect
                 value={rule.freq}
+                ariaLabel={t('event.recurrenceInterval')}
                 options={[
                   { value: 'daily', label: t('event.unitDay') },
                   { value: 'weekly', label: t('event.unitWeek') },
@@ -275,6 +277,7 @@ export function RecurrenceEditor({
               </span>
               <CustomSelect
                 value={rule.bySetPos?.length ? 'weekday' : 'date'}
+                ariaLabel={t('event.recurrenceMonthlyMode')}
                 options={[
                   { value: 'date', label: t('event.recurrenceMonthlyByDate') },
                   { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
@@ -309,6 +312,7 @@ export function RecurrenceEditor({
                 <div className="flex items-center gap-2">
                   <CustomSelect
                     value={String(rule.bySetPos[0])}
+                    ariaLabel={t('event.recurrenceMonthlyByWeekday')}
                     options={[
                       { value: '1', label: t('event.recurrenceNthFirst') },
                       { value: '2', label: t('event.recurrenceNthSecond') },
@@ -327,6 +331,7 @@ export function RecurrenceEditor({
                   />
                   <CustomSelect
                     value={rule.byDay?.[0] ?? 'SU'}
+                    ariaLabel={t('event.recurrenceWeekdaysLabel')}
                     options={WEEKDAY_CODES.map((code, idx) => ({
                       value: code,
                       label: weekdayName(idx, locale) || code,

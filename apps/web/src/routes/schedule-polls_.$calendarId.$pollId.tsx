@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { CustomSelect } from '@/components/pickers';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
 import { ApiError, errorMessage } from '@/lib/api';
+import { memberOption } from '@/lib/member-option';
 import {
   type PollAnswer,
   type PollSlot,
@@ -99,6 +101,7 @@ function SchedulePollDetailPage() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   const view: PollView = requestedView ?? (poll?.canManage ? 'manage' : 'respond');
   const reload = async (refresh = false) => {
@@ -441,7 +444,7 @@ function SchedulePollDetailPage() {
   };
 
   const cancelPoll = async () => {
-    if (!poll || !window.confirm(t('schedulePoll.cancelConfirm', { title: poll.title }))) return;
+    if (!poll) return;
     setCancelling(true);
     try {
       const cancelled = await schedulePollApi.cancel(calendarId, pollId, poll.version);
@@ -459,6 +462,7 @@ function SchedulePollDetailPage() {
       } else toast.error(errorMessage(reason));
     } finally {
       setCancelling(false);
+      setConfirmingCancel(false);
     }
   };
 
@@ -1049,10 +1053,12 @@ function SchedulePollDetailPage() {
                         ariaLabel={t('schedulePoll.eventOwner')}
                         className="w-full"
                         triggerClassName="input-modern"
-                        options={pollMembers.map((member) => ({
-                          value: member.id,
-                          label: member.name,
-                        }))}
+                        options={pollMembers.map((member) => {
+                          const full = calendarMembers.find((m) => m.id === member.id);
+                          return full
+                            ? memberOption(full, userId, t)
+                            : { value: member.id, label: member.name };
+                        })}
                       />
                     </div>
                     <div className="self-end rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-3">
@@ -1160,12 +1166,21 @@ function SchedulePollDetailPage() {
               <div className="flex justify-center sm:justify-start">
                 <button
                   type="button"
-                  onClick={cancelPoll}
+                  onClick={() => setConfirmingCancel(true)}
                   disabled={cancelling}
                   className="rounded-full px-3 py-2 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)] disabled:opacity-50"
                 >
                   {cancelling ? t('common.saving') : t('schedulePoll.cancelPoll')}
                 </button>
+                <ConfirmSheet
+                  open={confirmingCancel}
+                  title={t('confirm.cancelPollTitle')}
+                  hint={t('schedulePoll.cancelConfirm', { title: poll.title })}
+                  confirmLabel={t('confirm.cancelPoll')}
+                  busy={cancelling}
+                  onConfirm={cancelPoll}
+                  onCancel={() => setConfirmingCancel(false)}
+                />
               </div>
             )}
           </>

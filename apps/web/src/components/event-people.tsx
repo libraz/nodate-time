@@ -2,8 +2,15 @@ import { Avatar } from '@/components/avatar';
 import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect } from '@/components/pickers';
 import { type TranslationKey, useT } from '@/i18n';
+import { memberOption } from '@/lib/member-option';
 import { showAsLabelKey } from '@/lib/permissions';
-import { type Member, SHOW_AS_OPTIONS, type ShowAs } from '@/types/calendar';
+import {
+  type Attendee,
+  type Member,
+  type Rsvp,
+  SHOW_AS_OPTIONS,
+  type ShowAs,
+} from '@/types/calendar';
 
 /** What each availability means where it matters: when a time is being found. */
 const SHOW_AS_HINT: Record<ShowAs, TranslationKey> = {
@@ -13,31 +20,83 @@ const SHOW_AS_HINT: Record<ShowAs, TranslationKey> = {
   oof: 'event.showAsOofHint',
 };
 
-/** A participant as a pill: picture or initial, name, and a way to take them off. */
+/** The i18n key naming an RSVP answer; pending carries no mark. */
+const RSVP_LABEL: Record<Exclude<Rsvp, 'pending'>, TranslationKey> = {
+  accepted: 'event.rsvpAccepted',
+  tentative: 'event.rsvpTentative',
+  declined: 'event.rsvpDeclined',
+};
+
+/** A small badge on a participant's avatar giving their answer. */
+function RsvpMark({ rsvp }: { rsvp: Rsvp | undefined }) {
+  const t = useT();
+  if (!rsvp || rsvp === 'pending') return null;
+  const label = t(RSVP_LABEL[rsvp]);
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-rsvp={rsvp}
+      className="absolute -right-1 -bottom-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-surface)] text-micro leading-none font-bold text-[var(--color-text-secondary)] ring-1 ring-[var(--color-border)]"
+    >
+      {rsvp === 'tentative' ? (
+        '?'
+      ) : (
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d={rsvp === 'accepted' ? 'M20 6L9 17l-5-5' : 'M6 6l12 12M18 6L6 18'} />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+/** A participant as a pill: picture or initial, their answer, name, and a way to take them off. */
 function ParticipantChip({
   member,
   name,
-  disabled,
+  rsvp,
+  removable,
   onRemove,
 }: {
   member: Member;
   name: string;
-  disabled: boolean;
+  rsvp: Rsvp | undefined;
+  removable: boolean;
   onRemove: () => void;
 }) {
   const t = useT();
+  const declined = rsvp === 'declined';
   return (
     <span className="flex h-8 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] pr-1 pl-1 text-footnote text-[var(--color-text-primary)]">
-      <Avatar
-        src={member.avatarUrl}
-        name={member.name}
-        color={member.color}
-        round
-        size="h-6 w-6"
-        className="text-caption"
-      />
-      <span className={`truncate ${disabled ? 'pr-2' : ''}`}>{name}</span>
-      {!disabled && (
+      <span className="relative shrink-0">
+        <Avatar
+          src={member.avatarUrl}
+          name={member.name}
+          color={member.color}
+          round
+          size="h-6 w-6"
+          className="text-caption"
+        />
+        <RsvpMark rsvp={rsvp} />
+      </span>
+      <span
+        className={`truncate ${removable ? '' : 'pr-2'} ${
+          declined ? 'text-[var(--color-text-secondary)] line-through' : ''
+        }`}
+      >
+        {name}
+      </span>
+      {removable && (
         <LabelledButton
           label={t('event.removeParticipant', { name: member.name })}
           onClick={onRemove}
@@ -67,7 +126,19 @@ interface EventPeopleProps {
   /** The member whose layer the event sits on; null on a new event means the author. */
   ownerId: string | null;
   participants: string[];
-  disabled: boolean;
+  /** Shows who is involved without any control to change it. */
+  readOnly: boolean;
+  /** Offers the owner as a choice; otherwise the owner is shown as a plain row. */
+  canChangeOwner: boolean;
+  /**
+   * Whether a participant trusted to edit the event may be taken off. Doing so
+   * changes who may edit it, which only a manager or the event's owner may do.
+   */
+  canRemoveEditors: boolean;
+  /** Shown under the owner picker. */
+  ownerHint?: string | undefined;
+  /** The saved answers and grants, absent on a new event. */
+  attendees?: Attendee[] | undefined;
   onOwnerChange: (id: string) => void;
   onParticipantsChange: (ids: string[]) => void;
 }
@@ -87,7 +158,11 @@ export function EventPeople({
   myId,
   ownerId,
   participants,
-  disabled,
+  readOnly,
+  canChangeOwner,
+  canRemoveEditors,
+  ownerHint,
+  attendees,
   onOwnerChange,
   onParticipantsChange,
 }: EventPeopleProps) {
@@ -95,18 +170,13 @@ export function EventPeople({
   // The author reads themselves first: most plans are one's own.
   const ordered = [...members].sort((a, b) => Number(b.id === myId) - Number(a.id === myId));
   const nameOf = (m: Member) => (m.id === myId ? t('event.memberMe', { name: m.name }) : m.name);
-  const option = (m: Member) => ({
-    value: m.id,
-    label: nameOf(m),
-    color: m.color,
-    person: { name: m.name, avatarUrl: m.avatarUrl },
-  });
   const owner = ordered.find((m) => m.id === (ownerId ?? myId));
   const taking = participants
     .map((id) => ordered.find((m) => m.id === id))
     .filter((m): m is Member => !!m);
   const addable = ordered.filter((m) => !participants.includes(m.id));
   const searchable = members.length >= SEARCHABLE_FROM;
+  const attendeeOf = (id: string) => attendees?.find((a) => a.userId === id);
 
   return (
     <div className="card-section bg-[var(--color-surface-secondary)] p-4">
@@ -114,7 +184,7 @@ export function EventPeople({
         <span className="shrink-0 text-default text-[var(--color-text-primary)]">
           {t('event.whose')}
         </span>
-        {disabled ? (
+        {readOnly || !canChangeOwner ? (
           owner && (
             <span className="flex min-w-0 items-center gap-2 text-default text-[var(--color-text-primary)]">
               <Avatar
@@ -131,7 +201,7 @@ export function EventPeople({
         ) : (
           <CustomSelect
             value={owner?.id ?? ''}
-            options={ordered.map(option)}
+            options={ordered.map((m) => memberOption(m, myId, t))}
             onChange={onOwnerChange}
             ariaLabel={t('event.whose')}
             searchable={searchable}
@@ -139,6 +209,9 @@ export function EventPeople({
           />
         )}
       </div>
+      {ownerHint && !readOnly && canChangeOwner && (
+        <p className="mt-2 text-caption text-[var(--color-text-secondary)]">{ownerHint}</p>
+      )}
 
       <div className="my-3 border-t border-[var(--color-border)] opacity-50" />
 
@@ -147,20 +220,24 @@ export function EventPeople({
           {t('event.participants')}
         </legend>
         <div className="flex flex-wrap items-center gap-1.5">
-          {taking.map((m) => (
-            <ParticipantChip
-              key={m.id}
-              member={m}
-              name={nameOf(m)}
-              disabled={disabled}
-              onRemove={() => onParticipantsChange(participants.filter((id) => id !== m.id))}
-            />
-          ))}
-          {!disabled && addable.length > 0 && (
+          {taking.map((m) => {
+            const attendee = attendeeOf(m.id);
+            return (
+              <ParticipantChip
+                key={m.id}
+                member={m}
+                name={nameOf(m)}
+                rsvp={attendee?.rsvp}
+                removable={!readOnly && (canRemoveEditors || !attendee?.canEdit)}
+                onRemove={() => onParticipantsChange(participants.filter((id) => id !== m.id))}
+              />
+            );
+          })}
+          {!readOnly && addable.length > 0 && (
             <CustomSelect
               value=""
               placeholder={t('event.addParticipant')}
-              options={addable.map(option)}
+              options={addable.map((m) => memberOption(m, myId, t))}
               onChange={(id) => onParticipantsChange([...participants, id])}
               ariaLabel={t('event.addParticipant')}
               searchable={searchable}

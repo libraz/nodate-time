@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { LabelledButton } from '@/components/labelled-button';
 import { MemoCalendarTag, MemoDialog } from '@/components/memo-dialog';
@@ -181,6 +182,8 @@ export function MemoSection() {
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const [dialog, setDialog] = useState<MemoDialogState>(null);
+  const [pendingDelete, setPendingDelete] = useState<Memo | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Calendars the user can post a memo to: active in the sidebar and editable.
   const { options: postableCalendars, target, setTargetId } = usePanelCalendar(postable);
@@ -211,10 +214,14 @@ export function MemoSection() {
 
   const handleDelete = async (memo: Memo) => {
     if (!editable) return;
+    setDeleting(true);
     try {
       await deleteMemo(memo.calendarId, memo.id);
     } catch (e) {
       toast.error(errorMessage(e));
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
   };
 
@@ -341,7 +348,7 @@ export function MemoSection() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDelete(memo);
+                          setPendingDelete(memo);
                         }}
                         aria-label={t('common.delete')}
                         title={t('common.delete')}
@@ -382,6 +389,14 @@ export function MemoSection() {
           onClose={() => setDialog(null)}
         />
       )}
+      <ConfirmSheet
+        open={pendingDelete !== null}
+        title={t('confirm.deleteMemo')}
+        confirmLabel={t('common.delete')}
+        busy={deleting}
+        onConfirm={() => pendingDelete && handleDelete(pendingDelete)}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

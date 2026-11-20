@@ -846,7 +846,9 @@ describe('AlbumPanel camera roll', () => {
 
     fireEvent.click(within(viewer).getByLabelText('common.delete'));
     expect(mockApi.delete).not.toHaveBeenCalled();
-    fireEvent.click(within(viewer).getByText('album.deleteOne'));
+    const sheet = screen.getByRole('alertdialog');
+    expect(within(sheet).getByText('album.deleteOne')).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() =>
       expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0'),
@@ -871,7 +873,9 @@ describe('AlbumPanel camera roll', () => {
     const panel = screen.getByRole('dialog', { name: 'panel.album' });
     const deletes = within(panel).getAllByLabelText('common.delete');
     fireEvent.click(deletes[deletes.length - 1] as HTMLElement);
-    fireEvent.click(screen.getByText('album.deleteMany'));
+    const sheet = screen.getByRole('alertdialog');
+    expect(within(sheet).getByText('album.deleteMany')).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() => expect(mockApi.delete).toHaveBeenCalledTimes(2));
     expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0');

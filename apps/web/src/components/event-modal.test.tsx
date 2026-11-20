@@ -86,18 +86,18 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
+const teamCalendar = {
+  id: 'cal-1',
+  name: 'Team',
+  color: '#000',
+  createdAt: '',
+  publicShared: false,
+  role: 'owner',
+  memberColor: '#000',
+};
+
 const calendarState = {
-  calendars: [
-    {
-      id: 'cal-1',
-      name: 'Team',
-      color: '#000',
-      createdAt: '',
-      publicShared: false,
-      role: 'owner',
-      memberColor: '#000',
-    },
-  ],
+  calendars: [teamCalendar],
   activeCalendarIds: ['cal-1'],
   events: [event],
   addEvent: vi.fn(),
@@ -152,6 +152,9 @@ beforeEach(() => {
   uiState.locale = 'ja';
   uiState.timezone = 'Asia/Tokyo';
   calendarState.events = [event];
+  calendarState.calendars = [teamCalendar];
+  calendarState.activeCalendarIds = ['cal-1'];
+  teamCalendar.role = 'owner';
   relativeTime.mockReturnValue('a while ago');
   mockApi.get.mockResolvedValue([]);
   mockApi.getWithRevision.mockResolvedValue({ data: event, revision: 'rev-1' });
@@ -748,7 +751,7 @@ describe('EventModal monthly weekday position', () => {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
-    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNthFifth/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.recurrenceMonthlyByWeekday' }));
 
     expect(screen.queryByRole('option', { name: 'event.recurrenceNthLast' })).toBeNull();
     expect(screen.getByRole('option', { name: 'event.recurrenceNthFifth' })).toBeInTheDocument();
@@ -791,7 +794,7 @@ describe('EventModal recurrence presets across zones', () => {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
-    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNone/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.recurrence' }));
     fireEvent.click(screen.getByRole('option', { name: 'event.recurrenceWeekly' }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -807,7 +810,7 @@ describe('EventModal canonical recurrence rules', () => {
     mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
-    fireEvent.click(screen.getByRole('button', { name: /event\.recurrenceNone/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.recurrence' }));
     fireEvent.click(screen.getByRole('option', { name: label }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
     await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
@@ -894,7 +897,7 @@ describe('EventModal task-derived event', () => {
 
     expect(titleField()).toHaveAttribute('readonly');
     expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /event\.recurrenceNone/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'event.recurrence' })).toBeDisabled();
     for (const date of screen.getAllByRole('button', { name: '2026年8月7日(金)' })) {
       expect(date).toBeDisabled();
     }
@@ -971,5 +974,381 @@ describe('EventModal who and availability', () => {
 
     expect(screen.queryByRole('button', { name: 'event.whose' })).toBeNull();
     expect(screen.getByRole('group', { name: 'event.showAs' })).toBeInTheDocument();
+  });
+});
+
+describe('EventModal unsaved edits', () => {
+  async function editTitle() {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    fireEvent.change(titleField(), { target: { value: 'Standup moved' } });
+  }
+
+  function discardSheet() {
+    return screen.queryByRole('alertdialog', { name: 'common.discardTitle' });
+  }
+
+  const closePaths: [string, () => void][] = [
+    [
+      'the header close button',
+      () =>
+        fireEvent.click(
+          within(screen.getByRole('dialog')).getByRole('button', { name: 'common.close' }),
+        ),
+    ],
+    [
+      'cancel',
+      () =>
+        fireEvent.click(
+          within(screen.getByRole('dialog')).getByRole('button', { name: 'common.cancel' }),
+        ),
+    ],
+    [
+      'the backdrop',
+      () => fireEvent.click(document.querySelector('.modal-backdrop') as HTMLElement),
+    ],
+    ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+    [
+      'a swipe down',
+      () => {
+        const handle = document.querySelector('.touch-none') as HTMLElement;
+        fireEvent(handle, new MouseEvent('pointerdown', { bubbles: true, clientY: 0 }));
+        fireEvent(window, new MouseEvent('pointermove', { clientY: 300 }));
+        fireEvent(window, new MouseEvent('pointerup', { clientY: 300 }));
+      },
+    ],
+  ];
+
+  it.each(closePaths)('asks before %s throws edits away', async (_, close) => {
+    await editTitle();
+
+    close();
+
+    expect(await screen.findByRole('alertdialog', { name: 'common.discardTitle' })).toBeVisible();
+    expect(uiState.closeEventModal).not.toHaveBeenCalled();
+  });
+
+  it('closes once the discard is confirmed, and stays open on keep editing', async () => {
+    await editTitle();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(await screen.findByRole('button', { name: 'common.keepEditing' }));
+    await waitFor(() => expect(discardSheet()).toBeNull());
+    expect(titleField()).toHaveValue('Standup moved');
+
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'common.cancel' }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'common.discard' }));
+
+    await waitFor(() => expect(uiState.closeEventModal).toHaveBeenCalledTimes(1));
+  });
+
+  it('closes without asking after a successful save', async () => {
+    calendarState.updateEvent.mockResolvedValue(undefined);
+    await editTitle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(uiState.closeEventModal).toHaveBeenCalledTimes(1));
+    expect(discardSheet()).toBeNull();
+  });
+});
+
+describe('EventModal for a reader who may not edit', () => {
+  const invited: CalendarEvent = {
+    ...event,
+    ownerId: 'u2',
+    participantIds: ['u1'],
+    attendees: [{ userId: 'u1', rsvp: 'pending', canEdit: false }],
+  };
+
+  it('viewer can RSVP and expand more options; inputs are readOnly', async () => {
+    teamCalendar.role = 'viewer';
+    calendarState.events = [invited];
+    mockApi.put.mockResolvedValue(undefined);
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(titleField()).toHaveAttribute('readonly');
+    expect(screen.queryByRole('button', { name: 'common.save' })).toBeNull();
+
+    const more = screen.getByRole('button', { name: 'event.moreOptions' });
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    for (const field of ['event.location', 'event.urlPlaceholder', 'event.memo']) {
+      expect(screen.getByPlaceholderText(field)).toHaveAttribute('readonly');
+    }
+    for (const select of ['event.notification', 'event.visibility', 'event.flexibility']) {
+      expect(screen.getByRole('button', { name: select })).toBeDisabled();
+    }
+    expect(screen.getByRole('button', { name: 'event.recurrence' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'event.rsvpAccepted' }));
+    await waitFor(() =>
+      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/events/ev-1/rsvp', {
+        rsvp: 'accepted',
+      }),
+    );
+  });
+
+  it('closes without asking, since nothing it shows can be an edit', async () => {
+    teamCalendar.role = 'viewer';
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(uiState.closeEventModal).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('EventModal task-derived edits', () => {
+  it('keeps location and memo editable, and an edit there counts as unsaved', async () => {
+    calendarState.events = [{ ...event, taskOwned: true }];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'event.moreOptions' }));
+    const location = screen.getByPlaceholderText('event.location');
+    const memo = screen.getByPlaceholderText('event.memo');
+    expect(location).not.toHaveAttribute('readonly');
+    expect(memo).not.toHaveAttribute('readonly');
+    fireEvent.change(location, { target: { value: 'Room 4' } });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(await screen.findByRole('alertdialog', { name: 'common.discardTitle' })).toBeVisible();
+  });
+});
+
+describe('EventModal owner picker', () => {
+  const members: Member[] = [
+    { id: 'u1', name: 'Me', email: '', role: 'editor', color: '#111' },
+    { id: 'u2', name: 'Bob', email: '', role: 'editor', color: '#222' },
+    { id: 'u3', name: 'Cat', email: '', role: 'editor', color: '#333' },
+  ];
+
+  beforeEach(() => {
+    calendarState.membersMap = { 'cal-1': members };
+  });
+
+  afterEach(() => {
+    calendarState.membersMap = { 'cal-1': [] };
+  });
+
+  async function pickOwner(name: string) {
+    fireEvent.click(screen.getByRole('button', { name: 'event.whose' }));
+    fireEvent.click(await screen.findByRole('option', { name }));
+  }
+
+  it('lets an editor file a new plan under anyone, and says what that gives away', async () => {
+    teamCalendar.role = 'editor';
+    uiState.editingEventId = null;
+    render(<EventModal />);
+
+    expect(screen.queryByText('event.ownerOtherHint')).toBeNull();
+    await pickOwner('Bob');
+
+    expect(screen.getByText('event.ownerOtherHint')).toBeInTheDocument();
+  });
+
+  it('gives a manager no hint, since they keep the right to edit', async () => {
+    uiState.editingEventId = null;
+    render(<EventModal />);
+
+    await pickOwner('Bob');
+
+    expect(screen.queryByText('event.ownerOtherHint')).toBeNull();
+  });
+
+  it('lets an editor move a plan they own', async () => {
+    teamCalendar.role = 'editor';
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.getByRole('button', { name: 'event.whose' })).toBeEnabled();
+  });
+
+  it('shows the owner as a row to an editor trusted on somebody else’s plan', async () => {
+    teamCalendar.role = 'editor';
+    calendarState.events = [
+      {
+        ...event,
+        ownerId: 'u2',
+        participantIds: ['u1'],
+        attendees: [{ userId: 'u1', rsvp: 'accepted', canEdit: true }],
+      },
+    ];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.queryByRole('button', { name: 'event.whose' })).toBeNull();
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+  });
+
+  it('forgets the chosen owner when the calendar changes', async () => {
+    const home = { ...teamCalendar, id: 'cal-2', name: 'Home' };
+    calendarState.calendars = [teamCalendar, home];
+    calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
+    calendarState.membersMap = { 'cal-1': members, 'cal-2': members };
+    uiState.editingEventId = null;
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Dentist' } });
+
+    await pickOwner('Bob');
+    fireEvent.click(screen.getByRole('button', { name: 'event.calendar' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    expect(calendarState.addEvent.mock.calls[0]?.[0]).toBe('cal-2');
+    expect(calendarState.addEvent.mock.calls[0]?.[1]).toMatchObject({ ownerId: null });
+  });
+});
+
+describe('EventModal participants', () => {
+  const members: Member[] = [
+    { id: 'u1', name: 'Me', email: '', role: 'editor', color: '#111' },
+    { id: 'u2', name: 'Bob', email: '', role: 'editor', color: '#222' },
+    { id: 'u3', name: 'Cat', email: '', role: 'editor', color: '#333' },
+    { id: 'u4', name: 'Dan', email: '', role: 'editor', color: '#444' },
+    { id: 'u5', name: 'Eve', email: '', role: 'editor', color: '#555' },
+  ];
+
+  beforeEach(() => {
+    calendarState.membersMap = { 'cal-1': members };
+  });
+
+  afterEach(() => {
+    calendarState.membersMap = { 'cal-1': [] };
+  });
+
+  const delegated: CalendarEvent = {
+    ...event,
+    ownerId: 'u2',
+    participantIds: ['u1', 'u3'],
+    attendees: [
+      { userId: 'u1', rsvp: 'pending', canEdit: true },
+      { userId: 'u3', rsvp: 'pending', canEdit: false },
+    ],
+  };
+
+  function removeButtons() {
+    const people = screen.getByRole('group', { name: 'event.participants' });
+    return within(people).queryAllByRole('button', { name: 'event.removeParticipant' });
+  }
+
+  it('offers a delegate no way to take off a participant trusted to edit', async () => {
+    teamCalendar.role = 'editor';
+    calendarState.events = [delegated];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(removeButtons()).toHaveLength(1);
+  });
+
+  it('lets a manager take off anyone', async () => {
+    calendarState.events = [delegated];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(removeButtons()).toHaveLength(2);
+  });
+
+  it('marks each participant with their answer', async () => {
+    calendarState.events = [
+      {
+        ...event,
+        participantIds: ['u2', 'u3', 'u4', 'u5'],
+        attendees: [
+          { userId: 'u2', rsvp: 'accepted', canEdit: false },
+          { userId: 'u3', rsvp: 'declined', canEdit: false },
+          { userId: 'u4', rsvp: 'tentative', canEdit: false },
+          { userId: 'u5', rsvp: 'pending', canEdit: false },
+        ],
+      },
+    ];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const people = screen.getByRole('group', { name: 'event.participants' });
+    for (const answer of ['event.rsvpAccepted', 'event.rsvpDeclined', 'event.rsvpTentative']) {
+      const mark = within(people).getByRole('img', { name: answer });
+      expect(mark).toHaveAttribute('title', answer);
+    }
+    expect(within(people).getAllByRole('img')).toHaveLength(3);
+    expect(within(people).getByText('Cat')).toHaveClass('line-through');
+    expect(within(people).getByText('Bob')).not.toHaveClass('line-through');
+  });
+});
+
+describe('EventModal end before start', () => {
+  async function typeEnd(time: string) {
+    fireEvent.click(screen.getByRole('button', { name: '10:00' }));
+    const input = await screen.findByRole('textbox', { name: 'picker.typeTime' });
+    fireEvent.change(input, { target: { value: time } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  }
+
+  it('reports the error and refuses to save', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    await typeEnd('8:00');
+
+    expect(await screen.findByText('event.endBeforeStart')).toBeInTheDocument();
+    const save = screen.getByRole('button', { name: 'common.save' });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(calendarState.updateEvent).not.toHaveBeenCalled();
+  });
+
+  it('allows an end equal to the start', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    await typeEnd('9:00');
+
+    expect(screen.queryByText('event.endBeforeStart')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, string>;
+    expect(DateTime.fromISO(payload.endAt as string).toMillis()).toBe(
+      DateTime.fromISO(payload.startAt as string).toMillis(),
+    );
+  });
+});
+
+describe('EventModal immediate sections', () => {
+  it('says the sections below save immediately when editing', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.getByRole('heading', { name: 'event.savedImmediately' })).toBeInTheDocument();
+  });
+
+  it('has no such heading on create, where those sections are absent', () => {
+    uiState.editingEventId = null;
+    render(<EventModal />);
+
+    expect(screen.queryByRole('heading', { name: 'event.savedImmediately' })).toBeNull();
+  });
+});
+
+describe('EventModal delete', () => {
+  it('asks before deleting a single event', async () => {
+    calendarState.deleteEvent.mockResolvedValue(undefined);
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'event.deleteEvent' }));
+    const sheet = await screen.findByRole('alertdialog', { name: 'event.deleteConfirmTitle' });
+    expect(calendarState.deleteEvent).not.toHaveBeenCalled();
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
+
+    await waitFor(() =>
+      expect(calendarState.deleteEvent).toHaveBeenCalledWith('cal-1', 'ev-1', undefined),
+    );
   });
 });

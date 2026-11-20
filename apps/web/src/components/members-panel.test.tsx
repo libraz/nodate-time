@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -70,7 +70,8 @@ const calendarState = {
     },
   ],
   activeCalendarIds: ['cal-1'],
-  membersMap: { 'cal-1': members },
+  membersMap: { 'cal-1': members } as Record<string, Member[]>,
+  memberErrors: {} as Record<string, string>,
   fetchMembers: vi.fn(),
   leaveCalendar: vi.fn(),
   updateMemberColor: vi.fn(),
@@ -95,6 +96,8 @@ beforeEach(() => {
   uiState.rightPanel = 'members';
   uiState.panelCalendarRequest = null;
   setMyRole('reader');
+  calendarState.membersMap = { 'cal-1': members };
+  calendarState.memberErrors = {};
 });
 
 function setMyRole(role: string) {
@@ -199,17 +202,47 @@ describe('MembersPanel keyboard', () => {
   });
 });
 
+describe('MembersPanel load state', () => {
+  it('shows a placeholder while members have neither loaded nor failed', () => {
+    calendarState.membersMap = {};
+    const { container } = render(<MembersPanel />);
+
+    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.queryByText('members.loadFailed')).toBeNull();
+  });
+
+  it('says the load failed and retries on request', () => {
+    calendarState.membersMap = {};
+    calendarState.memberErrors = { 'cal-1': 'boom' };
+    render(<MembersPanel />);
+
+    expect(screen.getByText('members.loadFailed')).toBeInTheDocument();
+    calendarState.fetchMembers.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
+    expect(calendarState.fetchMembers).toHaveBeenCalledWith('cal-1');
+  });
+
+  it('lists the members once loaded', () => {
+    render(<MembersPanel />);
+
+    expect(screen.getByText('Taro')).toBeInTheDocument();
+    expect(screen.queryByText('members.loadFailed')).toBeNull();
+  });
+});
+
 describe('MembersPanel membership', () => {
   // Settings let a member leave; the panel listing the same members did not
   // offer it at all.
   it('lets a member leave the calendar from their own row', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     calendarState.leaveCalendar.mockResolvedValue(undefined);
     render(<MembersPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'members.leave' }));
 
-    expect(window.confirm).toHaveBeenCalledWith('members.leaveConfirm');
+    const sheet = screen.getByRole('alertdialog');
+    expect(within(sheet).getByText('members.leaveConfirm')).toBeInTheDocument();
+    expect(calendarState.leaveCalendar).not.toHaveBeenCalled();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'members.leave' }));
     await waitFor(() => expect(calendarState.leaveCalendar).toHaveBeenCalledWith('cal-1', 'u1'));
   });
 

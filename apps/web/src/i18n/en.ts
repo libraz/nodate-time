@@ -556,7 +556,6 @@ export const en: Record<TranslationKey, string> = {
   'album.deleteOne': 'Delete photo',
   'album.deleteMany': 'Delete {count} photos',
   'album.deleteHint': 'Removed from the album for everyone in {name}',
-  'album.deleting': 'Deleting...',
   'album.info': 'Info',
   'album.prev': 'Previous photo',
   'album.next': 'Next photo',

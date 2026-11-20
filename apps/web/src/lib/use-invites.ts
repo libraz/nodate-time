@@ -1,5 +1,4 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
 import type { Role } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
@@ -84,7 +83,6 @@ function applyInviteMutation(rows: InviteData[], mutation: InviteMutation): Invi
  * screen, once per calendar they selected.
  */
 export function useInvites(calendarId: string, enabled = true): CalendarInvites {
-  const t = useT();
   const scope = useMemo<InviteScope>(() => ({ calendarId, enabled }), [calendarId, enabled]);
   const activationRef = useRef<InviteActivation | null>(null);
   const [invitesByCalendar, setInvitesByCalendar] = useState<Map<string, InviteData[]>>(
@@ -211,8 +209,6 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
   const createPublicLink = useCallback(async () => {
     const activation = activationRef.current;
     if (!scope.enabled || !scope.calendarId || activation?.scope !== scope) return false;
-    // Guard against accidental external exposure.
-    if (!window.confirm(t('share.publicConfirm'))) return false;
     if (activationRef.current !== activation) return false;
 
     const operation = startCreate(activation, 'public');
@@ -233,7 +229,7 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
     } finally {
       finishCreate(activation, operation);
     }
-  }, [commitMutation, finishCreate, scope, startCreate, t]);
+  }, [commitMutation, finishCreate, scope, startCreate]);
 
   const revokeInvite = useCallback(
     async (id: string) => {

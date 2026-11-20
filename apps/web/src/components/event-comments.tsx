@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
 import { api, errorMessage } from '@/lib/api';
@@ -41,6 +42,8 @@ export function CommentsSection({
   const [isSending, setIsSending] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // A thread that could not be read is reported in place of the list: a toast
   // would be gone by the time the reader reaches this far down the modal, and
   // an empty section otherwise reads as "no comments yet".
@@ -131,6 +134,20 @@ export function CommentsSection({
     await fetchComments();
   };
 
+  const deleteComment = async (commentId: string) => {
+    setDeleting(true);
+    try {
+      await api.delete(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+      return;
+    } finally {
+      setDeleting(false);
+      setPendingDeleteId(null);
+    }
+    fetchComments();
+  };
+
   return (
     <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -205,17 +222,7 @@ export function CommentsSection({
                       {mayDelete(c) && (
                         <button
                           type="button"
-                          onClick={async () => {
-                            try {
-                              await api.delete(
-                                `/calendars/${calendarId}/events/${eventId}/activities/${c.id}`,
-                              );
-                            } catch (err) {
-                              toast.error(errorMessage(err));
-                              return;
-                            }
-                            fetchComments();
-                          }}
+                          onClick={() => setPendingDeleteId(c.id)}
                           className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                         >
                           {t('event.deleteComment')}
@@ -293,6 +300,15 @@ export function CommentsSection({
           </LabelledButton>
         </div>
       )}
+
+      <ConfirmSheet
+        open={pendingDeleteId !== null}
+        title={t('confirm.deleteComment')}
+        confirmLabel={t('common.delete')}
+        busy={deleting}
+        onConfirm={() => pendingDeleteId && deleteComment(pendingDeleteId)}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 }

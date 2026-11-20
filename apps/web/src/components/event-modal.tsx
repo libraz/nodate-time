@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { AttachmentsSection } from '@/components/event-attachments';
 import { ChecklistSection } from '@/components/event-checklist';
 import { CommentsSection } from '@/components/event-comments';
@@ -20,7 +21,13 @@ import {
   recurrenceAnchorStart,
   shiftStartKeepingDuration,
 } from '@/lib/event-times';
-import { canEdit, canEditEvent, roleOnCalendar, visibilityLabelKey } from '@/lib/permissions';
+import {
+  canEdit,
+  canEditEvent,
+  canManage,
+  roleOnCalendar,
+  visibilityLabelKey,
+} from '@/lib/permissions';
 import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
@@ -86,6 +93,32 @@ interface FormState {
   flexibility: Flexibility;
   recurrencePreset: RecurrencePreset;
   recurrenceRule: RecurrenceRule | null;
+}
+
+/** Structural equality over plain data; a key holding `undefined` counts as absent. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => sameData(v, b[i]))
+    );
+  }
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(ra), ...Object.keys(rb)]);
+  return [...keys].every((k) => sameData(ra[k], rb[k]));
+}
+
+/** Whether two forms say the same thing; participants are a set, not a sequence. */
+function formEqual(a: FormState, b: FormState): boolean {
+  const { participantIds: pa, ...restA } = a;
+  const { participantIds: pb, ...restB } = b;
+  const setB = new Set(pb);
+  return pa.length === setB.size && pa.every((id) => setB.has(id)) && sameData(restA, restB);
 }
 
 export function EventModal() {
@@ -177,8 +210,9 @@ export function EventModal() {
       ctrl.abort();
       const dy = start.lastY - start.startY;
       // Dismiss on a long pull or a quick downward flick; otherwise snap back.
-      if (dy > 160 || (dy > 48 && start.vy > 0.55)) requestClose();
+      // The sheet snaps back first, so a discard question is asked over a sheet at rest.
       setSheetDragY(0);
+      if (dy > 160 || (dy > 48 && start.vy > 0.55)) guardedClose();
     };
     window.addEventListener('pointermove', move, { signal: ctrl.signal });
     window.addEventListener('pointerup', end, { signal: ctrl.signal });
@@ -199,6 +233,7 @@ export function EventModal() {
       closeTimer.current = null;
     }
     setClosing(false);
+    setConfirming(null);
     setSheetIn(false);
     const id = requestAnimationFrame(() => setSheetIn(true));
     return () => cancelAnimationFrame(id);
@@ -229,6 +264,10 @@ export function EventModal() {
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
+  // The form as it was opened or last saved; an edit is whatever differs from it.
+  const initialForm = useRef<FormState | null>(null);
+  // Which confirmation is up: discarding unsaved edits, or deleting the event.
+  const [confirming, setConfirming] = useState<null | 'discard' | 'delete'>(null);
   // Optional fields (location/url/memo/reminder/visibility) collapse on create and
   // auto-expand when an existing event already uses any of them.
   const [showMore, setShowMore] = useState(false);
@@ -244,6 +283,34 @@ export function EventModal() {
   // A task projects this event's title, dates and recurrence; the server refuses
   // changes to them, so the form shows them without offering to edit.
   const taskOwned = editingEvent?.taskOwned === true;
+  // An end before the start is refused; an end equal to it is a zero-length
+  // event, which the API accepts.
+  const endError =
+    !form.allDay &&
+    DateTime.fromISO(form.endAt, { zone: timezone }) <
+      DateTime.fromISO(form.startAt, { zone: timezone });
+  const isDirty = editable && initialForm.current !== null && !formEqual(form, initialForm.current);
+  // Every way out of the editor asks first when it would throw edits away.
+  const guardedClose = () => {
+    if (closeTimer.current) return;
+    if (isDirty) {
+      setConfirming('discard');
+      return;
+    }
+    requestClose();
+  };
+  // Mirrors the API: on create any writer may file the plan under anyone; on
+  // edit only a manager or the event's owner may move it, and only they may
+  // take off a participant trusted to edit it.
+  const canChangeOwner = editingEvent
+    ? canManage(myRole) || editingEvent.ownerId === me?.id
+    : canEdit(myRole);
+  // A non-manager who files a new plan under someone else cannot edit it after.
+  const otherOwner =
+    !editingEvent && !canManage(myRole) && form.ownerId && form.ownerId !== me?.id
+      ? membersMap[formCalendarId]?.find((m) => m.id === form.ownerId)
+      : undefined;
+  const ownerHint = otherOwner ? t('event.ownerOtherHint', { name: otherOwner.name }) : undefined;
 
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
@@ -297,7 +364,7 @@ export function EventModal() {
       const rule = editingEvent.recurrenceRule ?? null;
       const startDt = DateTime.fromISO(editingEvent.startAt, { zone: anchorZone });
       const preset = ruleToPreset(rule, startDt);
-      setForm({
+      const opened: FormState = {
         title: editingEvent.title,
         allDay: editingEvent.allDay,
         startAt: editingEvent.allDay
@@ -319,7 +386,9 @@ export function EventModal() {
         flexibility: editingEvent.flexibility ?? 'fixed',
         recurrenceRule: rule,
         recurrencePreset: preset,
-      });
+      };
+      setForm(opened);
+      initialForm.current = opened;
       setShowMore(
         !!(
           editingEvent.location ||
@@ -340,7 +409,7 @@ export function EventModal() {
         : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
       const draftEnd = eventDraftEnd?.setZone(timezone, { keepLocalTime: true });
       const end = timed && draftEnd && draftEnd > start ? draftEnd : start.plus({ hours: 1 });
-      setForm({
+      const opened: FormState = {
         title: '',
         allDay: !timed,
         startAt: start.toFormat("yyyy-MM-dd'T'HH:mm"),
@@ -358,7 +427,9 @@ export function EventModal() {
         flexibility: 'fixed',
         recurrencePreset: 'none',
         recurrenceRule: null,
-      });
+      };
+      setForm(opened);
+      initialForm.current = opened;
       setShowMore(false);
     }
   }, [
@@ -406,7 +477,7 @@ export function EventModal() {
 
   const handleSave = useCallback(
     async (scope?: 'this' | 'all') => {
-      if (!form.title.trim() || saving || !editable) return;
+      if (!form.title.trim() || saving || !editable || endError) return;
       // Editing an occurrence: ask this-vs-series before mutating anything.
       if (editingEvent && isRecurringInstance && !scope) {
         setScopePrompt('save');
@@ -440,6 +511,7 @@ export function EventModal() {
         } else {
           await addEvent(form.calendarId, data);
         }
+        initialForm.current = form;
         setScopePrompt(null);
         requestClose();
       } catch (e) {
@@ -470,6 +542,7 @@ export function EventModal() {
       requestClose,
       saving,
       editable,
+      endError,
       timezone,
       anchorZone,
       revision,
@@ -495,6 +568,7 @@ export function EventModal() {
         toast.error(errorMessage(e, t('error.deleteFailed')));
       } finally {
         setSaving(false);
+        setConfirming(null);
       }
     },
     [editingEvent, isRecurringInstance, deleteEvent, requestClose, saving, editable, t],
@@ -509,7 +583,7 @@ export function EventModal() {
       setScopePrompt(null);
       return;
     }
-    requestClose();
+    guardedClose();
   };
   const panelRef = useModalA11y<HTMLDivElement>(showEventModal, dismiss, titleRef);
   const scopeRef = useModalA11y<HTMLDivElement>(scopePrompt !== null, () => setScopePrompt(null));
@@ -530,7 +604,7 @@ export function EventModal() {
       <div className="grid grid-cols-[2.5rem_1fr_2.5rem] items-center gap-3 px-6 py-3">
         <LabelledButton
           label={t('common.close')}
-          onClick={requestClose}
+          onClick={guardedClose}
           className="icon-btn h-10 w-10 bg-[var(--color-surface-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
         >
           <svg
@@ -556,7 +630,7 @@ export function EventModal() {
           ref={titleRef}
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-          readOnly={taskOwned}
+          readOnly={!editable || taskOwned}
           placeholder={t('event.titlePlaceholder')}
           rows={1}
           className="w-full resize-none border-b-2 border-transparent bg-transparent text-display font-light text-[var(--color-text-primary)] outline-none transition-colors placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
@@ -592,7 +666,7 @@ export function EventModal() {
               {calIcon}
               <CustomSelect
                 value={formCalendarId}
-                onChange={(v) => setForm((f) => ({ ...f, calendarId: v }))}
+                onChange={(v) => setForm((f) => ({ ...f, calendarId: v, ownerId: null }))}
                 ariaLabel={t('event.calendar')}
                 className="min-w-0 flex-1"
                 triggerClassName="input-modern"
@@ -702,7 +776,11 @@ export function EventModal() {
             myId={me?.id}
             ownerId={form.ownerId}
             participants={form.participantIds}
-            disabled={!editable}
+            readOnly={!editable}
+            canChangeOwner={canChangeOwner}
+            canRemoveEditors={canChangeOwner}
+            ownerHint={ownerHint}
+            attendees={editingEvent?.attendees}
             onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
             onParticipantsChange={(ids) => setForm((f) => ({ ...f, participantIds: ids }))}
           />
@@ -717,7 +795,7 @@ export function EventModal() {
           </p>
         )}
         <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-          <fieldset disabled={taskOwned} className="contents">
+          <fieldset disabled={!editable || taskOwned} className="contents">
             <DateTimeField
               label={t('event.start')}
               dateValue={DateTime.fromISO(form.startAt, { zone: timezone })}
@@ -765,17 +843,17 @@ export function EventModal() {
               }}
               onTimeChange={(time) => {
                 const datePart = form.endAt.split('T')[0] ?? '';
-                setForm((f) => {
-                  const newEnd = `${datePart}T${time}`;
-                  // If end is before start, don't allow it — keep old value
-                  const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
-                  const endDt = DateTime.fromISO(newEnd, { zone: timezone });
-                  if (endDt <= startDt) return f;
-                  return { ...f, endAt: newEnd };
-                });
+                // Applied as chosen: an end before the start is reported below
+                // and blocks the save rather than being silently ignored.
+                setForm((f) => ({ ...f, endAt: `${datePart}T${time}` }));
               }}
               minDate={DateTime.fromISO(form.startAt, { zone: timezone })}
             />
+            {endError && (
+              <p role="alert" className="pb-1 text-footnote text-[var(--color-danger)]">
+                {t('event.endBeforeStart')}
+              </p>
+            )}
 
             <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
@@ -863,6 +941,7 @@ export function EventModal() {
                   type="text"
                   value={form.location}
                   onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                  readOnly={!editable}
                   placeholder={t('event.location')}
                   className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                 />
@@ -886,6 +965,7 @@ export function EventModal() {
                   type="url"
                   value={form.url}
                   onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                  readOnly={!editable}
                   placeholder={t('event.urlPlaceholder')}
                   className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                 />
@@ -908,6 +988,7 @@ export function EventModal() {
                   data-1p-ignore
                   value={form.memo}
                   onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
+                  readOnly={!editable}
                   placeholder={t('event.memo')}
                   maxLength={16000}
                   rows={2}
@@ -939,6 +1020,8 @@ export function EventModal() {
                   </svg>
                   <CustomSelect
                     value={String(form.notificationOffset ?? 'none')}
+                    ariaLabel={t('event.notification')}
+                    disabled={!editable}
                     options={NOTIFICATION_OFFSETS.map(({ label, value }) => ({
                       value: String(value ?? 'none'),
                       label: t(`event.notification_${label}` as TranslationKey),
@@ -977,6 +1060,8 @@ export function EventModal() {
                 </svg>
                 <CustomSelect
                   value={form.visibility}
+                  ariaLabel={t('event.visibility')}
+                  disabled={!editable}
                   options={VISIBILITY_OPTIONS.map((v) => ({
                     value: v,
                     label: t(visibilityLabelKey(v)),
@@ -991,6 +1076,7 @@ export function EventModal() {
                 </span>
                 <CustomSelect
                   ariaLabel={t('event.flexibility')}
+                  disabled={!editable}
                   value={form.flexibility}
                   options={[
                     { value: 'fixed', label: t('event.flexibilityFixed') },
@@ -1006,6 +1092,17 @@ export function EventModal() {
             </div>
           </div>
         </>
+      )}
+
+      {/* The sections below write as they change, unlike the form above. */}
+      {editingEvent && (
+        <div className="mx-6 mt-5 flex items-center gap-3">
+          <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
+          <h3 className="shrink-0 text-caption font-medium text-[var(--color-text-tertiary)]">
+            {t('event.savedImmediately')}
+          </h3>
+          <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
+        </div>
       )}
 
       {/* Checklist (edit mode only) */}
@@ -1068,7 +1165,7 @@ export function EventModal() {
         <div className="px-6 pt-4">
           <button
             type="button"
-            onClick={() => handleDelete()}
+            onClick={() => (isRecurringInstance ? handleDelete() : setConfirming('delete'))}
             disabled={saving}
             className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-default font-medium text-[var(--color-danger)] disabled:opacity-50"
             style={{ borderRadius: 'var(--radius-md)' }}
@@ -1091,7 +1188,7 @@ export function EventModal() {
         className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
           closing ? 'backdrop-out' : ''
         }`}
-        onClick={requestClose}
+        onClick={guardedClose}
       />
       {/* One panel for both layouts: CSS rests it on the bottom edge as a sheet
           and centres it as a dialog from `sm` up. */}
@@ -1148,7 +1245,7 @@ export function EventModal() {
           >
             <button
               type="button"
-              onClick={requestClose}
+              onClick={guardedClose}
               className="btn-secondary flex-1 py-3 text-default font-medium"
             >
               {editable ? t('common.cancel') : t('common.close')}
@@ -1157,7 +1254,7 @@ export function EventModal() {
               <button
                 type="button"
                 onClick={() => handleSave()}
-                disabled={saving || !form.title.trim()}
+                disabled={saving || !form.title.trim() || endError}
                 className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
               >
                 {saving ? t('common.saving') : t('common.save')}
@@ -1219,6 +1316,26 @@ export function EventModal() {
           </div>
         </>
       )}
+
+      <ConfirmSheet
+        open={confirming === 'discard'}
+        title={t('common.discardTitle')}
+        confirmLabel={t('common.discard')}
+        cancelLabel={t('common.keepEditing')}
+        onConfirm={() => {
+          setConfirming(null);
+          requestClose();
+        }}
+        onCancel={() => setConfirming(null)}
+      />
+      <ConfirmSheet
+        open={confirming === 'delete'}
+        title={t('event.deleteConfirmTitle')}
+        confirmLabel={t('common.delete')}
+        busy={saving}
+        onConfirm={() => handleDelete()}
+        onCancel={() => setConfirming(null)}
+      />
     </>
   );
 }

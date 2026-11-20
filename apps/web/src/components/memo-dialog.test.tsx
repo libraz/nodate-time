@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({
@@ -51,6 +51,48 @@ describe('MemoDialog', () => {
     expect(screen.getByRole('button', { name: 'common.save' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'common.delete' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('Groceries')).not.toHaveAttribute('readonly');
+  });
+
+  it('closes at once when nothing was edited', () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    const onClose = vi.fn();
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('asks before discarding edits on any dismiss', () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    const onClose = vi.fn();
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={onClose} />);
+    fireEvent.change(screen.getByDisplayValue('Groceries'), { target: { value: 'Errands' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.keepEditing' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.discard' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks before deleting the memo', () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+
+    expect(calendarState.deleteMemo).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 
   // The form used to render once per layout, so the history loaded twice and

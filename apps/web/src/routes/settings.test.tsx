@@ -296,6 +296,10 @@ describe('Calendar details cover image', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.calendarCoverRemove' }));
+    expect(calendarState.deleteCalendarCover).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'common.delete' }),
+    );
     await waitFor(() => expect(calendarState.deleteCalendarCover).toHaveBeenCalledWith('cal-1'));
     const removedCalendar = calendarState.calendars[0];
     if (!removedCalendar) throw new Error('Calendar fixture missing after removal');
@@ -414,7 +418,7 @@ describe('CalendarsSection invite listing', () => {
 
     render(<CalendarsSection />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'A' }));
+    fireEvent.click(screen.getByRole('button', { name: 'calendar.calendarName' }));
     fireEvent.click(await screen.findByRole('option', { name: 'B' }));
     expect(await screen.findByText('/share/token-b')).toBeTruthy();
 
@@ -457,7 +461,7 @@ describe('CalendarsSection invite listing', () => {
 
     render(<CalendarsSection />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry' }));
 
     expect(await screen.findByRole('option', { name: 'invites.expiry30d' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'invites.expiryNever' })).toBeNull();
@@ -471,7 +475,7 @@ describe('CalendarsSection invite listing', () => {
 
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
-    fireEvent.click(await screen.findByRole('button', { name: 'members.roleEditor' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'members.role' }));
     expect(await screen.findByRole('option', { name: 'members.roleViewer' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'members.roleOwner' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'members.roleManager' })).toBeNull();
@@ -503,14 +507,16 @@ describe('CalendarsSection own membership', () => {
     render(<CalendarsSection />);
 
     await waitFor(() => expect(screen.getByText('Me')).toBeTruthy());
-    expect(within(row('Me')).queryByRole('button', { name: 'members.roleOwner' })).toBeNull();
+    expect(within(row('Me')).queryByRole('button', { name: 'members.roleFor:Me' })).toBeNull();
   });
 
   it('still offers one on another member row', async () => {
     render(<CalendarsSection />);
 
     await waitFor(() => expect(screen.getByText('Other')).toBeTruthy());
-    expect(within(row('Other')).getByRole('button', { name: 'members.roleOwner' })).toBeTruthy();
+    expect(
+      within(row('Other')).getByRole('button', { name: 'members.roleFor:Other' }),
+    ).toBeTruthy();
   });
 });
 

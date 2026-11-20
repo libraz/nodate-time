@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CustomSelect, DateTimeField } from './pickers';
+import { CustomSelect, DateTimeField, parseTypedTime } from './pickers';
 
 // Mock the ui-store to provide locale
 vi.mock('@/stores/ui-store', () => ({
@@ -19,13 +19,13 @@ describe('CustomSelect', () => {
   ];
 
   it('renders the selected label', () => {
-    render(<CustomSelect value="b" options={options} onChange={() => {}} />);
+    render(<CustomSelect value="b" options={options} onChange={() => {}} ariaLabel="Letters" />);
     expect(screen.getByText('Beta')).toBeInTheDocument();
   });
 
   it('opens dropdown on click and shows all options', async () => {
     const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
 
     await user.click(screen.getByText('Alpha'));
 
@@ -36,7 +36,7 @@ describe('CustomSelect', () => {
   it('calls onChange when an option is selected', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={onChange} />);
+    render(<CustomSelect value="a" options={options} onChange={onChange} ariaLabel="Letters" />);
 
     await user.click(screen.getByText('Alpha'));
     await user.click(screen.getByText('Gamma'));
@@ -46,7 +46,7 @@ describe('CustomSelect', () => {
 
   it('closes dropdown after selection', async () => {
     const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
 
     await user.click(screen.getByText('Alpha'));
     expect(screen.getByText('Gamma')).toBeInTheDocument();
@@ -64,7 +64,15 @@ describe('CustomSelect', () => {
       { value: 'JP', label: 'Japan' },
       { value: 'US', label: 'United States' },
     ];
-    render(<CustomSelect value="JP" options={countries} onChange={() => {}} searchable />);
+    render(
+      <CustomSelect
+        value="JP"
+        options={countries}
+        onChange={() => {}}
+        ariaLabel="Country"
+        searchable
+      />,
+    );
 
     await user.click(screen.getByText('Japan'));
     const filter = screen.getByRole('textbox', { name: 'Search' });
@@ -85,7 +93,7 @@ describe('CustomSelect', () => {
 
   it('leaves an ordinary select without a filter box', async () => {
     const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
 
     await user.click(screen.getByText('Alpha'));
     expect(screen.queryByRole('textbox')).toBeNull();
@@ -93,7 +101,7 @@ describe('CustomSelect', () => {
 
   it('shows checkmark on selected option', async () => {
     const user = userEvent.setup();
-    render(<CustomSelect value="b" options={options} onChange={() => {}} />);
+    render(<CustomSelect value="b" options={options} onChange={() => {}} ariaLabel="Letters" />);
 
     await user.click(screen.getByText('Beta'));
 
@@ -236,12 +244,22 @@ describe('CustomSelect', () => {
     const subscribe = vi.spyOn(document, 'addEventListener');
     const mousedowns = () => subscribe.mock.calls.filter(([type]) => type === 'mousedown').length;
 
-    const { rerender } = render(<CustomSelect value="a" options={options} onChange={() => {}} />);
+    const { rerender } = render(
+      <CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />,
+    );
     await user.click(screen.getByText('Alpha'));
 
     const whileOpen = mousedowns();
     // A render the dropdown lives through: same open list, different props.
-    rerender(<CustomSelect value="a" options={options} onChange={() => {}} className="w-40" />);
+    rerender(
+      <CustomSelect
+        value="a"
+        options={options}
+        onChange={() => {}}
+        ariaLabel="Letters"
+        className="w-40"
+      />,
+    );
 
     expect(mousedowns()).toBe(whileOpen);
     subscribe.mockRestore();
@@ -518,5 +536,129 @@ describe('DateTimeField from the keyboard', () => {
 
     expect(onTimeChange).toHaveBeenCalledWith('09:15');
     expect(timeButton).toHaveFocus();
+  });
+});
+
+describe('CustomSelect disabled', () => {
+  it('shows the value but never opens', async () => {
+    const user = userEvent.setup();
+    render(
+      <CustomSelect
+        value="a"
+        options={[{ value: 'a', label: 'Alpha' }]}
+        onChange={() => {}}
+        ariaLabel="Letters"
+        disabled
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Letters' });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent('Alpha');
+    await user.click(trigger);
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+});
+
+describe('parseTypedTime', () => {
+  it.each([
+    ['9', '09:00'],
+    ['09', '09:00'],
+    ['9:30', '09:30'],
+    ['09:30', '09:30'],
+    ['930', '09:30'],
+    ['0930', '09:30'],
+    ['0', '00:00'],
+    ['23:59', '23:59'],
+    ['\uFF19\uFF1A\uFF13\uFF10', '09:30'],
+    [' 14:05 ', '14:05'],
+  ])('reads %j as %s', (input, expected) => {
+    expect(parseTypedTime(input)).toBe(expected);
+  });
+
+  it.each(['24:00', '9:5', '960', '', '12345', 'ab', '9:60', '25'])('refuses %j', (input) => {
+    expect(parseTypedTime(input)).toBeNull();
+  });
+});
+
+describe('TimePicker typed entry', () => {
+  function renderField(onTimeChange = vi.fn()) {
+    render(
+      <DateTimeField
+        label="Start"
+        dateValue={DateTime.fromISO('2026-04-19T09:00:00')}
+        timeValue="09:00"
+        showTime
+        onDateChange={() => {}}
+        onTimeChange={onTimeChange}
+      />,
+    );
+    return onTimeChange;
+  }
+
+  async function openTyped() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '09:00' }));
+    return { user, input: screen.getByRole('textbox', { name: 'Type a time' }) };
+  }
+
+  it('keeps focus on the selected slot when it opens', async () => {
+    renderField();
+    await openTyped();
+
+    expect(screen.getByRole('button', { name: '09:00', pressed: true })).toHaveFocus();
+  });
+
+  it('is reached from the slot list with Shift+Tab', async () => {
+    renderField();
+    const { user, input } = await openTyped();
+
+    await user.tab({ shift: true });
+
+    expect(input).toHaveFocus();
+  });
+
+  it('applies a typed time on Enter', async () => {
+    const onTimeChange = renderField();
+    const { user, input } = await openTyped();
+
+    await user.click(input);
+    await user.keyboard('1430{Enter}');
+
+    expect(onTimeChange).toHaveBeenCalledWith('14:30');
+  });
+
+  it('does not apply on the Enter that confirms an IME composition', async () => {
+    const onTimeChange = renderField();
+    const { input } = await openTyped();
+
+    fireEvent.change(input, { target: { value: '1430' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(onTimeChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onTimeChange).toHaveBeenCalledWith('14:30');
+  });
+
+  it('marks an invalid entry and stays open', async () => {
+    const onTimeChange = renderField();
+    const { input } = await openTyped();
+
+    fireEvent.change(input, { target: { value: '24:00' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onTimeChange).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('textbox', { name: 'Type a time' })).toBeInTheDocument();
+  });
+
+  it('leaves the arrow keys to the text box while it has focus', async () => {
+    renderField();
+    const { user, input } = await openTyped();
+
+    await user.click(input);
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+
+    expect(input).toHaveFocus();
   });
 });

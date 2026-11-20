@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrandRow } from '@/components/brand-mark';
 import { CalendarCoverImage } from '@/components/calendar-cover-image';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
@@ -332,6 +333,7 @@ export function ProfileSection() {
   const [name, setName] = useState(user?.name ?? '');
   const [saving, setSaving] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [confirmingAvatar, setConfirmingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const [currentPw, setCurrentPw] = useState('');
@@ -371,6 +373,7 @@ export function ProfileSection() {
       toast.error(errorMessage(e));
     } finally {
       setAvatarBusy(false);
+      setConfirmingAvatar(false);
     }
   }, [removeAvatar]);
 
@@ -457,13 +460,21 @@ export function ProfileSection() {
               {user?.avatarUrl && (
                 <button
                   type="button"
-                  onClick={handleAvatarRemove}
+                  onClick={() => setConfirmingAvatar(true)}
                   disabled={avatarBusy}
                   className="text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
                 >
                   {t('profile.removeAvatar')}
                 </button>
               )}
+              <ConfirmSheet
+                open={confirmingAvatar}
+                title={t('confirm.removeAvatar')}
+                confirmLabel={t('common.delete')}
+                busy={avatarBusy}
+                onConfirm={handleAvatarRemove}
+                onCancel={() => setConfirmingAvatar(false)}
+              />
             </div>
           </div>
         </div>
@@ -589,6 +600,8 @@ function SessionsSection() {
   const t = useT();
   const [sessions, setSessions] = useState<SessionData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -613,12 +626,16 @@ function SessionsSection() {
   }, [load]);
 
   const revoke = async (id: string) => {
+    setRevoking(true);
     try {
       await api.delete(`/user/sessions/${id}`);
       setSessions((cur) => cur.filter((s) => s.id !== id));
       toast.success(t('sessions.revoked'));
     } catch (e) {
       toast.error(errorMessage(e));
+    } finally {
+      setRevoking(false);
+      setPendingRevokeId(null);
     }
   };
 
@@ -629,10 +646,18 @@ function SessionsSection() {
       ) : (
         <ul className="-my-2 divide-y divide-[var(--color-separator)]">
           {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} onRevoke={() => revoke(s.id)} />
+            <SessionRow key={s.id} session={s} onRevoke={() => setPendingRevokeId(s.id)} />
           ))}
         </ul>
       )}
+      <ConfirmSheet
+        open={pendingRevokeId !== null}
+        title={t('confirm.revokeSession')}
+        confirmLabel={t('confirm.signOut')}
+        busy={revoking}
+        onConfirm={() => pendingRevokeId && revoke(pendingRevokeId)}
+        onCancel={() => setPendingRevokeId(null)}
+      />
     </Section>
   );
 }
@@ -806,6 +831,7 @@ export function AppearanceSection() {
           <CustomSelect
             value={timezone}
             onChange={(next) => savePreference({ timezone: next })}
+            ariaLabel={t('settings.timezone')}
             className="w-full max-w-[420px]"
             triggerClassName="input-modern"
             options={Array.from(new Set([detectedTz, ...TIMEZONE_OPTIONS])).map((tz) => ({
@@ -837,6 +863,7 @@ export function AppearanceSection() {
             <CustomSelect
               value={holidaysCountry}
               onChange={(v) => setHolidaysCountry(v)}
+              ariaLabel={t('settings.holidaysCountry')}
               className="w-full max-w-[420px]"
               triggerClassName="input-modern"
               searchable
@@ -861,6 +888,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
   const [color, setColor] = useState(calendar?.color ?? '#42A5F5');
   const [saving, setSaving] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
+  const [confirmingCover, setConfirmingCover] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
   const canUploadCover = calendar?.coverUploadAllowed === true;
@@ -916,6 +944,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
       toast.error(errorMessage(e));
     } finally {
       setCoverBusy(false);
+      setConfirmingCover(false);
     }
   };
 
@@ -1007,13 +1036,21 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
                   {calendar?.coverImageUrl && (
                     <button
                       type="button"
-                      onClick={removeCover}
+                      onClick={() => setConfirmingCover(true)}
                       disabled={coverBusy}
                       className="text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
                     >
                       {t('settings.calendarCoverRemove')}
                     </button>
                   )}
+                  <ConfirmSheet
+                    open={confirmingCover}
+                    title={t('confirm.removeCover')}
+                    confirmLabel={t('common.delete')}
+                    busy={coverBusy}
+                    onConfirm={removeCover}
+                    onCancel={() => setConfirmingCover(false)}
+                  />
                 </div>
               )}
               {canUploadCover && (
@@ -1050,6 +1087,9 @@ export function CalendarsSection() {
   // Bounded by default: an unbounded link cannot be taken back once forwarded.
   const [inviteExpiry, setInviteExpiry] = useState<number>(168);
   const [inviteUses, setInviteUses] = useState<number>(1);
+  const [pendingRemoveMember, setPendingRemoveMember] = useState<Member | null>(null);
+  const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     if (!selectedId && calendars.length > 0) {
@@ -1084,9 +1124,13 @@ export function CalendarsSection() {
   } = useInvites(selectedId, isAdmin);
 
   const handleRemoveMember = async (member: Member) => {
+    setConfirmBusy(true);
+    const left = await removeMember(member);
+    setConfirmBusy(false);
+    setPendingRemoveMember(null);
     // Leaving takes the calendar with it, so what is left of the list is what
     // the section has to show rather than a selection pointing at nothing.
-    if (await removeMember(member)) {
+    if (left) {
       setSelectedId(calendars.find((c) => c.id !== selectedId)?.id ?? '');
     }
   };
@@ -1101,7 +1145,11 @@ export function CalendarsSection() {
   };
 
   const handleRevokeInvite = async (id: string) => {
-    if (await revokeInvite(id)) toast.success(t('invites.revoke'));
+    setConfirmBusy(true);
+    const revoked = await revokeInvite(id);
+    setConfirmBusy(false);
+    setPendingRevokeId(null);
+    if (revoked) toast.success(t('invites.revoke'));
   };
 
   const copyInvite = async (token: string) => {
@@ -1117,6 +1165,7 @@ export function CalendarsSection() {
           <CustomSelect
             value={selectedId}
             onChange={setSelectedId}
+            ariaLabel={t('calendar.calendarName')}
             className="w-full max-w-[420px]"
             triggerClassName="input-modern"
             options={calendars.map((c) => ({ value: c.id, label: c.name }))}
@@ -1167,6 +1216,7 @@ export function CalendarsSection() {
                     <CustomSelect
                       value={m.role}
                       onChange={(v) => changeRole(m, v)}
+                      ariaLabel={t('members.roleFor', { name: m.name })}
                       className="shrink-0"
                       triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
                       options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
@@ -1179,7 +1229,7 @@ export function CalendarsSection() {
                   {canRemove && (
                     <button
                       type="button"
-                      onClick={() => handleRemoveMember(m)}
+                      onClick={() => setPendingRemoveMember(m)}
                       aria-label={isMe ? t('members.leave') : t('common.delete')}
                       className="shrink-0 rounded-lg p-2 text-[var(--color-text-tertiary)] transition hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
                     >
@@ -1204,6 +1254,25 @@ export function CalendarsSection() {
             })}
           </ul>
         )}
+        <ConfirmSheet
+          open={pendingRemoveMember !== null}
+          title={
+            pendingRemoveMember?.id === me?.id
+              ? t('confirm.leaveTitle')
+              : t('confirm.removeMember', { name: pendingRemoveMember?.name ?? '' })
+          }
+          hint={
+            pendingRemoveMember?.id === me?.id
+              ? t('members.leaveConfirm')
+              : t('members.removeConfirm')
+          }
+          confirmLabel={
+            pendingRemoveMember?.id === me?.id ? t('members.leave') : t('confirm.remove')
+          }
+          busy={confirmBusy}
+          onConfirm={() => pendingRemoveMember && handleRemoveMember(pendingRemoveMember)}
+          onCancel={() => setPendingRemoveMember(null)}
+        />
       </Section>
 
       {isAdmin && (
@@ -1214,6 +1283,7 @@ export function CalendarsSection() {
           <CustomSelect
             value={inviteRole}
             onChange={(role) => setInviteRole(role as Role)}
+            ariaLabel={t('members.role')}
             options={INVITE_ROLE_OPTIONS.map((role) => ({
               value: role,
               label: t(roleLabelKey(role)),
@@ -1226,6 +1296,7 @@ export function CalendarsSection() {
               className="flex-1"
               value={String(inviteExpiry)}
               onChange={(v) => setInviteExpiry(Number(v))}
+              ariaLabel={t('invites.expiry')}
               options={INVITE_EXPIRY_HOURS.map((h) => ({
                 value: String(h),
                 label: t(inviteExpiryLabelKey(h)),
@@ -1236,6 +1307,7 @@ export function CalendarsSection() {
               className="flex-1"
               value={String(inviteUses)}
               onChange={(v) => setInviteUses(Number(v))}
+              ariaLabel={t('invites.uses')}
               options={INVITE_MAX_USES.map((u) => ({
                 value: String(u),
                 label: t(inviteUsesLabelKey(u)),
@@ -1288,7 +1360,7 @@ export function CalendarsSection() {
                   )}
                   <button
                     type="button"
-                    onClick={() => handleRevokeInvite(inv.id)}
+                    onClick={() => setPendingRevokeId(inv.id)}
                     className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
                   >
                     {t('invites.revoke')}
@@ -1297,6 +1369,14 @@ export function CalendarsSection() {
               ))}
             </ul>
           )}
+          <ConfirmSheet
+            open={pendingRevokeId !== null}
+            title={t('confirm.revokeInvite')}
+            confirmLabel={t('confirm.revoke')}
+            busy={confirmBusy}
+            onConfirm={() => pendingRevokeId && handleRevokeInvite(pendingRevokeId)}
+            onCancel={() => setPendingRevokeId(null)}
+          />
         </Section>
       )}
     </>
@@ -1466,6 +1546,7 @@ export function ExportSection() {
           <CustomSelect
             value={selectedId}
             onChange={setSelectedId}
+            ariaLabel={t('calendar.calendarName')}
             className="w-full max-w-[420px]"
             triggerClassName="input-modern"
             options={calendars.map((c) => ({ value: c.id, label: c.name }))}
@@ -1607,6 +1688,8 @@ export function AllowedEmailsSection() {
   const [email, setEmail] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -1642,11 +1725,15 @@ export function AllowedEmailsSection() {
   };
 
   const remove = async (id: string) => {
+    setRemoving(true);
     try {
       await api.delete(`/admin/allowed-emails/${id}`);
       await refresh();
     } catch (err) {
       toast.error(errorMessage(err));
+    } finally {
+      setRemoving(false);
+      setPendingRemoveId(null);
     }
   };
 
@@ -1707,7 +1794,7 @@ export function AllowedEmailsSection() {
               </div>
               <button
                 type="button"
-                onClick={() => remove(row.id)}
+                onClick={() => setPendingRemoveId(row.id)}
                 className="shrink-0 text-body text-[var(--color-danger)] hover:underline"
               >
                 {t('settings.adminAllowedEmailsRemove')}
@@ -1716,6 +1803,14 @@ export function AllowedEmailsSection() {
           ))}
         </ul>
       )}
+      <ConfirmSheet
+        open={pendingRemoveId !== null}
+        title={t('confirm.removeAllowedEmail')}
+        confirmLabel={t('confirm.remove')}
+        busy={removing}
+        onConfirm={() => pendingRemoveId && remove(pendingRemoveId)}
+        onCancel={() => setPendingRemoveId(null)}
+      />
     </Section>
   );
 }
@@ -1734,6 +1829,8 @@ function ProviderCard({
   const [enabled, setEnabled] = useState(info.enabled);
   const [editingSecret, setEditingSecret] = useState(!info.hasSecret);
   const [saving, setSaving] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     setClientId(info.clientId);
@@ -1761,13 +1858,16 @@ function ProviderCard({
   };
 
   const remove = async () => {
-    if (!confirm(t('settings.adminProviderRemoveConfirm', { provider: meta.label }))) return;
+    setRemoving(true);
     try {
       await api.delete(`/admin/oauth-providers/${info.provider}`);
       toast.success(t('panel.updated'));
       await onChange();
     } catch (e) {
       toast.error(errorMessage(e));
+    } finally {
+      setRemoving(false);
+      setConfirmingRemove(false);
     }
   };
 
@@ -1889,12 +1989,21 @@ function ProviderCard({
         {info.source === 'db' && (
           <button
             type="button"
-            onClick={remove}
+            onClick={() => setConfirmingRemove(true)}
             className="text-body font-medium text-[var(--color-danger)] hover:underline"
           >
             {t('settings.adminProviderClear')}
           </button>
         )}
+        <ConfirmSheet
+          open={confirmingRemove}
+          title={t('confirm.removeProvider')}
+          hint={t('settings.adminProviderRemoveConfirm', { provider: meta.label })}
+          confirmLabel={t('common.delete')}
+          busy={removing}
+          onConfirm={remove}
+          onCancel={() => setConfirmingRemove(false)}
+        />
       </div>
     </Section>
   );

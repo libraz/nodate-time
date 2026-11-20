@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Avatar } from '@/components/avatar';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { type AlbumPhoto, formatAlbumMoment } from '@/lib/album';
@@ -111,12 +112,13 @@ export function AlbumViewer({
       const el = e.target;
       if (el instanceof Element && el.closest('input,textarea,[contenteditable="true"]')) return;
       if (document.querySelector('.dropdown-panel')) return;
+      if (confirmingDelete) return;
       e.preventDefault();
       goTo(e.key === 'ArrowLeft' ? prev : next);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [goTo, prev, next]);
+  }, [goTo, prev, next, confirmingDelete]);
 
   /**
    * Events the photo could belong to: the ones on the day it was taken.
@@ -194,6 +196,8 @@ export function AlbumViewer({
     setSavingCaption(true);
     try {
       await onSaveCaption(photo.id, captionDraft);
+    } catch {
+      // The failure is reported by the caller; the typed caption stays.
     } finally {
       setSavingCaption(false);
     }
@@ -203,6 +207,8 @@ export function AlbumViewer({
     setLinkingEvent(true);
     try {
       await onLinkEvent(photo.id, eventId);
+    } catch {
+      // The failure is reported by the caller.
     } finally {
       setLinkingEvent(false);
     }
@@ -491,16 +497,16 @@ export function AlbumViewer({
         </div>
       </div>
 
-      {confirmingDelete && (
-        <AlbumDeleteSheet
-          title={t('album.deleteOne')}
-          hint={t('album.deleteHint', { name: calendarName })}
-          busy={deleting}
-          tone="dark"
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmingDelete(false)}
-        />
-      )}
+      <ConfirmSheet
+        open={confirmingDelete}
+        title={t('album.deleteOne')}
+        hint={t('album.deleteHint', { name: calendarName })}
+        confirmLabel={t('common.delete')}
+        busy={deleting}
+        tone="dark"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>,
     document.body,
   );
@@ -521,78 +527,5 @@ export function TrashIcon() {
     >
       <path d="M4 7h16M9 7V4.8A.8.8 0 019.8 4h4.4a.8.8 0 01.8.8V7M6.5 7l.8 12.2A1.9 1.9 0 009.2 21h5.6a1.9 1.9 0 001.9-1.8L17.5 7M10 11v6M14 11v6" />
     </svg>
-  );
-}
-
-interface AlbumDeleteSheetProps {
-  title: string;
-  hint: string;
-  busy: boolean;
-  /** Over the photo viewer the sheet is dark; over the panel it follows the theme. */
-  tone: 'dark' | 'theme';
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-const SHEET_TONES = {
-  dark: {
-    card: 'bg-neutral-800/95 text-white',
-    hint: 'text-white/60',
-    rule: 'border-white/10',
-    hover: 'hover:bg-white/5',
-    danger: 'text-[#ff453a]',
-  },
-  theme: {
-    card: 'glass-surface-heavy ring-1 ring-[var(--color-border)] text-[var(--color-text-primary)]',
-    hint: 'text-[var(--color-text-tertiary)]',
-    rule: 'border-[var(--color-border)]',
-    hover: 'hover:bg-[var(--color-hover)]',
-    danger: 'text-[var(--color-danger)]',
-  },
-} as const;
-
-/**
- * The confirmation a deletion asks for, as an action sheet: the photos are
- * gone for every member of the calendar, so it says so before it happens.
- */
-export function AlbumDeleteSheet({
-  title,
-  hint,
-  busy,
-  tone,
-  onConfirm,
-  onCancel,
-}: AlbumDeleteSheetProps) {
-  const t = useT();
-  const c = SHEET_TONES[tone];
-  return (
-    <div className="absolute inset-0 z-30 flex items-end justify-center bg-black/40 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
-      <button
-        type="button"
-        aria-label={t('common.cancel')}
-        className="absolute inset-0 cursor-default"
-        onClick={onCancel}
-      />
-      <div className="album-viewer-sheet relative flex w-full max-w-[420px] flex-col gap-2">
-        <div className={`overflow-hidden rounded-[14px] text-center backdrop-blur-xl ${c.card}`}>
-          <p className={`px-4 pt-3.5 pb-3 text-caption ${c.hint}`}>{hint}</p>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            className={`w-full border-t py-3.5 text-callout font-medium transition-colors disabled:opacity-50 ${c.rule} ${c.hover} ${c.danger}`}
-          >
-            {busy ? t('album.deleting') : title}
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className={`w-full rounded-[14px] py-3.5 text-callout font-semibold backdrop-blur-xl transition-colors ${c.card} ${c.hover}`}
-        >
-          {t('common.cancel')}
-        </button>
-      </div>
-    </div>
   );
 }

@@ -116,24 +116,28 @@ describe('SharePanel invites', () => {
    */
   it('creates the public link read-only, and only once confirmed', async () => {
     apiPost.mockResolvedValue(invite('inv-public', 'token-public', true));
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<SharePanel />);
 
     const create = await screen.findByRole('button', { name: 'share.createPublic' });
     fireEvent.click(create);
     await act(async () => {});
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
     expect(apiPost).not.toHaveBeenCalled();
 
-    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    await act(async () => {});
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(apiPost).not.toHaveBeenCalled();
+
     fireEvent.click(create);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'common.create' }));
     await act(async () => {});
     expect(apiPost).toHaveBeenCalledWith('/calendars/cal-1/invites', {
       role: 'viewer',
       isPublic: true,
     });
-
-    confirm.mockRestore();
   });
 
   /**
@@ -146,7 +150,7 @@ describe('SharePanel invites', () => {
     render(<SharePanel />);
 
     // The trigger shows the current choice; the list arrives through a portal.
-    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry7d' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry' }));
 
     expect(await screen.findByRole('option', { name: 'invites.expiry30d' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'invites.expiryNever' })).toBeNull();
@@ -161,7 +165,7 @@ describe('SharePanel invites', () => {
 
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
-    fireEvent.click(await screen.findByRole('button', { name: 'members.roleEditor' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'members.role' }));
     expect(await screen.findByRole('option', { name: 'members.roleViewer' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'members.roleOwner' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'members.roleManager' })).toBeNull();

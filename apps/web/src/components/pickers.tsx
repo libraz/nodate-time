@@ -85,7 +85,7 @@ function useOutsideClose(
   }, [active]);
 }
 
-const POPUP_FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"])';
+const POPUP_FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"]), input:not([disabled])';
 
 /**
  * Keys every floating panel owes the keyboard: Escape closes it without also
@@ -358,6 +358,35 @@ const TIME_SLOTS = (() => {
   return slots;
 })();
 
+/** The slot a time rounds to, as `HH:mm`. */
+function nearestSlotOf(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  const totalMin = (h ?? 0) * 60 + (m ?? 0);
+  const rounded = Math.min(Math.round(totalMin / 15) * 15, 23 * 60 + 45);
+  const rh = Math.floor(rounded / 60);
+  const rm = rounded % 60;
+  return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
+}
+
+/**
+ * Reads a typed time as `HH:mm`, or null when it is not one.
+ *
+ * Accepts `H`, `HH`, `H:mm`, `HH:mm`, `Hmm` and `HHmm` with hour 0-23 and
+ * minute 00-59; full-width digits and colons are folded first.
+ */
+export function parseTypedTime(input: string): string | null {
+  const text = input.normalize('NFKC').trim();
+  const match =
+    text.match(/^(\d{1,2}):(\d{2})$/) ??
+    text.match(/^(\d{1,2})()$/) ??
+    text.match(/^(\d{1,2})(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
 function TimePickerDropdown({
   value,
   onChange,
@@ -366,7 +395,11 @@ function TimePickerDropdown({
   floatingRef,
   returnFocusRef,
 }: TimePickerDropdownProps) {
+  const t = useT();
   const selectedRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [typed, setTyped] = useState('');
+  const [typedInvalid, setTypedInvalid] = useState(false);
 
   useOutsideClose([floatingRef], onClose, true);
 
@@ -375,13 +408,38 @@ function TimePickerDropdown({
     returnFocusRef.current?.focus();
   };
 
+  // Focus starts on the slot, not the text box, so a tap does not raise the
+  // on-screen keyboard.
   useEffect(() => {
     selectedRef.current?.focus({ preventScroll: true });
     selectedRef.current?.scrollIntoView({ block: 'center' });
   }, []);
 
+  const handleTypedChange = (next: string) => {
+    setTyped(next);
+    setTypedInvalid(false);
+    const time = parseTypedTime(next);
+    if (!time) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-slot="${nearestSlotOf(time)}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  };
+
+  const handleTypedKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    const time = parseTypedTime(typed);
+    if (!time) {
+      setTypedInvalid(true);
+      return;
+    }
+    onChange(time);
+    closeToField();
+  };
+
   // Slots are one Tab stop; the arrows walk the list.
   const handleListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target instanceof HTMLInputElement) return;
     const slots = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button'));
     const at = slots.indexOf(document.activeElement as HTMLElement);
     const target =
@@ -399,50 +457,62 @@ function TimePickerDropdown({
     target.focus();
   };
 
-  const nearestSlot = useMemo(() => {
-    const [h, m] = value.split(':').map(Number);
-    const totalMin = (h ?? 0) * 60 + (m ?? 0);
-    const rounded = Math.min(Math.round(totalMin / 15) * 15, 23 * 60 + 45);
-    const rh = Math.floor(rounded / 60);
-    const rm = rounded % 60;
-    return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
-  }, [value]);
+  const nearestSlot = useMemo(() => nearestSlotOf(value), [value]);
 
   return createPortal(
-    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons
+    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its controls
     <div
       ref={floatingRef}
       onKeyDown={(e) => {
         handlePopupKeys(e, closeToField);
         handleListKey(e);
       }}
-      className="dropdown-panel fixed z-[9999] max-h-[240px] w-[100px] overflow-y-auto bg-[var(--color-surface-elevated)] py-1 ring-1 ring-[var(--color-border)]"
+      className="dropdown-panel fixed z-[9999] flex max-h-[284px] w-[100px] flex-col bg-[var(--color-surface-elevated)] ring-1 ring-[var(--color-border)]"
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
-      {TIME_SLOTS.map((slot) => {
-        const isSelected = slot === nearestSlot;
-        return (
-          <button
-            key={slot}
-            ref={isSelected ? selectedRef : undefined}
-            type="button"
-            tabIndex={isSelected ? 0 : -1}
-            aria-pressed={isSelected}
-            onClick={() => {
-              onChange(slot);
-              closeToField();
-            }}
-            className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
-            style={{
-              backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
-              color: isSelected ? 'var(--color-accent-ink)' : 'var(--color-text-primary)',
-              fontWeight: isSelected ? 600 : 400,
-            }}
-          >
-            {slot}
-          </button>
-        );
-      })}
+      <div className="border-b border-[var(--color-separator)] p-1.5">
+        <input
+          data-1p-ignore
+          type="text"
+          inputMode="numeric"
+          value={typed}
+          onChange={(e) => handleTypedChange(e.target.value)}
+          onKeyDown={handleTypedKey}
+          aria-label={t('picker.typeTime')}
+          aria-invalid={typedInvalid}
+          placeholder="9:30"
+          className={`input-modern w-full text-center text-default tabular-nums ${
+            typedInvalid ? 'ring-1 ring-[var(--color-danger)]' : ''
+          }`}
+        />
+      </div>
+      <div ref={listRef} className="flex-1 overflow-y-auto py-1">
+        {TIME_SLOTS.map((slot) => {
+          const isSelected = slot === nearestSlot;
+          return (
+            <button
+              key={slot}
+              ref={isSelected ? selectedRef : undefined}
+              type="button"
+              data-slot={slot}
+              tabIndex={isSelected ? 0 : -1}
+              aria-pressed={isSelected}
+              onClick={() => {
+                onChange(slot);
+                closeToField();
+              }}
+              className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
+              style={{
+                backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
+                color: isSelected ? 'var(--color-accent-ink)' : 'var(--color-text-primary)',
+                fontWeight: isSelected ? 600 : 400,
+              }}
+            >
+              {slot}
+            </button>
+          );
+        })}
+      </div>
     </div>,
     document.body,
   );
@@ -482,7 +552,9 @@ interface CustomSelectProps {
    * Names the control for assistive tech. The visible caption sits outside
    * this component, so without it the only name is the current value.
    */
-  ariaLabel?: string;
+  ariaLabel: string;
+  /** Shows the current value without letting the list open. */
+  disabled?: boolean;
   /**
    * Adds a filter box to the dropdown.
    *
@@ -530,6 +602,7 @@ export function CustomSelect({
   className,
   triggerClassName,
   ariaLabel,
+  disabled = false,
   searchable,
   placeholder,
 }: CustomSelectProps) {
@@ -668,12 +741,13 @@ export function CustomSelect({
         aria-expanded={open}
         aria-controls={open ? listID : undefined}
         aria-label={ariaLabel}
+        disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={handleKeyDown}
         className={
           triggerClassName
-            ? `flex w-full items-center justify-between gap-2 text-left transition-colors ${triggerClassName}`
-            : 'flex w-full items-center justify-between gap-2 bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-default text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]'
+            ? `flex w-full items-center justify-between gap-2 text-left transition-colors disabled:cursor-default disabled:opacity-60 ${triggerClassName}`
+            : 'flex w-full items-center justify-between gap-2 bg-[var(--color-surface-inset)] py-1.5 pr-3 pl-3 text-default text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-[var(--color-surface-inset)]'
         }
         style={triggerClassName ? undefined : { borderRadius: 'var(--radius-sm)' }}
       >
@@ -698,6 +772,7 @@ export function CustomSelect({
       </button>
 
       {open &&
+        !disabled &&
         createPortal(
           <div
             ref={floatingRef}

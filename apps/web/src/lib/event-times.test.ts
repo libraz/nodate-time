@@ -57,9 +57,18 @@ describe('eventTimesForSave', () => {
     expect(times.endAt).toBe('2026-08-05T10:00:00.000-04:00');
   });
 
-  it('gives a timed event an hour when its end is not after its start', () => {
+  it('keeps a timed event whose end equals its start', () => {
     const times = eventTimesForSave(
       { allDay: false, startAt: '2026-08-05T09:00', endAt: '2026-08-05T09:00' },
+      TOKYO,
+      TOKYO,
+    );
+    expect(times.endAt).toBe('2026-08-05T09:00:00.000+09:00');
+  });
+
+  it('gives a timed event an hour when its end is before its start', () => {
+    const times = eventTimesForSave(
+      { allDay: false, startAt: '2026-08-05T09:00', endAt: '2026-08-05T08:00' },
       TOKYO,
       TOKYO,
     );

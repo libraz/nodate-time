@@ -138,7 +138,7 @@ export function eventTimesForSave(
 
   const start = DateTime.fromISO(form.startAt, { zone: viewerZone });
   const end = DateTime.fromISO(form.endAt, { zone: viewerZone });
-  const effectiveEnd = end > start ? end : start.plus({ hours: 1 });
+  const effectiveEnd = end >= start ? end : start.plus({ hours: 1 });
   return {
     startAt: start.toISO() ?? form.startAt,
     endAt: effectiveEnd.toISO() ?? form.endAt,

@@ -132,7 +132,6 @@ describe('useInvites activation races', () => {
   it('ignores stale public-link and revoke completions after switching calendars', async () => {
     const stalePublic = deferred<InviteData>();
     const staleRevoke = deferred<void>();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     apiPost.mockReturnValueOnce(stalePublic.promise as never);
     apiDelete.mockReturnValueOnce(staleRevoke.promise as never);
     const { result, rerender } = renderHook(({ id }) => useInvites(id), {
@@ -157,7 +156,6 @@ describe('useInvites activation races', () => {
       await expect(publicResult).resolves.toBe(true);
     });
 
-    expect(confirm).toHaveBeenCalledWith('share.publicConfirm');
     expect(apiPost).toHaveBeenCalledWith('/calendars/calendar-a/invites', {
       role: 'viewer',
       isPublic: true,
@@ -196,7 +194,6 @@ describe('useInvites activation races', () => {
     apiPost
       .mockReturnValueOnce(olderCreate.promise as never)
       .mockReturnValueOnce(newerCreate.promise as never);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { result } = renderHook(() => useInvites('calendar-a'));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -221,8 +218,7 @@ describe('useInvites activation races', () => {
     expect(result.current.busy).toBeNull();
   });
 
-  it('does not call the API or ask for confirmation while disabled', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('does not call the API while disabled', async () => {
     const { result } = renderHook(() => useInvites('calendar-a', false));
 
     await act(async () => {
@@ -234,14 +230,12 @@ describe('useInvites activation races', () => {
     expect(apiGet).not.toHaveBeenCalled();
     expect(apiPost).not.toHaveBeenCalled();
     expect(apiDelete).not.toHaveBeenCalled();
-    expect(confirm).not.toHaveBeenCalled();
     expect(result.current).toMatchObject({ invites: [], loading: false, busy: null });
   });
 
   it.each(['switch', 'disable'] as const)(
     'rejects captured callbacks after a calendar %s',
     async (transition) => {
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
       const { result, rerender } = renderHook(({ id, enabled }) => useInvites(id, enabled), {
         initialProps: { id: 'calendar-a', enabled: true },
       });
@@ -261,7 +255,6 @@ describe('useInvites activation races', () => {
 
       expect(apiPost).not.toHaveBeenCalled();
       expect(apiDelete).not.toHaveBeenCalled();
-      expect(confirm).not.toHaveBeenCalled();
     },
   );
 
@@ -326,7 +319,6 @@ describe('useInvites activation races', () => {
         .mockResolvedValueOnce(createdJoin as never)
         .mockResolvedValueOnce(createdPublic as never);
       apiDelete.mockResolvedValueOnce(undefined as never);
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
       const { result } = renderHook(() => useInvites('calendar-a'));
 
       expect(result.current.loading).toBe(true);

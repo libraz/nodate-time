@@ -20,12 +20,27 @@ export interface CalendarMembers {
   changeRole: (member: Member, role: string) => Promise<void>;
   /**
    * Removes a member, or gives up the caller's own membership when the member
-   * is the caller. Returns true when the caller left, which is the case where
-   * the calendar itself is gone and a screen holding a selection needs another.
+   * is the caller. Does not ask first; the caller confirms. Returns true when
+   * the caller left, which is the case where the calendar itself is gone and a
+   * screen holding a selection needs another.
    */
   removeMember: (member: Member) => Promise<boolean>;
   /** Sets the colour a member's layer is drawn in. Call once per finished choice. */
   changeColor: (member: Member, color: string) => Promise<void>;
+}
+
+/**
+ * Whether a calendar's member list is still loading or failed to load, read
+ * from the store without fetching anything. Subscribing to the two values
+ * separately keeps the result from changing identity on every store update.
+ */
+export function useMembersState(calendarId: string): {
+  loading: boolean;
+  error: string | undefined;
+} {
+  const loaded = useCalendarStore((s) => Boolean(s.membersMap[calendarId]));
+  const error = useCalendarStore((s) => s.memberErrors[calendarId]);
+  return { loading: !loaded && !error, error };
 }
 
 /**
@@ -80,7 +95,6 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
   const removeMember = useCallback(
     async (member: Member) => {
       const leaving = member.id === me?.id;
-      if (!confirm(leaving ? t('members.leaveConfirm') : t('members.removeConfirm'))) return false;
       try {
         if (leaving) {
           // Leaving takes the calendar with it. Refetching its members instead

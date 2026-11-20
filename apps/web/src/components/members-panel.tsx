@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { ConfirmSheet } from '@/components/confirm-sheet';
 import { TipCard } from '@/components/guide';
 import { MemberAdder } from '@/components/member-adder';
 import { MemberColorEditor } from '@/components/member-color-editor';
@@ -9,11 +10,13 @@ import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { memberRowRules } from '@/lib/member-row';
 import { roleLabelKey } from '@/lib/permissions';
-import { useCalendarMembers } from '@/lib/use-calendar-members';
+import { useCalendarMembers, useMembersState } from '@/lib/use-calendar-members';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
+import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
+import type { Member } from '@/types/calendar';
 
 const JUST_ADDED_MS = 2400;
 
@@ -27,6 +30,8 @@ export function MembersPanel() {
   const { options, target, setTargetId } = usePanelCalendar();
   const [editingColorOf, setEditingColorOf] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<Member | null>(null);
+  const [removing, setRemoving] = useState(false);
   // Rows just added stay tinted for a moment, so the reader sees where they landed.
   const [justAdded, setJustAdded] = useState<ReadonlySet<string>>(new Set());
   const request = useUiStore((s) => s.panelCalendarRequest);
@@ -43,6 +48,15 @@ export function MembersPanel() {
     removeMember,
     changeColor,
   } = useCalendarMembers(presence.mounted ? calendarId : '');
+  const { loading, error: loadError } = useMembersState(calendarId);
+  const fetchMembers = useCalendarStore((s) => s.fetchMembers);
+
+  const confirmRemove = async (member: Member) => {
+    setRemoving(true);
+    await removeMember(member);
+    setRemoving(false);
+    setPendingRemove(null);
+  };
 
   // The picker is a step inside the panel, not a place it reopens on.
   useEffect(() => {
@@ -128,6 +142,26 @@ export function MembersPanel() {
         <div className="flex-1 overflow-y-auto">
           {!calendarId ? (
             <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
+          ) : loading ? (
+            <ul className="divide-y divide-[var(--color-separator)]" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <li key={i} className="flex animate-pulse items-center gap-3 px-5 py-3">
+                  <span className="h-9 w-9 shrink-0 rounded-full bg-[var(--color-surface-inset)]" />
+                  <span className="h-4 flex-1 rounded bg-[var(--color-surface-inset)]" />
+                </li>
+              ))}
+            </ul>
+          ) : loadError && members.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
+              <p className="text-body text-[var(--color-danger)]">{t('members.loadFailed')}</p>
+              <button
+                type="button"
+                onClick={() => fetchMembers(calendarId)}
+                className="btn-secondary h-8 px-4 text-footnote"
+              >
+                {t('error.retry')}
+              </button>
+            </div>
           ) : members.length === 0 ? (
             <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
           ) : (
@@ -195,6 +229,7 @@ export function MembersPanel() {
                         <CustomSelect
                           value={m.role}
                           onChange={(v) => changeRole(m, v)}
+                          ariaLabel={t('members.roleFor', { name: m.name })}
                           className="shrink-0"
                           triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
                           options={roleOptions.map((r) => ({
@@ -210,7 +245,7 @@ export function MembersPanel() {
                       {canRemove && (
                         <button
                           type="button"
-                          onClick={() => removeMember(m)}
+                          onClick={() => setPendingRemove(m)}
                           className="icon-btn icon-btn-danger h-8 w-8"
                           aria-label={isMe ? t('members.leave') : t('common.delete')}
                         >
@@ -246,6 +281,20 @@ export function MembersPanel() {
           )}
         </div>
       )}
+
+      <ConfirmSheet
+        open={pendingRemove !== null}
+        title={
+          pendingRemove?.id === me?.id
+            ? t('confirm.leaveTitle')
+            : t('confirm.removeMember', { name: pendingRemove?.name ?? '' })
+        }
+        hint={pendingRemove?.id === me?.id ? t('members.leaveConfirm') : t('members.removeConfirm')}
+        confirmLabel={pendingRemove?.id === me?.id ? t('members.leave') : t('confirm.remove')}
+        busy={removing}
+        onConfirm={() => pendingRemove && confirmRemove(pendingRemove)}
+        onCancel={() => setPendingRemove(null)}
+      />
     </SidePanel>
   );
 }
