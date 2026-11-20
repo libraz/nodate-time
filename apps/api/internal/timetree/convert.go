@@ -42,8 +42,10 @@ type converted struct {
 	Event calimport.Event
 	// Owner is the normalized address the event is filed under.
 	Owner string
-	Label string
-	Skip  string
+	// Attendees are the normalized addresses of its participants.
+	Attendees []string
+	Label     string
+	Skip      string
 	// Reject is set when the event cannot be imported as given.
 	Reject string
 }
@@ -60,6 +62,8 @@ type converter struct {
 	owners map[string]string
 	// defaultOwner is the normalized address for events without a mapped label.
 	defaultOwner string
+	// defaultAttendees are the normalized participants of those events.
+	defaultAttendees []string
 }
 
 func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer string) *converter {
@@ -80,6 +84,9 @@ func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer st
 		}
 		if m.DefaultOwner != "" {
 			cv.defaultOwner = norm(m.DefaultOwner)
+		}
+		for _, email := range m.DefaultAttendees {
+			cv.defaultAttendees = append(cv.defaultAttendees, norm(email))
 		}
 	}
 	return cv
@@ -129,9 +136,10 @@ func (cv *converter) convert(e ttEvent) converted {
 		return skip(skipOtherRepeat)
 	}
 
-	out.Owner = cv.defaultOwner
 	if owner, ok := cv.owners[out.Label]; ok {
 		out.Owner = owner
+	} else {
+		out.Owner, out.Attendees = cv.defaultOwner, cv.defaultAttendees
 	}
 
 	ev := calimport.Event{

@@ -166,6 +166,7 @@ calendars:
   - timetree: Band # the TimeTree calendar's name or alias code
     name: Band # name here; defaults to the TimeTree name
     default_owner: mgr@example.com # owner of events with no mapped label; defaults to importer
+    default_attendees: [hanako@example.com] # participants of those same events; optional
     members:
       - { email: hanako@example.com, role: viewer }
       - { email: mgr@example.com, role: manager }
@@ -179,6 +180,7 @@ calendars:
 - `calendars[].name` is the calendar's name here. An existing calendar of that name that the importer belongs to (other than a personal one) is reused.
 - `members` gives each person a role: `manager`, `editor` or `viewer`. An existing member keeps the role they have.
 - `labels` maps TimeTree label names to the person who owns those events. Events with no label, or a label not listed, go to `default_owner`.
+- `default_attendees` makes the listed people participants of the events that go to `default_owner`, such as a whole group's rehearsals. Each must be a member or the importer. Events under a mapped label get no participants. Participants count as busy in availability searches, and an event with two or more participants shows a plain dot instead of its owner's picture.
 
 Everything is checked before anything is written, and any of these stops the command with nothing written:
 

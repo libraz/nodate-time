@@ -12,6 +12,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
@@ -421,6 +422,9 @@ func importSeriesHead(
 		return importedSeries{}, importFailed, err
 	}
 	newID := uint32(id)
+	if err := attendees.AddToNew(ctx, q, s.workspaceID, newID, e.AttendeeUserIDs); err != nil {
+		return importedSeries{}, importFailed, err
+	}
 	if exceptions != nil {
 		if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
 			RecurrenceExceptions: exceptions,
@@ -485,7 +489,7 @@ func importChangedOccurrence(
 	if _, err := calresolve.LockEvent(ctx, q, cal.ID, parent.id); err != nil {
 		return importFailed, err
 	}
-	if _, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
+	res, err := q.UpsertRecurrenceOverride(ctx, generated.UpsertRecurrenceOverrideParams{
 		PublicID:                overridePubID[:],
 		WorkspaceID:             s.workspaceID,
 		CalendarID:              cal.ID,
@@ -506,8 +510,22 @@ func importChangedOccurrence(
 		NotificationOffset:      e.NotificationOffset,
 		RecurrenceParentID:      parentRef,
 		RecurrenceOriginalStart: originalRef,
-	}); err != nil {
+	})
+	if err != nil {
 		return importFailed, err
+	}
+	// One row affected is a new override; two means the same occurrence came
+	// twice in this import and the row, with its participants, already exists.
+	if affected, err := res.RowsAffected(); err != nil {
+		return importFailed, err
+	} else if affected == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return importFailed, err
+		}
+		if err := attendees.AddToNew(ctx, q, s.workspaceID, uint32(id), e.AttendeeUserIDs); err != nil {
+			return importFailed, err
+		}
 	}
 	// An occurrence moved past the series' end would otherwise fall out
 	// of every range query, which selects series by that column.

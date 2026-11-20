@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -280,7 +281,7 @@ func InsertEvent(ctx context.Context, q *generated.Queries, params generated.Cre
 	if err != nil {
 		return generated.CalendarEvent{}, err
 	}
-	if err := addEventParticipants(ctx, q, params.WorkspaceID, uint32(eventID), attendeeUserIDs); err != nil {
+	if err := attendees.AddToNew(ctx, q, params.WorkspaceID, uint32(eventID), attendeeUserIDs); err != nil {
 		return generated.CalendarEvent{}, err
 	}
 	created, err := q.GetCalendarEventByPublicID(ctx, generated.GetCalendarEventByPublicIDParams{

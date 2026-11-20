@@ -47,6 +47,9 @@ type Event struct {
 	// OwnerUserID 0 means the actor; otherwise the caller guarantees the
 	// user is a member of the calendar.
 	OwnerUserID uint32
+	// AttendeeUserIDs are the event's participants, distinct and each a
+	// member of the calendar; the caller guarantees both.
+	AttendeeUserIDs []uint32
 }
 
 // Result counts what became of the events handed to Run. Rejected is the part

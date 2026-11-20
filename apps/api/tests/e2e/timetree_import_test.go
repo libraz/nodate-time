@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,13 +144,14 @@ users:
 calendars:
   - timetree: %s
     default_owner: %s
+    default_attendees: [%s, %s]
     members:
       - { email: %s, role: viewer }
       - { email: %s, role: manager }
     labels:
       hana: %s
       mgr: %s
-`, s.importer, s.hanako, s.mgr, s.calName, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr)
+`, s.importer, s.hanako, s.mgr, s.calName, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr)
 	return s
 }
 
@@ -221,6 +223,28 @@ func (s *ttScenario) eventOwner(t *testing.T, sourceUID string) string {
 	return email
 }
 
+// eventAttendees lists the participants of an imported event, sorted.
+func (s *ttScenario) eventAttendees(t *testing.T, sourceUID string) []string {
+	t.Helper()
+	rows, err := testDB.Query(
+		`SELECT u.email FROM calendar_event_attendees a
+		 JOIN calendar_events e ON e.id = a.event_id
+		 JOIN calendars c ON c.id = e.calendar_id
+		 JOIN users u ON u.id = a.user_id
+		 WHERE c.name = ? AND e.source_uid = ? AND a.enabled = TRUE
+		 ORDER BY u.email`, s.calName, sourceUID)
+	require.NoError(t, err)
+	defer rows.Close()
+	emails := []string{}
+	for rows.Next() {
+		var email string
+		require.NoError(t, rows.Scan(&email))
+		emails = append(emails, email)
+	}
+	require.NoError(t, rows.Err())
+	return emails
+}
+
 func (s *ttScenario) calendarID(t *testing.T) string {
 	t.Helper()
 	var id string
@@ -290,6 +314,11 @@ func TestTimeTreeImportCreatesUsersMembersAndOwners(t *testing.T) {
 
 	require.Equal(t, s.hanako, s.eventOwner(t, "e-timed"), "label hana maps to hanako")
 	require.Equal(t, s.mgr, s.eventOwner(t, "e-allday"), "no label falls back to default_owner")
+	everyone := []string{s.hanako, s.mgr}
+	sort.Strings(everyone)
+	require.Equal(t, everyone, s.eventAttendees(t, "e-allday"), "default_attendees join an unlabelled event")
+	require.Equal(t, everyone, s.eventAttendees(t, "e-rec"), "and an unlabelled series")
+	require.Empty(t, s.eventAttendees(t, "e-timed"), "a person's label is theirs alone")
 	require.Equal(t, 3, s.events(t))
 	for _, skipped := range []string{"e-memo", "e-birthday", "e-rdate", "e-hourly"} {
 		require.Zero(t, s.count(t, `SELECT COUNT(*) FROM calendar_events e JOIN calendars c ON c.id = e.calendar_id

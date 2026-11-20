@@ -15,17 +15,19 @@ type calData struct {
 
 // analysis is what the dry-run report says about one TimeTree calendar.
 type analysis struct {
-	data          calData
-	conv          []converted
-	oldest        time.Time
-	byLabel       map[string]int
-	skips         map[string]int
-	rejects       map[string]int
-	owners        map[string]int
-	attendees     int
-	utcTimed      int
-	doubleDisplay int
-	allDay        []string
+	data      calData
+	conv      []converted
+	oldest    time.Time
+	byLabel   map[string]int
+	skips     map[string]int
+	rejects   map[string]int
+	owners    map[string]int
+	attendees int
+	// withDefaultAttendees counts the events default_attendees will join.
+	withDefaultAttendees int
+	utcTimed             int
+	doubleDisplay        int
+	allDay               []string
 }
 
 // maxAllDaySamples is how many raw/converted all-day pairs the report shows.
@@ -63,6 +65,9 @@ func analyze(d calData, cv *converter) *analysis {
 			a.rejects[c.Reject]++
 		default:
 			a.owners[c.Owner]++
+			if len(c.Attendees) > 0 {
+				a.withDefaultAttendees++
+			}
 		}
 		if e.AllDay && c.ok() && len(a.allDay) < maxAllDaySamples {
 			a.allDay = append(a.allDay, fmt.Sprintf("%s start_at=%d end_at=%d tz=%q -> %s .. %s",
@@ -129,6 +134,8 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 			continue
 		}
 		fmt.Fprintf(w, "  by owner: %s\n", tally(a.owners))
+		fmt.Fprintf(w, "  default attendees: %d people on %d events\n",
+			len(plan.Mapping.DefaultAttendees), a.withDefaultAttendees)
 		if plan.ExistingID != 0 {
 			fmt.Fprintf(w, "  calendar %q: reuse existing\n", plan.Name)
 		} else {

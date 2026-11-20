@@ -153,6 +153,19 @@ func TestMappingValidationRules(t *testing.T) {
 	t.Run("default_owner must be a member or the importer", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars[0].DefaultOwner = "stranger@example.com" }), "default_owner")
 	})
+	t.Run("default_attendees must be members or the importer", func(t *testing.T) {
+		assert.Empty(t, edit(t, false, func(m *Mapping) {
+			m.Calendars[0].DefaultAttendees = []string{"ops@example.com", "Hanako@example.com"}
+		}))
+		assertOneError(t, edit(t, false, func(m *Mapping) {
+			m.Calendars[0].DefaultAttendees = []string{"stranger@example.com"}
+		}), "default_attendees[0]")
+	})
+	t.Run("default_attendees duplicates", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) {
+			m.Calendars[0].DefaultAttendees = []string{"hanako@example.com", "HANAKO@example.com"}
+		}), "default_attendees[1]")
+	})
 	t.Run("timetree is required", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars[0].TimeTree = "" }), "timetree is required")
 	})

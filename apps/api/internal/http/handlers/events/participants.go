@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 )
@@ -147,7 +147,7 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 	// cannot hand back an edit right the owner's side did not give again.
 	//
 	// Only for an event that can already have attendees. Creation calls
-	// addEventParticipants directly, and the difference is not tidiness --
+	// attendees.AddToNew directly, and the difference is not tidiness --
 	// see there before routing the two back through one function.
 	eventRef := sql.NullInt32{Int32: int32(eventID), Valid: true}
 	current, err := q.ListEnabledEventAttendeeIDs(ctx, eventRef)
@@ -174,39 +174,5 @@ func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspa
 			arriving = append(arriving, p.userID)
 		}
 	}
-	return addEventParticipants(ctx, q, workspaceID, eventID, arriving)
-}
-
-// addEventParticipants adds attendees to an event that cannot already have
-// any: one created by the same transaction that is now adding them.
-//
-// The read and disable steps of replaceEventParticipants are deliberately
-// absent here, and restoring them to make the two symmetrical would restore an
-// intermittent 500 on event creation. An empty UPDATE is not free. Attendee rows are
-// indexed on (event_id, user_id) and a brand-new event id sorts above every
-// value in that index, so the scan for rows to disable finds nothing and
-// still takes a next-key lock running to supremum. Every concurrent creation
-// lands on that same gap; gap locks are shared, so all of them get it, and
-// then each needs to insert into the gap the others hold. Two creators are
-// enough for MySQL to roll one of them back, and the caller sees a request
-// that failed for no reason it could act on.
-//
-// The inserts on their own do not collide: an insert-intention lock conflicts
-// with another transaction's gap lock, not with another insert intention.
-func addEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, attendeeUserIDs []uint32) error {
-	for _, userID := range attendeeUserIDs {
-		pubID, err := uuid.NewV7()
-		if err != nil {
-			return err
-		}
-		if err := q.AddEventAttendee(ctx, generated.AddEventAttendeeParams{
-			PublicID:    pubID[:],
-			WorkspaceID: workspaceID,
-			EventID:     sql.NullInt32{Int32: int32(eventID), Valid: true},
-			UserID:      userID,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return attendees.AddToNew(ctx, q, workspaceID, eventID, arriving)
 }

@@ -166,6 +166,7 @@ calendars:
   - timetree: Band # TimeTree カレンダーの name または alias_code
     name: Band # こちら側の名前。省略時は TimeTree の name
     default_owner: mgr@example.com # 対応するラベルがない予定の所有者。省略時は importer
+    default_attendees: [hanako@example.com] # その予定の参加者。省略可
     members:
       - { email: hanako@example.com, role: viewer }
       - { email: mgr@example.com, role: manager }
@@ -179,6 +180,7 @@ calendars:
 - `calendars[].name` はこちら側のカレンダー名です。importer がメンバーである同名のカレンダー（個人カレンダーを除く）が既にあれば、それを再利用します。
 - `members` は各人のロールで、`manager`・`editor`・`viewer` のいずれかです。既にメンバーの人のロールは変えません。
 - `labels` は、TimeTree のラベル名と、その予定を持つ人の対応です。ラベルのない予定と、ここに書かれていないラベルの予定は `default_owner` になります。
+- `default_attendees` に書いた人は、`default_owner` に入る予定（グループ全体のレッスンなど）の参加者になります。それぞれメンバーか importer である必要があります。対応するラベルがある予定には参加者を付けません。参加者は空き時間の検索で予定ありとして数えられ、参加者が 2 人以上の予定には所有者の写真の代わりに色の点が表示されます。
 
 検証は書き込みの前にすべて済ませます。次のどれかに当たると、何も書かずに終了します。
 

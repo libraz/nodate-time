@@ -279,6 +279,9 @@ func write(ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res r
 			default:
 				ev := cv.Event
 				ev.OwnerUserID = users[cv.Owner].ID
+				for _, email := range cv.Attendees {
+					ev.AttendeeUserIDs = append(ev.AttendeeUserIDs, users[email].ID)
+				}
 				events = append(events, ev)
 			}
 		}

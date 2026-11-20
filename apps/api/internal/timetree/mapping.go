@@ -31,11 +31,14 @@ type MappingUser struct {
 
 // MappingCalendar maps one TimeTree calendar.
 type MappingCalendar struct {
-	TimeTree     string            `yaml:"timetree"`
-	Name         string            `yaml:"name"`
-	DefaultOwner string            `yaml:"default_owner"`
-	Members      []MappingMember   `yaml:"members"`
-	Labels       map[string]string `yaml:"labels"`
+	TimeTree     string `yaml:"timetree"`
+	Name         string `yaml:"name"`
+	DefaultOwner string `yaml:"default_owner"`
+	// DefaultAttendees are the participants of the events default_owner
+	// receives: the ones no mapped label assigns to a person.
+	DefaultAttendees []string          `yaml:"default_attendees"`
+	Members          []MappingMember   `yaml:"members"`
+	Labels           map[string]string `yaml:"labels"`
 }
 
 // MappingMember is a calendar member and the role it is given.
@@ -143,6 +146,16 @@ func (m *Mapping) validate(dryRun bool) []string {
 		if c.DefaultOwner != "" && !allowed[norm(c.DefaultOwner)] {
 			add("%s: default_owner %q is neither a member nor the importer", where, c.DefaultOwner)
 		}
+		seenAttendee := map[string]bool{}
+		for j, email := range c.DefaultAttendees {
+			switch {
+			case !allowed[norm(email)]:
+				add("%s.default_attendees[%d]: %q is neither a member nor the importer", where, j, email)
+			case seenAttendee[norm(email)]:
+				add("%s.default_attendees[%d]: %q is listed twice", where, j, email)
+			}
+			seenAttendee[norm(email)] = true
+		}
 		for _, label := range sortedKeys(c.Labels) {
 			if owner := c.Labels[label]; !allowed[norm(owner)] {
 				add("%s.labels[%q]: %q is neither a member nor the importer", where, label, owner)
@@ -170,6 +183,9 @@ func (m *Mapping) refs() []emailRef {
 		}
 		if c.DefaultOwner != "" {
 			refs = append(refs, emailRef{c.DefaultOwner, "default_owner of " + c.TimeTree})
+		}
+		for _, email := range c.DefaultAttendees {
+			refs = append(refs, emailRef{email, "default attendee of " + c.TimeTree})
 		}
 	}
 	return refs

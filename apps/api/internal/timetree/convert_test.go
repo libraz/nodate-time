@@ -184,6 +184,25 @@ func TestConvertOwnerFollowsTheLabel(t *testing.T) {
 		"without default_owner the importer owns")
 }
 
+func TestConvertDefaultAttendeesJoinOnlyUnmappedEvents(t *testing.T) {
+	m := &MappingCalendar{
+		DefaultOwner:     "mgr@example.com",
+		DefaultAttendees: []string{"Hanako@Example.com", "taro@example.com"},
+		Labels:           map[string]string{"花子": "hanako@example.com"},
+	}
+	cv := testConverter(m)
+	attendees := func(label flexID) []string {
+		ev := timed(jst(2026, 4, 10, 10), jst(2026, 4, 10, 11))
+		ev.LabelID = label
+		return cv.convert(ev).Attendees
+	}
+	assert.Empty(t, attendees("1"), "a person's label is that person's event alone")
+	assert.Equal(t, []string{"hanako@example.com", "taro@example.com"}, attendees("4"))
+	assert.Equal(t, []string{"hanako@example.com", "taro@example.com"}, attendees(""))
+	assert.Empty(t, testConverter(&MappingCalendar{}).convert(timed(jst(2026, 4, 10, 10), jst(2026, 4, 10, 11))).Attendees,
+		"without default_attendees nobody joins")
+}
+
 func TestConvertLabelNamesAreMatchedExactly(t *testing.T) {
 	m := &MappingCalendar{Labels: map[string]string{"ＡＢ": "a@example.com"}}
 	cv := newConverter(testWSZone, []ttLabel{{ID: "1", Name: "AB"}, {ID: "2", Name: "ＡＢ"}}, m, "ops@example.com")
