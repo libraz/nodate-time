@@ -47,8 +47,10 @@ func (q *Queries) AddCalendarMember(ctx context.Context, arg AddCalendarMemberPa
 }
 
 const countCalendarMembers = `-- name: CountCalendarMembers :one
-SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND enabled = TRUE
+SELECT COUNT(*) FROM calendar_members cm
+INNER JOIN users u ON u.id = cm.user_id AND u.enabled = TRUE
+INNER JOIN workspace_members wm ON wm.workspace_id = cm.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 `
 
 // Counts the same rows ListCalendarMembers returns, so the number a
@@ -62,12 +64,18 @@ func (q *Queries) CountCalendarMembers(ctx context.Context, calendarID uint32) (
 
 const countCalendarOwners = `-- name: CountCalendarOwners :one
 SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
 `
 
 // CountCalendarOwners guards the last-owner case. Roles above editor can
 // change membership, so losing the final owner would leave a calendar
-// nobody can administer.
+// nobody can administer. An owner who left the workspace is not reachable,
+// so they do not count.
 func (q *Queries) CountCalendarOwners(ctx context.Context, calendarID uint32) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countCalendarOwners, calendarID)
 	var count int64
@@ -77,7 +85,13 @@ func (q *Queries) CountCalendarOwners(ctx context.Context, calendarID uint32) (i
 
 const countCalendarOwnersForUpdate = `-- name: CountCalendarOwnersForUpdate :one
 SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE FOR UPDATE
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
+FOR UPDATE
 `
 
 func (q *Queries) CountCalendarOwnersForUpdate(ctx context.Context, calendarID uint32) (int64, error) {
@@ -166,7 +180,12 @@ func (q *Queries) GetCalendarMemberForUpdate(ctx context.Context, arg GetCalenda
 
 const getLongestStandingOwner = `-- name: GetLongestStandingOwner :one
 SELECT user_id FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
 ORDER BY created_at, id
 LIMIT 1
 `
@@ -259,8 +278,9 @@ SELECT cm.id, cm.public_id, cm.workspace_id, cm.calendar_id, cm.user_id, cm.role
        u.email AS user_email, u.avatar_url AS user_avatar_url,
        so.storage_key AS user_avatar_storage_key
 FROM calendar_members cm
-INNER JOIN users u ON u.id = cm.user_id
+INNER JOIN users u ON u.id = cm.user_id AND u.enabled = TRUE
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+INNER JOIN workspace_members wm ON wm.workspace_id = cm.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.created_at
 LIMIT ?

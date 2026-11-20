@@ -35,8 +35,9 @@ SELECT cm.*, u.public_id AS user_public_id, u.display_name AS user_display_name,
        u.email AS user_email, u.avatar_url AS user_avatar_url,
        so.storage_key AS user_avatar_storage_key
 FROM calendar_members cm
-INNER JOIN users u ON u.id = cm.user_id
+INNER JOIN users u ON u.id = cm.user_id AND u.enabled = TRUE
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
+INNER JOIN workspace_members wm ON wm.workspace_id = cm.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
 WHERE cm.calendar_id = ? AND cm.enabled = TRUE
 ORDER BY cm.created_at
 LIMIT ?;
@@ -87,24 +88,43 @@ LIMIT ?;
 -- Counts the same rows ListCalendarMembers returns, so the number a
 -- calendar reports matches the member list it opens.
 -- name: CountCalendarMembers :one
-SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND enabled = TRUE;
+SELECT COUNT(*) FROM calendar_members cm
+INNER JOIN users u ON u.id = cm.user_id AND u.enabled = TRUE
+INNER JOIN workspace_members wm ON wm.workspace_id = cm.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+WHERE cm.calendar_id = ? AND cm.enabled = TRUE;
 
 -- GetLongestStandingOwner names who inherits the events of a member leaving
 -- the calendar: the owner who has been one longest, so the answer is stable.
 -- name: GetLongestStandingOwner :one
 SELECT user_id FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
 ORDER BY created_at, id
 LIMIT 1;
 
 -- CountCalendarOwners guards the last-owner case. Roles above editor can
 -- change membership, so losing the final owner would leave a calendar
--- nobody can administer.
+-- nobody can administer. An owner who left the workspace is not reachable,
+-- so they do not count.
 -- name: CountCalendarOwners :one
 SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE;
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE);
 
 -- name: CountCalendarOwnersForUpdate :one
 SELECT COUNT(*) FROM calendar_members
-WHERE calendar_id = ? AND role = 'owner' AND enabled = TRUE FOR UPDATE;
+WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
+  AND calendar_members.enabled = TRUE
+  AND EXISTS (SELECT 1 FROM workspace_members wm
+              WHERE wm.workspace_id = calendar_members.workspace_id
+                AND wm.user_id = calendar_members.user_id
+                AND wm.enabled = TRUE)
+FOR UPDATE;
