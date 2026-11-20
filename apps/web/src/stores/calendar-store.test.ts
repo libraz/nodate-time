@@ -13,6 +13,7 @@ vi.mock('@/lib/api', () => {
       })),
       post: vi.fn(),
       put: vi.fn(),
+      putBlob: vi.fn(),
       delete: vi.fn(),
     },
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
@@ -24,6 +25,15 @@ vi.mock('@/lib/toast', () => ({
   toast: {
     error: vi.fn(),
   },
+}));
+
+vi.mock('@/lib/image-resize', () => ({
+  resizeImageForCover: vi.fn(async () => ({
+    bytes: new TextEncoder().encode('resized bytes').buffer,
+    contentType: 'image/webp',
+    width: 1600,
+    height: 900,
+  })),
 }));
 
 import { api } from '@/lib/api';
@@ -38,7 +48,6 @@ function cal(id: string, overrides: Partial<Calendar> = {}): Calendar {
     id,
     name: `Calendar ${id}`,
     color: '#47B2F7',
-    coverUrl: '',
     createdAt: '',
     publicShared: false,
     role: 'owner',
@@ -90,6 +99,68 @@ function memo(id: string, calendarId: string): Memo {
     updatedAt: '',
   };
 }
+
+describe('calendar cover upload', () => {
+  it('clears a signed URL omitted from a later full calendar update', async () => {
+    const existing = cal('cal-1', { coverImageUrl: 'https://storage.example/stale-signed-cover' });
+    mockApi.put.mockResolvedValue(cal('cal-1', { name: 'Renamed' }) as never);
+    useCalendarStore.setState({ calendars: [existing] });
+
+    await useCalendarStore.getState().updateCalendar('cal-1', { name: 'Renamed' });
+
+    expect(useCalendarStore.getState().calendars[0]?.name).toBe('Renamed');
+    expect(useCalendarStore.getState().calendars[0]?.coverImageUrl).toBeUndefined();
+  });
+
+  it('uploads bytes and stores the signed image URL', async () => {
+    const file = new Blob(['cover bytes'], { type: 'image/png' }) as File;
+    const updated = cal('cal-1', {
+      coverImageUrl: 'https://storage.example/signed-cover',
+      coverUploadAllowed: true,
+    });
+    mockApi.putBlob.mockResolvedValue(updated as never);
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+
+    await useCalendarStore.getState().uploadCalendarCover('cal-1', file);
+
+    expect(mockApi.putBlob).toHaveBeenCalledWith('/calendars/cal-1/cover', expect.any(Blob));
+    const sent = mockApi.putBlob.mock.calls[0]?.[1];
+    expect(sent?.type).toBe('image/webp');
+    expect(sent?.size).toBe('resized bytes'.length);
+    expect(useCalendarStore.getState().calendars[0]).toMatchObject({
+      coverImageUrl: 'https://storage.example/signed-cover',
+    });
+  });
+
+  it('clears a prior signed URL after removing the uploaded image', async () => {
+    const existing = cal('cal-1', { coverImageUrl: 'https://storage.example/old-signed-cover' });
+    mockApi.delete.mockResolvedValue(cal('cal-1') as never);
+    useCalendarStore.setState({ calendars: [existing] });
+
+    await useCalendarStore.getState().deleteCalendarCover('cal-1');
+
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/cover');
+    expect(useCalendarStore.getState().calendars[0]?.coverImageUrl).toBeUndefined();
+  });
+
+  it('does not apply an upload response after the signed-in account changes', async () => {
+    const file = new Blob(['cover bytes'], { type: 'image/png' }) as File;
+    let completeUpload: (calendar: Calendar) => void = () => {};
+    mockApi.putBlob.mockImplementation(
+      () => new Promise((resolve) => (completeUpload = resolve)) as never,
+    );
+    useCalendarStore.setState({ calendars: [cal('cal-1')] });
+
+    const upload = useCalendarStore.getState().uploadCalendarCover('cal-1', file);
+    useCalendarStore.getState().resetSessionData();
+    useCalendarStore.setState({ calendars: [cal('other-account-calendar')] });
+    await vi.waitFor(() => expect(mockApi.putBlob).toHaveBeenCalled());
+    completeUpload(cal('cal-1', { coverImageUrl: 'https://storage.example/signed-cover' }));
+    await upload;
+
+    expect(useCalendarStore.getState().calendars).toEqual([cal('other-account-calendar')]);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

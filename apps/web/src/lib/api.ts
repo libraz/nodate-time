@@ -476,6 +476,14 @@ export const api = {
       ...(body != null ? { body: JSON.stringify(body) } : {}),
       ...(signal ? { signal } : {}),
     }),
+  /** Sends raw bytes through the same authenticated request path as JSON writes. */
+  putBlob: <T>(path: string, body: Blob, signal?: AbortSignal) =>
+    request<T>(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body,
+      ...(signal ? { signal } : {}),
+    }),
   patch: <T>(path: string, body: unknown, signal?: AbortSignal) =>
     request<T>(path, {
       method: 'PATCH',

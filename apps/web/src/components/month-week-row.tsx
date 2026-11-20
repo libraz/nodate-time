@@ -1,8 +1,10 @@
 import type { DateTime } from 'luxon';
 import { type CSSProperties, memo, type PointerEvent as ReactPointerEvent, useMemo } from 'react';
+import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { fromISOInZone, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { readableInk } from '@/lib/member-color';
 import {
   eventStartDay,
   isMultiDay,
@@ -62,6 +64,8 @@ interface DensityStyle {
   chip: string;
   chipHover: string;
   dot: string;
+  /** Diameter of the owner's mark on a chip; zero keeps the plain colour dot. */
+  markSize: number;
   bar: string;
   overflow: string;
   cursorMovable: string;
@@ -79,6 +83,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     chip: 'gap-1 rounded-[5px] px-1.5 text-caption',
     chipHover: 'hover:brightness-95',
     dot: 'h-1.5 w-1.5',
+    markSize: 14,
     bar: 'gap-1 px-2 text-caption',
     overflow: 'text-caption',
     cursorMovable: 'cursor-grab active:cursor-grabbing',
@@ -92,6 +97,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     chip: 'gap-0.5 rounded-[4px] px-1 text-micro',
     chipHover: '',
     dot: 'h-1 w-1',
+    markSize: 0,
     bar: 'gap-1 px-2 text-micro',
     overflow: 'text-micro',
     cursorMovable: 'active:cursor-grabbing',
@@ -349,11 +355,20 @@ function MonthWeekRowImpl({
                         } as CSSProperties
                       }
                     >
-                      <span
-                        aria-hidden
-                        className={`shrink-0 rounded-full ${style.dot}`}
-                        style={{ backgroundColor: evt.color }}
-                      />
+                      {style.markSize > 0 ? (
+                        <OwnerMark
+                          name={evt.ownerName}
+                          avatarUrl={evt.ownerAvatarUrl}
+                          color={evt.color}
+                          size={style.markSize}
+                        />
+                      ) : (
+                        <span
+                          aria-hidden
+                          className={`shrink-0 rounded-full ${style.dot}`}
+                          style={{ backgroundColor: evt.color }}
+                        />
+                      )}
                       <span className="truncate">
                         {evt.allDay || !style.chipTime ? '' : `${start.toFormat('H:mm')} `}
                         {evt.title}
@@ -406,7 +421,7 @@ function MonthWeekRowImpl({
               type="button"
               onPointerDown={(e) => onEventPointerDown(p.event, e)}
               onClick={() => onEventClick(p.event.id)}
-              className={`event-bar pointer-events-auto absolute flex items-center truncate font-semibold tabular-nums text-white ${style.bar} ${style.chipHover} ${
+              className={`event-bar pointer-events-auto absolute flex items-center truncate font-semibold tabular-nums ${style.bar} ${style.chipHover} ${
                 canMoveEvent(p.event) ? style.cursorMovable : style.cursorFixed
               }`}
               style={{
@@ -416,6 +431,7 @@ function MonthWeekRowImpl({
                 height: barH,
                 lineHeight: `${barH}px`,
                 backgroundColor: p.event.color,
+                color: readableInk(p.event.color),
                 borderRadius: barRadius(p.continuesLeft, p.continuesRight),
                 opacity: draggingEventId === p.event.id ? 0.4 : undefined,
               }}
@@ -425,6 +441,15 @@ function MonthWeekRowImpl({
                 <span aria-hidden className="opacity-80">
                   ‹
                 </span>
+              )}
+              {style.markSize > 0 && !p.continuesLeft && (
+                <OwnerMark
+                  name={p.event.ownerName}
+                  avatarUrl={p.event.ownerAvatarUrl}
+                  color={p.event.color}
+                  size={style.markSize}
+                  inverse
+                />
               )}
               <span className="truncate">
                 {!p.event.allDay && !p.continuesLeft && (
@@ -445,7 +470,7 @@ function MonthWeekRowImpl({
       {/* Grid-aligned drag ghost: real-width preview at the landing spot. */}
       {previewSeg && dragLanding && (
         <div
-          className={`pointer-events-none absolute z-20 flex items-center truncate font-semibold text-white shadow-lg ${style.bar}`}
+          className={`pointer-events-none absolute z-20 flex items-center truncate font-semibold shadow-lg ${style.bar}`}
           style={{
             top: overlayTop,
             left: colLeft(previewSeg.startCol),
@@ -453,6 +478,7 @@ function MonthWeekRowImpl({
             height: barH,
             lineHeight: `${barH}px`,
             backgroundColor: dragLanding.event.color,
+            color: readableInk(dragLanding.event.color),
             borderRadius: '5px',
             opacity: 0.85,
           }}

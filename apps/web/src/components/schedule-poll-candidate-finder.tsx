@@ -1,6 +1,10 @@
 import { DateTime } from 'luxon';
-import { useEffect, useRef, useState } from 'react';
-import { formatSchedulePollSlotTime } from '@/components/schedule-poll-ui';
+import { type InputHTMLAttributes, useEffect, useRef, useState } from 'react';
+import {
+  formatSchedulePollSlotTime,
+  SlotDayTile,
+  slotTimeRange,
+} from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import {
@@ -176,185 +180,245 @@ export function SchedulePollCandidateFinder({
     }
   };
 
+  const days = (() => {
+    const byDay = new Map<
+      string,
+      Array<{ candidate: SchedulePollCandidate; key: string; start: DateTime; end: DateTime }>
+    >();
+    for (const candidate of suggestions) {
+      const start = DateTime.fromISO(candidate.startAt, { setZone: true })
+        .setZone(timezone)
+        .setLocale(locale);
+      const end = DateTime.fromISO(candidate.endAt, { setZone: true })
+        .setZone(timezone)
+        .setLocale(locale);
+      const day = start.toISODate() ?? candidate.startAt;
+      const entry = { candidate, key: candidateKey(candidate), start, end };
+      const group = byDay.get(day);
+      if (group) group.push(entry);
+      else byDay.set(day, [entry]);
+    }
+    return [...byDay.entries()];
+  })();
+
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-inset)] p-4 sm:p-5">
+    <div className="page-card p-4 sm:p-5">
       <div className="mb-4">
         <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
           {t('schedulePoll.findCandidates')}
         </h3>
-        <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
+        <p className="mt-0.5 text-footnote text-[var(--color-text-secondary)]">
           {t('schedulePoll.findCandidatesHint')}
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-        <label className="text-footnote text-[var(--color-text-secondary)]">
-          <span className="mb-1 block">{t('schedulePoll.fromDate')}</span>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
-            className="input-modern w-full"
-          />
-        </label>
-        <label className="text-footnote text-[var(--color-text-secondary)]">
-          <span className="mb-1 block">{t('schedulePoll.toDate')}</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
-            className="input-modern w-full"
-          />
-        </label>
-        <label className="text-footnote text-[var(--color-text-secondary)]">
-          <span className="mb-1 block">{t('schedulePoll.startTime')}</span>
-          <input
-            type="time"
-            value={startTime}
-            onChange={(event) => setStartTime(event.target.value)}
-            className="input-modern w-full"
-          />
-        </label>
-        <label className="text-footnote text-[var(--color-text-secondary)]">
-          <span className="mb-1 block">{t('schedulePoll.endTime')}</span>
-          <input
-            type="time"
-            value={endTime}
-            onChange={(event) => setEndTime(event.target.value)}
-            className="input-modern w-full"
-          />
-        </label>
-        <label className="text-footnote text-[var(--color-text-secondary)]">
-          <span className="mb-1 block">{t('schedulePoll.durationMinutes')}</span>
-          <input
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,0.8fr)]">
+        <Field
+          label={t('schedulePoll.fromDate')}
+          type="date"
+          value={fromDate}
+          onChange={(event) => setFromDate(event.target.value)}
+        />
+        <Field
+          label={t('schedulePoll.toDate')}
+          type="date"
+          value={toDate}
+          onChange={(event) => setToDate(event.target.value)}
+        />
+        <Field
+          label={t('schedulePoll.startTime')}
+          type="time"
+          value={startTime}
+          onChange={(event) => setStartTime(event.target.value)}
+        />
+        <Field
+          label={t('schedulePoll.endTime')}
+          type="time"
+          value={endTime}
+          onChange={(event) => setEndTime(event.target.value)}
+        />
+        <div className="col-span-2 sm:col-span-1">
+          <Field
+            label={t('schedulePoll.durationMinutes')}
             type="number"
             min={15}
             max={1440}
             step={15}
             value={durationMinutes}
             onChange={(event) => setDurationMinutes(Number(event.target.value))}
-            className="input-modern w-full"
           />
-        </label>
+        </div>
+      </div>
+      <div className="mt-3 flex justify-end">
         <button
           type="button"
           onClick={findCandidates}
           disabled={
             searching || memberIds.length === 0 || fromDate > toDate || durationMinutes < 15
           }
-          className="btn-primary self-end px-4 text-default disabled:opacity-50"
+          className="btn-primary inline-flex h-9 items-center gap-2 px-4 text-body"
         >
-          {searching ? t('common.loading') : t('schedulePoll.findCandidates')}
+          {searching ? (
+            <span aria-hidden className="spinner h-3.5 w-3.5" />
+          ) : (
+            <svg
+              aria-hidden
+              width="15"
+              height="15"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            >
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="m10.5 10.5 3 3" />
+            </svg>
+          )}
+          {t('schedulePoll.findCandidates')}
         </button>
       </div>
 
-      <div className="mt-4 border-t border-[var(--color-separator)] pt-4">
-        <h4 className="text-footnote font-semibold text-[var(--color-text-primary)]">
-          {t('schedulePoll.manualCandidate')}
-        </h4>
-        <p className="mb-3 mt-1 text-micro text-[var(--color-text-secondary)]">
-          {t('schedulePoll.manualCandidateHint', { timezone })}
-        </p>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <label className="text-footnote text-[var(--color-text-secondary)]">
-            <span className="mb-1 block">{t('schedulePoll.manualStartDate')}</span>
-            <input
-              type="date"
-              value={manualStartDate}
-              onChange={(event) => setManualStartDate(event.target.value)}
-              className="input-modern w-full"
-            />
-          </label>
-          <label className="text-footnote text-[var(--color-text-secondary)]">
-            <span className="mb-1 block">{t('schedulePoll.manualStartTime')}</span>
-            <input
-              type="time"
-              value={manualStartTime}
-              onChange={(event) => setManualStartTime(event.target.value)}
-              className="input-modern w-full"
-            />
-          </label>
-          <label className="text-footnote text-[var(--color-text-secondary)]">
-            <span className="mb-1 block">{t('schedulePoll.manualEndDate')}</span>
-            <input
-              type="date"
-              value={manualEndDate}
-              onChange={(event) => setManualEndDate(event.target.value)}
-              className="input-modern w-full"
-            />
-          </label>
-          <label className="text-footnote text-[var(--color-text-secondary)]">
-            <span className="mb-1 block">{t('schedulePoll.manualEndTime')}</span>
-            <input
-              type="time"
-              value={manualEndTime}
-              onChange={(event) => setManualEndTime(event.target.value)}
-              className="input-modern w-full"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={addManualCandidate}
-            disabled={searching || memberIds.length === 0}
-            className="btn-primary self-end px-4 text-default disabled:opacity-50"
-          >
-            {searching ? t('common.loading') : t('schedulePoll.addManualCandidate')}
-          </button>
-        </div>
-      </div>
-
       {searched && (
-        <div className="mt-4 border-t border-[var(--color-separator)] pt-3">
-          {suggestions.length === 0 ? (
+        <div className="mt-5 border-t border-[var(--color-separator)] pt-4">
+          {suggestions.length === 0 && !searching ? (
             <p className="py-2 text-body text-[var(--color-text-secondary)]">
               {t('schedulePoll.noCandidates')}
             </p>
           ) : (
-            <ul className="divide-y divide-[var(--color-separator)]">
-              {suggestions.map((candidate) => {
-                const key = candidateKey(candidate);
-                const unavailable = !candidate.active || candidate.availability === 'hard';
-                const checked = selectedKeys.has(key);
-                return (
-                  <li key={key}>
-                    <label className="flex min-h-12 items-center gap-3 py-2 text-body text-[var(--color-text-primary)]">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={unavailable || searching}
-                        onChange={() => toggle(candidate)}
-                        className="h-4 w-4 accent-[var(--color-accent)]"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-medium">
-                          {formatSchedulePollSlotTime(
+            <>
+              <p
+                role="status"
+                className={`mb-2.5 text-footnote font-semibold tabular-nums ${selected.length > 0 ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)]'}`}
+              >
+                {t('schedulePoll.selectedCandidates', { count: selected.length })}
+              </p>
+              <div className="max-h-[440px] overflow-y-auto pr-1">
+                <ul className="divide-y divide-[var(--color-separator)]">
+                  {days.map(([day, group]) => (
+                    <li key={day} className="flex gap-3 py-2.5 first:pt-0 last:pb-0">
+                      <SlotDayTile date={group[0]?.start ?? DateTime.fromISO(day)} dense />
+                      <ul className="flex min-w-0 flex-1 flex-wrap content-center gap-1.5">
+                        {group.map(({ candidate, key, start, end }) => {
+                          const unavailable =
+                            !candidate.active || candidate.availability === 'hard';
+                          const label = formatSchedulePollSlotTime(
                             candidate.startAt,
                             candidate.endAt,
                             timezone,
                             locale,
-                          )}
-                        </span>
-                        <span className="block text-footnote text-[var(--color-text-secondary)]">
-                          {unavailable
-                            ? t('schedulePoll.unavailable')
-                            : candidate.availability === 'soft'
-                              ? t('schedulePoll.availabilitySoft')
-                              : t('schedulePoll.availabilityOpen')}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {selected.length > 0 && (
-            <p className="mt-3 text-footnote font-medium text-[var(--color-accent)] tabular-nums">
-              {t('schedulePoll.selectedCandidates', { count: selected.length })}
-            </p>
+                          );
+                          return (
+                            <li key={key}>
+                              <label
+                                title={
+                                  unavailable
+                                    ? t('schedulePoll.unavailable')
+                                    : candidate.availability === 'soft'
+                                      ? t('schedulePoll.availabilitySoft')
+                                      : undefined
+                                }
+                                className={`choice-row choice-chip flex h-8 cursor-pointer items-center gap-1.5 px-2.5 text-footnote font-medium tabular-nums ${unavailable ? 'text-[var(--color-text-tertiary)] line-through opacity-60' : 'text-[var(--color-text-primary)]'}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedKeys.has(key)}
+                                  disabled={unavailable || searching}
+                                  onChange={() => toggle(candidate)}
+                                  aria-label={`${label}${
+                                    unavailable
+                                      ? ` (${t('schedulePoll.unavailable')})`
+                                      : candidate.availability === 'soft'
+                                        ? ` (${t('schedulePoll.availabilitySoft')})`
+                                        : ''
+                                  }`}
+                                  className="sr-only"
+                                />
+                                {!unavailable && candidate.availability === 'soft' && (
+                                  <span
+                                    aria-hidden
+                                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-warning)]"
+                                  />
+                                )}
+                                {slotTimeRange(start, end)}
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
           )}
         </div>
       )}
+
+      <details className="group mt-4 border-t border-[var(--color-separator)] pt-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-footnote font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] [&::-webkit-details-marker]:hidden">
+          <svg
+            aria-hidden
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            className="transition-transform group-open:rotate-90"
+          >
+            <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
+          </svg>
+          {t('schedulePoll.manualCandidate')}
+        </summary>
+        <p className="mb-3 mt-1 text-footnote text-[var(--color-text-tertiary)]">
+          {t('schedulePoll.manualCandidateHint', { timezone })}
+        </p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_auto] sm:items-end">
+          <Field
+            label={t('schedulePoll.manualStartDate')}
+            type="date"
+            value={manualStartDate}
+            onChange={(event) => setManualStartDate(event.target.value)}
+          />
+          <Field
+            label={t('schedulePoll.manualStartTime')}
+            type="time"
+            value={manualStartTime}
+            onChange={(event) => setManualStartTime(event.target.value)}
+          />
+          <Field
+            label={t('schedulePoll.manualEndDate')}
+            type="date"
+            value={manualEndDate}
+            onChange={(event) => setManualEndDate(event.target.value)}
+          />
+          <Field
+            label={t('schedulePoll.manualEndTime')}
+            type="time"
+            value={manualEndTime}
+            onChange={(event) => setManualEndTime(event.target.value)}
+          />
+          <button
+            type="button"
+            onClick={addManualCandidate}
+            disabled={searching || memberIds.length === 0}
+            className="btn-secondary col-span-2 h-[34px] px-4 text-body sm:col-span-1"
+          >
+            {t('schedulePoll.addManualCandidate')}
+          </button>
+        </div>
+      </details>
     </div>
+  );
+}
+
+function Field({ label, ...input }: { label: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block min-w-0 text-footnote font-medium text-[var(--color-text-secondary)]">
+      <span className="mb-1.5 block">{label}</span>
+      <input {...input} className="input-modern input-compact w-full tabular-nums" />
+    </label>
   );
 }

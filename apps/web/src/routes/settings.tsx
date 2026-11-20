@@ -3,6 +3,8 @@ import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrandRow } from '@/components/brand-mark';
+import { CalendarCoverImage } from '@/components/calendar-cover-image';
+import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
@@ -281,6 +283,9 @@ interface SectionProps {
   children: React.ReactNode;
 }
 
+/** The image types the avatar and cover endpoints accept. */
+const IMAGE_UPLOAD_TYPES = 'image/jpeg,image/png,image/webp';
+
 function Section({ title, description, children }: SectionProps) {
   return (
     <section className="mb-6">
@@ -418,30 +423,23 @@ export function ProfileSection() {
       )}
       <Section title={t('settings.profile')} description={t('profile.edit')}>
         <div className="mb-6 flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            disabled={avatarBusy}
-            className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[var(--color-accent)] text-hero font-bold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-            aria-label={t('profile.avatar')}
+          <ImageUploadTile
+            label={t('profile.avatar')}
+            accept={IMAGE_UPLOAD_TYPES}
+            inputRef={avatarInputRef}
+            onFile={handleAvatarFile}
+            busy={avatarBusy}
+            hasImage
+            className="h-16 w-16 rounded-2xl shadow-sm"
           >
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <span>{name ? name.slice(0, 1) : '\u{1F464}'}</span>
+              <span className="flex h-full w-full items-center justify-center bg-[var(--color-accent)] text-hero font-bold text-white">
+                {name ? name.slice(0, 1) : '\u{1F464}'}
+              </span>
             )}
-          </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleAvatarFile(f);
-              if (e.target) e.target.value = '';
-            }}
-          />
+          </ImageUploadTile>
           <div className="min-w-0">
             <p className="text-subhead font-semibold text-[var(--color-text-primary)]">
               {name || '—'}
@@ -855,35 +853,69 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
   const t = useT();
   const calendars = useCalendarStore((s) => s.calendars);
   const updateCalendar = useCalendarStore((s) => s.updateCalendar);
+  const uploadCalendarCover = useCalendarStore((s) => s.uploadCalendarCover);
+  const deleteCalendarCover = useCalendarStore((s) => s.deleteCalendarCover);
   const calendar = calendars.find((c) => c.id === calendarId);
 
   const [name, setName] = useState(calendar?.name ?? '');
   const [color, setColor] = useState(calendar?.color ?? '#42A5F5');
-  const [coverUrl, setCoverUrl] = useState(calendar?.coverUrl ?? '');
   const [saving, setSaving] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  const canUploadCover = calendar?.coverUploadAllowed === true;
+  const hasCover = Boolean(calendar?.coverImageUrl);
+  const draftCover = { color, coverImageUrl: calendar?.coverImageUrl ?? '' };
 
   useEffect(() => {
-    if (calendar) {
-      setName(calendar.name);
-      setColor(calendar.color);
-      setCoverUrl(calendar.coverUrl ?? '');
-    }
-  }, [calendar]);
+    setName(calendar?.name ?? '');
+  }, [calendar?.name]);
 
-  const dirty =
-    !!calendar &&
-    (name !== calendar.name || color !== calendar.color || coverUrl !== (calendar.coverUrl ?? ''));
+  useEffect(() => {
+    setColor(calendar?.color ?? '#42A5F5');
+  }, [calendar?.color]);
+
+  const dirty = !!calendar && (name !== calendar.name || color !== calendar.color);
 
   const save = async () => {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await updateCalendar(calendarId, { name: name.trim(), color, coverUrl });
+      await updateCalendar(calendarId, { name: name.trim(), color });
       toast.success(t('panel.updated'));
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCoverFile = async (file: File) => {
+    if (file.type && !IMAGE_UPLOAD_TYPES.split(',').includes(file.type)) {
+      toast.error(t('settings.calendarCoverInvalidType'));
+      return;
+    }
+
+    setCoverBusy(true);
+    try {
+      await uploadCalendarCover(calendarId, file);
+      toast.success(t('panel.updated'));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setCoverBusy(false);
+    }
+  };
+
+  const removeCover = async () => {
+    setCoverBusy(true);
+    try {
+      await deleteCalendarCover(calendarId);
+      toast.success(t('panel.updated'));
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setCoverBusy(false);
     }
   };
 
@@ -909,17 +941,90 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
           className="h-9 w-9 cursor-pointer rounded-full border-2 border-[var(--color-border)] bg-transparent"
         />
       </FieldRow>
-      <FieldRow label={t('settings.calendarCover')}>
-        <input
-          data-1p-ignore
-          type="url"
-          value={coverUrl}
-          onChange={(e) => setCoverUrl(e.target.value)}
-          placeholder="https://..."
-          className="input-modern w-full max-w-[420px]"
-          maxLength={500}
-        />
-      </FieldRow>
+      {(canUploadCover || hasCover) && (
+        <FieldRow label={t('settings.calendarCover')}>
+          <div className="flex items-start gap-4">
+            {canUploadCover ? (
+              <ImageUploadTile
+                label={t('settings.calendarCoverUpload')}
+                accept={IMAGE_UPLOAD_TYPES}
+                inputRef={coverInputRef}
+                onFile={handleCoverFile}
+                busy={coverBusy}
+                hasImage={hasCover}
+                className="h-20 w-20 rounded-2xl"
+              >
+                {hasCover && (
+                  <CalendarCoverImage
+                    calendar={draftCover}
+                    alt={calendar?.name ?? ''}
+                    className="h-full w-full object-cover"
+                    fallbackClassName="block h-full w-full"
+                  />
+                )}
+              </ImageUploadTile>
+            ) : (
+              hasCover && (
+                <CalendarCoverImage
+                  calendar={draftCover}
+                  alt={calendar?.name ?? ''}
+                  className="h-20 w-20 shrink-0 rounded-2xl object-cover"
+                  fallbackClassName="block h-20 w-20 shrink-0 rounded-2xl"
+                />
+              )
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-caption text-[var(--color-text-tertiary)]">
+                {t('settings.calendarCoverPreview')}
+              </p>
+              <div
+                aria-hidden="true"
+                className="flex max-w-[280px] items-center gap-3 rounded-lg border border-[var(--color-border)] px-3 py-2"
+              >
+                <CalendarCoverImage
+                  calendar={draftCover}
+                  className="h-7 w-7 shrink-0 rounded-md object-cover"
+                  fallbackClassName="h-3 w-3 shrink-0 rounded-full"
+                />
+                <span className="flex-1 truncate text-default text-[var(--color-text-primary)]">
+                  {name.trim() || calendar?.name}
+                </span>
+              </div>
+              {(canUploadCover || calendar?.coverImageUrl) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {canUploadCover && (
+                    <button
+                      type="button"
+                      onClick={() => coverInputRef.current?.click()}
+                      disabled={coverBusy}
+                      className="text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+                    >
+                      {t(
+                        hasCover ? 'settings.calendarCoverReplace' : 'settings.calendarCoverUpload',
+                      )}
+                    </button>
+                  )}
+                  {calendar?.coverImageUrl && (
+                    <button
+                      type="button"
+                      onClick={removeCover}
+                      disabled={coverBusy}
+                      className="text-caption text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                    >
+                      {t('settings.calendarCoverRemove')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {canUploadCover && (
+                <p className="mt-1 text-caption text-[var(--color-text-tertiary)]">
+                  {t('settings.calendarCoverHint')}
+                </p>
+              )}
+            </div>
+          </div>
+        </FieldRow>
+      )}
       <button
         type="button"
         onClick={save}
@@ -1019,7 +1124,7 @@ export function CalendarsSection() {
         </FieldRow>
       </Section>
 
-      {isAdmin && selectedId && <CalendarDetailsSection calendarId={selectedId} />}
+      {isAdmin && selectedId && <CalendarDetailsSection key={selectedId} calendarId={selectedId} />}
 
       <Section
         title={t('settings.members')}

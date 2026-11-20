@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { TipCard } from '@/components/guide';
+import { MemberColorEditor } from '@/components/member-color-editor';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { SidePanel } from '@/components/side-panel';
@@ -11,57 +13,6 @@ import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { Member } from '@/types/calendar';
-
-/**
- * The colour picker on a member's row. The browser reports every step of a
- * drag through the picker; only the colour the picker is closed on is sent.
- */
-function MemberColorInput({
-  member,
-  label,
-  onCommit,
-}: {
-  member: Member;
-  label: string;
-  onCommit: (color: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState(member.color);
-  const commitRef = useRef(onCommit);
-  useEffect(() => {
-    commitRef.current = onCommit;
-  }, [onCommit]);
-
-  useEffect(() => {
-    setDraft(member.color);
-  }, [member.color]);
-
-  // React's onChange is the DOM input event; the native change event is the
-  // one that fires once, when the choice is made.
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    const commit = () => commitRef.current(input.value);
-    input.addEventListener('change', commit);
-    return () => input.removeEventListener('change', commit);
-  }, []);
-
-  return (
-    <label className="relative shrink-0" aria-label={label}>
-      <Avatar src={member.avatar} name={member.name} size="h-9 w-9" color={draft} round />
-      <input
-        data-1p-ignore
-        ref={inputRef}
-        type="color"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        className="absolute inset-0 h-9 w-9 cursor-pointer opacity-0"
-        aria-label={label}
-      />
-    </label>
-  );
-}
 
 export function MembersPanel() {
   const t = useT();
@@ -71,6 +22,7 @@ export function MembersPanel() {
   const presence = usePresence(rightPanel === 'members');
   const me = useAuthStore((s) => s.user);
   const { options, target, setTargetId } = usePanelCalendar();
+  const [editingColorOf, setEditingColorOf] = useState<string | null>(null);
   const calendarId = target?.id ?? '';
   // Nothing is asked of the server while the panel is closed. It stays asked
   // through the exit, so the list does not empty out as the sheet slides away.
@@ -92,6 +44,7 @@ export function MembersPanel() {
       presence={presence}
       onClose={() => toggleRightPanel('members')}
       title={t('panel.members')}
+      helpTopic="calendars"
       actions={
         canManageMembers && (
           <button
@@ -115,6 +68,9 @@ export function MembersPanel() {
           <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
             {t('members.layerHint')}
           </p>
+          <TipCard id="members" topic="calendars" className="mt-3">
+            {t('tip.members')}
+          </TipCard>
         </div>
       )}
 
@@ -133,60 +89,79 @@ export function MembersPanel() {
                 ownerCount,
               });
               return (
-                <li key={m.id} className="flex items-center gap-3 px-5 py-3">
-                  {canManageMembers || isMe ? (
-                    <MemberColorInput
+                <li key={m.id} className="px-5 py-3">
+                  <div className="flex items-center gap-3">
+                    {canManageMembers || isMe ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingColorOf(editingColorOf === m.id ? null : m.id)}
+                        aria-expanded={editingColorOf === m.id}
+                        aria-label={`${t('members.color')}: ${m.name}`}
+                        title={t('members.color')}
+                        className="member-color-trigger relative shrink-0 rounded-full"
+                      >
+                        <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
+                        <span
+                          aria-hidden
+                          className="absolute -right-0.5 -bottom-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--color-surface-elevated)]"
+                          style={{ backgroundColor: m.color }}
+                        />
+                      </button>
+                    ) : (
+                      <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
+                        {m.name}
+                        {isMe && (
+                          <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+                            {t('members.you')}
+                          </span>
+                        )}
+                      </p>
+                      <p className="truncate text-footnote text-[var(--color-text-secondary)]">
+                        {m.email}
+                      </p>
+                    </div>
+                    {canChangeRole ? (
+                      <CustomSelect
+                        value={m.role}
+                        onChange={(v) => changeRole(m, v)}
+                        className="shrink-0"
+                        triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+                        options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
+                      />
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
+                        {t(roleLabelKey(m.role))}
+                      </span>
+                    )}
+                    {canRemove && (
+                      <button
+                        type="button"
+                        onClick={() => removeMember(m)}
+                        className="icon-btn icon-btn-danger h-8 w-8"
+                        aria-label={isMe ? t('members.leave') : t('common.delete')}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {editingColorOf === m.id && (canManageMembers || isMe) && (
+                    <MemberColorEditor
                       member={m}
-                      label={t('members.color')}
+                      others={members.filter((o) => o.id !== m.id)}
                       onCommit={(color) => changeColor(m, color)}
                     />
-                  ) : (
-                    <Avatar src={m.avatar} name={m.name} size="h-9 w-9" color={m.color} round />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
-                      {m.name}
-                      {isMe && (
-                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
-                          {t('members.you')}
-                        </span>
-                      )}
-                    </p>
-                    <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                      {m.email}
-                    </p>
-                  </div>
-                  {canChangeRole ? (
-                    <CustomSelect
-                      value={m.role}
-                      onChange={(v) => changeRole(m, v)}
-                      className="shrink-0"
-                      triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-                      options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
-                    />
-                  ) : (
-                    <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
-                      {t(roleLabelKey(m.role))}
-                    </span>
-                  )}
-                  {canRemove && (
-                    <button
-                      type="button"
-                      onClick={() => removeMember(m)}
-                      className="icon-btn icon-btn-danger h-8 w-8"
-                      aria-label={isMe ? t('members.leave') : t('common.delete')}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M18 6L6 18M6 6l12 12" />
-                      </svg>
-                    </button>
                   )}
                 </li>
               );

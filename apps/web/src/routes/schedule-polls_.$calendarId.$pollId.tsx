@@ -1,13 +1,18 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
+import { Avatar } from '@/components/avatar';
 import { CustomSelect } from '@/components/pickers';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
+  AnswerMark,
   AvailabilityBadge,
   formatSchedulePollSlotTime,
+  InviteeGrid,
   SchedulePollFrame,
   SchedulePollNotice,
-  SchedulePollSlotTime,
+  SchedulePollProgress,
+  SchedulePollSection,
+  SchedulePollSlot,
   SchedulePollStatus,
 } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
@@ -53,13 +58,6 @@ function answerLabel(t: ReturnType<typeof useT>, answer: PollAnswer | undefined)
   return t('schedulePoll.answerUnanswered');
 }
 
-function answerTone(answer: PollAnswer | undefined): string {
-  if (answer === 'yes') return 'text-[var(--color-accent)]';
-  if (answer === 'maybe') return 'text-[var(--color-warning,#e5a00d)]';
-  if (answer === 'no') return 'text-[var(--color-danger)]';
-  return 'text-[var(--color-text-tertiary)]';
-}
-
 function candidateKey(slot: Pick<PollSlot, 'startAt' | 'endAt'>): string {
   return `${Date.parse(slot.startAt)}/${Date.parse(slot.endAt)}`;
 }
@@ -79,6 +77,7 @@ function SchedulePollDetailPage() {
   const { calendarId, pollId } = Route.useParams();
   const { view: requestedView } = Route.useSearch();
   const userId = useAuthStore((state) => state.user?.id);
+  const locale = useUiStore((state) => state.locale);
   const refreshActions = useSchedulePollStore((state) => state.fetchActions);
   const [poll, setPoll] = useState<SchedulePoll | null>(null);
   const [loading, setLoading] = useState(true);
@@ -522,12 +521,38 @@ function SchedulePollDetailPage() {
           : 'schedulePoll.visibilityDefaultHint'
     : 'schedulePoll.visibilityConfidentialHint';
 
+  const tallyFor = (slotId: string) => {
+    const tally = { yes: 0, maybe: 0, no: 0 };
+    for (const response of poll?.responses ?? []) {
+      const value = response.answers.find((answer) => answer.slotId === slotId)?.value;
+      if (value) tally[value] += 1;
+    }
+    return tally;
+  };
+  const respondedMemberIds = new Set(
+    (poll?.responses ?? [])
+      .filter((response) => response.answers.length > 0)
+      .map((response) => response.memberId),
+  );
+  const bestSlotId = (() => {
+    let best: { id: string; yes: number; maybe: number } | null = null;
+    for (const slot of poll?.slots ?? []) {
+      if (!slot.active || slot.availability === 'hard') continue;
+      const tally = tallyFor(slot.id);
+      if (tally.no > 0 || tally.yes === 0) continue;
+      if (!best || tally.yes > best.yes || (tally.yes === best.yes && tally.maybe < best.maybe)) {
+        best = { id: slot.id, yes: tally.yes, maybe: tally.maybe };
+      }
+    }
+    return best?.id;
+  })();
+
   if (loading) {
     return (
       <SchedulePollFrame title={t('schedulePoll.title')}>
-        <p className="py-12 text-center text-body text-[var(--color-text-secondary)]">
-          {t('common.loading')}
-        </p>
+        <div className="flex justify-center py-16 text-[var(--color-text-tertiary)]">
+          <span role="status" aria-label={t('common.loading')} className="spinner h-5 w-5" />
+        </div>
       </SchedulePollFrame>
     );
   }
@@ -556,29 +581,41 @@ function SchedulePollDetailPage() {
             )}
           </SchedulePollNotice>
         ) : event ? (
-          <section className="max-w-[760px] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-7">
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <SchedulePollStatus status={poll.status} />
-              <span className="text-footnote text-[var(--color-text-secondary)]">
-                {t('schedulePoll.confirmedEvent')}
-              </span>
-            </div>
-            <h2 className="text-title font-bold text-[var(--color-text-primary)]">{event.title}</h2>
-            <p className="mt-2 text-body text-[var(--color-text-secondary)]">
-              <SchedulePollSlotTime
+          <section className="page-card max-w-[640px] p-5 sm:p-6">
+            <SchedulePollStatus status={poll.status} />
+            <h2 className="mt-2 text-title font-bold text-[var(--color-text-primary)]">
+              {event.title}
+            </h2>
+            <div className="mt-4">
+              <SchedulePollSlot
                 startAt={event.startAt}
                 endAt={event.endAt}
                 timezone={event.timezone ?? poll.timezone}
               />
-            </p>
+            </div>
             {event.location && (
-              <p className="mt-3 text-body text-[var(--color-text-primary)]">{event.location}</p>
+              <p className="mt-4 flex items-start gap-2 text-body text-[var(--color-text-primary)]">
+                <svg
+                  aria-hidden
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="mt-0.5 shrink-0 text-[var(--color-text-tertiary)]"
+                >
+                  <path d="M8 14s4.5-4.1 4.5-7.5a4.5 4.5 0 0 0-9 0C3.5 9.9 8 14 8 14Z" />
+                  <circle cx="8" cy="6.5" r="1.5" />
+                </svg>
+                {event.location}
+              </p>
             )}
-            <div className="mt-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-inset)] p-4">
-              <h3 className="text-footnote font-semibold text-[var(--color-text-primary)]">
+            <div className="mt-5 rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-3">
+              <p className="text-footnote font-semibold text-[var(--color-text-primary)]">
                 {t('schedulePoll.visibilitySummary')}: {t(eventVisibilityKey)}
-              </h3>
-              <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
+              </p>
+              <p className="mt-0.5 text-footnote text-[var(--color-text-secondary)]">
                 {t(eventVisibilityHintKey)}
               </p>
             </div>
@@ -586,7 +623,7 @@ function SchedulePollDetailPage() {
               to="/schedule-polls/$calendarId/$pollId"
               params={{ calendarId, pollId }}
               search={{ view: poll.canManage ? 'manage' : 'respond' }}
-              className="mt-5 inline-flex rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-body font-semibold text-[var(--color-accent)] hover:opacity-80"
+              className={`${SECONDARY_ACTION} mt-5`}
             >
               {t('schedulePoll.backToPoll')}
             </Link>
@@ -596,84 +633,88 @@ function SchedulePollDetailPage() {
     );
   }
 
-  const detailHeading = view === 'respond' ? t('schedulePoll.respond') : t('schedulePoll.manage');
+  const showTabs = poll.status === 'open' && poll.canRespond && poll.canManage;
+  const takeOver = async () => {
+    try {
+      const updated = await schedulePollApi.update(calendarId, pollId, {
+        version: poll.version,
+        takeOver: true,
+      });
+      setPoll(updated);
+      setAcknowledged(false);
+      toast.success(t('schedulePoll.takenOver'));
+      synchronizeActions();
+    } catch (reason) {
+      if (staleError(reason)) {
+        try {
+          await reload();
+          setStale(true);
+        } catch (reloadReason) {
+          toast.error(errorMessage(reloadReason));
+        }
+      } else toast.error(errorMessage(reason));
+    }
+  };
+  const inviteesChanged = !(
+    memberIdsDraft.length === poll.members.length &&
+    poll.members.every((member) => memberIdsDraft.includes(member.id))
+  );
 
   return (
     <SchedulePollFrame title={poll.title} eyebrow={t('schedulePoll.eyebrow')}>
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <SchedulePollStatus status={poll.status} />
-        <span className="rounded-full bg-[var(--color-surface-inset)] px-2.5 py-1 text-footnote text-[var(--color-text-secondary)]">
-          {t('schedulePoll.progress', {
-            responded: poll.respondedCount,
-            members: poll.memberCount,
-          })}
-        </span>
-        {poll.canRespond && poll.status === 'open' && (
-          <button
-            type="button"
-            onClick={() => navigateView('respond')}
-            aria-current={view === 'respond' ? 'page' : undefined}
-            className={`rounded-full px-3 py-1.5 text-footnote font-semibold ${view === 'respond' ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-inset)] text-[var(--color-text-primary)]'}`}
-          >
-            {t('schedulePoll.respond')}
-          </button>
-        )}
-        {poll.canManage && poll.status === 'open' && (
-          <button
-            type="button"
-            onClick={() => navigateView('manage')}
-            aria-current={view === 'manage' ? 'page' : undefined}
-            className={`rounded-full px-3 py-1.5 text-footnote font-semibold ${view === 'manage' ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-inset)] text-[var(--color-text-primary)]'}`}
-          >
-            {t('schedulePoll.manage')}
-          </button>
-        )}
-        {poll.canTakeOver && poll.status === 'open' && (
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const updated = await schedulePollApi.update(calendarId, pollId, {
-                  version: poll.version,
-                  takeOver: true,
-                });
-                setPoll(updated);
-                setAcknowledged(false);
-                toast.success(t('schedulePoll.takenOver'));
-                synchronizeActions();
-              } catch (reason) {
-                if (staleError(reason)) {
-                  try {
-                    await reload();
-                    setStale(true);
-                  } catch (reloadReason) {
-                    toast.error(errorMessage(reloadReason));
-                  }
-                } else toast.error(errorMessage(reason));
-              }
-            }}
-            className="rounded-full bg-[var(--color-accent-bg)] px-3 py-1.5 text-footnote font-semibold text-[var(--color-accent)]"
-          >
-            {t('schedulePoll.takeOver')}
-          </button>
-        )}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <SchedulePollStatus status={poll.status} />
+          <SchedulePollProgress responded={poll.respondedCount} members={poll.memberCount} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {poll.canTakeOver && poll.status === 'open' && (
+            <button type="button" onClick={takeOver} className={ACCENT_ACTION}>
+              {t('schedulePoll.takeOver')}
+            </button>
+          )}
+          {showTabs && (
+            <div className="segmented-control w-full sm:w-auto sm:min-w-[240px]">
+              <button
+                type="button"
+                onClick={() => navigateView('respond')}
+                data-active={view === 'respond'}
+                aria-current={view === 'respond' ? 'page' : undefined}
+              >
+                {t('schedulePoll.respond')}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateView('manage')}
+                data-active={view === 'manage' || view === 'candidates'}
+                aria-current={view === 'manage' ? 'page' : undefined}
+              >
+                {t('schedulePoll.manage')}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {refreshWarning && <SchedulePollNotice tone="warning">{refreshWarning}</SchedulePollNotice>}
-      {stale && (
-        <SchedulePollNotice tone="warning">{t('schedulePoll.staleReloaded')}</SchedulePollNotice>
+      {(refreshWarning || stale) && (
+        <div className="flex flex-col gap-2">
+          {refreshWarning && (
+            <SchedulePollNotice tone="warning">{refreshWarning}</SchedulePollNotice>
+          )}
+          {stale && (
+            <SchedulePollNotice tone="warning">
+              {t('schedulePoll.staleReloaded')}
+            </SchedulePollNotice>
+          )}
+        </div>
       )}
 
       {view === 'respond' && (
-        <section className="max-w-[900px]">
-          <div className="mb-4">
-            <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-              {detailHeading}
-            </h2>
-            <p className="mt-1 text-body text-[var(--color-text-secondary)]">
-              {t('schedulePoll.answerInstruction')}
-            </p>
-          </div>
+        <SchedulePollSection
+          title={t('schedulePoll.respond')}
+          hint={t('schedulePoll.answerInstruction')}
+          className="max-w-[820px]"
+        >
           {poll.status !== 'open' ? (
             <SchedulePollNotice>{t('schedulePoll.pollClosed')}</SchedulePollNotice>
           ) : hasNoUsableCandidates ? (
@@ -686,20 +727,18 @@ function SchedulePollDetailPage() {
             </SchedulePollNotice>
           ) : (
             <>
-              <div className="space-y-3">
-                {poll.slots
-                  .filter((slot) => slot.active && slot.availability !== 'hard')
-                  .map((slot) => (
-                    <AnswerSlot
-                      key={slot.id}
-                      slot={slot}
-                      timezone={poll.timezone}
-                      value={draftAnswers[slot.id]}
-                      onChange={(value) =>
-                        setDraftAnswers((previous) => ({ ...previous, [slot.id]: value }))
-                      }
-                    />
-                  ))}
+              <div className="page-card divide-y divide-[var(--color-separator)]">
+                {activeSlots.map((slot) => (
+                  <AnswerSlot
+                    key={slot.id}
+                    slot={slot}
+                    timezone={poll.timezone}
+                    value={draftAnswers[slot.id]}
+                    onChange={(value) =>
+                      setDraftAnswers((previous) => ({ ...previous, [slot.id]: value }))
+                    }
+                  />
+                ))}
               </div>
               {poll.slots.some((slot) => !slot.active || slot.availability === 'hard') && (
                 <div className="mt-3">
@@ -708,315 +747,312 @@ function SchedulePollDetailPage() {
                   </SchedulePollNotice>
                 </div>
               )}
-              <div className="mt-5 flex flex-col gap-3 border-t border-[var(--color-separator)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="page-card sticky bottom-4 z-10 mt-4 flex items-center justify-between gap-3 px-4 py-3 shadow-[var(--shadow-md)] sm:px-5">
                 <p
                   role="status"
-                  className="text-footnote text-[var(--color-text-secondary)] tabular-nums"
+                  className="flex min-w-0 items-center gap-2 text-footnote text-[var(--color-text-secondary)] tabular-nums"
                 >
-                  {t('schedulePoll.answerProgress', {
-                    answered: answerCount,
-                    total: activeSlots.length,
-                  })}
-                  {hasDraftChanges
-                    ? ` · ${t('schedulePoll.unsaved')}`
-                    : ` · ${t('schedulePoll.saved')}`}
+                  <span
+                    aria-hidden
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${hasDraftChanges ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-success)]'}`}
+                  />
+                  <span className="truncate">
+                    {t('schedulePoll.answerProgress', {
+                      answered: answerCount,
+                      total: activeSlots.length,
+                    })}
+                    {' · '}
+                    {hasDraftChanges ? t('schedulePoll.unsaved') : t('schedulePoll.saved')}
+                  </span>
                 </p>
                 <button
                   type="button"
                   onClick={saveResponse}
                   disabled={savingAnswers || !hasDraftChanges || activeSlots.length === 0}
-                  className="btn-primary px-5 text-default disabled:opacity-50"
+                  className="btn-primary h-10 shrink-0 px-5 text-default"
                 >
                   {savingAnswers ? t('common.saving') : t('schedulePoll.saveAnswers')}
                 </button>
               </div>
             </>
           )}
-        </section>
+        </SchedulePollSection>
       )}
 
-      {view === 'manage' && (
-        <section>
-          {!poll.canManage ? (
-            <SchedulePollNotice tone="error">{t('schedulePoll.noManageAccess')}</SchedulePollNotice>
-          ) : (
-            <>
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-                    {detailHeading}
-                  </h2>
-                  <p className="mt-1 text-body text-[var(--color-text-secondary)]">
-                    {t('schedulePoll.managerProgress', {
-                      responded: poll.respondedCount,
-                      members: poll.memberCount,
-                    })}
-                  </p>
-                </div>
-                {poll.status === 'open' && (
-                  <div className="flex flex-wrap gap-2">
+      {view === 'manage' &&
+        (!poll.canManage ? (
+          <SchedulePollNotice tone="error">{t('schedulePoll.noManageAccess')}</SchedulePollNotice>
+        ) : (
+          <>
+            <SchedulePollSection
+              title={t('schedulePoll.manage')}
+              hint={t('schedulePoll.managerProgress', {
+                responded: poll.respondedCount,
+                members: poll.memberCount,
+              })}
+              actions={
+                poll.status === 'open' ? (
+                  <>
                     <button
                       type="button"
                       onClick={() => navigateView('candidates')}
-                      className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-footnote font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                      className={SECONDARY_ACTION}
                     >
+                      <svg
+                        aria-hidden
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      >
+                        <path d="M8 3v10M3 8h10" />
+                      </svg>
                       {t('schedulePoll.editCandidates')}
                     </button>
                     <button
                       type="button"
                       onClick={refreshAvailability}
-                      className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-footnote font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                      className={SECONDARY_ACTION}
                     >
+                      <svg
+                        aria-hidden
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v2.5h-2.5" />
+                      </svg>
                       {t('schedulePoll.refreshAvailability')}
                     </button>
-                  </div>
-                )}
-              </div>
-
-              {poll.status === 'open' && (
-                <div className="mb-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
-                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
-                        {t('schedulePoll.invitees', { count: memberIdsDraft.length })}
-                      </h3>
-                      <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
-                        {t('schedulePoll.inviteesHint')}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={saveMembers}
-                      disabled={
-                        savingMembers ||
-                        memberIdsDraft.length === 0 ||
-                        (memberIdsDraft.length === poll.members.length &&
-                          poll.members.every((member) => memberIdsDraft.includes(member.id)))
-                      }
-                      className="rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-footnote font-semibold text-[var(--color-accent)] disabled:opacity-50"
-                    >
-                      {savingMembers ? t('common.saving') : t('schedulePoll.saveInvitees')}
-                    </button>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {currentRoster.map((member) => (
-                      <label
-                        key={member.id}
-                        className="flex min-h-10 items-center gap-3 rounded-xl bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={memberIdsDraft.includes(member.id)}
-                          onChange={(event) =>
-                            setMemberIdsDraft((previous) =>
-                              event.target.checked
-                                ? [...new Set([...previous, member.id])]
-                                : previous.filter((id) => id !== member.id),
-                            )
-                          }
-                          className="h-4 w-4 accent-[var(--color-accent)]"
-                        />
-                        <span className="truncate">{member.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {memberIdsDraft.length === 0 && (
-                    <p className="mt-2 text-footnote text-[var(--color-danger)]">
-                      {t('schedulePoll.selectAtLeastOne')}
-                    </p>
-                  )}
-                </div>
-              )}
-
+                  </>
+                ) : undefined
+              }
+            >
               {poll.slots.length === 0 ? (
                 <SchedulePollNotice tone="warning">
                   {t('schedulePoll.candidatesRevising')}
                 </SchedulePollNotice>
               ) : (
                 <>
-                  <div className="hidden overflow-x-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] md:block">
+                  <div className="page-card hidden overflow-x-auto md:block">
                     <table className="w-full border-collapse text-left">
-                      <thead className="bg-[var(--color-surface-inset)]">
-                        <tr>
+                      <thead>
+                        <tr className="border-b border-[var(--color-separator)]">
                           <th
                             scope="col"
-                            className="min-w-[240px] px-4 py-3 text-footnote font-semibold text-[var(--color-text-secondary)]"
+                            className="w-px whitespace-nowrap px-5 py-3 text-footnote font-medium text-[var(--color-text-secondary)]"
                           >
                             {t('schedulePoll.candidate')}
                           </th>
                           <th
                             scope="col"
-                            className="px-4 py-3 text-footnote font-semibold text-[var(--color-text-secondary)]"
+                            className="w-px whitespace-nowrap px-3 py-3 text-footnote font-medium text-[var(--color-text-secondary)]"
                           >
-                            {t('schedulePoll.availability')}
+                            {t('schedulePoll.tally')}
                           </th>
                           {poll.members.map((member) => (
                             <th
                               key={member.id}
                               scope="col"
-                              className="min-w-[100px] px-3 py-3 text-center text-footnote font-semibold text-[var(--color-text-secondary)]"
+                              className="min-w-[80px] px-2 py-3 text-center align-bottom"
                             >
-                              {member.name}
+                              <span
+                                className={`flex flex-col items-center gap-1 ${respondedMemberIds.has(member.id) ? '' : 'opacity-50'}`}
+                              >
+                                <Avatar
+                                  name={member.name}
+                                  size="h-7 w-7"
+                                  round
+                                  className="text-footnote"
+                                />
+                                <span className="block max-w-[84px] truncate text-micro font-medium text-[var(--color-text-secondary)]">
+                                  {member.name}
+                                </span>
+                              </span>
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--color-separator)]">
-                        {poll.slots.map((slot) => (
-                          <tr key={slot.id} className={!slot.active ? 'opacity-55' : ''}>
-                            <th
-                              scope="row"
-                              className="px-4 py-3 text-body font-medium text-[var(--color-text-primary)]"
+                        {poll.slots.map((slot) => {
+                          const tally = tallyFor(slot.id);
+                          const best = slot.id === bestSlotId;
+                          return (
+                            <tr
+                              key={slot.id}
+                              className={`${!slot.active ? 'opacity-50' : ''} ${best ? 'bg-[color-mix(in_srgb,var(--color-accent)_6%,transparent)]' : ''}`}
                             >
-                              <SchedulePollSlotTime
-                                startAt={slot.startAt}
-                                endAt={slot.endAt}
-                                timezone={poll.timezone}
-                              />
-                            </th>
-                            <td className="px-4 py-3">
-                              <AvailabilityBadge availability={slot.availability} />
-                              {!slot.active && (
-                                <span className="ml-2 text-micro text-[var(--color-text-tertiary)]">
-                                  {t('schedulePoll.unavailable')}
+                              <th scope="row" className="whitespace-nowrap px-5 py-2.5 font-normal">
+                                <span className="flex items-center gap-3">
+                                  <SchedulePollSlot
+                                    startAt={slot.startAt}
+                                    endAt={slot.endAt}
+                                    timezone={poll.timezone}
+                                    dense
+                                  />
+                                  {best && <BestTag />}
+                                  {slot.availability !== 'open' && (
+                                    <AvailabilityBadge availability={slot.availability} />
+                                  )}
+                                  {!slot.active && (
+                                    <span className="text-micro text-[var(--color-text-tertiary)]">
+                                      {t('schedulePoll.unavailable')}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </td>
-                            {poll.members.map((member) => {
-                              const value = responseFor(member.id, slot.id);
-                              return (
-                                <td
-                                  key={member.id}
-                                  className={`px-3 py-3 text-center text-body font-semibold ${answerTone(value)}`}
-                                >
-                                  {answerLabel(t, value)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
+                              </th>
+                              <td className="whitespace-nowrap px-3 py-2.5">
+                                <Tally tally={tally} />
+                              </td>
+                              {poll.members.map((member) => {
+                                const value = responseFor(member.id, slot.id);
+                                return (
+                                  <td key={member.id} className="px-2 py-2.5 text-center">
+                                    <span className="inline-flex" title={answerLabel(t, value)}>
+                                      <AnswerMark answer={value} size={18} />
+                                      <span className="sr-only">{answerLabel(t, value)}</span>
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
-                  <div className="space-y-2 md:hidden">
-                    {poll.slots.map((slot) => (
-                      <details
-                        key={slot.id}
-                        className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
-                      >
-                        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-body font-semibold text-[var(--color-text-primary)]">
-                          <SchedulePollSlotTime
-                            startAt={slot.startAt}
-                            endAt={slot.endAt}
-                            timezone={poll.timezone}
-                          />
-                          <AvailabilityBadge availability={slot.availability} />
-                        </summary>
-                        <ul className="mt-3 divide-y divide-[var(--color-separator)]">
-                          {poll.members.map((member) => {
-                            const value = responseFor(member.id, slot.id);
-                            return (
-                              <li
-                                key={member.id}
-                                className="flex justify-between gap-3 py-2 text-footnote"
-                              >
-                                <span className="truncate text-[var(--color-text-secondary)]">
-                                  {member.name}
-                                </span>
-                                <span className={`font-semibold ${answerTone(value)}`}>
-                                  {answerLabel(t, value)}
-                                </span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </details>
-                    ))}
-                  </div>
+                  <ul className="page-card divide-y divide-[var(--color-separator)] md:hidden">
+                    {poll.slots.map((slot) => {
+                      const best = slot.id === bestSlotId;
+                      return (
+                        <li
+                          key={slot.id}
+                          className={`px-4 py-3 ${!slot.active ? 'opacity-50' : ''} ${best ? 'bg-[color-mix(in_srgb,var(--color-accent)_6%,transparent)]' : ''}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <SchedulePollSlot
+                              startAt={slot.startAt}
+                              endAt={slot.endAt}
+                              timezone={poll.timezone}
+                              dense
+                            />
+                            <span className="flex shrink-0 flex-col items-end gap-1">
+                              {best && <BestTag />}
+                              {slot.availability !== 'open' && (
+                                <AvailabilityBadge availability={slot.availability} />
+                              )}
+                            </span>
+                          </div>
+                          <div className="mt-2.5 flex items-center justify-between gap-3">
+                            <ul className="flex min-w-0 flex-wrap gap-x-3 gap-y-1.5">
+                              {poll.members.map((member) => {
+                                const value = responseFor(member.id, slot.id);
+                                return (
+                                  <li
+                                    key={member.id}
+                                    className="flex items-center gap-1 text-footnote text-[var(--color-text-secondary)]"
+                                  >
+                                    <AnswerMark answer={value} size={14} />
+                                    <span className="max-w-[96px] truncate">{member.name}</span>
+                                    <span className="sr-only">{answerLabel(t, value)}</span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            <Tally tally={tallyFor(slot.id)} />
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </>
               )}
 
               {hasNoUsableCandidates && (
-                <div className="mt-4">
+                <div className="mt-3">
                   <SchedulePollNotice tone="warning">
                     {t('schedulePoll.addCandidatesRequired')}
                   </SchedulePollNotice>
                 </div>
               )}
+            </SchedulePollSection>
 
-              {poll.status === 'open' && (
-                <section className="mt-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
-                  <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
-                    {t('schedulePoll.finalize')}
-                  </h3>
-                  {!allResponded && (
-                    <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
-                      {t('schedulePoll.waitingForResponses', {
+            {poll.status === 'open' && (
+              <SchedulePollSection
+                title={t('schedulePoll.finalize')}
+                hint={
+                  !allResponded
+                    ? t('schedulePoll.waitingForResponses', {
                         count: poll.memberCount - poll.respondedCount,
-                      })}
-                    </p>
-                  )}
+                      })
+                    : undefined
+                }
+              >
+                <div className="page-card p-4 sm:p-5">
                   {allResponded && activeSlots.length === 0 && (
-                    <p className="mt-1 text-footnote text-[var(--color-warning,#e5a00d)]">
+                    <p className="mb-3 text-footnote text-[var(--color-warning)]">
                       {t('schedulePoll.addCandidatesRequired')}
                     </p>
                   )}
-                  <fieldset className="mt-3 space-y-2">
+                  <fieldset className="grid gap-2 sm:grid-cols-2">
                     <legend className="sr-only">{t('schedulePoll.selectFinalCandidate')}</legend>
-                    {poll.slots
-                      .filter((slot) => slot.active && slot.availability !== 'hard')
-                      .map((slot) => {
-                        const responses =
-                          poll.responses?.flatMap((response) =>
-                            response.answers
-                              .filter((answer) => answer.slotId === slot.id)
-                              .map((answer) => answer.value),
-                          ) ?? [];
-                        const blocked = responses.includes('no');
-                        const hasMaybe =
-                          slot.availability === 'soft' || responses.includes('maybe');
-                        return (
-                          <label
-                            key={slot.id}
-                            className={`flex min-h-12 items-center gap-3 rounded-xl border px-3 py-2 text-body ${selectedSlotId === slot.id ? 'border-[color-mix(in_srgb,var(--color-accent)_45%,var(--color-border))] bg-[var(--color-accent-bg)]' : 'border-[var(--color-border)] bg-[var(--color-surface-inset)]'} ${blocked ? 'opacity-55' : ''}`}
-                          >
-                            <input
-                              type="radio"
-                              name="final-slot"
-                              value={slot.id}
-                              checked={selectedSlotId === slot.id}
-                              disabled={!allResponded || blocked}
-                              onChange={() => {
-                                setSelectedSlotId(slot.id);
-                                setAcknowledged(false);
-                              }}
-                              className="h-4 w-4 accent-[var(--color-accent)]"
+                    {activeSlots.map((slot) => {
+                      const tally = tallyFor(slot.id);
+                      const blocked = tally.no > 0;
+                      const hasMaybe = slot.availability === 'soft' || tally.maybe > 0;
+                      return (
+                        <label
+                          key={slot.id}
+                          className={`choice-row flex min-h-14 cursor-pointer items-center gap-3 px-3 py-2 ${blocked ? 'opacity-55' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="final-slot"
+                            value={slot.id}
+                            checked={selectedSlotId === slot.id}
+                            disabled={!allResponded || blocked}
+                            onChange={() => {
+                              setSelectedSlotId(slot.id);
+                              setAcknowledged(false);
+                            }}
+                            className="check-input"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <SchedulePollSlot
+                              startAt={slot.startAt}
+                              endAt={slot.endAt}
+                              timezone={poll.timezone}
+                              dense
                             />
-                            <span className="min-w-0 flex-1 text-[var(--color-text-primary)]">
-                              <SchedulePollSlotTime
-                                startAt={slot.startAt}
-                                endAt={slot.endAt}
-                                timezone={poll.timezone}
-                              />
-                            </span>
-                            <AvailabilityBadge availability={slot.availability} />
-                            {blocked && (
+                          </span>
+                          <span className="flex shrink-0 flex-col items-end gap-1">
+                            <Tally tally={tally} />
+                            {blocked ? (
                               <span className="text-micro font-semibold text-[var(--color-danger)]">
                                 {t('schedulePoll.blockedByNo')}
                               </span>
-                            )}
-                            {!blocked && hasMaybe && (
-                              <span className="text-micro text-[var(--color-warning,#e5a00d)]">
+                            ) : hasMaybe ? (
+                              <span className="text-micro font-medium text-[var(--color-warning)]">
                                 {t('schedulePoll.needsAcknowledgment')}
                               </span>
-                            )}
-                          </label>
-                        );
-                      })}
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </fieldset>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div className="block text-footnote font-semibold text-[var(--color-text-secondary)]">
+
+                  <div className="mt-5 grid gap-4 border-t border-[var(--color-separator)] pt-5 sm:grid-cols-2">
+                    <div className="text-footnote font-medium text-[var(--color-text-secondary)]">
                       <span className="mb-1.5 block">{t('schedulePoll.eventOwner')}</span>
                       <CustomSelect
                         value={ownerId}
@@ -1030,99 +1066,143 @@ function SchedulePollDetailPage() {
                         }))}
                       />
                     </div>
-                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-inset)] p-3">
+                    <div className="self-end rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-3">
                       <p className="text-footnote font-semibold text-[var(--color-text-primary)]">
                         {t('schedulePoll.visibilitySummary')}
                       </p>
-                      <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
+                      <p className="mt-0.5 text-footnote text-[var(--color-text-secondary)]">
                         {t('schedulePoll.confidentialVisibilityHint')}
                       </p>
                     </div>
                   </div>
+
                   {requiresAcknowledgment && selectedSlot && (
-                    <label
-                      className="mt-4 flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-inset)] p-3 text-footnote text-[var(--color-text-primary)]"
-                      style={{
-                        borderColor:
-                          'color-mix(in srgb, var(--color-warning, #e5a00d) 30%, var(--color-border))',
-                        backgroundColor:
-                          'color-mix(in srgb, var(--color-warning, #e5a00d) 10%, var(--color-surface))',
-                      }}
-                    >
+                    <label className="callout callout-warning mt-4 cursor-pointer text-footnote text-[var(--color-text-primary)]">
                       <input
                         type="checkbox"
                         checked={acknowledged}
                         onChange={(event) => setAcknowledged(event.target.checked)}
-                        className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
+                        className="check-input mt-px"
                       />
                       <span>{t('schedulePoll.acknowledgeSoftSlot')}</span>
                     </label>
                   )}
                   {slotHasNo && selectedSlot && (
-                    <p className="mt-3 text-footnote text-[var(--color-danger)]">
+                    <p role="alert" className="mt-3 text-footnote text-[var(--color-danger)]">
                       {t('schedulePoll.cannotFinalizeNo')}
                     </p>
                   )}
-                  <button
-                    type="button"
-                    onClick={finalize}
-                    disabled={
-                      finalizing ||
-                      !allResponded ||
-                      !selectedSlotId ||
-                      slotHasNo ||
-                      (requiresAcknowledgment && !acknowledged)
+                  <div className="mt-5 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={finalize}
+                      disabled={
+                        finalizing ||
+                        !allResponded ||
+                        !selectedSlotId ||
+                        slotHasNo ||
+                        (requiresAcknowledgment && !acknowledged)
+                      }
+                      className="btn-primary w-full px-6 text-default sm:w-auto"
+                    >
+                      {finalizing ? t('common.saving') : t('schedulePoll.finalizeAndCreateEvent')}
+                    </button>
+                  </div>
+                </div>
+              </SchedulePollSection>
+            )}
+
+            {poll.status === 'open' && (
+              <details className="page-card group">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 sm:px-5 [&::-webkit-details-marker]:hidden">
+                  <span className="min-w-0">
+                    <span className="block text-default font-semibold text-[var(--color-text-primary)]">
+                      {t('schedulePoll.invitees', { count: memberIdsDraft.length })}
+                    </span>
+                    <span className="mt-0.5 block text-footnote text-[var(--color-text-secondary)]">
+                      {t('schedulePoll.inviteesHint')}
+                    </span>
+                  </span>
+                  <svg
+                    aria-hidden
+                    width="14"
+                    height="14"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="shrink-0 text-[var(--color-text-tertiary)] transition-transform group-open:rotate-90"
+                  >
+                    <path d="m5 2.5 4.5 4.5L5 11.5" />
+                  </svg>
+                </summary>
+                <div className="border-t border-[var(--color-separator)] px-4 py-4 sm:px-5">
+                  <InviteeGrid
+                    members={currentRoster}
+                    selectedIds={memberIdsDraft}
+                    onToggle={(memberId, checked) =>
+                      setMemberIdsDraft((previous) =>
+                        checked
+                          ? [...new Set([...previous, memberId])]
+                          : previous.filter((id) => id !== memberId),
+                      )
                     }
-                    className="btn-primary mt-4 px-5 text-default disabled:opacity-50"
-                  >
-                    {finalizing ? t('common.saving') : t('schedulePoll.finalizeAndCreateEvent')}
-                  </button>
-                </section>
-              )}
-
-              {poll.status === 'open' && (
-                <div className="mt-5 border-t border-[var(--color-separator)] pt-4">
-                  <button
-                    type="button"
-                    onClick={cancelPoll}
-                    disabled={cancelling}
-                    className="rounded-full px-3 py-2 text-footnote font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] disabled:opacity-50"
-                  >
-                    {cancelling ? t('common.saving') : t('schedulePoll.cancelPoll')}
-                  </button>
+                  />
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <p role="alert" className="text-footnote text-[var(--color-danger)]">
+                      {memberIdsDraft.length === 0 ? t('schedulePoll.selectAtLeastOne') : ''}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={saveMembers}
+                      disabled={savingMembers || memberIdsDraft.length === 0 || !inviteesChanged}
+                      className="btn-primary h-9 shrink-0 px-4 text-body"
+                    >
+                      {savingMembers ? t('common.saving') : t('schedulePoll.saveInvitees')}
+                    </button>
+                  </div>
                 </div>
-              )}
-            </>
-          )}
-        </section>
-      )}
+              </details>
+            )}
 
-      {view === 'candidates' && (
-        <section>
-          {!poll.canManage ? (
-            <SchedulePollNotice tone="error">{t('schedulePoll.noManageAccess')}</SchedulePollNotice>
-          ) : poll.status !== 'open' ? (
-            <SchedulePollNotice>{t('schedulePoll.pollClosed')}</SchedulePollNotice>
-          ) : (
-            <>
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-                    {t('schedulePoll.editCandidates')}
-                  </h2>
-                  <p className="mt-1 text-body text-[var(--color-text-secondary)]">
-                    {t('schedulePoll.candidateEditHint')}
-                  </p>
-                </div>
+            {poll.status === 'open' && (
+              <div className="flex justify-center sm:justify-start">
+                <button
+                  type="button"
+                  onClick={cancelPoll}
+                  disabled={cancelling}
+                  className="rounded-full px-3 py-2 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)] disabled:opacity-50"
+                >
+                  {cancelling ? t('common.saving') : t('schedulePoll.cancelPoll')}
+                </button>
+              </div>
+            )}
+          </>
+        ))}
+
+      {view === 'candidates' &&
+        (!poll.canManage ? (
+          <SchedulePollNotice tone="error">{t('schedulePoll.noManageAccess')}</SchedulePollNotice>
+        ) : poll.status !== 'open' ? (
+          <SchedulePollNotice>{t('schedulePoll.pollClosed')}</SchedulePollNotice>
+        ) : (
+          <>
+            <SchedulePollSection
+              title={t('schedulePoll.editCandidates')}
+              hint={t('schedulePoll.candidateEditHint')}
+              actions={
                 <button
                   type="button"
                   onClick={() => navigateView('manage')}
-                  className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-footnote font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+                  className={SECONDARY_ACTION}
                 >
                   {t('schedulePoll.backToManage')}
                 </button>
-              </div>
-              <div className="mb-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+              }
+            >
+              <div className="page-card p-4 sm:p-5">
                 <h3 className="mb-3 text-default font-semibold text-[var(--color-text-primary)]">
                   {t('schedulePoll.currentCandidates')}
                 </h3>
@@ -1131,86 +1211,130 @@ function SchedulePollDetailPage() {
                     {t('schedulePoll.noCandidates')}
                   </p>
                 ) : (
-                  <ul className="divide-y divide-[var(--color-separator)]">
+                  <ul className="grid gap-2 sm:grid-cols-2">
                     {poll.slots.map((slot) => (
-                      <li key={slot.id} className="flex min-h-12 items-center gap-3 py-2 text-body">
-                        <input
-                          type="checkbox"
-                          checked={keptSlotIds.includes(slot.id)}
-                          disabled={!slot.active}
-                          onChange={(event) =>
-                            setKeptSlotIds((previous) =>
-                              event.target.checked
-                                ? [...previous, slot.id]
-                                : previous.filter((id) => id !== slot.id),
-                            )
-                          }
-                          className="h-4 w-4 accent-[var(--color-accent)]"
-                        />
-                        <span className="min-w-0 flex-1 text-[var(--color-text-primary)]">
-                          <SchedulePollSlotTime
-                            startAt={slot.startAt}
-                            endAt={slot.endAt}
-                            timezone={poll.timezone}
+                      <li key={slot.id}>
+                        <label
+                          className={`choice-row flex min-h-14 cursor-pointer items-center gap-3 px-3 py-2 ${!slot.active ? 'opacity-55' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={keptSlotIds.includes(slot.id)}
+                            disabled={!slot.active}
+                            onChange={(event) =>
+                              setKeptSlotIds((previous) =>
+                                event.target.checked
+                                  ? [...previous, slot.id]
+                                  : previous.filter((id) => id !== slot.id),
+                              )
+                            }
+                            aria-label={t('schedulePoll.keepCandidate', {
+                              candidate: formatSchedulePollSlotTime(
+                                slot.startAt,
+                                slot.endAt,
+                                poll.timezone,
+                                locale,
+                              ),
+                            })}
+                            className="check-input"
                           />
-                        </span>
-                        <AvailabilityBadge availability={slot.availability} />
-                        {!slot.active && (
-                          <span className="text-micro text-[var(--color-text-tertiary)]">
-                            {t('schedulePoll.unavailable')}
+                          <span className="min-w-0 flex-1">
+                            <SchedulePollSlot
+                              startAt={slot.startAt}
+                              endAt={slot.endAt}
+                              timezone={poll.timezone}
+                              dense
+                            />
                           </span>
-                        )}
+                          {(slot.availability !== 'open' || !slot.active) && (
+                            <AvailabilityBadge
+                              availability={slot.active ? slot.availability : 'hard'}
+                            />
+                          )}
+                        </label>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
-              <div className="mb-5">
-                <SchedulePollCandidateFinder
-                  calendarId={calendarId}
-                  memberIds={memberIdsDraft}
-                  selected={newCandidates}
-                  onChange={setNewCandidates}
-                />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-separator)] pt-4">
-                <p className="text-footnote text-[var(--color-text-secondary)]">
-                  {t('schedulePoll.candidateSaveReview', {
-                    kept: keptSlotIds.length,
-                    added: newCandidates.length,
-                  })}
-                </p>
-                <button
-                  type="button"
-                  onClick={saveCandidates}
-                  disabled={savingCandidates || keptSlotIds.length + newCandidates.length === 0}
-                  className="btn-primary px-5 text-default disabled:opacity-50"
-                >
-                  {savingCandidates ? t('common.saving') : t('schedulePoll.saveCandidates')}
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-      )}
+            </SchedulePollSection>
+            <SchedulePollCandidateFinder
+              calendarId={calendarId}
+              memberIds={memberIdsDraft}
+              selected={newCandidates}
+              onChange={setNewCandidates}
+            />
+            <div className="page-card sticky bottom-4 z-10 flex items-center justify-between gap-3 px-4 py-3 shadow-[var(--shadow-md)] sm:px-5">
+              <p className="min-w-0 text-footnote text-[var(--color-text-secondary)] tabular-nums">
+                {t('schedulePoll.candidateSaveReview', {
+                  kept: keptSlotIds.length,
+                  added: newCandidates.length,
+                })}
+              </p>
+              <button
+                type="button"
+                onClick={saveCandidates}
+                disabled={savingCandidates || keptSlotIds.length + newCandidates.length === 0}
+                className="btn-primary h-10 shrink-0 px-5 text-default"
+              >
+                {savingCandidates ? t('common.saving') : t('schedulePoll.saveCandidates')}
+              </button>
+            </div>
+          </>
+        ))}
 
-      {poll.status === 'finalized' && (
-        <div className="mt-6">
-          {poll.confirmedEventId ? (
+      {poll.status === 'finalized' &&
+        (poll.confirmedEventId ? (
+          <div>
             <Link
               to="/schedule-polls/$calendarId/$pollId"
               params={{ calendarId, pollId }}
               search={{ view: 'event' }}
-              className="inline-flex rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-body font-semibold text-[var(--color-accent)]"
+              className={ACCENT_ACTION}
             >
               {t('schedulePoll.viewEvent')}
             </Link>
-          ) : (
-            <SchedulePollNotice>{t('schedulePoll.eventUnavailable')}</SchedulePollNotice>
-          )}
-        </div>
-      )}
+          </div>
+        ) : (
+          <SchedulePollNotice>{t('schedulePoll.eventUnavailable')}</SchedulePollNotice>
+        ))}
     </SchedulePollFrame>
+  );
+}
+
+const SECONDARY_ACTION =
+  'inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-surface-inset)] px-3.5 text-footnote font-semibold text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]';
+const ACCENT_ACTION =
+  'inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-bg)] px-3.5 text-footnote font-semibold text-[var(--color-accent)] transition hover:bg-[var(--color-accent-subtle)]';
+
+function BestTag() {
+  const t = useT();
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-micro font-semibold text-[var(--color-text-on-accent)]">
+      {t('schedulePoll.bestCandidate')}
+    </span>
+  );
+}
+
+function Tally({ tally }: { tally: { yes: number; maybe: number; no: number } }) {
+  const t = useT();
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-2 text-footnote font-semibold text-[var(--color-text-primary)] tabular-nums"
+      title={t('schedulePoll.answerTally', tally)}
+    >
+      <span className="sr-only">{t('schedulePoll.answerTally', tally)}</span>
+      {(['yes', 'maybe', 'no'] as const).map((key) => (
+        <span
+          key={key}
+          aria-hidden
+          className={`inline-flex items-center gap-0.5 ${tally[key] === 0 ? 'opacity-35' : ''}`}
+        >
+          <AnswerMark answer={key} size={12} />
+          {tally[key]}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -1241,20 +1365,15 @@ function AnswerSlot({
     { value: 'no', mark: 'schedulePoll.answerNoMark', label: 'schedulePoll.answerNo' },
   ];
   return (
-    <fieldset className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:px-5 sm:py-4">
+    <fieldset className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
       <legend className="sr-only">{t('schedulePoll.answerForCandidate')}</legend>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-body font-semibold text-[var(--color-text-primary)]">
-          <SchedulePollSlotTime startAt={slot.startAt} endAt={slot.endAt} timezone={timezone} />
-        </p>
-        <AvailabilityBadge availability={slot.availability} />
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <SchedulePollSlot startAt={slot.startAt} endAt={slot.endAt} timezone={timezone} />
+        {slot.availability !== 'open' && <AvailabilityBadge availability={slot.availability} />}
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="answer-seg w-full sm:w-[360px]">
         {choices.map((choice) => (
-          <label
-            key={choice.value}
-            className={`flex min-h-[68px] cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border text-center transition focus-within:ring-2 focus-within:ring-[var(--color-accent)] focus-within:ring-offset-2 focus-within:ring-offset-[var(--color-surface)] ${value === choice.value ? 'border-[color-mix(in_srgb,var(--color-accent)_45%,var(--color-border))] bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'border-[var(--color-border)] bg-[var(--color-surface-inset)] text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'}`}
-          >
+          <label key={choice.value} data-answer={choice.value} className="answer-opt">
             <input
               className="sr-only"
               type="radio"
@@ -1264,10 +1383,8 @@ function AnswerSlot({
               onChange={() => onChange(choice.value)}
               aria-label={`${candidateLabel}: ${t(choice.mark)} ${t(choice.label)}`}
             />
-            <span aria-hidden className="text-title font-bold leading-tight">
-              {t(choice.mark)}
-            </span>
-            <span className="text-footnote font-semibold">{t(choice.label)}</span>
+            <AnswerMark answer={choice.value} size={15} />
+            <span className="min-w-0 truncate">{t(choice.label)}</span>
           </label>
         ))}
       </div>

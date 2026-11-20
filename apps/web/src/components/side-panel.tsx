@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+import { HelpLink } from '@/components/guide';
 import { useT } from '@/i18n';
+import type { HelpTopic } from '@/lib/help-topics';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import type { Presence } from '@/lib/use-presence';
 
@@ -10,6 +12,8 @@ interface SidePanelProps {
   title: string;
   /** Controls placed before the close button in the header. */
   actions?: ReactNode;
+  /** Help section a "?" in the header opens. */
+  helpTopic?: HelpTopic;
   children: ReactNode;
 }
 
@@ -18,7 +22,14 @@ interface SidePanelProps {
  * share: a backdrop, a header with the close control, and an entrance and exit
  * that play the same way for every one of them.
  */
-export function SidePanel({ presence, onClose, title, actions, children }: SidePanelProps) {
+export function SidePanel({
+  presence,
+  onClose,
+  title,
+  actions,
+  helpTopic,
+  children,
+}: SidePanelProps) {
   const t = useT();
   const { mounted, closing } = presence;
   const panelRef = useModalA11y<HTMLDivElement>(mounted && !closing, onClose);
@@ -48,6 +59,7 @@ export function SidePanel({ presence, onClose, title, actions, children }: SideP
           <h2 className="min-w-0 truncate text-subhead font-semibold">{title}</h2>
           <div className="flex shrink-0 items-center gap-1.5">
             {actions}
+            {helpTopic && <HelpLink topic={helpTopic} label={title} />}
             <button
               type="button"
               onClick={onClose}

@@ -272,6 +272,31 @@ export function CalendarHeader() {
         type="button"
         onClick={() => {
           setShowProfileMenu(false);
+          navigate({ to: '/help' });
+        }}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-secondary)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 9.5a2.5 2.5 0 014.6 1.3c0 1.7-2.1 2.2-2.1 3.7" />
+          <circle cx="12" cy="17.2" r="0.6" fill="var(--color-text-secondary)" />
+        </svg>
+        {t('help.title')}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setShowProfileMenu(false);
           logout();
         }}
         className="flex w-full items-center gap-3 px-4 py-2.5 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
@@ -304,6 +329,7 @@ export function CalendarHeader() {
           type="button"
           onClick={() => setShowMobileMenu(true)}
           aria-label={t('calendar.calendarList')}
+          data-tour="menu"
           className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
         >
           <svg
@@ -522,6 +548,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={() => openEventModal()}
+            data-tour="add-event"
             className="flex h-9 items-center justify-center px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
             style={{
               borderRadius: 'var(--radius-sm)',

@@ -1,6 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Calendar } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
@@ -12,11 +13,29 @@ vi.mock('@/lib/api', () => ({
 
 const deleteCalendar = vi.fn().mockResolvedValue(undefined);
 
+const initialCalendars: Calendar[] = [
+  {
+    id: 'cal-owned',
+    name: 'Family',
+    color: '#47B2F7',
+    createdAt: '',
+    role: 'owner',
+    publicShared: false,
+    memberColor: '#47B2F7',
+  },
+  {
+    id: 'cal-joined',
+    name: 'Work',
+    color: '#F7A047',
+    createdAt: '',
+    role: 'editor',
+    publicShared: false,
+    memberColor: '#F7A047',
+  },
+];
+
 const calendarState = {
-  calendars: [
-    { id: 'cal-owned', name: 'Family', color: '#47B2F7', role: 'owner', publicShared: false },
-    { id: 'cal-joined', name: 'Work', color: '#F7A047', role: 'editor', publicShared: false },
-  ],
+  calendars: [...initialCalendars],
   activeCalendarIds: ['cal-owned', 'cal-joined'],
   toggleCalendarFilter: vi.fn(),
   setActiveCalendarIds: vi.fn(),
@@ -34,6 +53,45 @@ import { CalendarList } from './calendar-list';
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  calendarState.calendars = [...initialCalendars];
+});
+
+function ownedCalendar(): Calendar {
+  const calendar = calendarState.calendars.find((item) => item.id === 'cal-owned');
+  if (!calendar) throw new Error('Owned calendar fixture missing');
+  return calendar;
+}
+
+describe('CalendarList cover images', () => {
+  it('shows the uploaded cover thumbnail', () => {
+    calendarState.calendars[0] = {
+      ...ownedCalendar(),
+      coverImageUrl: 'https://storage.example/signed-cover',
+    };
+
+    const { container } = render(<CalendarList />);
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://storage.example/signed-cover',
+    );
+  });
+
+  it('falls back to the color dot when an uploaded cover fails to load', () => {
+    calendarState.calendars[0] = {
+      ...ownedCalendar(),
+      coverImageUrl: 'https://storage.example/signed-cover',
+    };
+
+    const { container } = render(<CalendarList />);
+    const uploadedImage = container.querySelector('img');
+    expect(uploadedImage).toHaveAttribute('src', 'https://storage.example/signed-cover');
+    if (!uploadedImage) throw new Error('Uploaded image was not rendered');
+
+    fireEvent.error(uploadedImage);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[data-calendar-cover-fallback]')).not.toBeNull();
+  });
 });
 
 describe('CalendarList calendar deletion', () => {
@@ -78,8 +136,10 @@ describe('CalendarList after creating a calendar', () => {
       id: 'cal-new',
       name: 'Band',
       color: '#47B2F7',
+      createdAt: '',
       role: 'owner',
       publicShared: false,
+      memberColor: '#47B2F7',
     };
     calendarState.addCalendar.mockImplementation(async () => {
       calendarState.calendars.push(created);

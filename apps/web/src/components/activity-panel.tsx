@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Avatar } from '@/components/avatar';
+import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import type { HistoryActor } from '@/components/history-timeline';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { SidePanel } from '@/components/side-panel';
@@ -75,7 +76,7 @@ export function ActivityPanel({ open, onClose }: ActivityPanelProps) {
   if (!presence.mounted) return null;
 
   return (
-    <SidePanel presence={presence} onClose={onClose} title={t('activity.title')}>
+    <SidePanel presence={presence} onClose={onClose} title={t('activity.title')} helpTopic="faq">
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {!target ? (
           <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
@@ -97,9 +98,11 @@ export function ActivityPanel({ open, onClose }: ActivityPanelProps) {
             )}
 
             {!isLoading && items.length === 0 && (
-              <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
-                {t('activity.empty')}
-              </p>
+              <EmptyState
+                icon={GUIDE_ICONS.activity}
+                title={t('empty.activityTitle')}
+                description={t('empty.activityDesc')}
+              />
             )}
 
             {items.length > 0 && (

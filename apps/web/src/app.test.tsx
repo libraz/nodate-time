@@ -140,7 +140,7 @@ describe('App right sidebar', () => {
     const panel = heading.closest('.side-panel');
     expect(panel).not.toBeNull();
     // The panel carries the memo list itself, not just a title.
-    expect(within(panel as HTMLElement).getByText('panel.noMemos')).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText('empty.memosTitle')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'panel.memo' }));
     // Closing plays an exit first: the sheet is marked as leaving, then goes.

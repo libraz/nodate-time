@@ -92,7 +92,6 @@ const calendarState = {
       id: 'cal-1',
       name: 'Team',
       color: '#000',
-      coverUrl: '',
       createdAt: '',
       publicShared: false,
       role: 'owner',

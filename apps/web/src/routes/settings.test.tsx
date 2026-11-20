@@ -51,11 +51,11 @@ function calendar(role: string): Calendar {
     id: 'cal-1',
     name: 'A',
     color: '#000',
-    coverUrl: '',
     createdAt: '',
     publicShared: false,
     role,
     memberColor: '#000',
+    coverUploadAllowed: false,
   };
 }
 
@@ -63,6 +63,9 @@ const calendarState = {
   calendars: [calendar('owner')],
   membersMap: {} as Record<string, Member[]>,
   fetchMembers: vi.fn(),
+  updateCalendar: vi.fn(),
+  uploadCalendarCover: vi.fn(),
+  deleteCalendarCover: vi.fn(),
   leaveCalendar: vi.fn(),
   fetchEvents: vi.fn(),
   visibleRange: vi.fn(() => ({ start: '', end: '' })),
@@ -158,7 +161,13 @@ beforeEach(() => {
   apiGet.mockResolvedValue([]);
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  calendarState.calendars = [calendar('owner')];
+  calendarState.membersMap = {};
+  calendarState.uploadCalendarCover.mockReset();
+  calendarState.deleteCalendarCover.mockReset();
+});
 
 describe('SettingsPage header', () => {
   it('shows the brand row above the title', () => {
@@ -217,6 +226,162 @@ describe('CalendarsSection invites', () => {
     await waitFor(() =>
       expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('/calendars/cal-1/invites')),
     );
+  });
+});
+
+describe('Calendar details cover image', () => {
+  const objectUrlApi = {
+    createObjectURL: Object.getOwnPropertyDescriptor(URL, 'createObjectURL'),
+    revokeObjectURL: Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL'),
+  };
+  beforeEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: () => 'blob:picked-cover',
+      configurable: true,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, configurable: true });
+  });
+  afterEach(() => {
+    for (const [key, descriptor] of Object.entries(objectUrlApi)) {
+      if (descriptor) Object.defineProperty(URL, key, descriptor);
+      else Reflect.deleteProperty(URL, key);
+    }
+  });
+
+  it('previews the uploaded cover, uploads a selected file, and removes it', async () => {
+    const file = new File(['image bytes'], 'cover.png', { type: 'image/png' });
+    calendarState.calendars = [
+      {
+        ...calendar('owner'),
+        coverImageUrl: 'https://storage.example/signed-cover',
+        coverUploadAllowed: true,
+      },
+    ];
+    calendarState.uploadCalendarCover.mockResolvedValue(undefined);
+    calendarState.deleteCalendarCover.mockResolvedValue(undefined);
+
+    const { container, rerender } = render(<CalendarsSection />);
+    const preview = screen.getByAltText('A');
+    expect(preview).toHaveAttribute('src', 'https://storage.example/signed-cover');
+
+    const nameInput = container.querySelector<HTMLInputElement>('input[type="text"]');
+    const colorInput = container.querySelector<HTMLInputElement>('input[type="color"]');
+    if (!nameInput || !colorInput) {
+      throw new Error('Calendar detail inputs were not rendered');
+    }
+    fireEvent.change(nameInput, { target: { value: 'Draft name' } });
+    fireEvent.change(colorInput, { target: { value: '#ff0000' } });
+    expect(screen.getByAltText('A')).toHaveAttribute('src', 'https://storage.example/signed-cover');
+
+    const input = container.querySelector('input[type="file"]');
+    expect(input).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
+    if (!input) throw new Error('Cover upload input was not rendered');
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() =>
+      expect(calendarState.uploadCalendarCover).toHaveBeenCalledWith('cal-1', file),
+    );
+    const uploadedCalendar = calendarState.calendars[0];
+    if (!uploadedCalendar) throw new Error('Calendar fixture missing after upload');
+    calendarState.calendars[0] = {
+      ...uploadedCalendar,
+      coverImageUrl: 'https://storage.example/replacement-cover',
+    };
+    await act(async () => rerender(<CalendarsSection />));
+    expect(nameInput).toHaveValue('Draft name');
+    expect(colorInput).toHaveValue('#ff0000');
+    expect(screen.getByAltText('A')).toHaveAttribute(
+      'src',
+      'https://storage.example/replacement-cover',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.calendarCoverRemove' }));
+    await waitFor(() => expect(calendarState.deleteCalendarCover).toHaveBeenCalledWith('cal-1'));
+    const removedCalendar = calendarState.calendars[0];
+    if (!removedCalendar) throw new Error('Calendar fixture missing after removal');
+    const withoutUploadedCover = { ...removedCalendar };
+    delete withoutUploadedCover.coverImageUrl;
+    calendarState.calendars[0] = withoutUploadedCover;
+    await act(async () => rerender(<CalendarsSection />));
+    expect(nameInput).toHaveValue('Draft name');
+    expect(colorInput).toHaveValue('#ff0000');
+    expect(screen.queryByAltText('A')).toBeNull();
+  });
+
+  it('shows a dropped file at once and uploads it', async () => {
+    const file = new File(['image bytes'], 'cover.webp', { type: 'image/webp' });
+    let finishUpload: () => void = () => {};
+    calendarState.calendars = [{ ...calendar('owner'), coverUploadAllowed: true }];
+    calendarState.uploadCalendarCover.mockImplementation(
+      () => new Promise<void>((resolve) => (finishUpload = resolve)),
+    );
+
+    const { container } = render(<CalendarsSection />);
+    const tile = container.querySelector('.image-upload-tile');
+    if (!tile) throw new Error('Cover upload tile was not rendered');
+    expect(tile).toHaveAttribute('data-empty');
+    fireEvent.drop(tile, { dataTransfer: { files: [file], types: ['Files'] } });
+
+    await waitFor(() =>
+      expect(calendarState.uploadCalendarCover).toHaveBeenCalledWith('cal-1', file),
+    );
+    expect(tile).toHaveAttribute('aria-busy', 'true');
+    expect(container.querySelector('img[src="blob:picked-cover"]')).not.toBeNull();
+
+    await act(async () => finishUpload());
+    expect(tile).toHaveAttribute('aria-busy', 'false');
+    expect(container.querySelector('img[src="blob:picked-cover"]')).toBeNull();
+  });
+
+  it('rejects a file of the wrong type before uploading', async () => {
+    calendarState.calendars = [{ ...calendar('owner'), coverUploadAllowed: true }];
+
+    const { container } = render(<CalendarsSection />);
+    const input = container.querySelector('input[type="file"]');
+    if (!input) throw new Error('Cover upload input was not rendered');
+    fireEvent.change(input, {
+      target: { files: [new File(['gif'], 'cover.gif', { type: 'image/gif' })] },
+    });
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith('settings.calendarCoverInvalidType'),
+    );
+    expect(calendarState.uploadCalendarCover).not.toHaveBeenCalled();
+  });
+
+  it('previews the unsaved colour in the calendar-list row', () => {
+    calendarState.calendars = [{ ...calendar('owner'), coverUploadAllowed: true }];
+
+    const { container } = render(<CalendarsSection />);
+    const colorInput = container.querySelector<HTMLInputElement>('input[type="color"]');
+    if (!colorInput) throw new Error('Colour input was not rendered');
+    fireEvent.change(colorInput, { target: { value: '#ff0000' } });
+
+    const dot = container.querySelector<HTMLElement>('[data-calendar-cover-fallback]');
+    expect(dot?.style.backgroundColor).toBe('rgb(255, 0, 0)');
+  });
+
+  it('hides the upload control when storage uploads are unavailable', () => {
+    calendarState.calendars = [{ ...calendar('owner'), coverUploadAllowed: false }];
+
+    const { container } = render(<CalendarsSection />);
+
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'settings.calendarCoverUpload' })).toBeNull();
+  });
+
+  it('does not show cover controls to a calendar editor', () => {
+    calendarState.calendars = [
+      {
+        ...calendar('editor'),
+        coverImageUrl: 'https://storage.example/signed-cover',
+        coverUploadAllowed: true,
+      },
+    ];
+
+    const { container } = render(<CalendarsSection />);
+
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'settings.calendarCoverRemove' })).toBeNull();
   });
 });
 

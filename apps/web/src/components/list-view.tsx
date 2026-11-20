@@ -1,5 +1,7 @@
 import { DateTime } from 'luxon';
 import { type CSSProperties, useLayoutEffect, useMemo, useRef } from 'react';
+import { EmptyState, GUIDE_ICONS } from '@/components/guide';
+import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
 import { formatMonthYear, fromISOInZone, isToday, nowInZone } from '@/lib/date-utils';
@@ -44,8 +46,12 @@ export function ListView() {
   return (
     <div ref={scrollRef} className="relative flex h-full flex-col overflow-y-auto">
       {grouped.length === 0 && (
-        <div className="flex flex-1 items-center justify-center py-20 text-default text-[var(--color-text-secondary)]">
-          {t('calendar.noEvents')}
+        <div className="flex flex-1 items-center justify-center py-10">
+          <EmptyState
+            icon={GUIDE_ICONS.calendar}
+            title={t('empty.eventsTitle')}
+            description={t('empty.eventsDesc')}
+          />
         </div>
       )}
       {grouped.map(([dateStr, evts], index) => {
@@ -101,10 +107,11 @@ export function ListView() {
                           className="event-block flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3.5 py-2.5 text-left"
                           style={{ '--evt': evt.color } as CSSProperties}
                         >
-                          <span
-                            aria-hidden
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: evt.color }}
+                          <OwnerMark
+                            name={evt.ownerName}
+                            avatarUrl={evt.ownerAvatarUrl}
+                            color={evt.color}
+                            size={22}
                           />
                           <div className="min-w-0 flex-1">
                             <p className="event-block-title truncate text-default font-semibold">

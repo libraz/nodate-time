@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, errorMessage, isAbortError } from '@/lib/api';
 import { fetchWindow } from '@/lib/date-utils';
+import { resizeImageForCover } from '@/lib/image-resize';
 import { loadJson, saveJson } from '@/lib/storage';
 import { toast } from '@/lib/toast';
 import { useUiStore } from '@/stores/ui-store';
@@ -81,10 +82,9 @@ interface CalendarState {
 
   /** Resolves to the created calendar, or null when the account changed meanwhile. */
   addCalendar: (cal: { name: string; color: string }) => Promise<Calendar | null>;
-  updateCalendar: (
-    id: string,
-    patch: { name?: string; color?: string; coverUrl?: string },
-  ) => Promise<void>;
+  updateCalendar: (id: string, patch: { name?: string; color?: string }) => Promise<void>;
+  uploadCalendarCover: (id: string, file: File) => Promise<void>;
+  deleteCalendarCover: (id: string) => Promise<void>;
   deleteCalendar: (id: string) => Promise<void>;
   /**
    * Gives up the caller's own membership. Distinct from removing someone
@@ -172,6 +172,12 @@ let accountGeneration = 0;
 let calendarRequestGeneration = 0;
 let eventRequestGeneration = 0;
 let memoRequestGeneration = 0;
+
+function mergeCalendarResponse(current: Calendar, updated: Calendar): Calendar {
+  const merged = { ...current, ...updated };
+  if (!updated.coverImageUrl) delete merged.coverImageUrl;
+  return merged;
+}
 
 export const useCalendarStore = create<CalendarState>((set, get) => ({
   calendars: [],
@@ -419,7 +425,27 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   async updateCalendar(id, patch) {
     const updated = await api.put<Calendar>(`/calendars/${id}`, patch);
     set((s) => ({
-      calendars: s.calendars.map((c) => (c.id === id ? { ...c, ...updated } : c)),
+      calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
+    }));
+  },
+
+  async uploadCalendarCover(id, file) {
+    const currentAccountGeneration = accountGeneration;
+    const resized = await resizeImageForCover(file);
+    const body = new Blob([resized.bytes], { type: resized.contentType });
+    const updated = await api.putBlob<Calendar>(`/calendars/${id}/cover`, body);
+    if (currentAccountGeneration !== accountGeneration) return;
+    set((s) => ({
+      calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
+    }));
+  },
+
+  async deleteCalendarCover(id) {
+    const currentAccountGeneration = accountGeneration;
+    const updated = await api.delete<Calendar>(`/calendars/${id}/cover`);
+    if (currentAccountGeneration !== accountGeneration) return;
+    set((s) => ({
+      calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
     }));
   },
 

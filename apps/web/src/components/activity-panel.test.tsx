@@ -1,5 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
+
 import { ja, type TranslationKey } from '@/i18n/ja';
 import type { Calendar } from '@/types/calendar';
 
@@ -41,7 +49,6 @@ function calendar(id: string, name: string): Calendar {
     id,
     name,
     color: '#3b82f6',
-    coverUrl: '',
     createdAt: '2026-01-01T00:00:00+09:00',
     publicShared: false,
     role: 'owner',
@@ -199,7 +206,7 @@ describe('ActivityPanel', () => {
 
     render(<ActivityPanel open onClose={() => {}} />);
 
-    expect(await screen.findByText('activity.empty')).toBeInTheDocument();
+    expect(await screen.findByText('empty.activityTitle')).toBeInTheDocument();
   });
 
   it('asks for nothing when no calendar is in view', () => {
@@ -218,7 +225,7 @@ describe('ActivityPanel', () => {
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('feed unavailable'));
     expect(screen.queryByText('history.loading')).not.toBeInTheDocument();
-    expect(screen.getByText('activity.empty')).toBeInTheDocument();
+    expect(screen.getByText('empty.activityTitle')).toBeInTheDocument();
   });
 
   it('pages with the cursor the server handed back and appends the next page', async () => {
@@ -348,7 +355,9 @@ describe('ActivityPanel keyboard', () => {
 
     const panel = await screen.findByRole('dialog');
     await screen.findByText('activity.loadMore');
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button,input,select'));
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>('a[href],button,input,select'),
+    );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     expect(focusable.length).toBeGreaterThan(1);

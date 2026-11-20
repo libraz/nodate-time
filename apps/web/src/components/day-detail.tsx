@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
@@ -132,20 +133,28 @@ export function DayDetail() {
                         closeDayDetail();
                         openEventModal(evt.id);
                       }}
-                      className="card-section w-full bg-[var(--color-surface-secondary)] p-4 text-left transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
-                      style={{ borderLeft: `3px solid ${evt.color}` }}
+                      className="card-section flex w-full items-start gap-3 bg-[var(--color-surface-secondary)] p-4 text-left transition-colors hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
                     >
-                      <p className="text-subhead font-medium text-[var(--color-text-primary)]">
-                        {evt.title}
-                      </p>
-                      <p className="mt-1 text-default text-[var(--color-text-secondary)]">
-                        {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
-                      </p>
-                      {evt.location && (
-                        <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
-                          {evt.location}
+                      <OwnerMark
+                        name={evt.ownerName}
+                        avatarUrl={evt.ownerAvatarUrl}
+                        color={evt.color}
+                        size={24}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <p className="text-subhead font-medium text-[var(--color-text-primary)]">
+                          {evt.title}
                         </p>
-                      )}
+                        <p className="mt-1 text-default text-[var(--color-text-secondary)]">
+                          {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
+                        </p>
+                        {evt.location && (
+                          <p className="mt-0.5 text-body text-[var(--color-text-tertiary)]">
+                            {evt.location}
+                          </p>
+                        )}
+                      </span>
                     </button>
                   ))}
               </div>

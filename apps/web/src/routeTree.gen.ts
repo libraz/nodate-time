@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root';
 import { Route as IndexRouteImport } from './routes/index';
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password';
+import { Route as HelpRouteImport } from './routes/help';
 import { Route as LoginRouteImport } from './routes/login';
 import { Route as OauthCompleteRouteImport } from './routes/oauth-complete';
 import { Route as ResetPasswordRouteImport } from './routes/reset-password';
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any);
 const LoginRoute = LoginRouteImport.update({
@@ -81,6 +87,7 @@ const SchedulePollsCalendarIdPollIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
+  '/help': typeof HelpRoute;
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
@@ -94,6 +101,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
+  '/help': typeof HelpRoute;
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/': typeof IndexRoute;
   '/forgot-password': typeof ForgotPasswordRoute;
+  '/help': typeof HelpRoute;
   '/login': typeof LoginRoute;
   '/oauth-complete': typeof OauthCompleteRoute;
   '/reset-password': typeof ResetPasswordRoute;
@@ -123,6 +132,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/forgot-password'
+    | '/help'
     | '/login'
     | '/oauth-complete'
     | '/reset-password'
@@ -163,6 +175,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   ForgotPasswordRoute: typeof ForgotPasswordRoute;
+  HelpRoute: typeof HelpRoute;
   LoginRoute: typeof LoginRoute;
   OauthCompleteRoute: typeof OauthCompleteRoute;
   ResetPasswordRoute: typeof ResetPasswordRoute;
@@ -188,6 +201,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password';
       fullPath: '/forgot-password';
       preLoaderRoute: typeof ForgotPasswordRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/help': {
+      id: '/help';
+      path: '/help';
+      fullPath: '/help';
+      preLoaderRoute: typeof HelpRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     '/login': {
@@ -259,6 +279,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  HelpRoute: HelpRoute,
   LoginRoute: LoginRoute,
   OauthCompleteRoute: OauthCompleteRoute,
   ResetPasswordRoute: ResetPasswordRoute,

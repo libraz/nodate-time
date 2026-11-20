@@ -1,5 +1,13 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
+
 import type { Calendar } from '@/types/calendar';
 import type { InviteData } from '@/types/invite';
 
@@ -31,7 +39,6 @@ function calendar(id: string, name: string): Calendar {
     id,
     name,
     color: '#000',
-    coverUrl: '',
     createdAt: '',
     publicShared: false,
     role: 'owner',

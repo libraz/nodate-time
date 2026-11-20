@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@tanstack/react-router', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
+
 vi.mock('@/lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   errorMessage: (e: unknown) => String(e),
@@ -177,7 +184,7 @@ describe('AlbumPanel', () => {
     render(<AlbumPanel />);
 
     expect(await screen.findByText('Error: album unavailable')).toBeInTheDocument();
-    expect(screen.getByText('panel.noPhotos')).toBeInTheDocument();
+    expect(screen.getByText('empty.photosTitle')).toBeInTheDocument();
   });
 
   it('shows the empty state for an album with no photos', async () => {
@@ -186,7 +193,7 @@ describe('AlbumPanel', () => {
 
     render(<AlbumPanel />);
 
-    expect(await screen.findByText('panel.noPhotos')).toBeInTheDocument();
+    expect(await screen.findByText('empty.photosTitle')).toBeInTheDocument();
   });
 
   it('opens a photo full size and closes it again', async () => {
@@ -385,7 +392,7 @@ describe('AlbumPanel keyboard', () => {
 
     const panel = await screen.findByRole('dialog', { name: 'panel.album' });
     await screen.findByText('album.loadMore');
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button,input'));
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('a[href],button,input'));
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     expect(focusable.length).toBeGreaterThan(1);
@@ -646,7 +653,7 @@ describe('AlbumPanel thumbnail upload', () => {
     );
 
     render(<AlbumPanel />);
-    await screen.findByText('panel.noPhotos');
+    await screen.findByText('empty.photosTitle');
     pickFile(new File([new Uint8Array(9000)], 'photo.png', { type: 'image/png' }));
 
     await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
@@ -665,7 +672,7 @@ describe('AlbumPanel thumbnail upload', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<AlbumPanel />);
-    await screen.findByText('panel.noPhotos');
+    await screen.findByText('empty.photosTitle');
     pickFile(new File([new Uint8Array(9000)], 'photo.gif', { type: 'image/gif' }));
 
     await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
@@ -685,7 +692,7 @@ describe('AlbumPanel thumbnail upload', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<AlbumPanel />);
-    await screen.findByText('panel.noPhotos');
+    await screen.findByText('empty.photosTitle');
     pickFile(new File([new Uint8Array(9000)], 'photo.png', { type: 'image/png' }));
 
     await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
@@ -705,7 +712,7 @@ describe('AlbumPanel thumbnail upload', () => {
       .mockResolvedValue({ items: [photo('https://storage/photo')] });
 
     render(<AlbumPanel />);
-    await screen.findByText('panel.noPhotos');
+    await screen.findByText('empty.photosTitle');
     pickFile(new File([new Uint8Array(9000)], 'photo.jpg', { type: 'image/jpeg' }));
 
     // The photo is stored either way: confirm does not need the thumbnail, and

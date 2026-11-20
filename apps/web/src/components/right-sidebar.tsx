@@ -58,15 +58,13 @@ const ITEM_DEFS: SidebarItemDef[] = [
   },
   {
     id: 'settings',
-    labelKey: 'panel.settings',
+    labelKey: 'settings.appearance',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <line x1="4" y1="6" x2="20" y2="6" />
-        <line x1="4" y1="12" x2="20" y2="12" />
-        <line x1="4" y1="18" x2="20" y2="18" />
-        <circle cx="8" cy="6" r="2" fill="var(--color-surface)" />
-        <circle cx="16" cy="12" r="2" fill="var(--color-surface)" />
-        <circle cx="10" cy="18" r="2" fill="var(--color-surface)" />
+        <path d="M12 3a9 9 0 000 18c1.1 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 004-4c0-4.4-4-8-9-8z" />
+        <circle cx="7.5" cy="11.5" r="1.2" fill="currentColor" />
+        <circle cx="10.5" cy="7.5" r="1.2" fill="currentColor" />
+        <circle cx="15.5" cy="8.5" r="1.2" fill="currentColor" />
       </svg>
     ),
   },
@@ -80,13 +78,14 @@ export function RightSidebar() {
   const toggleSettings = useUiStore((s) => s.toggleSettings);
 
   return (
-    <div className="flex w-10 shrink-0 flex-col items-center gap-1.5 border-l border-[var(--color-border)] pt-3 sm:w-14 sm:gap-2 sm:pt-4">
+    <div className="flex w-16 shrink-0 flex-col items-center gap-1 border-l border-[var(--color-border)] pt-3">
       {ITEM_DEFS.map((item) => {
         const active = item.id === 'settings' ? showSettings : rightPanel === item.id;
         return (
           <button
             key={item.id}
             type="button"
+            data-tour={item.id}
             onClick={() => {
               if (item.id === 'settings') {
                 toggleSettings();
@@ -95,18 +94,20 @@ export function RightSidebar() {
               toggleRightPanel(item.id satisfies RightPanelId);
             }}
             className={[
-              'relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors sm:h-11 sm:w-11',
+              'relative flex w-14 flex-col items-center gap-0.5 rounded-xl py-1.5 transition-colors',
               active
                 ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
                 : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-primary)]',
             ].join(' ')}
-            aria-label={t(item.labelKey)}
-            title={t(item.labelKey)}
+            aria-pressed={active}
           >
             {active && (
               <span className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--color-accent)]" />
             )}
-            <span className="h-5 w-5 sm:h-[22px] sm:w-[22px]">{item.icon}</span>
+            <span className="h-[22px] w-[22px]">{item.icon}</span>
+            <span className="w-full truncate text-center text-micro leading-tight">
+              {t(item.labelKey)}
+            </span>
           </button>
         );
       })}

@@ -1,10 +1,14 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
+import { EmptyState, GUIDE_ICONS, TipCard } from '@/components/guide';
 import { CustomSelect } from '@/components/pickers';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
+  InviteeGrid,
   SchedulePollFrame,
   SchedulePollNotice,
+  SchedulePollProgress,
+  SchedulePollSection,
   SchedulePollStatus,
 } from '@/components/schedule-poll-ui';
 import { Switch } from '@/components/switch';
@@ -76,12 +80,12 @@ function AvailabilitySharingControl({ calendarId }: { calendarId: string }) {
   };
 
   return (
-    <section className="mb-5 flex flex-col gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <section className="page-card flex items-center justify-between gap-4 p-4 sm:px-5">
       <div className="min-w-0">
         <h2 className="text-default font-semibold text-[var(--color-text-primary)]">
           {t('schedulePoll.availabilitySharing')}
         </h2>
-        <p className="mt-1 max-w-[680px] text-footnote text-[var(--color-text-secondary)]">
+        <p className="mt-0.5 max-w-[640px] text-footnote text-[var(--color-text-secondary)]">
           {t('schedulePoll.availabilitySharingHint')}
         </p>
         {error && (
@@ -251,6 +255,7 @@ function SchedulePollIndexPage() {
     current.push(action);
     actionGroups.set(action.kind, current);
   }
+  const orderedActions = Array.from(actionGroups.values()).flat();
 
   return (
     <SchedulePollFrame
@@ -258,91 +263,36 @@ function SchedulePollIndexPage() {
       eyebrow={t('schedulePoll.eyebrow')}
       backTo="/"
     >
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="block min-w-0 flex-1 text-footnote font-semibold text-[var(--color-text-secondary)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0 flex-1 text-footnote font-medium text-[var(--color-text-secondary)]">
           <span className="mb-1.5 block">{t('schedulePoll.calendar')}</span>
           <CustomSelect
             value={selectedCalendarId}
             onChange={openCalendar}
             ariaLabel={t('schedulePoll.calendar')}
-            className="w-full max-w-[520px]"
+            className="w-full sm:max-w-[360px]"
             triggerClassName="input-modern"
             options={calendars.map((calendar) => ({ value: calendar.id, label: calendar.name }))}
           />
         </div>
         {canManage && selectedCalendarId && (
-          <button type="button" onClick={toggleCreate} className="btn-primary px-5 text-default">
+          <button
+            type="button"
+            onClick={toggleCreate}
+            aria-expanded={creating}
+            className={`${creating ? 'btn-secondary' : 'btn-primary'} inline-flex items-center justify-center gap-2 px-5 text-default`}
+          >
+            {!creating && <PlusIcon />}
             {creating ? t('schedulePoll.cancelCreate') : t('schedulePoll.create')}
           </button>
         )}
       </div>
 
-      {actions.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-3 text-title font-semibold text-[var(--color-text-primary)]">
-            {t('schedulePoll.myActions')}
-          </h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            {Array.from(actionGroups.entries()).flatMap(([kind, group]) =>
-              group.map((action) => (
-                <Link
-                  key={`${kind}:${action.calendarId}:${action.pollId}`}
-                  to="/schedule-polls/$calendarId/$pollId"
-                  params={{ calendarId: action.calendarId, pollId: action.pollId }}
-                  search={{
-                    view:
-                      kind === 'answer' ? 'respond' : kind === 'finalize' ? 'manage' : 'candidates',
-                  }}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-left transition hover:bg-[var(--color-hover)]"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-footnote font-semibold text-[var(--color-accent)]">
-                      {t(
-                        kind === 'answer'
-                          ? 'schedulePoll.statusAnswer'
-                          : kind === 'finalize'
-                            ? 'schedulePoll.statusFinalize'
-                            : 'schedulePoll.statusAddSlots',
-                      )}
-                    </span>
-                    <span className="mt-0.5 block truncate text-default font-semibold text-[var(--color-text-primary)]">
-                      {action.title}
-                    </span>
-                    <span className="mt-0.5 block truncate text-footnote text-[var(--color-text-secondary)]">
-                      {action.calendarName}
-                    </span>
-                  </span>
-                  <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-3 py-1.5 text-footnote font-semibold text-[var(--color-accent)]">
-                    {t(
-                      kind === 'answer'
-                        ? 'schedulePoll.actionAnswer'
-                        : kind === 'finalize'
-                          ? 'schedulePoll.actionFinalize'
-                          : 'schedulePoll.actionAddSlots',
-                    )}
-                  </span>
-                </Link>
-              )),
-            )}
-          </div>
-        </section>
-      )}
-
-      {canManage && selectedCalendarId && (
-        <AvailabilitySharingControl key={selectedCalendarId} calendarId={selectedCalendarId} />
-      )}
-
       {creating && canManage && (
-        <section className="mb-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6">
-          <div className="mb-5">
-            <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-              {t('schedulePoll.create')}
-            </h2>
-            <p className="mt-1 text-body text-[var(--color-text-secondary)]">
-              {t('schedulePoll.createHint')}
-            </p>
-          </div>
-
+        <div className="flex flex-col gap-5">
+          <p className="text-body text-[var(--color-text-secondary)]">
+            {t('schedulePoll.createHint')}
+          </p>
           {membersError && <SchedulePollNotice tone="error">{membersError}</SchedulePollNotice>}
           {membersLoading ? (
             <p className="py-5 text-body text-[var(--color-text-secondary)]">
@@ -352,155 +302,275 @@ function SchedulePollIndexPage() {
             <SchedulePollNotice>{t('schedulePoll.noMembers')}</SchedulePollNotice>
           ) : (
             <>
-              <fieldset className="mb-5">
-                <legend className="mb-2 text-default font-semibold text-[var(--color-text-primary)]">
-                  {t('schedulePoll.invitees', { count: memberIds.length })}
-                </legend>
-                <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
-                  {t('schedulePoll.inviteesHint')}
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {members.map((member) => (
-                    <label
-                      key={member.id}
-                      className="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)]"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={memberIds.includes(member.id)}
-                        onChange={(event) => setInvitee(member.id, event.target.checked)}
-                        className="h-4 w-4 accent-[var(--color-accent)]"
-                      />
-                      <span className="truncate">{member.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <CreateStep index={1} title={t('schedulePoll.invitees', { count: memberIds.length })}>
+                <fieldset className="page-card p-4 sm:p-5">
+                  <legend className="sr-only">
+                    {t('schedulePoll.invitees', { count: memberIds.length })}
+                  </legend>
+                  <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
+                    {t('schedulePoll.inviteesHint')}
+                  </p>
+                  <InviteeGrid members={members} selectedIds={memberIds} onToggle={setInvitee} />
+                  {memberIds.length === 0 && (
+                    <p role="alert" className="mt-3 text-footnote text-[var(--color-danger)]">
+                      {t('schedulePoll.selectAtLeastOne')}
+                    </p>
+                  )}
+                </fieldset>
+              </CreateStep>
 
-              {memberIds.length === 0 && (
-                <SchedulePollNotice tone="warning">
-                  {t('schedulePoll.selectAtLeastOne')}
-                </SchedulePollNotice>
-              )}
-              {memberIds.length > 0 && (
-                <>
-                  <div className="mb-5">
-                    <SchedulePollCandidateFinder
-                      calendarId={selectedCalendarId}
-                      memberIds={memberIds}
-                      selected={candidateSlots}
-                      onChange={setCandidateSlots}
-                    />
-                  </div>
-                  <label className="mb-5 block max-w-[640px] text-footnote font-semibold text-[var(--color-text-secondary)]">
-                    <span className="mb-1.5 block">{t('schedulePoll.pollName')}</span>
+              <CreateStep
+                index={2}
+                title={t('schedulePoll.candidate')}
+                muted={memberIds.length === 0}
+              >
+                {memberIds.length > 0 && (
+                  <SchedulePollCandidateFinder
+                    calendarId={selectedCalendarId}
+                    memberIds={memberIds}
+                    selected={candidateSlots}
+                    onChange={setCandidateSlots}
+                  />
+                )}
+              </CreateStep>
+
+              <CreateStep
+                index={3}
+                title={t('schedulePoll.pollName')}
+                muted={memberIds.length === 0}
+              >
+                {memberIds.length > 0 && (
+                  <div className="page-card p-4 sm:p-5">
                     <input
                       type="text"
                       value={title}
                       onChange={(event) => setTitle(event.target.value)}
                       maxLength={200}
+                      aria-label={t('schedulePoll.pollName')}
                       placeholder={t('schedulePoll.pollNamePlaceholder')}
                       className="input-modern w-full"
                     />
-                  </label>
-                  <div className="flex flex-col items-start justify-between gap-3 border-t border-[var(--color-separator)] pt-4 sm:flex-row sm:items-center">
-                    <p className="text-footnote text-[var(--color-text-secondary)]">
-                      {t('schedulePoll.createReview', {
-                        calendar: selectedCalendar?.name ?? '',
-                        members: memberIds.length,
-                        candidates: candidateSlots.length,
-                      })}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={createPoll}
-                      disabled={
-                        saving ||
-                        !title.trim() ||
-                        memberIds.length === 0 ||
-                        candidateSlots.length === 0
-                      }
-                      className="btn-primary px-5 text-default disabled:opacity-50"
-                    >
-                      {saving ? t('common.saving') : t('schedulePoll.sendRequest')}
-                    </button>
+                    <div className="mt-4 flex flex-col items-stretch justify-between gap-3 border-t border-[var(--color-separator)] pt-4 sm:flex-row sm:items-center">
+                      <p className="text-footnote text-[var(--color-text-secondary)] tabular-nums">
+                        {t('schedulePoll.createReview', {
+                          calendar: selectedCalendar?.name ?? '',
+                          members: memberIds.length,
+                          candidates: candidateSlots.length,
+                        })}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={createPoll}
+                        disabled={
+                          saving ||
+                          !title.trim() ||
+                          memberIds.length === 0 ||
+                          candidateSlots.length === 0
+                        }
+                        className="btn-primary shrink-0 px-6 text-default"
+                      >
+                        {saving ? t('common.saving') : t('schedulePoll.sendRequest')}
+                      </button>
+                    </div>
                   </div>
-                </>
-              )}
+                )}
+              </CreateStep>
             </>
           )}
-        </section>
+        </div>
       )}
 
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-              {t('schedulePoll.calendarPolls')}
-            </h2>
-            <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
-              {selectedCalendar?.name ?? t('schedulePoll.selectCalendar')}
-            </p>
-          </div>
-          {pollsLoading && (
-            <span className="text-footnote text-[var(--color-text-secondary)]">
-              {t('common.loading')}
-            </span>
-          )}
-        </div>
+      {orderedActions.length > 0 && (
+        <SchedulePollSection title={t('schedulePoll.myActions')}>
+          <ul className="page-card divide-y divide-[var(--color-separator)] overflow-hidden">
+            {orderedActions.map((action) => (
+              <li key={`${action.kind}:${action.calendarId}:${action.pollId}`}>
+                <Link
+                  to="/schedule-polls/$calendarId/$pollId"
+                  params={{ calendarId: action.calendarId, pollId: action.pollId }}
+                  search={{
+                    view:
+                      action.kind === 'answer'
+                        ? 'respond'
+                        : action.kind === 'finalize'
+                          ? 'manage'
+                          : 'candidates',
+                  }}
+                  className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--color-hover)] sm:px-5"
+                >
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-default font-semibold text-[var(--color-text-primary)]">
+                      {action.title}
+                    </span>
+                    <span className="mt-0.5 block truncate text-footnote text-[var(--color-text-secondary)]">
+                      {t(
+                        action.kind === 'answer'
+                          ? 'schedulePoll.statusAnswer'
+                          : action.kind === 'finalize'
+                            ? 'schedulePoll.statusFinalize'
+                            : 'schedulePoll.statusAddSlots',
+                      )}
+                      {' · '}
+                      {action.calendarName}
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-3 py-1.5 text-footnote font-semibold text-[var(--color-accent)] transition group-hover:bg-[var(--color-accent-subtle)]">
+                    {t(
+                      action.kind === 'answer'
+                        ? 'schedulePoll.actionAnswer'
+                        : action.kind === 'finalize'
+                          ? 'schedulePoll.actionFinalize'
+                          : 'schedulePoll.actionAddSlots',
+                    )}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </SchedulePollSection>
+      )}
 
+      <SchedulePollSection
+        title={t('schedulePoll.calendarPolls')}
+        hint={selectedCalendar?.name ?? t('schedulePoll.selectCalendar')}
+        actions={
+          pollsLoading ? (
+            <span aria-hidden className="spinner h-4 w-4 text-[var(--color-text-tertiary)]" />
+          ) : undefined
+        }
+      >
+        <TipCard id="polls" topic="polls" className="mb-4">
+          {t('tip.polls')}
+        </TipCard>
         {pollsError && <SchedulePollNotice tone="error">{pollsError}</SchedulePollNotice>}
         {!selectedCalendarId ? (
           <SchedulePollNotice>{t('schedulePoll.noCalendars')}</SchedulePollNotice>
         ) : polls.length === 0 && !pollsLoading ? (
-          <div className="rounded-2xl border border-dashed border-[var(--color-border)] px-5 py-10 text-center text-body text-[var(--color-text-secondary)]">
-            {t('schedulePoll.noPolls')}
+          <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border-strong)]">
+            <EmptyState
+              icon={GUIDE_ICONS.poll}
+              title={t('empty.pollsTitle')}
+              description={t('empty.pollsDesc')}
+            />
           </div>
         ) : (
-          <div className="divide-y divide-[var(--color-separator)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul className="page-card divide-y divide-[var(--color-separator)] overflow-hidden">
             {polls.map((poll) => (
-              <div
-                key={poll.id}
-                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate text-default font-semibold text-[var(--color-text-primary)]">
-                      {poll.title}
-                    </h3>
-                    <SchedulePollStatus status={poll.status} />
-                  </div>
-                  <p className="mt-1 text-footnote text-[var(--color-text-secondary)] tabular-nums">
-                    {poll.respondedCount} / {poll.memberCount} · {t('schedulePoll.responded')}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {poll.confirmedEventId && (
-                    <Link
-                      to="/schedule-polls/$calendarId/$pollId"
-                      params={{ calendarId: poll.calendarId, pollId: poll.id }}
-                      search={{ view: 'event' }}
-                      className="rounded-full bg-[var(--color-surface-inset)] px-3 py-1.5 text-footnote font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-                    >
-                      {t('schedulePoll.viewEvent')}
-                    </Link>
-                  )}
+              <li key={poll.id} className="flex items-stretch">
+                <Link
+                  to="/schedule-polls/$calendarId/$pollId"
+                  params={{ calendarId: poll.calendarId, pollId: poll.id }}
+                  search={{ view: poll.canManage || poll.canTakeOver ? 'manage' : 'respond' }}
+                  aria-label={`${poll.title} — ${
+                    poll.status === 'open'
+                      ? t('schedulePoll.openPoll')
+                      : t('schedulePoll.viewResult')
+                  }`}
+                  className="group flex min-w-0 flex-1 items-center gap-4 px-4 py-3.5 transition hover:bg-[var(--color-hover)] sm:px-5"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className={`truncate text-default font-semibold ${poll.status === 'cancelled' ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-primary)]'}`}
+                      >
+                        {poll.title}
+                      </span>
+                      <SchedulePollStatus status={poll.status} />
+                    </span>
+                    <SchedulePollProgress
+                      responded={poll.respondedCount}
+                      members={poll.memberCount}
+                      className="mt-1.5"
+                    />
+                  </span>
+                  <ChevronIcon />
+                </Link>
+                {poll.confirmedEventId && (
                   <Link
                     to="/schedule-polls/$calendarId/$pollId"
                     params={{ calendarId: poll.calendarId, pollId: poll.id }}
-                    search={{ view: poll.canManage || poll.canTakeOver ? 'manage' : 'respond' }}
-                    className="rounded-full bg-[var(--color-accent-bg)] px-3.5 py-1.5 text-footnote font-semibold text-[var(--color-accent)] hover:opacity-80"
+                    search={{ view: 'event' }}
+                    className="flex shrink-0 items-center border-l border-[var(--color-separator)] px-4 text-footnote font-semibold text-[var(--color-accent)] transition hover:bg-[var(--color-hover)]"
                   >
-                    {poll.status === 'open'
-                      ? t('schedulePoll.openPoll')
-                      : t('schedulePoll.viewResult')}
+                    {t('schedulePoll.viewEvent')}
                   </Link>
-                </div>
-              </div>
+                )}
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </section>
+      </SchedulePollSection>
+
+      {canManage && selectedCalendarId && (
+        <AvailabilitySharingControl key={selectedCalendarId} calendarId={selectedCalendarId} />
+      )}
     </SchedulePollFrame>
+  );
+}
+
+function CreateStep({
+  index,
+  title,
+  muted = false,
+  children,
+}: {
+  index: number;
+  title: string;
+  muted?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className={muted ? 'opacity-50' : undefined}>
+      <h2 className="mb-2.5 flex items-center gap-2.5 text-default font-semibold text-[var(--color-text-primary)]">
+        <span
+          aria-hidden
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-footnote font-bold text-[var(--color-text-on-accent)] tabular-nums"
+        >
+          {index}
+        </span>
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      aria-hidden
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M8 3v10M3 8h10" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg
+      aria-hidden
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 text-[var(--color-text-tertiary)] transition group-hover:translate-x-0.5 group-hover:text-[var(--color-text-secondary)]"
+    >
+      <path d="m5 2.5 4.5 4.5L5 11.5" />
+    </svg>
   );
 }

@@ -1,10 +1,13 @@
+import { Link } from '@tanstack/react-router';
 import { lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
 import { FabButton } from '@/components/fab-button';
+import { TipCard } from '@/components/guide';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { LoadFailure, LoadFailureBanner } from '@/components/load-failure';
 import { MonthScroll } from '@/components/month-scroll';
+import { OnboardingWizard } from '@/components/onboarding-wizard';
 import { MemoSection, SettingsModal } from '@/components/right-panel';
 import { RightSidebar } from '@/components/right-sidebar';
 import { SchedulePollActionNotice } from '@/components/schedule-poll-actions';
@@ -26,6 +29,7 @@ import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useLatch, usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useGuideStore } from '@/stores/guide-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import type { MobileTab } from '@/stores/ui-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -263,6 +267,34 @@ function MobileSettingsView() {
           ))}
         </div>
       </div>
+
+      <div className="mt-2 divide-y divide-[var(--color-separator)] rounded-xl bg-[var(--color-surface)]">
+        {(
+          [
+            { to: '/settings', label: t('settings.openAll') },
+            { to: '/help', label: t('help.title') },
+          ] as const
+        ).map((row) => (
+          <Link
+            key={row.to}
+            to={row.to}
+            className="flex items-center justify-between px-4 py-3 text-default text-[var(--color-text-primary)] active:bg-[var(--color-hover)]"
+          >
+            {row.label}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-text-tertiary)"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
@@ -279,7 +311,15 @@ function MemoPanel() {
   const presence = usePresence(rightPanel === 'memo');
 
   return (
-    <SidePanel presence={presence} onClose={() => toggleRightPanel('memo')} title={t('panel.memo')}>
+    <SidePanel
+      presence={presence}
+      onClose={() => toggleRightPanel('memo')}
+      title={t('panel.memo')}
+      helpTopic="memos"
+    >
+      <TipCard id="memo" topic="memos" className="mx-5 mt-4">
+        {t('tip.memo')}
+      </TipCard>
       <div className="flex-1 overflow-hidden">
         <MemoSection />
       </div>
@@ -395,6 +435,11 @@ export function App() {
   const fetchMemos = useCalendarStore((s) => s.fetchMemos);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const userId = useAuthStore((s) => s.user?.id);
+  const loadGuideFor = useGuideStore((s) => s.loadFor);
+  // Before the calendar load below resolves, so the tour check reads this account.
+  useEffect(() => {
+    loadGuideFor(userId ?? null);
+  }, [userId, loadGuideFor]);
   const fetchSchedulePollActions = useSchedulePollStore((s) => s.fetchActions);
   const resetSchedulePollActions = useSchedulePollStore((s) => s.reset);
   const calendars = useCalendarStore((s) => s.calendars);
@@ -415,7 +460,15 @@ export function App() {
     // did not arrive is not a load that happened, so releasing it lets the
     // next mount ask again instead of leaving the session permanently empty.
     fetchCalendars().finally(() => {
-      if (useCalendarStore.getState().loadError) initDone.current = false;
+      const loaded = useCalendarStore.getState();
+      if (loaded.loadError) {
+        initDone.current = false;
+        return;
+      }
+      // Sign-up makes one calendar, so an account that has not grown past it is
+      // new enough for the tour; anyone further along gets the sidebar's offer.
+      const guide = useGuideStore.getState();
+      if (guide.userId && !guide.wizardDone && loaded.calendars.length <= 1) guide.openWizard();
     });
   }, [fetchCalendars]);
 
@@ -592,6 +645,8 @@ export function App() {
 
       {/* Mobile FAB for creating events */}
       <FabButton />
+
+      <OnboardingWizard />
 
       {/* Settings modal (PC) */}
       {showSettings && (

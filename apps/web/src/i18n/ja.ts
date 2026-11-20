@@ -1,4 +1,7 @@
+import { guideJa } from './guide.ja';
+
 export const ja = {
+  ...guideJa,
   // Common
   'common.cancel': 'キャンセル',
   'common.save': '保存',
@@ -157,11 +160,8 @@ export const ja = {
   'panel.memo': 'メモ',
   'panel.targetCalendar': '対象カレンダー',
   'panel.album': 'アルバム',
-  'panel.members': 'メンバーリスト',
-  'panel.settings': 'カレンダー設定',
+  'panel.members': 'メンバー',
   'panel.share': '共有',
-  'panel.noMemos': 'メモはありません',
-  'panel.noPhotos': '写真はありません',
   'panel.enterToPost': 'Enterで投稿',
   'panel.updated': '更新しました',
   'panel.memoPlaceholder': 'メモを入力...',
@@ -262,6 +262,7 @@ export const ja = {
   'settings.sunday': '日曜日',
   'settings.monday': '月曜日',
   'settings.appearance': '外観',
+  'settings.openAll': 'すべての設定',
   'settings.theme': 'テーマ',
   'settings.themeGlass': 'Glass',
   'settings.themeModern': 'Modern',
@@ -405,6 +406,13 @@ export const ja = {
 
   // Members admin
   'members.color': 'レイヤーの色',
+  'members.colorPalette': 'パレットから選ぶ',
+  'members.colorCustom': 'RGB で指定',
+  'members.colorPicker': 'カラーピッカーを開く',
+  'members.colorApply': '適用',
+  'members.colorInvalid': '#RRGGBB か R, G, B（0〜255）で入力してください',
+  'members.colorInUse': '使用中',
+  'members.colorInUseHint': '他のメンバーが使っている色。同じ色も選べます',
   'members.role': '権限',
   'members.roleOwner': 'オーナー',
   'members.roleManager': '管理者',
@@ -505,6 +513,12 @@ export const ja = {
   'settings.calendarColor': 'カラー',
   'settings.calendarCover': 'カバー画像',
   'settings.calendarCoverUpload': 'カバー画像をアップロード',
+  'settings.calendarCoverReplace': '画像を変更',
+  'settings.calendarCoverRemove': 'カバー画像を削除',
+  'settings.calendarCoverInvalidType': 'JPEG、PNG、WebP画像を選択してください',
+  'settings.calendarCoverHint':
+    'JPEG・PNG・WebP。ドロップでも追加でき、大きな画像は自動で縮小します',
+  'settings.calendarCoverPreview': 'カレンダー一覧での表示',
   'settings.calendarDetails': 'カレンダー設定',
 
   // Memo dialog
@@ -571,7 +585,6 @@ export const ja = {
   'schedulePoll.selectCalendar': 'カレンダーを選択',
   'schedulePoll.selectCalendarHint': '日程調整を確認するカレンダーを選んでください',
   'schedulePoll.noCalendars': '利用できるカレンダーがありません',
-  'schedulePoll.noPolls': 'このカレンダーの日程調整はありません',
   'schedulePoll.noMembers': '対象にできるメンバーがいません',
   'schedulePoll.myActions': 'あなたの対応待ち',
   'schedulePoll.create': '日程調整を作成',
@@ -689,6 +702,9 @@ export const ja = {
   'schedulePoll.candidatesUpdated': '候補を更新しました。対象者に再回答を依頼しました。',
   'schedulePoll.confirmedEvent': '確定した予定',
   'schedulePoll.eventTitle': '確定した予定',
+  'schedulePoll.tally': '集計',
+  'schedulePoll.bestCandidate': '最有力',
+  'schedulePoll.answerTally': '○ {yes}・△ {maybe}・× {no}',
   'schedulePoll.eventUnavailable': '確定した予定を表示できません。',
   'schedulePoll.eventMissing': '予定は削除されたか、利用できなくなっています。',
   'schedulePoll.eventAccessUnavailable': '予定を表示する権限がないか、現在利用できません。',
@@ -732,6 +748,11 @@ export const ja = {
   'apiError.CALENDAR.NOT_FOUND': 'カレンダーが見つかりません',
   'apiError.CALENDAR.ACCESS_DENIED': 'このカレンダーにアクセスする権限がありません',
   'apiError.CALENDAR.ROLE_REQUIRED': 'この操作を行う権限がありません',
+  'apiError.CALENDAR.COVER_FORBIDDEN': 'このカレンダーのカバーを変更する権限がありません',
+  'apiError.CALENDAR.COVER_TOO_LARGE': 'カバー画像は5MB以下にしてください',
+  'apiError.CALENDAR.COVER_INVALID': 'JPEG、PNG、WebPの画像を選択してください',
+  'apiError.CALENDAR.COVER_CONFLICT':
+    '別のセッションでカバー画像が変更されました。読み込み直してからお試しください',
   'apiError.EVENT.NOT_FOUND': '予定が見つかりません',
   'apiError.EVENT.EDIT_DENIED': 'この予定を編集する権限がありません',
   'apiError.EVENT.NOT_ATTENDEE': 'この予定の参加者ではありません',

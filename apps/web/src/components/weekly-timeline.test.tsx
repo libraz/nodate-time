@@ -339,7 +339,7 @@ describe('WeeklyTimeline week model', () => {
 
     const chips = screen.getAllByText('Birthday');
     expect(chips).toHaveLength(1);
-    const cell = chips[0]?.parentElement;
+    const cell = chips[0]?.closest('button')?.parentElement;
     const row = cell?.parentElement;
     // The row opens with the gutter label; Wednesday is the fourth column.
     expect(row && Array.from(row.children).indexOf(cell as Element)).toBe(4);

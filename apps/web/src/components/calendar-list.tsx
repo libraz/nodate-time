@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { CalendarCoverImage } from '@/components/calendar-cover-image';
+import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canManage, canOwn } from '@/lib/permissions';
@@ -77,7 +79,7 @@ export function CalendarList() {
   }, [showNewForm]);
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex min-h-0 flex-col" data-tour="calendars">
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
           {t('calendar.calendarList')}
@@ -150,6 +152,15 @@ export function CalendarList() {
       </p>
 
       <div className="overflow-y-auto px-2 py-1">
+        {calendars.length === 0 && !showNewForm && (
+          <EmptyState
+            compact
+            icon={GUIDE_ICONS.calendar}
+            title={t('empty.calendarsTitle')}
+            description={t('empty.calendarsDesc')}
+            action={{ label: t('calendar.newCalendar'), onClick: () => setShowNewForm(true) }}
+          />
+        )}
         {calendars.map((cal) => {
           const isActive = activeCalendarIds.includes(cal.id);
           const confirming = pendingDeleteId === cal.id;
@@ -162,12 +173,12 @@ export function CalendarList() {
                   onClick={() => toggleCalendarFilter(cal.id)}
                   className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
                 >
-                  <span
-                    className="h-3 w-3 shrink-0 rounded-full transition-[background-color,opacity,transform] duration-200 group-active:scale-90"
-                    style={{
-                      backgroundColor: isActive ? cal.color : 'var(--color-text-tertiary)',
-                      opacity: isActive ? 1 : 0.3,
-                    }}
+                  <CalendarCoverImage
+                    calendar={cal}
+                    className="h-7 w-7 shrink-0 rounded-md object-cover transition-opacity duration-200"
+                    fallbackClassName="h-3 w-3 shrink-0 rounded-full transition-[background-color,opacity,transform] duration-200 group-active:scale-90"
+                    fallbackColor={isActive ? cal.color : 'var(--color-text-tertiary)'}
+                    inactive={!isActive}
                   />
                   <span
                     className="flex-1 truncate text-default"

@@ -19,6 +19,7 @@ export function FabButton() {
     <button
       type="button"
       onClick={() => openEventModal()}
+      data-tour="add-event"
       className="fab-button fixed z-30 flex h-[56px] w-[56px] items-center justify-center transition-transform hover:scale-105 active:scale-90 sm:hidden"
       style={{
         bottom: 'calc(60px + env(safe-area-inset-bottom))',

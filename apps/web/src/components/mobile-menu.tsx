@@ -122,6 +122,29 @@ export function MobileMenu() {
 
   const accountActions: MenuAction[] = [
     {
+      key: 'help',
+      labelKey: 'help.title',
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          width="20"
+          height="20"
+          strokeLinecap="round"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 9.5a2.5 2.5 0 014.6 1.3c0 1.7-2.1 2.2-2.1 3.7" />
+          <circle cx="12" cy="17.2" r="0.6" fill="currentColor" />
+        </svg>
+      ),
+      onSelect: () => {
+        setShow(false);
+        navigate({ to: '/help' });
+      },
+    },
+    {
       key: 'settings',
       labelKey: 'settings.title',
       icon: (

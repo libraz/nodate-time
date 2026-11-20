@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import {
   fromISOInZone,
@@ -341,10 +342,16 @@ export function WeeklyTimeline() {
                     key={evt.id}
                     type="button"
                     onClick={() => openEventModal(evt.id)}
-                    className="event-chip truncate rounded-full px-2 text-caption font-semibold leading-[18px]"
+                    className="event-chip flex items-center gap-1 rounded-full pr-2 pl-0.5 text-left text-caption font-semibold leading-[18px]"
                     style={{ '--evt': evt.color } as CSSProperties}
                   >
-                    {evt.title}
+                    <OwnerMark
+                      name={evt.ownerName}
+                      avatarUrl={evt.ownerAvatarUrl}
+                      color={evt.color}
+                      size={14}
+                    />
+                    <span className="truncate">{evt.title}</span>
                   </button>
                 ))}
               </div>
@@ -509,7 +516,7 @@ export function WeeklyTimeline() {
                         if (consumeClick() || consumeResizeClick()) return;
                         openEventModal(evt.id);
                       }}
-                      className={`event-block absolute z-[5] overflow-hidden rounded-md px-1.5 pt-1 text-left ${
+                      className={`event-block absolute z-[5] flex flex-col justify-start overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                       style={
@@ -522,8 +529,14 @@ export function WeeklyTimeline() {
                         } as CSSProperties
                       }
                     >
-                      <p className="event-block-title truncate text-body font-semibold">
-                        {evt.title}
+                      <p className="event-block-title flex items-center gap-1 text-body font-semibold">
+                        <OwnerMark
+                          name={evt.ownerName}
+                          avatarUrl={evt.ownerAvatarUrl}
+                          color={evt.color}
+                          size={14}
+                        />
+                        <span className="truncate">{evt.title}</span>
                       </p>
                       <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
                         {marker
@@ -560,7 +573,15 @@ export function WeeklyTimeline() {
             } as CSSProperties
           }
         >
-          <p className="event-block-title truncate text-body font-semibold">{drag.event.title}</p>
+          <p className="event-block-title flex items-center gap-1 text-body font-semibold">
+            <OwnerMark
+              name={drag.event.ownerName}
+              avatarUrl={drag.event.ownerAvatarUrl}
+              color={drag.event.color}
+              size={14}
+            />
+            <span className="truncate">{drag.event.title}</span>
+          </p>
           <p className="text-caption tabular-nums text-[var(--color-text-secondary)]">
             {fromISOInZone(drag.event.startAt, timezone).toFormat('H:mm')} -{' '}
             {fromISOInZone(drag.event.endAt, timezone).toFormat('H:mm')}

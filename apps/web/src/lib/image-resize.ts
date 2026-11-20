@@ -84,6 +84,17 @@ export function resizeImageForAvatar(file: File): Promise<ResizedImage> {
   return resize(file, { maxDimension: 512, quality: 0.92, preferredType: reencodeType(file.type) });
 }
 
+/** The longest edge a calendar cover is stored at; well inside the server's 5 MB cap. */
+export const coverMaxDimension = 1600;
+
+export function resizeImageForCover(file: File): Promise<ResizedImage> {
+  return resize(file, {
+    maxDimension: coverMaxDimension,
+    quality: 0.88,
+    preferredType: reencodeType(file.type),
+  });
+}
+
 /** The longest edge an album photo is stored at. */
 export const albumMaxDimension = 2048;
 

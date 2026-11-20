@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
 import { SidePanel } from '@/components/side-panel';
@@ -85,6 +86,7 @@ export function SharePanel() {
       presence={presence}
       onClose={() => toggleRightPanel('share')}
       title={t('panel.share')}
+      helpTopic="invite"
     >
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {!target ? (
@@ -99,6 +101,10 @@ export function SharePanel() {
               target={target}
               onChange={setTargetId}
             />
+
+            <TipCard id="share" topic="invite">
+              {t('tip.share')}
+            </TipCard>
 
             {/* Invite links (single-use) — multiple may coexist */}
             <section className="space-y-2">

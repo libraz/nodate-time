@@ -1,4 +1,6 @@
+import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
+import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { LabelledButton } from '@/components/labelled-button';
 import { MemoDialog } from '@/components/memo-dialog';
 import { CustomSelect } from '@/components/pickers';
@@ -25,6 +27,7 @@ export function SettingsModal() {
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
   const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
+  const navigate = useNavigate();
 
   if (!showSettings) return null;
 
@@ -42,12 +45,12 @@ export function SettingsModal() {
           ref={panelRef}
           role="dialog"
           aria-modal="true"
-          aria-label={t('tabs.settings')}
+          aria-label={t('settings.appearance')}
           className="glass-surface-heavy modal-panel w-full max-w-[400px] ring-1 ring-[var(--color-border)]"
         >
           <div className="flex items-center justify-between px-6 py-4">
             <h2 className="text-title font-semibold text-[var(--color-text-primary)]">
-              {t('tabs.settings')}
+              {t('settings.appearance')}
             </h2>
             <LabelledButton
               label={t('common.close')}
@@ -135,6 +138,30 @@ export function SettingsModal() {
                 ))}
               </div>
             </div>
+          </div>
+
+          <div className="border-t border-[var(--color-separator)] px-6 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                toggleSettings();
+                navigate({ to: '/settings' });
+              }}
+              className="flex w-full items-center justify-between rounded-lg py-1.5 text-body text-[var(--color-accent)] hover:opacity-80"
+            >
+              {t('settings.openAll')}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -228,9 +255,12 @@ export function MemoSection() {
       )}
       <div className="flex-1 overflow-y-auto">
         {visibleMemos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center px-4 py-8 text-[var(--color-text-tertiary)]">
-            <p className="text-body">{t('panel.noMemos')}</p>
-          </div>
+          <EmptyState
+            compact
+            icon={GUIDE_ICONS.memo}
+            title={t('empty.memosTitle')}
+            description={t('empty.memosDesc')}
+          />
         ) : (
           visibleMemos.map((memo) => {
             const memoCal = calendarById.get(memo.calendarId);

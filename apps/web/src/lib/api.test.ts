@@ -159,6 +159,23 @@ describe('downloads', () => {
   });
 });
 
+describe('raw uploads', () => {
+  it('sends file bytes with the authenticated binary request contract', async () => {
+    const body = new Blob(['cover bytes'], { type: 'image/png' });
+    localStorage.setItem('tt_token', 'session-token');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'cal-1' }));
+
+    await expect(api.putBlob('/calendars/cal-1/cover', body)).resolves.toEqual({ id: 'cal-1' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(body);
+    expect(headers.Authorization).toBe('Bearer session-token');
+    expect(headers['Content-Type']).toBe('application/octet-stream');
+  });
+});
+
 describe('endSession', () => {
   const live = () => makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
   const expired = () => makeJwt({ exp: Math.floor(Date.now() / 1000) - 3600 });

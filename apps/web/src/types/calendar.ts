@@ -2,7 +2,10 @@ export interface Calendar {
   id: string;
   name: string;
   color: string;
-  coverUrl: string;
+  /** Short lived signed URL for a cover image uploaded to configured storage. */
+  coverImageUrl?: string;
+  /** Whether the server allows uploading a cover for this calendar. */
+  coverUploadAllowed?: boolean;
   createdAt: string;
   /** True when an active public (read-only embed) link exposes this calendar externally. */
   publicShared: boolean;
@@ -141,6 +144,10 @@ export interface CalendarEvent {
   color: string;
   /** The member whose layer this event sits on. */
   ownerId: string | null;
+  /** Read-only. The owner's name and picture, so a chip can say whose it is
+   *  without the member list. Empty once the owner has left the calendar. */
+  ownerName?: string;
+  ownerAvatarUrl?: string;
   location: string;
   memo: string;
   url: string;

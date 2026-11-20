@@ -1,6 +1,8 @@
+import { guideEn } from './guide.en';
 import type { TranslationKey } from './ja';
 
 export const en: Record<TranslationKey, string> = {
+  ...guideEn,
   'common.cancel': 'Cancel',
   'common.save': 'Save',
   'common.saving': 'Saving...',
@@ -154,10 +156,7 @@ export const en: Record<TranslationKey, string> = {
   'panel.targetCalendar': 'Calendar',
   'panel.album': 'Album',
   'panel.members': 'Members',
-  'panel.settings': 'Calendar Settings',
   'panel.share': 'Share',
-  'panel.noMemos': 'No memos',
-  'panel.noPhotos': 'No photos',
   'panel.enterToPost': 'Press Enter to post',
   'panel.updated': 'Updated',
   'panel.memoPlaceholder': 'Write a memo...',
@@ -254,6 +253,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.sunday': 'Sunday',
   'settings.monday': 'Monday',
   'settings.appearance': 'Appearance',
+  'settings.openAll': 'All settings',
   'settings.theme': 'Theme',
   'settings.themeGlass': 'Glass',
   'settings.themeModern': 'Modern',
@@ -389,6 +389,13 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminAllowedEmailsRemove': 'Remove',
 
   'members.color': 'Layer colour',
+  'members.colorPalette': 'Palette',
+  'members.colorCustom': 'Custom RGB',
+  'members.colorPicker': 'Open colour picker',
+  'members.colorApply': 'Apply',
+  'members.colorInvalid': 'Enter #RRGGBB or R, G, B (0–255)',
+  'members.colorInUse': 'In use',
+  'members.colorInUseHint': 'Already used by another member. You can still pick it',
   'members.role': 'Role',
   'members.roleOwner': 'Owner',
   'members.roleManager': 'Manager',
@@ -488,6 +495,12 @@ export const en: Record<TranslationKey, string> = {
   'settings.calendarColor': 'Color',
   'settings.calendarCover': 'Cover image',
   'settings.calendarCoverUpload': 'Upload cover image',
+  'settings.calendarCoverReplace': 'Change image',
+  'settings.calendarCoverRemove': 'Remove cover',
+  'settings.calendarCoverInvalidType': 'Choose a JPEG, PNG, or WebP image',
+  'settings.calendarCoverHint':
+    'JPEG, PNG or WebP. Drop a file here too; large images are scaled down.',
+  'settings.calendarCoverPreview': 'In the calendar list',
   'settings.calendarDetails': 'Calendar settings',
 
   // Memo dialog
@@ -554,7 +567,6 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.selectCalendar': 'Select a calendar',
   'schedulePoll.selectCalendarHint': 'Choose which calendar’s schedule polls to view',
   'schedulePoll.noCalendars': 'No calendars are available',
-  'schedulePoll.noPolls': 'There are no schedule polls in this calendar',
   'schedulePoll.noMembers': 'There are no members to invite',
   'schedulePoll.myActions': 'Needs your attention',
   'schedulePoll.create': 'Create a schedule poll',
@@ -683,6 +695,9 @@ export const en: Record<TranslationKey, string> = {
     'Candidates updated. Invitees have been asked to respond again.',
   'schedulePoll.confirmedEvent': 'Confirmed event',
   'schedulePoll.eventTitle': 'Confirmed event',
+  'schedulePoll.tally': 'Tally',
+  'schedulePoll.bestCandidate': 'Top pick',
+  'schedulePoll.answerTally': '{yes} yes, {maybe} maybe, {no} no',
   'schedulePoll.eventUnavailable': 'The confirmed event is unavailable.',
   'schedulePoll.eventMissing': 'This event was deleted or is no longer available.',
   'schedulePoll.eventAccessUnavailable':
@@ -727,6 +742,11 @@ export const en: Record<TranslationKey, string> = {
   'apiError.CALENDAR.NOT_FOUND': 'Calendar not found',
   'apiError.CALENDAR.ACCESS_DENIED': 'You do not have access to this calendar',
   'apiError.CALENDAR.ROLE_REQUIRED': 'Insufficient role for this action',
+  'apiError.CALENDAR.COVER_FORBIDDEN': 'You do not have permission to change this calendar cover',
+  'apiError.CALENDAR.COVER_TOO_LARGE': 'Calendar cover images may not exceed 5 MB',
+  'apiError.CALENDAR.COVER_INVALID': 'Choose a valid JPEG, PNG, or WebP image',
+  'apiError.CALENDAR.COVER_CONFLICT':
+    'The calendar cover changed in another session. Reload and try again',
   'apiError.EVENT.NOT_FOUND': 'Event not found',
   'apiError.EVENT.EDIT_DENIED': 'You cannot edit this event',
   'apiError.EVENT.NOT_ATTENDEE': 'You are not a participant of this event',

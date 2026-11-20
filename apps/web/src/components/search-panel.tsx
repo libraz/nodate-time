@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { OwnerMark } from '@/components/owner-mark';
 import { Highlight, handleResultListKeys } from '@/components/search-results';
 import { useT } from '@/i18n';
 import {
@@ -101,9 +102,12 @@ export function SearchPanel() {
                 className="search-result mx-2 flex w-[calc(100%-16px)] items-start gap-3 px-5 py-3.5 text-left hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)]"
                 style={{ borderRadius: 'var(--radius-sm)' }}
               >
-                <span
-                  className="color-dot mt-1.5 h-2.5 w-2.5 shrink-0"
-                  style={{ backgroundColor: evt.color }}
+                <OwnerMark
+                  name={evt.ownerName}
+                  avatarUrl={evt.ownerAvatarUrl}
+                  color={evt.color}
+                  size={22}
+                  className="mt-0.5"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-callout font-medium text-[var(--color-text-primary)]">

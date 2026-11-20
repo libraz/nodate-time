@@ -1,5 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tanstack/react-router', () => ({
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
+
 import type { Member } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -52,7 +60,6 @@ const calendarState = {
       id: 'cal-1',
       name: 'Team',
       color: '#000',
-      coverUrl: '',
       createdAt: '',
       publicShared: false,
       role: 'reader',
@@ -135,7 +142,9 @@ describe('MembersPanel keyboard', () => {
     render(<MembersPanel />);
 
     const panel = await screen.findByRole('dialog');
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button,input,select'));
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>('a[href],button,input,select'),
+    );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     expect(first).toBeDefined();
@@ -194,10 +203,11 @@ describe('MembersPanel membership', () => {
   });
 
   // The picker reports every step of a drag; each used to be a PUT.
-  it('saves a colour once, when the picker is closed on it', async () => {
+  it('saves a picked colour once, when the picker is closed on it', async () => {
     calendarState.updateMemberColor.mockResolvedValue(undefined);
     render(<MembersPanel />);
-    const input = screen.getByLabelText('members.color', { selector: 'input' });
+    fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+    const input = screen.getByLabelText('members.colorPicker');
 
     fireEvent.input(input, { target: { value: '#111111' } });
     fireEvent.input(input, { target: { value: '#222222' } });
@@ -208,5 +218,60 @@ describe('MembersPanel membership', () => {
 
     await waitFor(() => expect(calendarState.updateMemberColor).toHaveBeenCalledTimes(1));
     expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#333333');
+  });
+
+  it('saves a palette colour in one click, even one another member has', async () => {
+    calendarState.updateMemberColor.mockResolvedValue(undefined);
+    render(<MembersPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '#47B2F7' }));
+
+    await waitFor(() =>
+      expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#47B2F7'),
+    );
+  });
+
+  it('marks a palette colour another member already carries', () => {
+    const taro = members[1] as Member;
+    const before = taro.color;
+    taro.color = '#F35F8C';
+    try {
+      render(<MembersPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+
+      expect(
+        screen.getByRole('button', { name: '#F35F8C — members.colorInUse: Taro' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '#47B2F7' })).toBeInTheDocument();
+    } finally {
+      taro.color = before;
+    }
+  });
+
+  it('takes a colour typed as R, G, B', async () => {
+    calendarState.updateMemberColor.mockResolvedValue(undefined);
+    render(<MembersPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+    const field = screen.getByLabelText('members.colorCustom');
+
+    fireEvent.change(field, { target: { value: '0, 128, 255' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#0080FF'),
+    );
+  });
+
+  it('refuses text that is not a colour without saving', () => {
+    render(<MembersPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+    const field = screen.getByLabelText('members.colorCustom');
+
+    fireEvent.change(field, { target: { value: 'red' } });
+    fireEvent.click(screen.getByRole('button', { name: 'members.colorApply' }));
+
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(calendarState.updateMemberColor).not.toHaveBeenCalled();
   });
 });
