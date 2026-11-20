@@ -1,7 +1,7 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "f2d71c9e9d889c9d9310dc4d7857b8aeb3f554a8",
+  "ref": "7d40e6490149dc68d175a602c29599d98f1bcfea",
   "files": [
     {
       "path": "PROTOCOL.md",
@@ -61,7 +61,7 @@
     },
     {
       "path": "conformance/schema/50-nullable-unique-keys.sql",
-      "sha256": "8c878bf3e07c9c3da2f443e6b82c207501da6c450cfadcd5bbc33806707cc30f"
+      "sha256": "a3df2302e11a20905d83ac0e9a72718d668b1a504b91e1b4d4f1619a2559f66d"
     },
     {
       "path": "conformance/schema/70-recurrence-shape.sql",
@@ -233,7 +233,7 @@
     },
     {
       "path": "tables/users.sql",
-      "sha256": "f852d75198d8b54038aa9c5de72f8e2ad733574db1f0e8a418441bff96c5062d"
+      "sha256": "7e94358b4ec52a50dbc20a29a4228bc0ff4784ff4547626ac0f20691bffd1190"
     },
     {
       "path": "tables/workspace_invites.sql",
@@ -286,6 +286,10 @@
     {
       "path": "upgrades/0002-recurrence-shape.sql",
       "sha256": "3a49e0172cfecef5e5a13d4d6923fcce70e1cebbe8c808cf0f84fe2d82bee09f"
+    },
+    {
+      "path": "upgrades/0003-theme-families.sql",
+      "sha256": "6829564e8add8f5a67dda6cf5ea14c0db9af89b1a79ab6d2cb738d8b9e93a688"
     }
   ]
 }

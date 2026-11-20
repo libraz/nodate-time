@@ -21,7 +21,7 @@ CREATE TABLE users (
   working_hours_end TIME NULL COMMENT 'User override of workspace working_hours_end; NULL = inherit',
   snap_to_working_day ENUM('off','warn','auto') NOT NULL DEFAULT 'warn' COMMENT 'What happens when a task/event lands on a non-working day: off=accept silently, warn=save with badge, auto=itemkit snaps forward to next working day',
   treat_holidays_as_non_working BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'If true, subscribed system (holiday) calendar events count as non-working days',
-  theme_preference ENUM('aurora-light','aurora-dark','dotline-light','dotline-dark','glass-light','glass-dark','system') NOT NULL DEFAULT 'system' COMMENT 'UI theme preference',
+  theme_preference ENUM('glass-light','glass-dark','modern-light','modern-dark','washi-light','washi-dark','classic-light','classic-dark','nothing-light','nothing-dark','system') NOT NULL DEFAULT 'system' COMMENT 'UI theme preference',
   calendar_shift_default ENUM('ask','sync_always','task_only_always') NOT NULL DEFAULT 'ask' COMMENT 'Default behaviour when an event linked to safe tasks is shifted: ask=prompt the user every time (current behaviour), sync_always=also shift every linked safe task by the same delta, task_only_always=shift only the event and leave linked tasks alone',
   last_login_at DATETIME(3) NULL COMMENT 'Last successful login',
 

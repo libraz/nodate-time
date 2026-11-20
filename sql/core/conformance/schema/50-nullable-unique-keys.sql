@@ -106,6 +106,9 @@ CREATE TEMPORARY TABLE nf_nullable_unique_allow (
 ) ENGINE=InnoDB;
 
 INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reason) VALUES
+  ('agent_runs', 'uniq_agent_runs_agent_source_event', 'source_event_id',
+   'Keeps an on_event agent to one run per triggering event. A scheduled run has no source event and is deduplicated by uniq_agent_runs_dedupe_key instead, and a run whose event was hard-deleted keeps its history with the FK set to NULL.'),
+
   ('calendar_event_invites', 'uniq_calendar_event_invites_event_attendee', 'event_id',
    'Both halves are set on every invite a writer creates; they go NULL only when the event or the attendee is hard-deleted and the FK sets them so the revoked invite survives. A row that no longer names an event has no grant left to keep singular.'),
   ('calendar_event_invites', 'uniq_calendar_event_invites_event_attendee', 'attendee_id',
@@ -129,6 +132,9 @@ INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reaso
 
   ('events', 'uniq_events_reverses', 'reverses_event_id',
    'Stops two concurrent reversals of one event from both landing and double-cancelling in any projection over the log. An ordinary event reverses nothing and must stay freely appendable.'),
+
+  ('intake_items', 'uniq_intake_items_workspace_signal', 'signal_id',
+   'One intake item per signal, so a signal re-processed twice does not queue twice. A manually entered item has no signal, and an item whose signal was deleted keeps its triage history with the FK set to NULL; neither has a signal to be the only item for.'),
 
   ('lenses', 'uniq_lenses_public_token_hash', 'public_token_hash',
    'A published lens holds the only hash of its share token, so a token resolves to one lens. An unpublished lens has no token, no share URL, and nothing to be the only holder of.'),
@@ -156,6 +162,9 @@ INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reaso
    'Disjoint pair with uniq_task_actors_task_id_agent_id_role. chk_task_actors_kind_target makes exactly one of user_id and agent_id non-NULL, so an agent actor drops out of this key and is bound by the other one.'),
   ('task_actors', 'uniq_task_actors_task_id_agent_id_role', 'agent_id',
    'The other half of the pair: a human actor leaves agent_id NULL and is bound by uniq_task_actors_task_id_user_id_role. Every row is covered by exactly one of the two.'),
+
+  ('task_handoffs', 'uniq_task_handoffs_one_pending_role', 'pending_role_key',
+   'The generated column resolves to the role only while a handoff is pending, so the key allows one unresolved handoff per task role. Accepted, declined, expired and cancelled handoffs are immutable history and any number of them may exist.'),
 
   ('webhook_deliveries', 'uniq_webhook_deliveries_subscription_event', 'event_public_id',
    'Stops one event being POSTed twice to a subscriber when the fan-out fires twice. A test ping stands for no event and is a fresh dispatch each time it is asked for, so deduplicating pings would make the second press of the button do nothing.');

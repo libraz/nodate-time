@@ -885,12 +885,16 @@ func (ns NullUsersSnapToWorkingDay) Value() (driver.Value, error) {
 type UsersThemePreference string
 
 const (
-	UsersThemePreferenceAuroraLight  UsersThemePreference = "aurora-light"
-	UsersThemePreferenceAuroraDark   UsersThemePreference = "aurora-dark"
-	UsersThemePreferenceDotlineLight UsersThemePreference = "dotline-light"
-	UsersThemePreferenceDotlineDark  UsersThemePreference = "dotline-dark"
 	UsersThemePreferenceGlassLight   UsersThemePreference = "glass-light"
 	UsersThemePreferenceGlassDark    UsersThemePreference = "glass-dark"
+	UsersThemePreferenceModernLight  UsersThemePreference = "modern-light"
+	UsersThemePreferenceModernDark   UsersThemePreference = "modern-dark"
+	UsersThemePreferenceWashiLight   UsersThemePreference = "washi-light"
+	UsersThemePreferenceWashiDark    UsersThemePreference = "washi-dark"
+	UsersThemePreferenceClassicLight UsersThemePreference = "classic-light"
+	UsersThemePreferenceClassicDark  UsersThemePreference = "classic-dark"
+	UsersThemePreferenceNothingLight UsersThemePreference = "nothing-light"
+	UsersThemePreferenceNothingDark  UsersThemePreference = "nothing-dark"
 	UsersThemePreferenceSystem       UsersThemePreference = "system"
 )
 
