@@ -25,9 +25,8 @@ func membersOf(t *testing.T, calURL, token string) map[string]memberItem {
 }
 
 // TestMemberColorIsChangeable verifies the product's own model: one shared
-// calendar with a colour per person. An invited member arrives on a fixed
-// colour, and until this is reachable everyone after the first is drawn the
-// same, which is the whole way a reader tells whose plan is whose.
+// calendar with a colour per person, which is the whole way a reader tells
+// whose plan is whose.
 func TestMemberColorIsChangeable(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -67,6 +66,36 @@ func TestMemberColorIsChangeable(t *testing.T) {
 	require.Equal(t, 403, denied)
 }
 
+// TestJoinersArriveOnColoursNobodyHas pins the colour a link hands out: the
+// palette colour fewest members carry, so a calendar filled through one link
+// does not draw everyone alike. A repeat stays possible by choice.
+func TestJoinersArriveOnColoursNobodyHas(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	first := helpers.NewTenant(t, testServerURL)
+	second := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+
+	joinAs(t, calURL, owner.AccessToken, first, "editor")
+	joinAs(t, calURL, owner.AccessToken, second, "viewer")
+
+	members := membersOf(t, calURL, owner.AccessToken)
+	colours := map[string]bool{}
+	for _, m := range members {
+		colours[m.Color] = true
+	}
+	require.Len(t, colours, 3, "owner and two joiners on three colours: %v", members)
+	require.Equal(t, "#47B2F7", members[first.UserID].Color, "the earliest free palette colour")
+	require.Equal(t, "#F35F8C", members[second.UserID].Color)
+
+	// Claiming a colour somebody already has is allowed.
+	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+second.UserID+"/color",
+		second.AccessToken, map[string]any{"color": "#47B2F7"}, nil)
+	require.Equal(t, "#47B2F7", membersOf(t, calURL, owner.AccessToken)[second.UserID].Color)
+}
+
 // TestEventTakesItsOwnerColour verifies that an event renders in the colour of
 // the layer it sits on, and follows that layer when it changes -- which is why
 // the event carries no colour of its own.
@@ -83,8 +112,9 @@ func TestEventTakesItsOwnerColour(t *testing.T) {
 		member.AccessToken, map[string]any{"color": "#F35F8C"}, nil)
 
 	var evt struct {
-		ID    string `json:"id"`
-		Color string `json:"color"`
+		ID        string `json:"id"`
+		Color     string `json:"color"`
+		OwnerName string `json:"ownerName"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", member.AccessToken,
 		map[string]any{
@@ -94,6 +124,9 @@ func TestEventTakesItsOwnerColour(t *testing.T) {
 			"endAt":   "2026-09-01T11:00:00+09:00",
 		}, &evt)
 	require.Equal(t, "#F35F8C", evt.Color)
+	// The owner is named on the event, so a chip can say whose it is
+	// without fetching the member list.
+	require.Equal(t, member.Name, evt.OwnerName)
 
 	// An event has no colour to send. The field is refused rather than
 	// accepted and overwritten, so a client cannot believe it set one.
