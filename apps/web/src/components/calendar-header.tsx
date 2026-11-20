@@ -204,7 +204,7 @@ export function CalendarHeader() {
   }, [showViewMenu]);
 
   const profileDropdown = showProfileMenu && (
-    <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-2xl py-2 ring-1 ring-[var(--color-border)]">
+    <div className="glass-surface-heavy absolute right-0 top-full z-50 mt-1 w-64 rounded-[var(--radius-md)] py-2 ring-1 ring-[var(--color-border)]">
       {user && (
         <div className="border-b border-[var(--color-separator)] px-4 py-3">
           <div className="flex items-center gap-3">
@@ -321,7 +321,7 @@ export function CalendarHeader() {
   );
 
   return (
-    <div className="glass-surface-heavy sticky top-0 z-30">
+    <div className="glass-surface-heavy app-header sticky top-0 z-30">
       {/* Mobile header (< sm) */}
       <div className="flex h-[48px] items-center gap-1 px-3 sm:hidden">
         {/* Left: drawer toggle + month label (follows scroll) + view switcher */}
@@ -363,7 +363,7 @@ export function CalendarHeader() {
               <ChevronDown />
             </button>
             {showViewMenu && (
-              <div className="glass-surface-heavy absolute left-0 top-full z-50 mt-1 w-40 rounded-2xl py-1.5 ring-1 ring-[var(--color-border)]">
+              <div className="glass-surface-heavy absolute left-0 top-full z-50 mt-1 w-40 rounded-[var(--radius-md)] py-1.5 ring-1 ring-[var(--color-border)]">
                 {VIEWS.map((v) => (
                   <button
                     key={v.value}
@@ -416,7 +416,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={goToToday}
-            className="flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent)]"
+            className="today-button flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent-ink)]"
           >
             <span className="leading-none">{t('calendar.today')}</span>
           </button>
@@ -435,7 +435,7 @@ export function CalendarHeader() {
                 height="18"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="white"
+                stroke="currentColor"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -486,7 +486,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={goToToday}
-            className="flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-sm font-medium text-[var(--color-accent)] transition-transform active:scale-95"
+            className="today-button flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-sm font-medium text-[var(--color-accent-ink)] transition-transform active:scale-95"
             {...shortcutProps('today', t('calendar.today'))}
           >
             <span className="leading-none">{t('calendar.today')}</span>
@@ -497,8 +497,8 @@ export function CalendarHeader() {
         <div className="flex-1" />
 
         {/* Right: view toggle + search + create + avatar */}
-        <div className="flex items-center gap-0.5">
-          <div className="segmented-control inline-flex">
+        <div className="flex items-center gap-1">
+          <div className="segmented-control mr-1 inline-flex">
             <button
               data-active={calendarView === 'month'}
               type="button"
@@ -573,7 +573,7 @@ export function CalendarHeader() {
             </svg>
           </button>
 
-          <div className="relative" ref={desktopProfileMenuRef}>
+          <div className="relative ml-1" ref={desktopProfileMenuRef}>
             <AvatarButton {...avatarButtonProps} />
             {profileDropdown}
           </div>

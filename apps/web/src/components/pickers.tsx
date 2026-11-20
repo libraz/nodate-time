@@ -309,7 +309,7 @@ function DatePickerDropdown({
               style={{
                 backgroundColor: isSelected ? 'var(--color-accent)' : 'transparent',
                 color: isSelected
-                  ? '#ffffff'
+                  ? 'var(--color-text-on-accent)'
                   : isDisabled
                     ? 'var(--color-text-tertiary)'
                     : dayOfWeek === 0
@@ -434,7 +434,7 @@ function TimePickerDropdown({
             className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
             style={{
               backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
-              color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
+              color: isSelected ? 'var(--color-accent-ink)' : 'var(--color-text-primary)',
               fontWeight: isSelected ? 600 : 400,
             }}
           >
@@ -739,7 +739,7 @@ export function CustomSelect({
                         : isActive
                           ? 'var(--color-hover)'
                           : 'transparent',
-                      color: isSelected ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                      color: isSelected ? 'var(--color-accent-ink)' : 'var(--color-text-primary)',
                       fontWeight: isSelected ? 600 : 400,
                     }}
                   >
@@ -823,7 +823,7 @@ export function DateTimeField({
             setShowDatePicker((v) => !v);
             setShowTimePicker(false);
           }}
-          className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+          className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent-ink)] hover:bg-[var(--color-accent-subtle)]"
         >
           {dateLabel}
         </button>
@@ -847,7 +847,7 @@ export function DateTimeField({
                 setShowTimePicker((v) => !v);
                 setShowDatePicker(false);
               }}
-              className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent)] hover:bg-[var(--color-accent-subtle)]"
+              className="pill-button bg-[var(--color-accent-bg)] px-3 py-1.5 text-default font-medium tabular-nums text-[var(--color-accent-ink)] hover:bg-[var(--color-accent-subtle)]"
             >
               {timeValue}
             </button>

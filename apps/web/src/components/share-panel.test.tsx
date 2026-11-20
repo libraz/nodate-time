@@ -28,6 +28,7 @@ vi.mock('@/lib/toast', () => ({
 const uiState = {
   rightPanel: 'share' as string | null,
   toggleRightPanel: vi.fn(),
+  openPanelFor: vi.fn(),
 };
 
 vi.mock('@/stores/ui-store', () => ({
@@ -41,6 +42,7 @@ function calendar(id: string, name: string): Calendar {
     color: '#000',
     createdAt: '',
     publicShared: false,
+    memberCount: 1,
     role: 'owner',
     memberColor: '#000',
   };
@@ -295,5 +297,13 @@ describe('SharePanel copy', () => {
     await act(async () => {});
 
     expect(toastError).toHaveBeenCalledWith('common.copyFailed');
+  });
+});
+
+describe('SharePanel direct addition', () => {
+  it('opens the members panel on its picker for the same calendar', async () => {
+    render(<SharePanel />);
+    fireEvent.click(await screen.findByRole('button', { name: /members.addSection/ }));
+    expect(uiState.openPanelFor).toHaveBeenCalledWith('members', 'cal-1', { addMembers: true });
   });
 });

@@ -50,6 +50,7 @@ function cal(id: string, overrides: Partial<Calendar> = {}): Calendar {
     color: '#47B2F7',
     createdAt: '',
     publicShared: false,
+    memberCount: 1,
     role: 'owner',
     memberColor: '#47B2F7',
     ...overrides,
@@ -489,6 +490,24 @@ describe('retryFailedLoads', () => {
     // is for what is missing, not a second run of the whole startup.
     expect(mockApi.get.mock.calls.map((c) => c[0])).toEqual(['/calendars/cal-2/members']);
     expect(s.membersMap['cal-2']?.[0]?.role).toBe('editor');
+  });
+});
+
+describe('fetchMembers', () => {
+  it('brings the calendar member count up to the roster it just read', async () => {
+    useCalendarStore.setState({ calendars: [cal('cal-1', { memberCount: 1 }), cal('cal-2')] });
+    mockApi.get.mockResolvedValueOnce([
+      { id: 'u1', name: 'A', email: 'a@example.com', role: 'owner', color: '#000000' },
+      { id: 'u2', name: 'B', email: 'b@example.com', role: 'editor', color: '#000000' },
+    ] as never);
+
+    await useCalendarStore.getState().fetchMembers('cal-1');
+
+    const counts = useCalendarStore.getState().calendars.map((c) => [c.id, c.memberCount]);
+    expect(counts).toEqual([
+      ['cal-1', 2],
+      ['cal-2', 1],
+    ]);
   });
 });
 

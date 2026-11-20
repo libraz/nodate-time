@@ -46,6 +46,9 @@ export const HELP_SECTIONS: HelpSection[] = [
         items: [
           { term: 'help.eventsAdd', desc: 'help.eventsAddDesc' },
           { term: 'help.eventsEdit', desc: 'help.eventsEditDesc' },
+          { term: 'help.eventsWhose', desc: 'help.eventsWhoseDesc' },
+          { term: 'help.eventsPeople', desc: 'help.eventsPeopleDesc' },
+          { term: 'help.eventsShowAs', desc: 'help.eventsShowAsDesc' },
           { term: 'help.eventsRepeat', desc: 'help.eventsRepeatDesc' },
           { term: 'help.eventsAllDay', desc: 'help.eventsAllDayDesc' },
           { term: 'help.eventsVisibility', desc: 'help.eventsVisibilityDesc' },
@@ -83,6 +86,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         kind: 'terms',
         items: [
+          { term: 'help.directAdd', desc: 'help.directAddDesc' },
           { term: 'help.inviteLink', desc: 'help.inviteLinkDesc' },
           { term: 'help.publicLink', desc: 'help.publicLinkDesc' },
           { term: 'help.stopSharing', desc: 'help.stopSharingDesc' },

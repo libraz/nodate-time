@@ -94,7 +94,7 @@ export function DayDetail() {
                   closeDayDetail();
                   openEventModal();
                 }}
-                className="text-callout font-medium text-[var(--color-accent)]"
+                className="text-callout font-medium text-[var(--color-accent-ink)]"
               >
                 {t('event.createEvent')}
               </button>

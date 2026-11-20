@@ -308,7 +308,7 @@ export function WeeklyTimeline() {
                 style={{
                   backgroundColor: today ? 'var(--color-accent)' : 'transparent',
                   color: today
-                    ? '#ffffff'
+                    ? 'var(--color-text-on-accent)'
                     : dow === 0
                       ? 'var(--color-sunday)'
                       : dow === 6
@@ -516,7 +516,7 @@ export function WeeklyTimeline() {
                         if (consumeClick() || consumeResizeClick()) return;
                         openEventModal(evt.id);
                       }}
-                      className={`event-block absolute z-[5] flex flex-col justify-start overflow-hidden rounded-md px-1.5 pt-1 text-left ${
+                      className={`event-block event-block-stacked absolute z-[5] flex flex-col justify-start overflow-hidden rounded-md px-1.5 pt-1 text-left ${
                         movable ? 'cursor-grab active:cursor-grabbing' : ''
                       }`}
                       style={

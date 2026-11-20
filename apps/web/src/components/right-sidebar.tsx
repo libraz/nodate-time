@@ -94,16 +94,13 @@ export function RightSidebar() {
               toggleRightPanel(item.id satisfies RightPanelId);
             }}
             className={[
-              'relative flex w-14 flex-col items-center gap-0.5 rounded-xl py-1.5 transition-colors',
+              'relative flex w-14 flex-col items-center gap-0.5 rounded-[var(--radius-control)] py-1.5 transition-colors',
               active
-                ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
+                ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_28%,transparent)]'
                 : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-primary)]',
             ].join(' ')}
             aria-pressed={active}
           >
-            {active && (
-              <span className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--color-accent)]" />
-            )}
             <span className="h-[22px] w-[22px]">{item.icon}</span>
             <span className="w-full truncate text-center text-micro leading-tight">
               {t(item.labelKey)}

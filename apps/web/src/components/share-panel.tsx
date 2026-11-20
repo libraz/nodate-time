@@ -34,6 +34,7 @@ export function SharePanel() {
   const timezone = useUiStore((s) => s.timezone);
   const locale = useUiStore((s) => s.locale);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const openPanelFor = useUiStore((s) => s.openPanelFor);
   const presence = usePresence(rightPanel === 'share');
   // Inviting requires admin; only offer calendars the user administers and is viewing.
   const { options, target, setTargetId } = usePanelCalendar(manages);
@@ -105,6 +106,51 @@ export function SharePanel() {
             <TipCard id="share" topic="invite">
               {t('tip.share')}
             </TipCard>
+
+            <button
+              type="button"
+              onClick={() => openPanelFor('members', calendarId, { addMembers: true })}
+              className="flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] p-3 text-left transition-colors hover:bg-[var(--color-hover)]"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="9" cy="8" r="3.5" />
+                  <path d="M2.5 20a6.5 6.5 0 0113 0M19 8v6M16 11h6" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-body font-semibold text-[var(--color-text-primary)]">
+                  {t('members.addSection')}
+                </span>
+                <span className="block text-caption text-[var(--color-text-secondary)]">
+                  {t('share.directAddLead')}
+                </span>
+              </span>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0 text-[var(--color-text-tertiary)]"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </button>
 
             {/* Invite links (single-use) — multiple may coexist */}
             <section className="space-y-2">
@@ -186,7 +232,9 @@ export function SharePanel() {
                               backgroundColor: inv.useCount
                                 ? 'var(--color-danger-bg)'
                                 : 'var(--color-accent-bg)',
-                              color: inv.useCount ? 'var(--color-danger)' : 'var(--color-accent)',
+                              color: inv.useCount
+                                ? 'var(--color-danger)'
+                                : 'var(--color-accent-ink)',
                             }}
                           >
                             {inv.useCount ? t('share.inviteUsed') : t('share.inviteUnused')}

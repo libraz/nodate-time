@@ -418,7 +418,7 @@ function SchedulePollIndexPage() {
                       {action.calendarName}
                     </span>
                   </span>
-                  <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-3 py-1.5 text-footnote font-semibold text-[var(--color-accent)] transition group-hover:bg-[var(--color-accent-subtle)]">
+                  <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-3 py-1.5 text-footnote font-semibold text-[var(--color-accent-ink)] transition group-hover:bg-[var(--color-accent-subtle)]">
                     {t(
                       action.kind === 'answer'
                         ? 'schedulePoll.actionAnswer'
@@ -494,7 +494,7 @@ function SchedulePollIndexPage() {
                     to="/schedule-polls/$calendarId/$pollId"
                     params={{ calendarId: poll.calendarId, pollId: poll.id }}
                     search={{ view: 'event' }}
-                    className="flex shrink-0 items-center border-l border-[var(--color-separator)] px-4 text-footnote font-semibold text-[var(--color-accent)] transition hover:bg-[var(--color-hover)]"
+                    className="flex shrink-0 items-center border-l border-[var(--color-separator)] px-4 text-footnote font-semibold text-[var(--color-accent-ink)] transition hover:bg-[var(--color-hover)]"
                   >
                     {t('schedulePoll.viewEvent')}
                   </Link>

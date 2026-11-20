@@ -33,7 +33,8 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'tip.label': 'Tip',
   'tip.dismiss': 'Got it',
   'tip.learnMore': 'Learn more',
-  'tip.guide': 'New here? Take a one-minute tour.',
+  'tip.guideTitle': 'New here?',
+  'tip.guide': 'Take a one-minute tour of the basics.',
   'tip.guideAction': 'Start the tour',
   'tip.members':
     'The role decides what someone can do. Make people who add plans "Editors", and people who only look "Viewers".',
@@ -41,6 +42,8 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'Send an invite link to people who plan with you, and a public link to people who only look. A public link works without an account.',
   'tip.memo':
     "Memos hold things that are not tied to a date, like packing lists or notices, shared with the calendar's members.",
+  'tip.event':
+    'A plan is shown in the colour of the person picked under "Whose plan". Mark it "Tentative" or "Free" to keep that time open when scheduling.',
   'tip.album': 'Every member of this calendar can see the photos in its album.',
   'tip.polls':
     'A schedule poll sends a few candidate times to members so everyone can settle on one that works.',
@@ -74,7 +77,8 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'Create a calendar, add plans, and invite the people you plan with. That is all it takes.',
   'help.startStep1': 'Create a calendar with "New calendar" in the menu.',
   'help.startStep2': 'Add a plan with the "+" button.',
-  'help.startStep3': 'Make an invite link under "Share" and send it.',
+  'help.startStep3':
+    'Pick people from your workspace with "Add" under "Members", or send anyone else an invite link from "Share".',
 
   'help.eventsTitle': 'Plans',
   'help.eventsAdd': 'Adding a plan',
@@ -86,6 +90,15 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'help.eventsRepeat': 'Repeating plans',
   'help.eventsRepeatDesc':
     'Use "Repeat" to choose weekly, monthly and so on. When you change a repeating plan, choose "This event only" or "All events in the series".',
+  'help.eventsWhose': 'Whose plan',
+  'help.eventsWhoseDesc':
+    'On a shared calendar each plan belongs to someone, picked under "Whose plan", and is shown in their colour. You can add plans for other people too, such as a family member\'s appointment or a plan for someone you look after.',
+  'help.eventsPeople': 'Participants',
+  'help.eventsPeopleDesc':
+    'Pick who else takes part. They can answer "Going", "Maybe" or "Not going" when they open the plan. When scheduling, the plan counts against their free time too, unless they said they are not going.',
+  'help.eventsShowAs': 'Availability (Busy, Tentative, Free, Out of office)',
+  'help.eventsShowAsDesc':
+    'Decides how scheduling treats the time. "Busy" and "Out of office" take it. "Tentative" leaves it as "might be able to move", and "Free" keeps it open even with a plan in it. Use "Tentative" for plans not yet settled and "Free" for reminders.',
   'help.eventsAllDay': 'All-day plans',
   'help.eventsAllDayDesc': 'Mark plans without a set time, like trips or birthdays, as "All day".',
   'help.eventsVisibility': 'Who sees the details',
@@ -98,7 +111,7 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'A calendar holds plans. Make one for each group you share with. Tick or untick it in the left menu to show or hide it.',
   'help.calendarsColor': 'Plan colours',
   'help.calendarsColorDesc':
-    'A plan is shown in the colour of the person who made it. Change colours under "Members".',
+    'A plan is shown in the colour of the person picked under "Whose plan". Change colours under "Members".',
   'help.rolesTitle': 'Roles (what people can do)',
   'help.roleOwnerDesc': 'Can do everything. Only owners can delete the calendar.',
   'help.roleManagerDesc': 'Can add members and change their roles.',
@@ -106,6 +119,9 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'help.roleViewerDesc': 'Can only look.',
 
   'help.inviteTitle': 'Inviting and sharing',
+  'help.directAdd': 'Add from your workspace',
+  'help.directAddDesc':
+    'People in the same workspace can be added from "Add" under "Members" without a link. Choose several at once, pick editor or viewer, and add them.',
   'help.inviteLink': 'Invite link',
   'help.inviteLinkDesc':
     'A link for people who plan with you. Whoever opens it creates an account and joins the calendar. You can set how long it lasts and how many people can use it.',

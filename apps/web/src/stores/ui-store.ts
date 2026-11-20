@@ -28,8 +28,9 @@ interface UiState {
   /**
    * The calendar the last openPanelFor named. A fresh object per call, so a
    * panel adopts it even when the same calendar is asked for twice.
+   * `addMembers` opens the members panel straight on its picker.
    */
-  panelCalendarRequest: { calendarId: string } | null;
+  panelCalendarRequest: { calendarId: string; addMembers?: boolean } | null;
   showSearch: boolean;
   searchQuery: string;
   mobileTab: MobileTab;
@@ -60,7 +61,11 @@ interface UiState {
   goToToday: () => void;
   toggleRightPanel: (panel: RightPanelId) => void;
   /** Opens a side panel pointed at one calendar, closing the mobile menu it may come from. */
-  openPanelFor: (panel: Exclude<RightPanelId, null>, calendarId: string) => void;
+  openPanelFor: (
+    panel: Exclude<RightPanelId, null>,
+    calendarId: string,
+    opts?: { addMembers?: boolean },
+  ) => void;
   toggleSearch: () => void;
   setSearchQuery: (query: string) => void;
   setMobileTab: (tab: MobileTab) => void;
@@ -166,8 +171,12 @@ export const useUiStore = create<UiState>((set, get) => ({
       rightPanel: s.rightPanel === panel ? null : panel,
     })),
 
-  openPanelFor: (panel, calendarId) =>
-    set({ rightPanel: panel, panelCalendarRequest: { calendarId }, showMobileMenu: false }),
+  openPanelFor: (panel, calendarId, opts) =>
+    set({
+      rightPanel: panel,
+      panelCalendarRequest: { calendarId, ...(opts?.addMembers ? { addMembers: true } : {}) },
+      showMobileMenu: false,
+    }),
 
   toggleSearch: () => set((s) => ({ showSearch: !s.showSearch, searchQuery: '' })),
   setSearchQuery: (query) => set({ searchQuery: query }),

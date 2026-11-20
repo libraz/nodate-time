@@ -1,39 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlbumDeleteSheet, AlbumViewer, TrashIcon } from '@/components/album-viewer';
 import { EmptyState, GUIDE_ICONS, TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
-import { CustomSelect } from '@/components/pickers';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
+import { type AlbumPhoto, formatAlbumDay, groupByDay } from '@/lib/album';
 import { api, errorMessage } from '@/lib/api';
-import { fromISOInZone } from '@/lib/date-utils';
-import { seriesId } from '@/lib/event-move';
 import { readCaptureTime } from '@/lib/exif';
 import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarPages } from '@/lib/use-calendar-pages';
-import { useModalA11y } from '@/lib/use-modal-a11y';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
-import { eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-
-interface AlbumPhoto {
-  id: string;
-  caption: string;
-  imageUrl: string;
-  /**
-   * The grid-sized copy of the photo, absent when it has none. Photos uploaded
-   * before thumbnails existed never get one, so this stays optional.
-   */
-  thumbnailUrl?: string;
-  createdAt: string;
-  takenAt: string;
-  /** Public id of the event this photo belongs to, empty when it belongs to none. */
-  eventId?: string;
-  uploadedBy: { id: string; name: string; avatarUrl?: string };
-}
 
 interface AlbumListResponse {
   items: AlbumPhoto[];
@@ -47,20 +28,25 @@ interface PresignResponse {
   thumbnailUploadUrl?: string;
 }
 
+/** How far below the visible grid the next page starts loading. */
+const LOAD_AHEAD_MARGIN = '600px';
+
 export function AlbumPanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
   const presence = usePresence(rightPanel === 'album');
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const calendars = useCalendarStore((s) => s.calendars);
-  const events = useCalendarStore((s) => s.events);
   const timezone = useUiStore((s) => s.timezone);
+  const locale = useUiStore((s) => s.locale);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [lightbox, setLightbox] = useState<AlbumPhoto | null>(null);
-  const [captionDraft, setCaptionDraft] = useState('');
-  const [savingCaption, setSavingCaption] = useState(false);
-  const [linkingEvent, setLinkingEvent] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [upload, setUpload] = useState<{ done: number; total: number } | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // Photos already retried once. A URL that expired comes back working; an
   // object that is genuinely missing does not, and without this the second
   // failure would ask for another listing, forever.
@@ -85,35 +71,44 @@ export function AlbumPanel() {
     loadMore,
     updateItems,
   } = useCalendarPages<AlbumPhoto>(activeCalendarId, 'albums', presence.mounted);
-  const myRole = roleOnCalendar(calendars, activeCalendarId);
-  const editable = canEdit(myRole);
+  const editable = canEdit(roleOnCalendar(calendars, activeCalendarId));
+  const days = useMemo(() => groupByDay(photos, timezone), [photos, timezone]);
 
-  // The innermost open surface owns the keyboard. The lightbox answers first
-  // while it is up, and the event picker portals its list out of the lightbox
-  // and closes itself on Escape, so the lightbox stands down while one is open.
-  //
-  // Asking for it by class name couples this to markup pickers.tsx owns, which
-  // is deliberate rather than overlooked: a portalled list is not in this
-  // subtree, so there is nothing else here to ask. It stops being necessary the
-  // day CustomSelect can report its own open state.
-  const dismissLightbox = () => {
-    if (document.querySelector('.dropdown-panel')) return;
-    setLightbox(null);
-  };
+  // The panel does not answer Escape while a surface above it is open.
   const dismissPanel = () => {
-    if (lightbox) return;
+    if (viewerId) return;
+    if (confirmingDelete) {
+      setConfirmingDelete(false);
+      return;
+    }
+    if (selecting) {
+      endSelecting();
+      return;
+    }
     toggleRightPanel('album');
   };
-  const lightboxRef = useModalA11y<HTMLDivElement>(lightbox !== null, dismissLightbox);
-  // The lightbox carries its own trap because its controls sit outside the
-  // panel's container, and without one Tab walks straight out of the page. The
-  // two traps do not fight -- each only intercepts Tab at the edge of its own
-  // container, and the containers are disjoint -- and a picker's portalled list
-  // is deliberately outside both, so opening one hands it the keyboard.
 
   useEffect(() => {
-    if (activeCalendarId) retriedRef.current.clear();
+    if (!activeCalendarId) return;
+    retriedRef.current.clear();
+    setSelecting(false);
+    setSelected(new Set());
   }, [activeCalendarId]);
+
+  // Scrolling to the end of the grid reads the next page; the button under it
+  // stays for keyboard readers and as the place a slow page shows progress.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !nextCursor) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      },
+      { rootMargin: LOAD_AHEAD_MARGIN },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [nextCursor, loadMore]);
 
   /**
    * Re-lists every page on screen so each photo gets a freshly signed URL.
@@ -135,7 +130,6 @@ export function AlbumPanel() {
         refreshed.push(...(data.items ?? []));
       }
       updateItems(calendarId, () => refreshed);
-      setLightbox((cur) => (cur ? (refreshed.find((p) => p.id === cur.id) ?? cur) : cur));
     } catch {
       // Leave what is on screen alone: a failed refresh is no reason to empty
       // an album the reader is looking at.
@@ -153,75 +147,128 @@ export function AlbumPanel() {
     [refreshImageUrls],
   );
 
-  const handleUpload = useCallback(
+  const uploadOne = useCallback(
     async (file: File) => {
-      if (!activeCalendarId) return;
-      setUploading(true);
-      setError(null);
-      try {
-        // Read the capture time before preparing the file: re-encoding drops
-        // the EXIF block, and this is the value the album orders by.
-        const takenAt = await readCaptureTime(file, timezone);
-        const resized = await prepareImageForAlbum(file);
-        // The grid draws the photo itself when there is no thumbnail, so
-        // failing to make one is not a reason to fail the upload.
-        const thumbnail = await prepareAlbumThumbnail(file, resized).catch(() => null);
-        const presign = await uploadViaPresign<PresignResponse>({
-          kind: 'album',
-          presignPath: `/calendars/${activeCalendarId}/albums/presign`,
-          presignBody: {
-            contentType: resized.contentType,
-            byteSize: resized.bytes.byteLength,
-            width: resized.width,
-            height: resized.height,
-            // Omitted rather than sent as now: the server treats an absent
-            // capture time as the upload time, and saying "taken now" for a
-            // photo with no metadata would be a claim rather than a default.
-            ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
-            // Declaring nothing is how the server is told this photo has no
-            // thumbnail, which is a normal outcome rather than an error.
-            ...(thumbnail
-              ? {
-                  thumbnailContentType: thumbnail.contentType,
-                  thumbnailByteSize: thumbnail.bytes.byteLength,
-                }
-              : {}),
-          },
+      // Read the capture time before preparing the file: re-encoding drops
+      // the EXIF block, and this is the value the album orders by.
+      const takenAt = await readCaptureTime(file, timezone);
+      const resized = await prepareImageForAlbum(file);
+      // The grid draws the photo itself when there is no thumbnail, so
+      // failing to make one is not a reason to fail the upload.
+      const thumbnail = await prepareAlbumThumbnail(file, resized).catch(() => null);
+      const presign = await uploadViaPresign<PresignResponse>({
+        kind: 'album',
+        presignPath: `/calendars/${activeCalendarId}/albums/presign`,
+        presignBody: {
           contentType: resized.contentType,
-          body: resized.bytes,
           byteSize: resized.bytes.byteLength,
-        });
-        if (thumbnail && presign.thumbnailUploadUrl) {
-          // Neither a rejection nor a non-ok response is acted on: the photo
-          // is already stored, confirm does not need the thumbnail, and the
-          // grid falls back to the photo. Losing it costs bandwidth, not the
-          // picture, so it must not surface as a failed upload.
-          await fetch(presign.thumbnailUploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': thumbnail.contentType },
-            body: thumbnail.bytes,
-          }).catch(() => undefined);
-        }
-        // The row is created disabled; confirm enables it once the object is stored.
-        await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
-        retriedRef.current.clear();
-        await reload();
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        setUploading(false);
+          width: resized.width,
+          height: resized.height,
+          // Omitted rather than sent as now: the server treats an absent
+          // capture time as the upload time, and saying "taken now" for a
+          // photo with no metadata would be a claim rather than a default.
+          ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
+          // Declaring nothing is how the server is told this photo has no
+          // thumbnail, which is a normal outcome rather than an error.
+          ...(thumbnail
+            ? {
+                thumbnailContentType: thumbnail.contentType,
+                thumbnailByteSize: thumbnail.bytes.byteLength,
+              }
+            : {}),
+        },
+        contentType: resized.contentType,
+        body: resized.bytes,
+        byteSize: resized.bytes.byteLength,
+      });
+      if (thumbnail && presign.thumbnailUploadUrl) {
+        // Neither a rejection nor a non-ok response is acted on: the photo
+        // is already stored, confirm does not need the thumbnail, and the
+        // grid falls back to the photo. Losing it costs bandwidth, not the
+        // picture, so it must not surface as a failed upload.
+        await fetch(presign.thumbnailUploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': thumbnail.contentType },
+          body: thumbnail.bytes,
+        }).catch(() => undefined);
       }
+      // The row is created disabled; confirm enables it once the object is stored.
+      await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
     },
-    [activeCalendarId, reload, setError, timezone],
+    [activeCalendarId, timezone],
   );
 
-  const handleDelete = useCallback(
-    async (photoId: string) => {
+  /** Uploads one file after another, so a failed one does not take the rest with it. */
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      if (!activeCalendarId || files.length === 0) return;
+      setError(null);
+      setUpload({ done: 0, total: files.length });
+      let failure: unknown = null;
+      for (const [i, file] of files.entries()) {
+        try {
+          await uploadOne(file);
+        } catch (e) {
+          failure = e;
+        }
+        setUpload({ done: i + 1, total: files.length });
+      }
+      retriedRef.current.clear();
+      await reload();
+      if (failure) setError(errorMessage(failure));
+      setUpload(null);
+    },
+    [activeCalendarId, uploadOne, reload, setError],
+  );
+
+  /** Deletes photos one by one; returns the ids that are gone. */
+  const deletePhotos = useCallback(
+    async (ids: string[]) => {
+      if (!activeCalendarId) return new Set<string>();
+      const removed = new Set<string>();
+      let failure: unknown = null;
+      for (const id of ids) {
+        try {
+          await api.delete(`/calendars/${activeCalendarId}/albums/${id}`);
+          removed.add(id);
+        } catch (e) {
+          failure = e;
+        }
+      }
+      if (removed.size > 0) {
+        updateItems(activeCalendarId, (cur) => cur.filter((p) => !removed.has(p.id)));
+      }
+      if (failure) setError(errorMessage(failure));
+      return removed;
+    },
+    [activeCalendarId, updateItems, setError],
+  );
+
+  const handleViewerDelete = useCallback(
+    async (photoId: string) => (await deletePhotos([photoId])).has(photoId),
+    [deletePhotos],
+  );
+
+  const handleBulkDelete = async () => {
+    setDeleting(true);
+    const removed = await deletePhotos([...selected]);
+    setDeleting(false);
+    setConfirmingDelete(false);
+    setSelected((cur) => new Set([...cur].filter((id) => !removed.has(id))));
+    if (removed.size === selected.size) setSelecting(false);
+  };
+
+  const savePhoto = useCallback(
+    async (photoId: string, body: { caption: string; eventId?: string }) => {
       if (!activeCalendarId) return;
       try {
-        await api.delete(`/calendars/${activeCalendarId}/albums/${photoId}`);
-        updateItems(activeCalendarId, (cur) => cur.filter((p) => p.id !== photoId));
-        setLightbox(null);
+        const updated = await api.put<AlbumPhoto>(
+          `/calendars/${activeCalendarId}/albums/${photoId}`,
+          body,
+        );
+        updateItems(activeCalendarId, (cur) =>
+          cur.map((p) => (p.id === photoId ? { ...p, ...updated } : p)),
+        );
       } catch (e) {
         setError(errorMessage(e));
       }
@@ -229,75 +276,19 @@ export function AlbumPanel() {
     [activeCalendarId, updateItems, setError],
   );
 
-  const openLightbox = useCallback((photo: AlbumPhoto) => {
-    setLightbox(photo);
-    setCaptionDraft(photo.caption);
-  }, []);
-
-  const handleSaveCaption = useCallback(async () => {
-    if (!activeCalendarId || !lightbox) return;
-    setSavingCaption(true);
-    try {
-      const updated = await api.put<AlbumPhoto>(
-        `/calendars/${activeCalendarId}/albums/${lightbox.id}`,
-        { caption: captionDraft },
-      );
-      updateItems(activeCalendarId, (cur) =>
-        cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)),
-      );
-      setLightbox((cur) => (cur ? { ...cur, ...updated } : cur));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setSavingCaption(false);
-    }
-  }, [activeCalendarId, lightbox, captionDraft, updateItems, setError]);
-
-  /**
-   * Events the open photo could belong to: the ones on the day it was taken.
-   *
-   * Offering every loaded event would be a list of hundreds ordered by nothing
-   * the viewer can see. A photo belongs to what was happening when it was
-   * taken, and the capture time is read off the file precisely so this list
-   * can be short enough to pick from.
-   */
-  const linkableEvents = useMemo(() => {
-    if (!lightbox) return [];
-    const day = fromISOInZone(lightbox.takenAt, timezone).toISODate();
-    // A photo links to the series, so an occurrence is offered under its
-    // series id, once.
-    const offered = new Map<string, { id: string; title: string; startAt: string }>();
-    for (const evt of events) {
-      if (evt.calendarId !== activeCalendarId) continue;
-      if (eventStartDay(evt, timezone).toISODate() !== day) continue;
-      const id = seriesId(evt.id);
-      if (!offered.has(id)) offered.set(id, { id, title: evt.title, startAt: evt.startAt });
-    }
-    return [...offered.values()].sort((a, b) => a.startAt.localeCompare(b.startAt));
-  }, [lightbox, events, activeCalendarId, timezone]);
+  const handleSaveCaption = useCallback(
+    (photoId: string, caption: string) => savePhoto(photoId, { caption }),
+    [savePhoto],
+  );
 
   const handleLinkEvent = useCallback(
-    async (eventId: string) => {
-      if (!activeCalendarId || !lightbox) return;
-      setLinkingEvent(true);
-      try {
-        // An empty string is how the API is told to clear the link, so a photo
-        // can be detached from an event without being deleted and re-uploaded.
-        const updated = await api.put<AlbumPhoto>(
-          `/calendars/${activeCalendarId}/albums/${lightbox.id}`,
-          { caption: lightbox.caption, eventId },
-        );
-        updateItems(activeCalendarId, (cur) =>
-          cur.map((p) => (p.id === lightbox.id ? { ...p, ...updated } : p)),
-        );
-        setLightbox((cur) => (cur ? { ...cur, ...updated } : cur));
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        setLinkingEvent(false);
-      }
+    (photoId: string, eventId: string) => {
+      const caption = photos.find((p) => p.id === photoId)?.caption ?? '';
+      // An empty string is how the API is told to clear the link, so a photo
+      // can be detached from an event without being deleted and re-uploaded.
+      return savePhoto(photoId, { caption, eventId });
     },
-    [activeCalendarId, lightbox, updateItems, setError],
+    [photos, savePhoto],
   );
 
   const handleDownload = useCallback(
@@ -315,7 +306,27 @@ export function AlbumPanel() {
     [activeCalendarId, setError],
   );
 
+  function endSelecting() {
+    setSelecting(false);
+    setSelected(new Set());
+  }
+
+  const handleTile = (photo: AlbumPhoto) => {
+    if (!selecting) {
+      setViewerId(photo.id);
+      return;
+    }
+    setSelected((cur) => {
+      const nextSet = new Set(cur);
+      if (nextSet.has(photo.id)) nextSet.delete(photo.id);
+      else nextSet.add(photo.id);
+      return nextSet;
+    });
+  };
+
   if (!presence.mounted) return null;
+
+  const uploading = upload !== null;
 
   return (
     <>
@@ -327,48 +338,61 @@ export function AlbumPanel() {
         actions={
           editable && (
             <>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || !activeCalendarId}
-                aria-label={uploading ? t('event.uploading') : t('album.add')}
-                aria-busy={uploading}
-                title={t('album.add')}
-                className="icon-btn icon-btn-accent h-8 w-8"
-              >
-                {uploading ? (
-                  <span className="spinner h-4 w-4" aria-hidden="true" />
-                ) : (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.25"
-                    strokeLinecap="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                )}
-              </button>
+              {photos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => (selecting ? endSelecting() : setSelecting(true))}
+                  aria-pressed={selecting}
+                  className="rounded-full px-3 py-1 text-footnote font-semibold text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-bg)]"
+                >
+                  {selecting ? t('common.cancel') : t('album.select')}
+                </button>
+              )}
+              {!selecting && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || !activeCalendarId}
+                  aria-label={uploading ? t('event.uploading') : t('album.add')}
+                  aria-busy={uploading}
+                  title={t('album.add')}
+                  className="icon-btn icon-btn-accent h-8 w-8"
+                >
+                  {uploading ? (
+                    <span className="spinner h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.25"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  )}
+                </button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload(f);
-                  if (e.target) e.target.value = '';
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = '';
+                  handleFiles(files);
                 }}
               />
             </>
           )
         }
       >
-        {target && (
+        {target && !selecting && (
           <div className="border-b border-[var(--color-border)] px-5 py-3">
             <PanelCalendarPicker
               label={t('panel.targetCalendar')}
@@ -379,11 +403,25 @@ export function AlbumPanel() {
           </div>
         )}
 
+        {upload && (
+          <div className="border-b border-[var(--color-border)] px-5 py-2.5" aria-live="polite">
+            <div className="flex items-center justify-between text-caption text-[var(--color-text-secondary)]">
+              <span>{t('album.uploadProgress', { done: upload.done, total: upload.total })}</span>
+            </div>
+            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--color-surface-inset)]">
+              <div
+                className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300"
+                style={{ width: `${(upload.done / upload.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {error && <div className="px-5 py-2 text-footnote text-[var(--color-danger)]">{error}</div>}
 
-        <div className="flex-1 overflow-y-auto p-4">
-          {activeCalendarId && (
-            <TipCard id="album" topic="memos" className="mb-4">
+        <div className="flex-1 overflow-y-auto">
+          {activeCalendarId && !selecting && (
+            <TipCard id="album" topic="memos" className="mx-4 mt-4 mb-2">
               {t('tip.album')}
             </TipCard>
           )}
@@ -392,158 +430,151 @@ export function AlbumPanel() {
           ) : loading && photos.length === 0 ? (
             <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">…</p>
           ) : photos.length === 0 ? (
-            <EmptyState
-              icon={GUIDE_ICONS.photo}
-              title={t('empty.photosTitle')}
-              description={t('empty.photosDesc')}
-            />
+            <div className="p-4">
+              <EmptyState
+                icon={GUIDE_ICONS.photo}
+                title={t('empty.photosTitle')}
+                description={t('empty.photosDesc')}
+              />
+            </div>
           ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-1">
-                {photos.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => openLightbox(p)}
-                    className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-surface-secondary)]"
-                  >
-                    <img
-                      // A tile is about 134px, so the stored photo here is
-                      // megabytes per screenful. Photos uploaded before
-                      // thumbnails existed have none and never will, which
-                      // makes the fallback permanent rather than temporary.
-                      src={p.thumbnailUrl ?? p.imageUrl}
-                      alt={p.caption}
-                      loading="lazy"
-                      onError={() => handleImageError(p.id)}
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-                ))}
-              </div>
+            <div className="pb-4">
+              {days.map((group) => (
+                <section key={group.day} aria-label={formatAlbumDay(group.date, timezone, locale)}>
+                  <h3 className="album-day-heading sticky top-0 z-[1] px-4 pt-3 pb-2 text-footnote font-semibold text-[var(--color-text-primary)]">
+                    {formatAlbumDay(group.date, timezone, locale)}
+                  </h3>
+                  <div className="grid grid-cols-3 gap-[2px]">
+                    {group.photos.map((p) => {
+                      const isSelected = selected.has(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => handleTile(p)}
+                          aria-pressed={selecting ? isSelected : undefined}
+                          className="album-tile relative aspect-square overflow-hidden bg-[var(--color-surface-secondary)]"
+                        >
+                          <img
+                            // A tile is about 140px, so the stored photo here is
+                            // megabytes per screenful. Photos uploaded before
+                            // thumbnails existed have none and never will, which
+                            // makes the fallback permanent rather than temporary.
+                            src={p.thumbnailUrl ?? p.imageUrl}
+                            alt={p.caption}
+                            loading="lazy"
+                            draggable={false}
+                            onError={() => handleImageError(p.id)}
+                            className={`h-full w-full object-cover transition-[opacity,transform] duration-150 ${
+                              isSelected ? 'scale-[0.94] opacity-80' : ''
+                            }`}
+                          />
+                          {selecting && <SelectMark selected={isSelected} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
               {nextCursor && (
-                <button
-                  type="button"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  className="btn-secondary w-full text-body disabled:opacity-50"
-                >
-                  {loadingMore ? t('common.loading') : t('album.loadMore')}
-                </button>
+                <div ref={sentinelRef} className="px-4 pt-4">
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="w-full rounded-[var(--radius-control)] py-2 text-footnote text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-hover)] disabled:opacity-60"
+                  >
+                    {loadingMore ? t('common.loading') : t('album.loadMore')}
+                  </button>
+                </div>
+              )}
+              {!nextCursor && (
+                <p className="pt-4 text-center text-caption text-[var(--color-text-tertiary)] tabular-nums">
+                  {t('album.count', { count: photos.length })}
+                </p>
               )}
             </div>
           )}
         </div>
+
+        {selecting && (
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] px-5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+            <span className="w-8" aria-hidden="true" />
+            <span
+              className="text-footnote font-semibold text-[var(--color-text-primary)] tabular-nums"
+              aria-live="polite"
+            >
+              {selected.size === 0
+                ? t('album.selectPrompt')
+                : t('album.selectedCount', { count: selected.size })}
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={selected.size === 0}
+              aria-label={t('common.delete')}
+              title={t('common.delete')}
+              className="icon-btn h-8 w-8 text-[var(--color-danger)] disabled:text-[var(--color-text-tertiary)] disabled:opacity-60"
+            >
+              <TrashIcon />
+            </button>
+          </div>
+        )}
+
+        {confirmingDelete && (
+          <AlbumDeleteSheet
+            title={t('album.deleteMany', { count: selected.size })}
+            hint={t('album.deleteHint', { name: target?.name ?? '' })}
+            busy={deleting}
+            tone="theme"
+            onConfirm={handleBulkDelete}
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
       </SidePanel>
 
-      {lightbox && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
-          <button
-            type="button"
-            aria-label={t('common.close')}
-            className="absolute inset-0 cursor-default"
-            onClick={() => setLightbox(null)}
-          />
-          <div
-            ref={lightboxRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('album.photo')}
-            className="relative flex max-h-full max-w-full flex-col gap-3"
-          >
-            <img
-              src={lightbox.imageUrl}
-              alt={lightbox.caption}
-              onError={() => handleImageError(lightbox.id)}
-              className="max-h-[72vh] max-w-[90vw] rounded-lg object-contain"
-            />
-            <div className="absolute right-2 top-2 flex gap-2">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDownload(lightbox);
-                }}
-                className="rounded-md bg-black/60 px-3 py-1 text-footnote text-white hover:bg-[var(--color-accent)]"
-              >
-                {t('album.download')}
-              </button>
-              {editable && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(lightbox.id);
-                  }}
-                  className="rounded-md bg-black/60 px-3 py-1 text-footnote text-white hover:bg-[var(--color-danger)]"
-                >
-                  {t('common.delete')}
-                </button>
-              )}
-            </div>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: wrapper only stops event propagation so editing the caption does not trigger the parent photo click */}
-            <div
-              className="flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-              role="presentation"
-            >
-              {editable ? (
-                <>
-                  <input
-                    data-1p-ignore
-                    type="text"
-                    value={captionDraft}
-                    onChange={(e) => setCaptionDraft(e.target.value)}
-                    placeholder={t('album.captionPlaceholder')}
-                    className="flex-1 rounded-md bg-black/50 px-3 py-2 text-body text-white outline-none placeholder:text-white/50"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveCaption}
-                    disabled={savingCaption || captionDraft === lightbox.caption}
-                    className="btn-primary shrink-0 px-3 py-2 text-footnote disabled:opacity-50"
-                  >
-                    {savingCaption ? t('profile.saving') : t('album.saveCaption')}
-                  </button>
-                </>
-              ) : (
-                lightbox.caption && (
-                  <p className="flex-1 text-body text-white">{lightbox.caption}</p>
-                )
-              )}
-            </div>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: wrapper only stops event propagation so using the picker does not trigger the parent photo click */}
-            <div
-              className="mt-2 flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-              role="presentation"
-            >
-              <span className="shrink-0 text-footnote text-white/70">{t('album.event')}</span>
-              {editable ? (
-                <CustomSelect
-                  value={lightbox.eventId ?? ''}
-                  onChange={handleLinkEvent}
-                  triggerClassName="flex-1 bg-black/50 text-white"
-                  options={[
-                    { value: '', label: t('album.noEvent') },
-                    ...linkableEvents.map((evt) => ({ value: evt.id, label: evt.title })),
-                  ]}
-                />
-              ) : (
-                <span className="text-footnote text-white">
-                  {linkableEvents.find((evt) => evt.id === lightbox.eventId)?.title ??
-                    t('album.noEvent')}
-                </span>
-              )}
-              {linkingEvent && (
-                <span className="shrink-0 text-footnote text-white/70">{t('profile.saving')}</span>
-              )}
-            </div>
-          </div>
-        </div>
+      {viewerId && (
+        <AlbumViewer
+          photos={photos}
+          photoId={viewerId}
+          calendarId={activeCalendarId}
+          calendarName={target?.name ?? ''}
+          editable={editable}
+          hasMore={Boolean(nextCursor)}
+          onLoadMore={loadMore}
+          onNavigate={setViewerId}
+          onClose={() => setViewerId(null)}
+          onImageError={handleImageError}
+          onDownload={handleDownload}
+          onDelete={handleViewerDelete}
+          onSaveCaption={handleSaveCaption}
+          onLinkEvent={handleLinkEvent}
+        />
       )}
     </>
+  );
+}
+
+/** The check circle a tile wears in selection mode. */
+function SelectMark({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`absolute right-1.5 bottom-1.5 flex h-[22px] w-[22px] items-center justify-center rounded-full border-[1.5px] border-white shadow-[0_1px_3px_rgba(0,0,0,0.35)] ${
+        selected ? 'bg-[var(--color-accent)]' : 'bg-black/15'
+      }`}
+    >
+      {selected && (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M5 12.5l4.5 4.5L19 7.5"
+            stroke="white"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </span>
   );
 }

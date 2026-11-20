@@ -624,7 +624,7 @@ export function App() {
 
       {/* Mobile bottom tabs */}
       <div
-        className="glass-surface-heavy fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--color-border)] sm:hidden"
+        className="glass-surface-heavy app-tabbar fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--color-border)] sm:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {(['calendar', 'memo', 'search', 'settings'] as const).map((tab) => (
@@ -634,7 +634,7 @@ export function App() {
             onClick={() => setMobileTab(tab)}
             className="flex flex-1 flex-col items-center gap-0.5 py-2"
             style={{
-              color: mobileTab === tab ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+              color: mobileTab === tab ? 'var(--color-accent-ink)' : 'var(--color-text-secondary)',
             }}
           >
             {TAB_ICONS[tab]}

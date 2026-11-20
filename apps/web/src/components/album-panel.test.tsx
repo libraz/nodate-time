@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -24,6 +24,7 @@ const uiState = {
   rightPanel: 'album' as string | null,
   toggleRightPanel: vi.fn(),
   timezone: 'Asia/Tokyo',
+  locale: 'ja',
 };
 
 vi.mock('@/stores/ui-store', () => ({
@@ -83,6 +84,12 @@ function rectList(): DOMRectList {
   const rects = [new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList;
   rects.item = (index: number) => rects[index] ?? null;
   return rects;
+}
+
+/** Opens the first photo and its details sheet, where the caption and event link live. */
+async function openDetails() {
+  fireEvent.click(await screen.findByAltText('a photo'));
+  fireEvent.click(await screen.findByLabelText('album.info'));
 }
 
 describe('AlbumPanel', () => {
@@ -204,12 +211,14 @@ describe('AlbumPanel', () => {
 
     fireEvent.click(await screen.findByAltText('a photo'));
     await waitFor(() => expect(screen.getAllByAltText('a photo')).toHaveLength(2));
+    fireEvent.click(screen.getByLabelText('album.info'));
     // A viewer without edit rights reads the caption rather than editing it.
     expect(screen.getByText('a photo')).toBeInTheDocument();
     expect(screen.queryByText('album.saveCaption')).not.toBeInTheDocument();
 
-    const closers = screen.getAllByLabelText('common.close');
-    fireEvent.click(closers[closers.length - 1] as HTMLElement);
+    // The viewer's own close sits first in it; the details sheet has another.
+    const viewer = screen.getByRole('dialog', { name: 'album.photo' });
+    fireEvent.click(within(viewer).getAllByLabelText('common.close')[0] as HTMLElement);
 
     await waitFor(() => expect(screen.getAllByAltText('a photo')).toHaveLength(1));
   });
@@ -237,7 +246,7 @@ describe('AlbumPanel event link', () => {
     mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
 
     render(<AlbumPanel />);
-    fireEvent.click(await screen.findByAltText('a photo'));
+    await openDetails();
 
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
@@ -269,7 +278,7 @@ describe('AlbumPanel event link', () => {
 
     try {
       render(<AlbumPanel />);
-      fireEvent.click(await screen.findByAltText('a photo'));
+      await openDetails();
       fireEvent.click(await screen.findByText('album.noEvent'));
 
       expect(await screen.findByText('Field trip')).toBeInTheDocument();
@@ -285,7 +294,7 @@ describe('AlbumPanel event link', () => {
     mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: 'evt-1' });
 
     render(<AlbumPanel />);
-    fireEvent.click(await screen.findByAltText('a photo'));
+    await openDetails();
     fireEvent.click(await screen.findByText('album.noEvent'));
     fireEvent.click(await screen.findByText('Sports day'));
 
@@ -317,7 +326,7 @@ describe('AlbumPanel event link', () => {
       mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: series });
 
       render(<AlbumPanel />);
-      fireEvent.click(await screen.findByAltText('a photo'));
+      await openDetails();
       fireEvent.click(await screen.findByText('album.noEvent'));
       fireEvent.click(await screen.findByText('Practice'));
 
@@ -342,7 +351,7 @@ describe('AlbumPanel event link', () => {
     mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: '' });
 
     render(<AlbumPanel />);
-    fireEvent.click(await screen.findByAltText('a photo'));
+    await openDetails();
     fireEvent.click(await screen.findByText('Sports day'));
     fireEvent.click(await screen.findByText('album.noEvent'));
 
@@ -526,7 +535,7 @@ describe('AlbumPanel lightbox keyboard', () => {
     mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
 
     render(<AlbumPanel />);
-    fireEvent.click(await screen.findByAltText('a photo'));
+    await openDetails();
     fireEvent.click(await screen.findByText('album.noEvent'));
 
     const option = await screen.findByText('Sports day');
@@ -723,6 +732,36 @@ describe('AlbumPanel thumbnail upload', () => {
     expect(await screen.findByAltText('a photo')).toHaveAttribute('src', 'https://storage/photo');
     expect(screen.queryByText('Error: thumbnail unreachable')).not.toBeInTheDocument();
   });
+
+  // Several photos are picked at once; one that fails must not stop the rest.
+  it('uploads every picked file and carries on past one that fails', async () => {
+    stubImagePipeline(3000, (width) => width * 100);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response),
+    );
+    mockApi.post.mockReset();
+    mockApi.post
+      .mockRejectedValueOnce(new Error('too large'))
+      .mockResolvedValueOnce({ photoId: 'photo-2', uploadUrl: 'https://storage/put-photo' })
+      .mockResolvedValue({});
+
+    render(<AlbumPanel />);
+    await screen.findByText('empty.photosTitle');
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('no file input');
+    const files = [
+      new File([new Uint8Array(9000)], 'one.jpg', { type: 'image/jpeg' }),
+      new File([new Uint8Array(9000)], 'two.jpg', { type: 'image/jpeg' }),
+    ];
+    Object.defineProperty(input, 'files', { value: files, configurable: true });
+    fireEvent.change(input);
+
+    await waitFor(() =>
+      expect(mockApi.post).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-2/confirm'),
+    );
+    expect(await screen.findByText('Error: too large')).toBeInTheDocument();
+  });
 });
 
 describe('AlbumPanel target calendar', () => {
@@ -748,5 +787,95 @@ describe('AlbumPanel target calendar', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Work' }));
 
     await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-2/albums'));
+  });
+});
+
+/** Photos newest first, the order the server lists them in. */
+function photos(...days: string[]) {
+  return days.map((day, i) => ({
+    ...photo(`https://storage/${i}`, `photo-${i}`),
+    caption: `photo ${i}`,
+    takenAt: `${day}T10:00:00+09:00`,
+  }));
+}
+
+describe('AlbumPanel camera roll', () => {
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+  });
+
+  it('heads each day the photos were taken on', async () => {
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-21', '2026-04-20') });
+
+    render(<AlbumPanel />);
+    await screen.findByAltText('photo 0');
+
+    const days = screen.getAllByRole('region');
+    expect(days).toHaveLength(2);
+    expect(within(days[0] as HTMLElement).getAllByRole('img')).toHaveLength(2);
+    expect(within(days[1] as HTMLElement).getByAltText('photo 2')).toBeInTheDocument();
+  });
+
+  it('pages through the album with the arrow keys', async () => {
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-20') });
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('photo 0'));
+    const viewer = await screen.findByRole('dialog', { name: 'album.photo' });
+    expect(within(viewer).getByAltText('photo 0')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    expect(within(viewer).getByAltText('photo 1')).toBeInTheDocument();
+    // There is nothing after the last photo; the key leaves it in place.
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    expect(within(viewer).getByAltText('photo 1')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'ArrowLeft' });
+    expect(within(viewer).getByAltText('photo 0')).toBeInTheDocument();
+  });
+
+  it('asks before deleting, then shows the next photo', async () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner', name: 'Family' }];
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-20') });
+    mockApi.delete.mockResolvedValue(undefined);
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('photo 0'));
+    const viewer = await screen.findByRole('dialog', { name: 'album.photo' });
+
+    fireEvent.click(within(viewer).getByLabelText('common.delete'));
+    expect(mockApi.delete).not.toHaveBeenCalled();
+    fireEvent.click(within(viewer).getByText('album.deleteOne'));
+
+    await waitFor(() =>
+      expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0'),
+    );
+    expect(await within(viewer).findByAltText('photo 1')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'album.photo' })).toBeInTheDocument();
+  });
+
+  it('deletes only the selected photos', async () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner', name: 'Family' }];
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-21', '2026-04-20') });
+    mockApi.delete.mockResolvedValue(undefined);
+
+    render(<AlbumPanel />);
+    await screen.findByAltText('photo 0');
+    fireEvent.click(screen.getByText('album.select'));
+    // In selection mode a tile is picked rather than opened.
+    fireEvent.click(screen.getByAltText('photo 0'));
+    fireEvent.click(screen.getByAltText('photo 2'));
+    expect(screen.queryByRole('dialog', { name: 'album.photo' })).not.toBeInTheDocument();
+
+    const panel = screen.getByRole('dialog', { name: 'panel.album' });
+    const deletes = within(panel).getAllByLabelText('common.delete');
+    fireEvent.click(deletes[deletes.length - 1] as HTMLElement);
+    fireEvent.click(screen.getByText('album.deleteMany'));
+
+    await waitFor(() => expect(mockApi.delete).toHaveBeenCalledTimes(2));
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0');
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-2');
+    await waitFor(() => expect(screen.queryByAltText('photo 0')).not.toBeInTheDocument());
+    expect(screen.getByAltText('photo 1')).toBeInTheDocument();
   });
 });

@@ -18,9 +18,9 @@ export function Toaster() {
         <div
           key={item.id}
           data-leaving={item.leaving || undefined}
-          className={`toast-item pointer-events-auto flex max-w-[440px] items-center gap-1 rounded-2xl py-1.5 pl-1.5 pr-1.5 text-default shadow-lg ring-1 backdrop-blur ${
+          className={`toast-item pointer-events-auto flex max-w-[440px] items-center gap-1 rounded-[var(--radius-lg)] py-1.5 pl-1.5 pr-1.5 text-default shadow-lg ring-1 backdrop-blur ${
             item.tone === 'success'
-              ? 'bg-[var(--color-accent-bg)]/95 text-[var(--color-accent)] ring-[var(--color-accent)]/30'
+              ? 'bg-[var(--color-accent-bg)]/95 text-[var(--color-accent-ink)] ring-[var(--color-accent)]/30'
               : item.tone === 'error'
                 ? 'bg-[var(--color-danger-bg)]/95 text-[var(--color-danger)] ring-[var(--color-danger)]/30'
                 : 'bg-[var(--color-surface)]/95 text-[var(--color-text-primary)] ring-[var(--color-border)]'
@@ -73,7 +73,7 @@ export function Toaster() {
                 item.action?.run();
                 dismiss(item.id);
               }}
-              className="shrink-0 rounded-xl px-3 py-1.5 font-semibold text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-bg)] active:scale-95"
+              className="shrink-0 rounded-xl px-3 py-1.5 font-semibold text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-bg)] active:scale-95"
             >
               {item.action.label}
             </button>

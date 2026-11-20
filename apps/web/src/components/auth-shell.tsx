@@ -17,7 +17,9 @@ interface AuthShellProps {
  */
 export function AuthShell({ title, subtitle, children, footer }: AuthShellProps) {
   return (
-    <div className="app-bg relative flex min-h-screen items-center justify-center overflow-hidden">
+    // Scrolls itself: the body never does, and a short screen or an open
+    // keyboard leaves the form taller than the viewport.
+    <div className="app-bg relative h-full overflow-y-auto">
       {/* Atmospheric depth — drifting accent orbs + film grain (glass themes only) */}
       <div aria-hidden className="auth-atmosphere">
         <span className="auth-orb auth-orb-1" />
@@ -26,26 +28,28 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
         <span className="auth-grain" />
       </div>
 
-      <div className="relative z-10 w-full max-w-[420px] px-6">
-        <div className="auth-brand mb-8 text-center">
-          <BrandHero alt={title === undefined ? '' : APP_NAME} />
-          <h1
-            className={`auth-title mt-4 text-display font-bold tracking-tight text-[var(--color-text-primary)]${
-              title === undefined && APP_LOGO ? ' sr-only' : ''
-            }`}
-          >
-            {title ?? APP_NAME}
-          </h1>
-          {subtitle && (
-            <p className="mt-1.5 text-callout text-[var(--color-text-secondary)]">{subtitle}</p>
-          )}
-        </div>
+      <div className="relative z-10 flex min-h-full items-center justify-center py-8">
+        <div className="w-full max-w-[420px] px-6">
+          <div className="auth-brand mb-8 text-center">
+            <BrandHero alt={title === undefined ? '' : APP_NAME} />
+            <h1
+              className={`auth-title mt-4 text-display font-bold tracking-tight text-[var(--color-text-primary)]${
+                title === undefined && APP_LOGO ? ' sr-only' : ''
+              }`}
+            >
+              {title ?? APP_NAME}
+            </h1>
+            {subtitle && (
+              <p className="mt-1.5 text-callout text-[var(--color-text-secondary)]">{subtitle}</p>
+            )}
+          </div>
 
-        <div className="glass-surface-heavy auth-card rounded-3xl p-7 ring-1 ring-[var(--color-border)] sm:p-8">
-          {children}
-        </div>
+          <div className="glass-surface-heavy auth-card rounded-[var(--radius-xl)] p-7 ring-1 ring-[var(--color-border)] sm:p-8">
+            {children}
+          </div>
 
-        {footer && <div className="auth-footer mt-6 text-center text-default">{footer}</div>}
+          {footer && <div className="auth-footer mt-6 text-center text-default">{footer}</div>}
+        </div>
       </div>
     </div>
   );

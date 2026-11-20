@@ -274,7 +274,7 @@ function MonthWeekRowImpl({
               <div className="flex w-full items-center pl-0.5" style={{ height: metrics.dateRowH }}>
                 {today ? (
                   <span
-                    className={`today-badge flex items-center justify-center rounded-full bg-[var(--color-accent)] font-medium tabular-nums text-white ${style.dayNumber}`}
+                    className={`today-badge flex items-center justify-center rounded-full bg-[var(--color-accent)] font-medium tabular-nums text-[var(--color-text-on-accent)] ${style.dayNumber}`}
                   >
                     {dt.day}
                   </span>
@@ -295,7 +295,7 @@ function MonthWeekRowImpl({
                     tabIndex={-1}
                     aria-label={`${isoDate} ${t('event.createEvent')}`}
                     title={t('event.createEvent')}
-                    className="reveal-on-hover day-create pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)] hover:bg-[var(--color-accent-bg)]"
+                    className="reveal-on-hover day-create pointer-events-auto ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--color-accent-ink)] hover:bg-[var(--color-accent-bg)]"
                   >
                     <svg
                       aria-hidden
@@ -391,12 +391,14 @@ function MonthWeekRowImpl({
                         type="button"
                         onClick={() => onOverflowClick(dt)}
                         aria-label={t('calendar.moreEvents', { count: overflow })}
-                        className={`pointer-events-auto font-medium text-[var(--color-accent)] hover:underline ${style.overflow}`}
+                        className={`pointer-events-auto font-medium text-[var(--color-accent-ink)] hover:underline ${style.overflow}`}
                       >
                         +{overflow}
                       </button>
                     ) : (
-                      <span className={`font-medium text-[var(--color-accent)] ${style.overflow}`}>
+                      <span
+                        className={`font-medium text-[var(--color-accent-ink)] ${style.overflow}`}
+                      >
                         +{overflow}
                       </span>
                     ))}

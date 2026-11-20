@@ -51,6 +51,7 @@ function calendar(id: string, name: string): Calendar {
     color: '#3b82f6',
     createdAt: '2026-01-01T00:00:00+09:00',
     publicShared: false,
+    memberCount: 1,
     role: 'owner',
     memberColor: '#3b82f6',
   };

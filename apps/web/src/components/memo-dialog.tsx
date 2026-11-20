@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { ShareStateIcon } from '@/components/calendar-list';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
@@ -8,11 +9,52 @@ import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useCalendarStore } from '@/stores/calendar-store';
+import type { Calendar } from '@/types/calendar';
 
 interface MemoDialogProps {
   calendarId: string;
   memoId?: string | undefined;
   onClose: () => void;
+}
+
+/**
+ * The calendar a memo lives in, named with its colour and who can see it.
+ * Memos belong to a calendar rather than to the reader, so every place that
+ * lists or composes one says which calendar it is saved in.
+ */
+export function MemoCalendarTag({
+  calendar,
+  showHint = false,
+}: {
+  calendar: Pick<Calendar, 'name' | 'color' | 'memberCount'>;
+  showHint?: boolean;
+}) {
+  const t = useT();
+  const shared = calendar.memberCount > 1;
+  const hint = shared
+    ? t('panel.memoSharedHint', { name: calendar.name })
+    : t('panel.memoPrivateHint', { name: calendar.name });
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5 text-caption text-[var(--color-text-tertiary)]"
+      title={hint}
+    >
+      <span
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: calendar.color }}
+        aria-hidden="true"
+      />
+      <span className="truncate font-medium text-[var(--color-text-secondary)]">
+        {showHint ? hint : calendar.name}
+      </span>
+      {!showHint && (
+        <>
+          <ShareStateIcon shared={shared} />
+          <span className="sr-only">{hint}</span>
+        </>
+      )}
+    </span>
+  );
 }
 
 /** Create/edit dialog for a calendar memo (bottom sheet on mobile, modal on desktop). */
@@ -27,6 +69,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   const editing = memoId ? (memos.find((m) => m.id === memoId) ?? null) : null;
   // A reader may open a memo to read it; saving or deleting would only be refused.
   const editable = canEdit(roleOnCalendar(calendars, calendarId));
+  const calendar = calendars.find((c) => c.id === calendarId);
   const heading = !editable ? t('panel.memo') : editing ? t('memo.edit') : t('memo.add');
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalA11y<HTMLDivElement>(true, onClose);
@@ -152,6 +195,12 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           }}
         />
       </div>
+
+      {calendar && (
+        <div className="px-6 pb-3">
+          <MemoCalendarTag calendar={calendar} showHint />
+        </div>
+      )}
 
       <div className="mx-6 border-t border-[var(--color-border)]" />
 

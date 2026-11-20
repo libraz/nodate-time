@@ -61,7 +61,7 @@ export function ListView() {
         const weekday = dt.weekday % 7;
         const holiday = holidaysCountry ? getHoliday(holidaysCountry, dateStr) : null;
         const dayColor = today
-          ? 'today-badge bg-[var(--color-accent)] text-white'
+          ? 'today-badge bg-[var(--color-accent)] text-[var(--color-text-on-accent)]'
           : holiday || weekday === 0
             ? 'text-[var(--color-sunday)]'
             : weekday === 6

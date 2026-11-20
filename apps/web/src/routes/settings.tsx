@@ -216,7 +216,7 @@ function SettingsPage() {
               aria-current={tab === td.id ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-body font-medium transition ${
                 tab === td.id
-                  ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                  ? 'bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-sm'
                   : 'bg-[var(--color-surface-inset)] text-[var(--color-text-primary)]'
               }`}
             >
@@ -240,7 +240,7 @@ function SettingsPage() {
                 aria-current={tab === td.id ? 'page' : undefined}
                 className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
                   tab === td.id
-                    ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
+                    ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]'
                     : 'text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
                 }`}
               >
@@ -248,7 +248,7 @@ function SettingsPage() {
                   aria-hidden
                   className={`flex h-9 w-9 items-center justify-center rounded-xl ${
                     tab === td.id
-                      ? 'bg-[var(--color-accent)] text-white'
+                      ? 'bg-[var(--color-accent)] text-[var(--color-text-on-accent)]'
                       : 'bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]'
                   }`}
                 >
@@ -295,7 +295,7 @@ function Section({ title, description, children }: SectionProps) {
           <p className="mt-0.5 text-body text-[var(--color-text-secondary)]">{description}</p>
         )}
       </header>
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
         {children}
       </div>
     </section>
@@ -435,7 +435,7 @@ export function ProfileSection() {
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <span className="flex h-full w-full items-center justify-center bg-[var(--color-accent)] text-hero font-bold text-white">
+              <span className="flex h-full w-full items-center justify-center bg-[var(--color-accent)] text-hero font-bold text-[var(--color-text-on-accent)]">
                 {name ? name.slice(0, 1) : '\u{1F464}'}
               </span>
             )}
@@ -450,7 +450,7 @@ export function ProfileSection() {
                 type="button"
                 onClick={() => avatarInputRef.current?.click()}
                 disabled={avatarBusy}
-                className="text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+                className="text-caption text-[var(--color-accent-ink)] hover:underline disabled:opacity-50"
               >
                 {t('profile.avatar')}
               </button>
@@ -682,7 +682,7 @@ function SessionRow({ session: s, onRevoke }: { session: SessionData; onRevoke: 
             {name}
           </span>
           {s.current && (
-            <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+            <span className="shrink-0 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent-ink)]">
               {t('sessions.current')}
             </span>
           )}
@@ -997,7 +997,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
                       type="button"
                       onClick={() => coverInputRef.current?.click()}
                       disabled={coverBusy}
-                      className="text-caption text-[var(--color-accent)] hover:underline disabled:opacity-50"
+                      className="text-caption text-[var(--color-accent-ink)] hover:underline disabled:opacity-50"
                     >
                       {t(
                         hasCover ? 'settings.calendarCoverReplace' : 'settings.calendarCoverUpload',
@@ -1154,7 +1154,7 @@ export function CalendarsSection() {
                     <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
                       {m.name}
                       {isMe && (
-                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent-ink)]">
                           {t('members.you')}
                         </span>
                       )}
@@ -1281,7 +1281,7 @@ export function CalendarsSection() {
                     <button
                       type="button"
                       onClick={() => copyInvite(inv.token as string)}
-                      className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent)] transition hover:bg-[var(--color-accent-bg)]"
+                      className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent-ink)] transition hover:bg-[var(--color-accent-bg)]"
                     >
                       {t('invites.copy')}
                     </button>
@@ -1687,7 +1687,7 @@ export function AllowedEmailsSection() {
           placeholder={t('settings.adminAllowedEmailsNotePlaceholder')}
           className="input-modern min-w-[160px] flex-1"
         />
-        <button type="submit" disabled={saving} className="btn-primary rounded-xl px-4">
+        <button type="submit" disabled={saving} className="btn-primary px-4">
           {t('settings.adminAllowedEmailsAdd')}
         </button>
       </form>
@@ -1778,7 +1778,7 @@ function ProviderCard({
 
   const sourceBadge =
     info.source === 'db' ? (
-      <span className="rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent)]">
+      <span className="rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent-ink)]">
         DB
       </span>
     ) : info.source === 'env' ? (
@@ -1800,7 +1800,7 @@ function ProviderCard({
             <span
               className={`rounded-full px-2 py-0.5 text-caption font-medium ${
                 info.enabled
-                  ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]'
+                  ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]'
                   : 'bg-[var(--color-surface-inset)] text-[var(--color-text-tertiary)]'
               }`}
             >
@@ -1870,7 +1870,7 @@ function ProviderCard({
             <button
               type="button"
               onClick={() => setEditingSecret(true)}
-              className="text-footnote font-medium text-[var(--color-accent)] hover:underline"
+              className="text-footnote font-medium text-[var(--color-accent-ink)] hover:underline"
             >
               {t('settings.adminProviderReplaceSecret')}
             </button>

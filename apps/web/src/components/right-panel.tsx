@@ -2,7 +2,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { LabelledButton } from '@/components/labelled-button';
-import { MemoDialog } from '@/components/memo-dialog';
+import { MemoCalendarTag, MemoDialog } from '@/components/memo-dialog';
 import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
@@ -147,7 +147,7 @@ export function SettingsModal() {
                 toggleSettings();
                 navigate({ to: '/settings' });
               }}
-              className="flex w-full items-center justify-between rounded-lg py-1.5 text-body text-[var(--color-accent)] hover:opacity-80"
+              className="flex w-full items-center justify-between rounded-lg py-1.5 text-body text-[var(--color-accent-ink)] hover:opacity-80"
             >
               {t('settings.openAll')}
               <svg
@@ -186,13 +186,19 @@ export function MemoSection() {
   const { options: postableCalendars, target, setTargetId } = usePanelCalendar(postable);
   const editable = target !== null;
 
-  // Show only memos from the calendars currently active in the sidebar.
-  const visibleMemos = useMemo(
-    () => memos.filter((m) => activeCalendarIds.includes(m.calendarId)),
-    [memos, activeCalendarIds],
+  // Memos belong to a calendar, not to the reader: group the visible ones under
+  // the calendar they are shared in, in sidebar order.
+  const memoGroups = useMemo(
+    () =>
+      calendars
+        .filter((c) => activeCalendarIds.includes(c.id))
+        .map((calendar) => ({
+          calendar,
+          memos: memos.filter((m) => m.calendarId === calendar.id),
+        }))
+        .filter((g) => g.memos.length > 0),
+    [calendars, memos, activeCalendarIds],
   );
-  const calendarById = useMemo(() => new Map(calendars.map((c) => [c.id, c])), [calendars]);
-  const showCalendarTag = activeCalendarIds.length > 1;
 
   const handleToggle = async (memo: Memo) => {
     if (!editable) return;
@@ -216,9 +222,9 @@ export function MemoSection() {
     <div className="flex h-full flex-col">
       {editable && target && (
         <div className="space-y-2 px-5 py-4">
-          {postableCalendars.length > 1 && (
-            <div className="flex items-center gap-2 text-caption text-[var(--color-text-secondary)]">
-              <span className="shrink-0">{t('panel.postTo')}</span>
+          <div className="flex items-center gap-2 text-caption text-[var(--color-text-secondary)]">
+            <span className="shrink-0">{t('panel.postTo')}</span>
+            {postableCalendars.length > 1 ? (
               <CustomSelect
                 value={target.id}
                 onChange={setTargetId}
@@ -231,12 +237,14 @@ export function MemoSection() {
                   color: c.color,
                 }))}
               />
-            </div>
-          )}
+            ) : (
+              <MemoCalendarTag calendar={target} />
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setDialog({ calendarId: target.id })}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-caption font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-bg)]"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2.5 py-1.5 text-caption font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-accent-bg)]"
           >
             <svg
               width="14"
@@ -254,7 +262,7 @@ export function MemoSection() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
-        {visibleMemos.length === 0 ? (
+        {memoGroups.length === 0 ? (
           <EmptyState
             compact
             icon={GUIDE_ICONS.memo}
@@ -262,110 +270,109 @@ export function MemoSection() {
             description={t('empty.memosDesc')}
           />
         ) : (
-          visibleMemos.map((memo) => {
-            const memoCal = calendarById.get(memo.calendarId);
-            const memoEditable = canEdit(memoCal?.role);
-            const rowContent = (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggle(memo);
-                  }}
-                  disabled={!memoEditable}
-                  aria-pressed={memo.done}
-                  aria-label={memo.done ? t('memo.markUndone') : t('memo.markDone')}
-                  title={memo.done ? t('memo.markUndone') : t('memo.markDone')}
-                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full disabled:opacity-60"
-                >
-                  {memo.done ? (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="12" r="9" fill="var(--color-accent)" />
-                      <path
-                        d="M8 12l3 3 5-5"
-                        stroke="var(--color-text-on-accent)"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  ) : (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                      <circle
-                        cx="12"
-                        cy="12"
-                        r="9"
-                        stroke="var(--color-text-tertiary)"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDialog({ calendarId: memo.calendarId, memoId: memo.id })}
-                  className="flex min-w-0 flex-1 flex-col gap-0.5 text-left transition-colors"
-                >
-                  <span
-                    className="truncate text-default"
-                    style={{
-                      textDecoration: memo.done ? 'line-through' : 'none',
-                      color: memo.done ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
-                    }}
-                  >
-                    {memo.title}
-                  </span>
-                  {memo.body?.trim() && (
-                    <span className="truncate text-caption text-[var(--color-text-tertiary)]">
-                      {memo.body}
-                    </span>
-                  )}
-                  {showCalendarTag && memoCal && (
-                    <span className="flex items-center gap-1.5 text-caption text-[var(--color-text-tertiary)]">
-                      <span
-                        className="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: memoCal.color }}
-                      />
-                      <span className="truncate">{memoCal.name}</span>
-                    </span>
-                  )}
-                </button>
-                {memoEditable && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(memo);
-                    }}
-                    aria-label={t('common.delete')}
-                    title={t('common.delete')}
-                    className="flex h-[26px] w-[26px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
-                    style={{ borderRadius: 'var(--radius-sm)' }}
-                  >
-                    <svg
-                      width="15"
-                      height="15"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                    </svg>
-                  </button>
-                )}
-              </>
-            );
-            return (
-              <div
-                key={memo.id}
-                className="flex w-full items-center gap-3 border-b border-[var(--color-border)]/50 px-5 py-3.5 transition-colors hover:bg-[var(--color-hover)]"
-              >
-                {rowContent}
+          memoGroups.map(({ calendar: memoCal, memos: groupMemos }) => (
+            <section key={memoCal.id} aria-label={memoCal.name}>
+              <div className="px-5 pt-3 pb-1.5">
+                <MemoCalendarTag calendar={memoCal} />
               </div>
-            );
-          })
+              {groupMemos.map((memo) => {
+                const memoEditable = canEdit(memoCal.role);
+                const rowContent = (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggle(memo);
+                      }}
+                      disabled={!memoEditable}
+                      aria-pressed={memo.done}
+                      aria-label={memo.done ? t('memo.markUndone') : t('memo.markDone')}
+                      title={memo.done ? t('memo.markUndone') : t('memo.markDone')}
+                      className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full disabled:opacity-60"
+                    >
+                      {memo.done ? (
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="9" fill="var(--color-accent)" />
+                          <path
+                            d="M8 12l3 3 5-5"
+                            stroke="var(--color-text-on-accent)"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ) : (
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                          <circle
+                            cx="12"
+                            cy="12"
+                            r="9"
+                            stroke="var(--color-text-tertiary)"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDialog({ calendarId: memo.calendarId, memoId: memo.id })}
+                      className="flex min-w-0 flex-1 flex-col gap-0.5 text-left transition-colors"
+                    >
+                      <span
+                        className="truncate text-default"
+                        style={{
+                          textDecoration: memo.done ? 'line-through' : 'none',
+                          color: memo.done
+                            ? 'var(--color-text-tertiary)'
+                            : 'var(--color-text-primary)',
+                        }}
+                      >
+                        {memo.title}
+                      </span>
+                      {memo.body?.trim() && (
+                        <span className="truncate text-caption text-[var(--color-text-tertiary)]">
+                          {memo.body}
+                        </span>
+                      )}
+                    </button>
+                    {memoEditable && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(memo);
+                        }}
+                        aria-label={t('common.delete')}
+                        title={t('common.delete')}
+                        className="flex h-[26px] w-[26px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                        style={{ borderRadius: 'var(--radius-sm)' }}
+                      >
+                        <svg
+                          width="15"
+                          height="15"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                        </svg>
+                      </button>
+                    )}
+                  </>
+                );
+                return (
+                  <div
+                    key={memo.id}
+                    className="flex w-full items-center gap-3 border-b border-[var(--color-border)]/50 px-5 py-3.5 transition-colors hover:bg-[var(--color-hover)]"
+                  >
+                    {rowContent}
+                  </div>
+                );
+              })}
+            </section>
+          ))
         )}
       </div>
       {dialog && (

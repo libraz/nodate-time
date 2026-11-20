@@ -55,14 +55,14 @@ function ForgotPasswordPage() {
       title={t('auth.forgotPasswordTitle')}
       subtitle={t('auth.forgotPasswordDescription')}
       footer={
-        <Link to="/login" className="text-[var(--color-accent)] hover:underline">
+        <Link to="/login" className="text-[var(--color-accent-ink)] hover:underline">
           {t('auth.backToLogin')}
         </Link>
       }
     >
       {done ? (
         <output aria-live="polite" className="flex flex-col items-center gap-3 py-4 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent-bg)] text-[var(--color-accent)]">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
                 d="M3 8l9 6 9-6M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"
@@ -106,7 +106,7 @@ function ForgotPasswordPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="btn-primary mt-6 w-full rounded-xl text-subhead"
+            className="btn-primary mt-6 w-full text-subhead"
           >
             {submitting ? '...' : t('auth.sendResetEmail')}
           </button>

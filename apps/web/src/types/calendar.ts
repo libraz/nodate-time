@@ -9,6 +9,8 @@ export interface Calendar {
   createdAt: string;
   /** True when an active public (read-only embed) link exposes this calendar externally. */
   publicShared: boolean;
+  /** Members including the signed-in user; 1 means only they see it. */
+  memberCount: number;
   /** The signed-in user's own role on this calendar, as the server resolved
    *  it to answer the request. */
   role: string;
@@ -120,7 +122,7 @@ export type Visibility = 'default' | 'public' | 'private' | 'confidential';
 
 /** The option sets shown in pickers, in the order they read best. */
 export const VISIBILITY_OPTIONS: Visibility[] = ['default', 'public', 'private', 'confidential'];
-export const SHOW_AS_OPTIONS: ShowAs[] = ['busy', 'free', 'tentative', 'oof'];
+export const SHOW_AS_OPTIONS: ShowAs[] = ['busy', 'tentative', 'free', 'oof'];
 
 export type Rsvp = 'pending' | 'accepted' | 'declined' | 'tentative';
 

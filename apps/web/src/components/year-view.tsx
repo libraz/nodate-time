@@ -79,7 +79,7 @@ export function YearView() {
                 setCalendarView('month');
               }}
               style={{ animationDelay: `${m * 0.03}s` }}
-              className={`year-card flex flex-col gap-1.5 rounded-2xl border bg-[var(--color-surface)] p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-[var(--color-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+              className={`year-card flex flex-col gap-1.5 rounded-[var(--radius-lg)] border bg-[var(--color-surface)] p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-[var(--color-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                 monthHasToday ? 'border-[var(--color-accent)]/50' : 'border-[var(--color-border)]'
               }`}
             >
@@ -87,7 +87,7 @@ export function YearView() {
                 <span
                   className={`text-callout font-semibold ${
                     monthHasToday
-                      ? 'text-[var(--color-accent)]'
+                      ? 'text-[var(--color-accent-ink)]'
                       : 'text-[var(--color-text-primary)]'
                   }`}
                 >
@@ -129,7 +129,7 @@ export function YearView() {
                       key={isoDate}
                       className="relative flex h-7 items-center justify-center text-caption font-medium tabular-nums"
                       style={{
-                        color: today ? 'white' : color,
+                        color: today ? 'var(--color-text-on-accent)' : color,
                         opacity: inMonth ? 1 : 0.28,
                       }}
                     >
@@ -145,7 +145,7 @@ export function YearView() {
                         <span
                           aria-hidden
                           className="absolute bottom-0.5 flex gap-0.5"
-                          style={{ color: 'var(--color-accent)' }}
+                          style={{ color: 'var(--color-accent-ink)' }}
                         >
                           {Array.from(
                             { length: Math.min(count, 3) },

@@ -94,7 +94,7 @@ export function SharedCalendarView() {
   if (shownFailure) {
     return (
       <div className="app-bg flex min-h-screen items-center justify-center">
-        <div className="glass-surface auth-card rounded-2xl px-8 py-12 text-center">
+        <div className="glass-surface auth-card rounded-[var(--radius-xl)] px-8 py-12 text-center">
           <svg
             className="mx-auto mb-4 h-12 w-12 text-[var(--color-text-tertiary)]"
             viewBox="0 0 24 24"
@@ -147,7 +147,7 @@ export function SharedCalendarView() {
 
   return (
     <div className="app-bg flex min-h-screen flex-col">
-      <div className="auth-card mx-auto flex w-full max-w-[680px] flex-1 flex-col overflow-hidden sm:my-6 sm:flex-initial sm:rounded-3xl sm:shadow-xl sm:ring-1 sm:ring-[var(--color-border)]">
+      <div className="auth-card mx-auto flex w-full max-w-[680px] flex-1 flex-col overflow-hidden sm:my-6 sm:flex-initial sm:rounded-[var(--radius-xl)] sm:shadow-xl sm:ring-1 sm:ring-[var(--color-border)]">
         {/* Header */}
         <header
           className="flex items-center justify-between px-4 py-3 text-white shadow-sm sm:px-6"
@@ -340,7 +340,7 @@ export function SharedCalendarView() {
               type="button"
               onClick={handleJoin}
               disabled={joining}
-              className="btn-primary h-11 w-full rounded-xl text-callout font-bold"
+              className="btn-primary h-11 w-full text-callout font-bold"
             >
               {joining ? t('share.joining') : t('share.joinCalendar')}
             </button>

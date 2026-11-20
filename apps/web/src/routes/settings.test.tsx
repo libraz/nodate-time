@@ -53,6 +53,7 @@ function calendar(role: string): Calendar {
     color: '#000',
     createdAt: '',
     publicShared: false,
+    memberCount: 1,
     role,
     memberColor: '#000',
     coverUploadAllowed: false,

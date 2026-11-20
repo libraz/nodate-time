@@ -54,3 +54,18 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
   writable: true,
 });
+
+// jsdom does not implement IntersectionObserver; nothing intersects in it.
+class NoopIntersectionObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+Object.defineProperty(globalThis, 'IntersectionObserver', {
+  value: NoopIntersectionObserver,
+  configurable: true,
+  writable: true,
+});

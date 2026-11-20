@@ -197,7 +197,7 @@ function LoginPage() {
             <button
               type="button"
               onClick={switchMode}
-              className="ml-1 font-semibold text-[var(--color-accent)] hover:underline"
+              className="ml-1 font-semibold text-[var(--color-accent-ink)] hover:underline"
             >
               {mode === 'login' ? t('auth.newRegistration') : t('auth.login')}
             </button>
@@ -234,7 +234,7 @@ function LoginPage() {
                   {t('auth.name')}
                 </label>
                 <div className="group relative">
-                  <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent)]">
+                  <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent-ink)]">
                     <UserIcon />
                   </span>
                   <input
@@ -259,7 +259,7 @@ function LoginPage() {
                 {t('auth.email')}
               </label>
               <div className="group relative">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent)]">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent-ink)]">
                   <MailIcon />
                 </span>
                 <input
@@ -283,7 +283,7 @@ function LoginPage() {
                 {t('auth.password')}
               </label>
               <div className="group relative">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent)]">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] transition-colors group-focus-within:text-[var(--color-accent-ink)]">
                   <LockIcon />
                 </span>
                 <input
@@ -312,7 +312,7 @@ function LoginPage() {
               <div className="mb-4 text-right">
                 <Link
                   to="/forgot-password"
-                  className="text-body text-[var(--color-accent)] hover:underline"
+                  className="text-body text-[var(--color-accent-ink)] hover:underline"
                 >
                   {t('auth.forgotPassword')}
                 </Link>
@@ -323,7 +323,7 @@ function LoginPage() {
               type="submit"
               disabled={isLoading}
               style={{ animationDelay: '0.28s' }}
-              className="auth-field btn-primary mt-2 w-full rounded-xl text-subhead"
+              className="auth-field btn-primary mt-2 w-full text-subhead"
             >
               {isLoading ? (
                 <span className="auth-spinner" aria-hidden />
@@ -394,7 +394,7 @@ function LoginPage() {
       </form>
 
       {import.meta.env.DEV && (
-        <div className="auth-footer mt-5 rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-inset)] p-3.5">
+        <div className="auth-footer mt-5 rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-inset)] p-3.5">
           <div className="mb-2.5 flex items-center justify-center gap-2 text-footnote font-medium text-[var(--color-text-tertiary)]">
             <span className="rounded-md border border-[var(--color-border-strong)] px-1.5 py-px text-micro font-bold uppercase tracking-wider text-[var(--color-text-secondary)]">
               Dev
@@ -406,7 +406,7 @@ function LoginPage() {
               type="button"
               onClick={() => devLogin('demo@example.com').catch(() => {})}
               disabled={isLoading}
-              className="flex h-[42px] items-center justify-center rounded-xl border border-transparent bg-[var(--color-accent-bg)] text-default font-semibold text-[var(--color-accent)] transition-all hover:bg-[var(--color-accent-subtle)] active:scale-[0.98] disabled:opacity-50"
+              className="flex h-[42px] items-center justify-center rounded-xl border border-transparent bg-[var(--color-accent-bg)] text-default font-semibold text-[var(--color-accent-ink)] transition-all hover:bg-[var(--color-accent-subtle)] active:scale-[0.98] disabled:opacity-50"
             >
               {t('auth.demoLogin')}
             </button>

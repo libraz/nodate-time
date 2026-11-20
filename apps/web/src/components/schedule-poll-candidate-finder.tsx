@@ -289,7 +289,7 @@ export function SchedulePollCandidateFinder({
             <>
               <p
                 role="status"
-                className={`mb-2.5 text-footnote font-semibold tabular-nums ${selected.length > 0 ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)]'}`}
+                className={`mb-2.5 text-footnote font-semibold tabular-nums ${selected.length > 0 ? 'text-[var(--color-accent-ink)]' : 'text-[var(--color-text-tertiary)]'}`}
               >
                 {t('schedulePoll.selectedCandidates', { count: selected.length })}
               </p>

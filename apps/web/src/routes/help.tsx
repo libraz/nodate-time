@@ -146,7 +146,7 @@ function HelpPage() {
                     aria-current={hash === s.id ? 'location' : undefined}
                     className={`block rounded-xl px-3 py-2 text-default transition ${
                       hash === s.id
-                        ? 'bg-[var(--color-accent-bg)] font-semibold text-[var(--color-accent)]'
+                        ? 'bg-[var(--color-accent-bg)] font-semibold text-[var(--color-accent-ink)]'
                         : 'text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
                     }`}
                   >
@@ -177,7 +177,7 @@ function HelpPage() {
                 <h2 className="mb-3 text-subhead font-semibold text-[var(--color-text-primary)]">
                   {t(s.title)}
                 </h2>
-                <div className="space-y-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+                <div className="space-y-5 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
                   {s.blocks.map((block, i) => (
                     // Blocks are a fixed list; their position is their identity.
                     // biome-ignore lint/suspicious/noArrayIndexKey: static content

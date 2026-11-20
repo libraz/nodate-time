@@ -1305,7 +1305,7 @@ function SchedulePollDetailPage() {
 const SECONDARY_ACTION =
   'inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-surface-inset)] px-3.5 text-footnote font-semibold text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]';
 const ACCENT_ACTION =
-  'inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-bg)] px-3.5 text-footnote font-semibold text-[var(--color-accent)] transition hover:bg-[var(--color-accent-subtle)]';
+  'inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-accent-bg)] px-3.5 text-footnote font-semibold text-[var(--color-accent-ink)] transition hover:bg-[var(--color-accent-subtle)]';
 
 function BestTag() {
   const t = useT();

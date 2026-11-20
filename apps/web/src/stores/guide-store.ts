@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { loadJson, saveJson } from '@/lib/storage';
 
 /** Contextual tips, each shown once until dismissed. */
-export type TipId = 'guide' | 'members' | 'share' | 'memo' | 'album' | 'polls';
+export type TipId = 'guide' | 'members' | 'share' | 'memo' | 'album' | 'polls' | 'event';
 
 interface GuideRecord {
   wizardDone: boolean;

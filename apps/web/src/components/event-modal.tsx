@@ -1,38 +1,28 @@
 import { DateTime } from 'luxon';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { AttachmentsSection } from '@/components/event-attachments';
+import { ChecklistSection } from '@/components/event-checklist';
+import { CommentsSection } from '@/components/event-comments';
+import { EventPeople, ShowAsPicker } from '@/components/event-people';
+import { RecurrenceEditor } from '@/components/event-recurrence';
+import { TipCard } from '@/components/guide';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { Switch } from '@/components/switch';
-import { type Locale, type TranslationKey, useT } from '@/i18n';
+import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, api, errorMessage } from '@/lib/api';
-import { formatRelativeTime, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import { seriesId } from '@/lib/event-move';
 import {
   eventTimesForSave,
   recurrenceAnchorStart,
   shiftStartKeepingDuration,
 } from '@/lib/event-times';
-import {
-  canDeleteComment,
-  canEdit,
-  canEditComment,
-  canEditEvent,
-  roleOnCalendar,
-  showAsLabelKey,
-  visibilityLabelKey,
-} from '@/lib/permissions';
-import {
-  getNthWeekday,
-  rebuildPresetRule,
-  ruleToPreset,
-  UI_WEEK_START,
-  WEEKDAY_CODES,
-} from '@/lib/recurrence-preset';
+import { canEdit, canEditEvent, roleOnCalendar, visibilityLabelKey } from '@/lib/permissions';
+import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
 import { toast } from '@/lib/toast';
-import { uploadViaPresign } from '@/lib/upload';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useAuthStore } from '@/stores/auth-store';
@@ -40,9 +30,6 @@ import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type {
   CalendarEvent,
-  ChecklistItem,
-  EventAttachment,
-  EventComment,
   Flexibility,
   RecurrencePreset,
   RecurrenceRule,
@@ -54,37 +41,12 @@ import {
   FALLBACK_LABEL_COLOR,
   NOTIFICATION_OFFSETS,
   normalizeNotificationOffset,
-  SHOW_AS_OPTIONS,
   VISIBILITY_OPTIONS,
 } from '@/types/calendar';
 
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
 function toLocalDatetime(iso: string, zone: string): string {
   return toLocalDatetimeInput(iso, zone);
-}
-
-export function eventCommentText(comment: EventComment): string {
-  return comment.body;
-}
-
-const WEEKDAY_NAMES_EN = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
-/**
- * The weekday as a recurrence sentence names it ("every Tuesday", "the 3rd
- * Tuesday"). English spells the day out where the calendar's own headings
- * abbreviate it; every other locale reads the same as those headings, so it
- * takes the shared label rather than a table of its own.
- */
-function weekdayName(dayIndex: number, locale: Locale): string {
-  return locale === 'en' ? (WEEKDAY_NAMES_EN[dayIndex] ?? '') : getWeekdayLabel(dayIndex, locale);
 }
 
 /**
@@ -104,718 +66,6 @@ function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): Recurre
     next.until = end.toISO() ?? next.until;
   }
   return next;
-}
-
-export function recurrenceUntilDateValue(until: string, zone: string): DateTime {
-  return DateTime.fromISO(until, { zone });
-}
-
-export function clampRecurrenceUntilDate(date: DateTime, startAt: string, zone: string): DateTime {
-  const min = DateTime.fromISO(startAt, { zone }).startOf('day');
-  return date < min ? min : date;
-}
-
-function recurrenceLabel(
-  rule: RecurrenceRule | null,
-  dt: DateTime,
-  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
-  locale: Locale,
-): string {
-  if (!rule) return t('event.recurrenceNone');
-  const preset = ruleToPreset(rule, dt);
-  const dayLabel = weekdayName(jsDayOfWeek(dt), locale);
-  switch (preset) {
-    case 'daily':
-      return t('event.recurrenceDaily');
-    case 'weekly':
-      return t('event.recurrenceWeekly', { day: dayLabel });
-    case 'weekdays':
-      return t('event.recurrenceWeekdays');
-    case 'monthly_nth':
-      return t('event.recurrenceMonthlyNth', { n: getNthWeekday(dt), day: dayLabel });
-    case 'monthly_date':
-      return t('event.recurrenceMonthlyDate', { date: dt.day });
-    case 'yearly':
-      return t('event.recurrenceYearly');
-    default:
-      // Custom: build a descriptive label
-      if (rule.interval > 1) {
-        const freqMap: Record<string, TranslationKey> = {
-          daily: 'event.unitDay',
-          weekly: 'event.unitWeek',
-          monthly: 'event.unitMonth',
-          yearly: 'event.unitYear',
-        };
-        const unitKey = freqMap[rule.freq] ?? 'event.unitDay';
-        return `${rule.interval} ${t(unitKey)}`;
-      }
-      return t('event.recurrenceCustom');
-  }
-}
-
-function CommentsSection({
-  calendarId,
-  eventId,
-  canPost,
-  moderatorRole,
-}: {
-  calendarId: string;
-  eventId: string;
-  /**
-   * Whether the viewer may add to the thread. This follows writing to the
-   * calendar, not editing this event: commenting on somebody else's plan is
-   * what a shared calendar is for, so it is deliberately wider than the
-   * event-level grant that governs the form above.
-   */
-  canPost: boolean;
-  /** The viewer's role on the calendar, which decides who may touch a comment. */
-  moderatorRole: string | undefined;
-}) {
-  const t = useT();
-  const locale = useUiStore((s) => s.locale);
-  const user = useAuthStore((s) => s.user);
-  const [comments, setComments] = useState<EventComment[]>([]);
-  const [newComment, setNewComment] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
-  // A thread that could not be read is reported in place of the list: a toast
-  // would be gone by the time the reader reaches this far down the modal, and
-  // an empty section otherwise reads as "no comments yet".
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // Set while there are older comments than the ones on screen. They are
-  // fetched on request rather than up front: a long-running event's thread is
-  // unbounded, and the newest is what someone opening the event is after.
-  const [olderCursor, setOlderCursor] = useState('');
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const listEndRef = useRef<HTMLDivElement>(null);
-  const mayEdit = (c: EventComment) => canEditComment(c, moderatorRole, user?.id);
-  const mayDelete = (c: EventComment) => canDeleteComment(c, moderatorRole, user?.id);
-
-  const fetchComments = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      // The thread is paged: the first page is the newest run of comments,
-      // already oldest-first within itself, and the cursor reaches the older
-      // ones before it.
-      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
-        `/calendars/${calendarId}/events/${eventId}/activities`,
-      );
-      setComments(page.items ?? []);
-      setOlderCursor(page.nextCursor ?? '');
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(errorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [calendarId, eventId]);
-
-  // Older comments go in front of what is already shown, because that is where
-  // they belong in the reading order.
-  const loadOlderComments = useCallback(async () => {
-    if (!olderCursor || loadingOlder) return;
-    setLoadingOlder(true);
-    try {
-      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
-        `/calendars/${calendarId}/events/${eventId}/activities?cursor=${encodeURIComponent(olderCursor)}`,
-      );
-      setComments((cur) => [...(page.items ?? []), ...cur]);
-      setOlderCursor(page.nextCursor ?? '');
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [calendarId, eventId, olderCursor, loadingOlder]);
-
-  useEffect(() => {
-    fetchComments();
-  }, [fetchComments]);
-
-  const prevCountRef = useRef(0);
-  useEffect(() => {
-    if (comments.length > prevCountRef.current) {
-      listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-    prevCountRef.current = comments.length;
-  });
-
-  const handleSend = async () => {
-    const content = newComment.trim();
-    if (!content || isSending) return;
-    setIsSending(true);
-    try {
-      await api.post(`/calendars/${calendarId}/events/${eventId}/activities`, { content });
-      setNewComment('');
-      await fetchComments();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const saveEdit = async (commentId: string) => {
-    try {
-      await api.put(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`, {
-        content: editContent,
-      });
-    } catch (err) {
-      toast.error(errorMessage(err));
-      return;
-    }
-    setEditingId(null);
-    await fetchComments();
-  };
-
-  return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.comments')}
-        </span>
-      </div>
-
-      {isLoading && comments.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
-          {t('common.loading')}
-        </p>
-      )}
-
-      {loadError && comments.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
-      )}
-
-      {!isLoading && !loadError && comments.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
-          {t('event.noComments')}
-        </p>
-      )}
-
-      {comments.length > 0 && (
-        <div className="mb-3 max-h-[240px] space-y-3 overflow-y-auto">
-          {olderCursor && (
-            <button
-              type="button"
-              onClick={loadOlderComments}
-              disabled={loadingOlder}
-              className="w-full py-1 text-center text-footnote text-[var(--color-text-secondary)]"
-            >
-              {loadingOlder ? t('common.loading') : t('event.loadEarlierComments')}
-            </button>
-          )}
-          {comments.map((c) => (
-            <div key={c.id} className="group flex gap-2">
-              <Avatar src={c.userAvatar} name={c.userName} className="mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-body font-medium text-[var(--color-text-primary)]">
-                    {c.userName}
-                  </span>
-                  <span className="text-caption text-[var(--color-text-tertiary)]">
-                    {formatRelativeTime(c.createdAt, locale)}
-                  </span>
-                  {editingId !== c.id && (mayEdit(c) || mayDelete(c)) && (
-                    <span className="reveal-on-hover flex gap-1">
-                      {mayEdit(c) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingId(c.id);
-                            setEditContent(eventCommentText(c));
-                          }}
-                          className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
-                        >
-                          {t('event.editComment')}
-                        </button>
-                      )}
-                      {mayDelete(c) && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await api.delete(
-                                `/calendars/${calendarId}/events/${eventId}/activities/${c.id}`,
-                              );
-                            } catch (err) {
-                              toast.error(errorMessage(err));
-                              return;
-                            }
-                            fetchComments();
-                          }}
-                          className="text-caption text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-                        >
-                          {t('event.deleteComment')}
-                        </button>
-                      )}
-                    </span>
-                  )}
-                </div>
-                {editingId === c.id ? (
-                  <div className="mt-1 flex gap-1">
-                    <input
-                      data-1p-ignore
-                      type="text"
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-body text-[var(--color-text-primary)] outline-none"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveEdit(c.id);
-                        if (e.key === 'Escape') {
-                          // Leaving the edit box is all this Escape means; let
-                          // it reach the modal and the whole editor would close.
-                          e.stopPropagation();
-                          setEditingId(null);
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => saveEdit(c.id)}
-                      className="bg-[var(--color-accent)] px-2 py-1 text-caption text-white"
-                      style={{ borderRadius: 'var(--radius-sm)' }}
-                    >
-                      {t('event.saveComment')}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-default text-[var(--color-text-primary)]">
-                    {eventCommentText(c)}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-          <div ref={listEndRef} />
-        </div>
-      )}
-
-      {canPost && (
-        <div className="flex items-center gap-2">
-          <input
-            data-1p-ignore
-            type="text"
-            value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={t('event.commentPlaceholder')}
-            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-            style={{ borderRadius: 'var(--radius-sm)' }}
-          />
-          <LabelledButton
-            label={t('event.send')}
-            onClick={handleSend}
-            disabled={!newComment.trim() || isSending}
-            className="icon-btn h-10 w-10 shrink-0 bg-[var(--color-accent)] disabled:opacity-40"
-            style={{ borderRadius: 'var(--radius-sm)' }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-          </LabelledButton>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChecklistSection({
-  calendarId,
-  eventId,
-  editable,
-}: {
-  calendarId: string;
-  eventId: string;
-  editable: boolean;
-}) {
-  const t = useT();
-  const [items, setItems] = useState<ChecklistItem[]>([]);
-  const [newTitle, setNewTitle] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  // A list that could not be read says so where the list would be, rather than
-  // passing for an event that simply has no checklist.
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const fetchItems = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const data = await api.get<ChecklistItem[]>(
-        `/calendars/${calendarId}/events/${eventId}/checklist`,
-      );
-      setItems(data);
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(errorMessage(err));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [calendarId, eventId]);
-
-  useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
-
-  const handleAdd = async () => {
-    const title = newTitle.trim();
-    if (!title) return;
-    try {
-      await api.post(`/calendars/${calendarId}/events/${eventId}/checklist`, {
-        title,
-        sortOrder: items.length,
-      });
-      setNewTitle('');
-      await fetchItems();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
-  const handleToggle = async (item: ChecklistItem) => {
-    try {
-      // Only done: a title or position read earlier would revert another
-      // member's rename or reorder made since.
-      await api.put(`/calendars/${calendarId}/events/${eventId}/checklist/${item.id}`, {
-        done: !item.done,
-      });
-      await fetchItems();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/checklist/${id}`);
-      await fetchItems();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
-  return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M9 11l3 3L22 4" />
-          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.checklist')}
-        </span>
-      </div>
-
-      {isLoading && items.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
-          {t('common.loading')}
-        </p>
-      )}
-
-      {loadError && items.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
-      )}
-
-      {items.length > 0 && (
-        <div className="mb-3 space-y-1">
-          {items.map((item) => (
-            <div key={item.id} className="group flex items-center gap-2">
-              <LabelledButton
-                label={item.title}
-                pressed={item.done}
-                onClick={() => handleToggle(item)}
-                disabled={!editable}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border)] disabled:cursor-default"
-                style={{
-                  backgroundColor: item.done ? 'var(--color-accent)' : 'transparent',
-                  borderColor: item.done ? 'var(--color-accent)' : undefined,
-                }}
-              >
-                {item.done && (
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth="3"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                )}
-              </LabelledButton>
-              <span
-                className="flex-1 text-default"
-                style={{
-                  color: item.done ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
-                  textDecoration: item.done ? 'line-through' : 'none',
-                }}
-              >
-                {item.title}
-              </span>
-              {editable && (
-                <LabelledButton
-                  label={t('common.delete')}
-                  onClick={() => handleDelete(item.id)}
-                  className="reveal-on-hover text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </LabelledButton>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {editable && (
-        <div className="flex items-center gap-2">
-          <input
-            data-1p-ignore
-            type="text"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleAdd();
-              }
-            }}
-            placeholder={t('event.checklistPlaceholder')}
-            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-            style={{ borderRadius: 'var(--radius-sm)' }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AttachmentsSection({
-  calendarId,
-  eventId,
-  editable,
-}: {
-  calendarId: string;
-  eventId: string;
-  editable: boolean;
-}) {
-  const t = useT();
-  const [attachments, setAttachments] = useState<EventAttachment[]>([]);
-  const [uploading, setUploading] = useState(false);
-  // A listing that could not be read says so where the files would be: an
-  // empty section otherwise claims the event has no attachments.
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const fetchAttachments = useCallback(async () => {
-    try {
-      const data = await api.get<EventAttachment[]>(
-        `/calendars/${calendarId}/events/${eventId}/attachments`,
-      );
-      setAttachments(data);
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(errorMessage(err));
-    }
-  }, [calendarId, eventId]);
-
-  useEffect(() => {
-    fetchAttachments();
-  }, [fetchAttachments]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    const contentType = file.type || 'application/octet-stream';
-    try {
-      const presign = await uploadViaPresign<{ attachmentId: string; uploadUrl: string }>({
-        kind: 'attachment',
-        presignPath: `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
-        presignBody: { filename: file.name, contentType, byteSize: file.size },
-        contentAddressed: true,
-        contentType,
-        body: file,
-        byteSize: file.size,
-      });
-      // The row is created disabled; confirm enables it once the object is stored.
-      await api.post(
-        `/calendars/${calendarId}/events/${eventId}/attachments/${presign.attachmentId}/confirm`,
-      );
-      await fetchAttachments();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleDownload = async (att: EventAttachment) => {
-    try {
-      const { downloadUrl } = await api.get<{ downloadUrl: string }>(
-        `/calendars/${calendarId}/events/${eventId}/attachments/${att.id}/download`,
-      );
-      window.open(downloadUrl, '_blank');
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/attachments/${id}`);
-      await fetchAttachments();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
-  };
-
-  const formatSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.attachments')}
-        </span>
-      </div>
-
-      {loadError && attachments.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
-      )}
-
-      {attachments.length > 0 && (
-        <div className="mb-3 space-y-2">
-          {attachments.map((att) => (
-            <div
-              key={att.id}
-              className="group flex items-center gap-2 bg-[var(--color-surface-inset)] px-3 py-2"
-              style={{ borderRadius: 'var(--radius-sm)' }}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-text-tertiary)"
-                strokeWidth="2"
-                className="shrink-0"
-              >
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <path d="M14 2v6h6" />
-              </svg>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-body text-[var(--color-text-primary)]">
-                  {att.filename}
-                </p>
-                <p className="text-caption text-[var(--color-text-tertiary)]">
-                  {formatSize(att.byteSize)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleDownload(att)}
-                className="shrink-0 text-[var(--color-accent)] hover:underline text-footnote"
-              >
-                {t('event.download')}
-              </button>
-              {editable && (
-                <LabelledButton
-                  label={t('common.delete')}
-                  onClick={() => handleDelete(att.id)}
-                  className="reveal-on-hover shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </LabelledButton>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {editable && (
-        <>
-          <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-body text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-50"
-            style={{ borderRadius: 'var(--radius-md)' }}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            {uploading ? t('event.uploading') : t('event.uploadAttachment')}
-          </button>
-        </>
-      )}
-    </div>
-  );
 }
 
 interface FormState {
@@ -840,7 +90,6 @@ interface FormState {
 
 export function EventModal() {
   const t = useT();
-  const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
   const showEventModal = useUiStore((s) => s.showEventModal);
   const editingEventId = useUiStore((s) => s.editingEventId);
@@ -980,8 +229,7 @@ export function EventModal() {
     recurrencePreset: 'none',
     recurrenceRule: null,
   });
-  const [showCustomRecurrence, setShowCustomRecurrence] = useState(false);
-  // Optional fields (location/url/memo/people/reminder) collapse on create and
+  // Optional fields (location/url/memo/reminder/visibility) collapse on create and
   // auto-expand when an existing event already uses any of them.
   const [showMore, setShowMore] = useState(false);
   // The revision this editor was opened on, as the server named it.
@@ -1049,7 +297,6 @@ export function EventModal() {
       const rule = editingEvent.recurrenceRule ?? null;
       const startDt = DateTime.fromISO(editingEvent.startAt, { zone: anchorZone });
       const preset = ruleToPreset(rule, startDt);
-      setShowCustomRecurrence(preset === 'custom');
       setForm({
         title: editingEvent.title,
         allDay: editingEvent.allDay,
@@ -1078,10 +325,9 @@ export function EventModal() {
           editingEvent.location ||
           editingEvent.url ||
           editingEvent.memo ||
-          (editingEvent.participants?.length ?? 0) > 0 ||
           editingEvent.notificationOffset != null ||
-          (editingEvent.flexibility && editingEvent.flexibility !== 'fixed') ||
-          editingEvent.ownerId
+          (editingEvent.visibility && editingEvent.visibility !== 'default') ||
+          (editingEvent.flexibility && editingEvent.flexibility !== 'fixed')
         ),
       );
     } else {
@@ -1094,7 +340,6 @@ export function EventModal() {
         : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
       const draftEnd = eventDraftEnd?.setZone(timezone, { keepLocalTime: true });
       const end = timed && draftEnd && draftEnd > start ? draftEnd : start.plus({ hours: 1 });
-      setShowCustomRecurrence(false);
       setForm({
         title: '',
         allDay: !timed,
@@ -1405,6 +650,65 @@ export function EventModal() {
           );
         })()}
 
+      {/* The reader's own answer to an invitation: theirs to give whether or
+          not they may edit the plan. */}
+      {myAttendance && (
+        <div className="px-6 pb-3">
+          <div className="card-section flex items-center justify-between gap-3 bg-[var(--color-surface-secondary)] px-4 py-3">
+            <span className="text-footnote text-[var(--color-text-secondary)]">
+              {t('event.yourRsvp')}
+            </span>
+            <div className="flex gap-1.5">
+              {(['accepted', 'tentative', 'declined'] as const).map((answer) => (
+                <button
+                  key={answer}
+                  type="button"
+                  onClick={() => answerRsvp(answer)}
+                  aria-pressed={rsvp === answer}
+                  className="rounded-full px-3 py-1 text-footnote transition"
+                  style={{
+                    backgroundColor:
+                      rsvp === answer ? 'var(--color-accent-bg)' : 'var(--color-surface-inset)',
+                    color: rsvp === answer ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  {t(
+                    answer === 'accepted'
+                      ? 'event.rsvpAccepted'
+                      : answer === 'tentative'
+                        ? 'event.rsvpTentative'
+                        : 'event.rsvpDeclined',
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Who: whose plan it is and who takes part. Left out on a calendar
+          nobody else is on, where both answers are the author. */}
+      {(membersMap[formCalendarId]?.length ?? 0) > 1 && (
+        <div className="px-6 pb-3">
+          {/* No "learn more" link: the help page is another route, and
+              leaving for it would throw away the plan being written. */}
+          {!editingEvent && (
+            <TipCard id="event" className="mb-3">
+              {t('tip.event')}
+            </TipCard>
+          )}
+          <EventPeople
+            members={membersMap[formCalendarId] ?? []}
+            myId={me?.id}
+            ownerId={form.ownerId}
+            participants={form.participants}
+            disabled={!editable}
+            onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
+            onParticipantsChange={(ids) => setForm((f) => ({ ...f, participants: ids }))}
+          />
+        </div>
+      )}
+
       {/* Date & Time card */}
       <div className="px-6">
         {taskOwned && (
@@ -1487,396 +791,29 @@ export function EventModal() {
               />
             </div>
 
-            {/* Recurrence */}
-            <div className="flex items-center justify-between py-2.5">
-              <span className="text-default text-[var(--color-text-primary)]">
-                {t('event.recurrence')}
-              </span>
-              <CustomSelect
-                value={form.recurrencePreset}
-                options={(() => {
-                  const startDt = recurrenceStart(form);
-                  const dayLabel = weekdayName(jsDayOfWeek(startDt), locale);
-                  const nth = getNthWeekday(startDt);
-                  return [
-                    { value: 'none', label: t('event.recurrenceNone') },
-                    { value: 'daily', label: t('event.recurrenceDaily') },
-                    { value: 'weekly', label: t('event.recurrenceWeekly', { day: dayLabel }) },
-                    { value: 'weekdays', label: t('event.recurrenceWeekdays') },
-                    {
-                      value: 'monthly_nth',
-                      label: t('event.recurrenceMonthlyNth', { n: nth, day: dayLabel }),
-                    },
-                    {
-                      value: 'monthly_date',
-                      label: t('event.recurrenceMonthlyDate', { date: startDt.day }),
-                    },
-                    { value: 'yearly', label: t('event.recurrenceYearly') },
-                    { value: 'custom', label: t('event.recurrenceCustom') },
-                  ];
-                })()}
-                onChange={(val) => {
-                  const preset = val as RecurrencePreset;
-                  if (preset === 'custom') {
-                    setShowCustomRecurrence(true);
-                    setForm((f) => ({
-                      ...f,
-                      recurrencePreset: 'custom',
-                      recurrenceRule: f.recurrenceRule ?? { freq: 'daily', interval: 1 },
-                    }));
-                    return;
-                  }
-                  setShowCustomRecurrence(false);
-                  const startDt = recurrenceStart(form);
-                  setForm((f) => ({
-                    ...f,
-                    recurrencePreset: preset,
-                    recurrenceRule: rebuildPresetRule(preset, startDt, f.recurrenceRule),
-                  }));
-                }}
-              />
-            </div>
-
-            {/* Custom recurrence dialog */}
-            {showCustomRecurrence && form.recurrenceRule && (
-              <div className="card-section mt-2 space-y-3 bg-[var(--color-surface-inset)] p-4">
-                <div className="space-y-1.5">
-                  <span className="block text-body text-[var(--color-text-secondary)]">
-                    {t('event.recurrenceInterval')}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      data-1p-ignore
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={form.recurrenceRule.interval}
-                      onChange={(e) => {
-                        const val = Math.max(1, Math.min(99, Number(e.target.value)));
-                        setForm((f) => ({
-                          ...f,
-                          recurrenceRule: f.recurrenceRule
-                            ? { ...f.recurrenceRule, interval: val }
-                            : null,
-                        }));
-                      }}
-                      style={{ width: '4rem' }}
-                      className="input-modern shrink-0 text-center text-body"
-                    />
-                    <CustomSelect
-                      value={form.recurrenceRule.freq}
-                      options={[
-                        { value: 'daily', label: t('event.unitDay') },
-                        { value: 'weekly', label: t('event.unitWeek') },
-                        { value: 'monthly', label: t('event.unitMonth') },
-                        { value: 'yearly', label: t('event.unitYear') },
-                      ]}
-                      onChange={(val) => {
-                        const freq = val as RecurrenceRule['freq'];
-                        const startDt = recurrenceStart(form);
-                        const dayCode = WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU';
-                        setForm((f) => {
-                          if (!f.recurrenceRule) return f;
-                          // Seed defaults so the rule stays valid for its frequency.
-                          const base = {
-                            ...f.recurrenceRule,
-                            freq,
-                            byDay: undefined as string[] | undefined,
-                            byMonthDay: undefined as number[] | undefined,
-                            bySetPos: undefined as number[] | undefined,
-                            wkst: undefined as RecurrenceRule['wkst'],
-                          };
-                          if (freq === 'weekly') {
-                            base.byDay = [dayCode];
-                            base.wkst = UI_WEEK_START;
-                          }
-                          if (freq === 'monthly') base.byMonthDay = [startDt.day];
-                          return { ...f, recurrenceRule: base };
-                        });
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Weekly: pick one or more weekdays */}
-                {form.recurrenceRule.freq === 'weekly' && (
-                  <div className="space-y-1.5">
-                    <span className="block text-body text-[var(--color-text-secondary)]">
-                      {t('event.recurrenceWeekdaysLabel')}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {WEEKDAY_CODES.map((code, idx) => {
-                        const selected = form.recurrenceRule?.byDay?.includes(code) ?? false;
-                        return (
-                          <button
-                            key={code}
-                            type="button"
-                            aria-pressed={selected}
-                            onClick={() =>
-                              setForm((f) => {
-                                if (!f.recurrenceRule) return f;
-                                const cur = f.recurrenceRule.byDay ?? [];
-                                const next = cur.includes(code)
-                                  ? cur.filter((d) => d !== code)
-                                  : [...cur, code];
-                                // Keep at least one weekday selected.
-                                return {
-                                  ...f,
-                                  recurrenceRule: {
-                                    ...f.recurrenceRule,
-                                    byDay: next.length > 0 ? next : cur,
-                                  },
-                                };
-                              })
-                            }
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-caption font-semibold transition-colors"
-                            style={{
-                              backgroundColor: selected
-                                ? 'var(--color-accent)'
-                                : 'var(--color-surface-secondary)',
-                              color: selected ? '#fff' : 'var(--color-text-secondary)',
-                            }}
-                          >
-                            {getWeekdayLabel(idx, locale)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Monthly: by day-of-month or by nth weekday */}
-                {form.recurrenceRule.freq === 'monthly' && (
-                  <div className="space-y-1.5">
-                    <span className="block text-body text-[var(--color-text-secondary)]">
-                      {t('event.recurrenceMonthlyMode')}
-                    </span>
-                    <CustomSelect
-                      value={form.recurrenceRule.bySetPos?.length ? 'weekday' : 'date'}
-                      options={[
-                        { value: 'date', label: t('event.recurrenceMonthlyByDate') },
-                        { value: 'weekday', label: t('event.recurrenceMonthlyByWeekday') },
-                      ]}
-                      onChange={(mode) => {
-                        const startDt = recurrenceStart(form);
-                        setForm((f) => {
-                          if (!f.recurrenceRule) return f;
-                          if (mode === 'weekday') {
-                            return {
-                              ...f,
-                              recurrenceRule: {
-                                ...f.recurrenceRule,
-                                bySetPos: [getNthWeekday(startDt)],
-                                byDay: [WEEKDAY_CODES[startDt.weekday % 7] ?? 'SU'],
-                                byMonthDay: undefined,
-                              },
-                            };
-                          }
-                          return {
-                            ...f,
-                            recurrenceRule: {
-                              ...f.recurrenceRule,
-                              byMonthDay: [startDt.day],
-                              bySetPos: undefined,
-                              byDay: undefined,
-                            },
-                          };
-                        });
-                      }}
-                    />
-                    {form.recurrenceRule.bySetPos?.length ? (
-                      <div className="flex items-center gap-2">
-                        <CustomSelect
-                          value={String(form.recurrenceRule.bySetPos[0])}
-                          options={[
-                            { value: '1', label: t('event.recurrenceNthFirst') },
-                            { value: '2', label: t('event.recurrenceNthSecond') },
-                            { value: '3', label: t('event.recurrenceNthThird') },
-                            { value: '4', label: t('event.recurrenceNthFourth') },
-                            // The fifth is what a start on the 29th-31st makes; the server
-                            // counts 1-5 from the start of the month and has no "last".
-                            { value: '5', label: t('event.recurrenceNthFifth') },
-                          ]}
-                          onChange={(pos) =>
-                            setForm((f) => ({
-                              ...f,
-                              recurrenceRule: f.recurrenceRule
-                                ? { ...f.recurrenceRule, bySetPos: [Number(pos)] }
-                                : null,
-                            }))
-                          }
-                        />
-                        <CustomSelect
-                          value={form.recurrenceRule.byDay?.[0] ?? 'SU'}
-                          options={WEEKDAY_CODES.map((code, idx) => ({
-                            value: code,
-                            label: weekdayName(idx, locale) || code,
-                          }))}
-                          onChange={(day) =>
-                            setForm((f) => ({
-                              ...f,
-                              recurrenceRule: f.recurrenceRule
-                                ? { ...f.recurrenceRule, byDay: [day] }
-                                : null,
-                            }))
-                          }
-                        />
-                      </div>
-                    ) : (
-                      <input
-                        data-1p-ignore
-                        type="number"
-                        min={1}
-                        max={31}
-                        value={form.recurrenceRule.byMonthDay?.[0] ?? recurrenceStart(form).day}
-                        onChange={(e) => {
-                          const val = Math.max(1, Math.min(31, Number(e.target.value)));
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, byMonthDay: [val] }
-                              : null,
-                          }));
-                        }}
-                        style={{ width: '4rem' }}
-                        className="input-modern shrink-0 text-center text-body"
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Any repeating rule may carry an end, whichever preset it reads as,
-              so the end condition is never tucked behind the custom editor. */}
-            {form.recurrenceRule && (
-              <div className="card-section mt-2 bg-[var(--color-surface-inset)] p-4">
-                <div className="space-y-1.5">
-                  <span className="text-body text-[var(--color-text-secondary)]">
-                    {t('event.recurrenceEndLabel')}
-                  </span>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="recEnd"
-                        checked={!form.recurrenceRule.until && !form.recurrenceRule.count}
-                        onChange={() =>
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, until: undefined, count: undefined }
-                              : null,
-                          }))
-                        }
-                        className="accent-[var(--color-accent)]"
-                      />
-                      <span className="text-body text-[var(--color-text-primary)]">
-                        {t('event.recurrenceEndNever')}
-                      </span>
-                    </label>
-                    <label className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="radio"
-                        name="recEnd"
-                        checked={!!form.recurrenceRule.until}
-                        onChange={() => {
-                          const defaultEnd = recurrenceStart(form)
-                            .plus({ months: 1 })
-                            .toFormat('yyyy-MM-dd');
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, until: defaultEnd, count: undefined }
-                              : null,
-                          }));
-                        }}
-                        className="accent-[var(--color-accent)]"
-                      />
-                      <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
-                        {t('event.recurrenceEndDate')}:
-                      </span>
-                      {form.recurrenceRule.until && (
-                        <DateTimeField
-                          label=""
-                          dateValue={recurrenceUntilDateValue(
-                            form.recurrenceRule.until,
-                            anchorZone,
-                          )}
-                          timeValue="00:00"
-                          showTime={false}
-                          onDateChange={(date) =>
-                            setForm((f) => {
-                              const clamped = clampRecurrenceUntilDate(
-                                date,
-                                recurrenceStart(f).toISO() ?? f.startAt,
-                                anchorZone,
-                              );
-                              return {
-                                ...f,
-                                recurrenceRule: f.recurrenceRule
-                                  ? { ...f.recurrenceRule, until: clamped.toFormat('yyyy-MM-dd') }
-                                  : null,
-                              };
-                            })
-                          }
-                          onTimeChange={() => {}}
-                          minDate={recurrenceStart(form).startOf('day')}
-                        />
-                      )}
-                    </label>
-                    <label className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="radio"
-                        name="recEnd"
-                        checked={!!form.recurrenceRule.count}
-                        onChange={() =>
-                          setForm((f) => ({
-                            ...f,
-                            recurrenceRule: f.recurrenceRule
-                              ? { ...f.recurrenceRule, count: 10, until: undefined }
-                              : null,
-                          }))
-                        }
-                        className="accent-[var(--color-accent)]"
-                      />
-                      <span className="shrink-0 whitespace-nowrap text-body text-[var(--color-text-primary)]">
-                        {t('event.recurrenceEndCount')}:
-                      </span>
-                      {form.recurrenceRule.count && (
-                        <input
-                          data-1p-ignore
-                          type="number"
-                          min={1}
-                          max={365}
-                          value={form.recurrenceRule.count}
-                          onChange={(e) => {
-                            const val = Math.max(1, Math.min(365, Number(e.target.value)));
-                            setForm((f) => ({
-                              ...f,
-                              recurrenceRule: f.recurrenceRule
-                                ? { ...f.recurrenceRule, count: val }
-                                : null,
-                            }));
-                          }}
-                          style={{ width: '4rem' }}
-                          className="input-modern shrink-0 text-center text-body"
-                        />
-                      )}
-                    </label>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Recurrence label for editing recurring events */}
-            {editingEvent?.isRecurrence && form.recurrenceRule && (
-              <p className="mt-1 text-footnote text-[var(--color-text-tertiary)]">
-                {recurrenceLabel(form.recurrenceRule, recurrenceStart(form), t, locale)}
-              </p>
-            )}
+            <RecurrenceEditor
+              preset={form.recurrencePreset}
+              rule={form.recurrenceRule}
+              start={recurrenceStart(form)}
+              zone={anchorZone}
+              showSummary={!!editingEvent?.isRecurrence}
+              onChange={(update) =>
+                setForm((f) => {
+                  const next = update({ preset: f.recurrencePreset, rule: f.recurrenceRule });
+                  return { ...f, recurrencePreset: next.preset, recurrenceRule: next.rule };
+                })
+              }
+            />
           </fieldset>
         </div>
+      </div>
+
+      <div className="mt-3 px-6">
+        <ShowAsPicker
+          value={form.showAs}
+          disabled={!editable}
+          onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
+        />
       </div>
 
       {/* Optional fields: collapsed by default on create, expanded when used */}
@@ -1980,104 +917,9 @@ export function EventModal() {
             </div>
           </div>
 
-          {/* Participants & Notification card */}
+          {/* Reminder, visibility and flexibility card */}
           <div className="mt-3 px-6">
             <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-              {/* Participants */}
-              <div className="flex items-center gap-3 py-1.5">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="shrink-0"
-                >
-                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-                </svg>
-                <div className="flex flex-wrap gap-1.5">
-                  {(membersMap[form.calendarId] ?? []).map((m) => {
-                    const isSelected = form.participants.includes(m.id);
-                    return (
-                      <LabelledButton
-                        key={m.id}
-                        label={m.name}
-                        pressed={isSelected}
-                        onClick={() =>
-                          setForm((f) => ({
-                            ...f,
-                            participants: isSelected
-                              ? f.participants.filter((id) => id !== m.id)
-                              : [...f.participants, m.id],
-                          }))
-                        }
-                        title={m.name}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-default transition-opacity"
-                        style={{
-                          backgroundColor: m.color,
-                          opacity: isSelected ? 1 : 0.3,
-                          outline: isSelected ? `2px solid ${m.color}` : 'none',
-                          outlineOffset: '2px',
-                        }}
-                      >
-                        {m.name[0]}
-                      </LabelledButton>
-                    );
-                  })}
-                  {form.participants.length === 0 && (
-                    <span className="text-default text-[var(--color-text-tertiary)]">
-                      {t('event.selectParticipants')}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {myAttendance && (
-                <>
-                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-                  <div className="flex items-center gap-3 py-1.5">
-                    <span className="w-[18px] shrink-0" aria-hidden />
-                    <span className="text-footnote text-[var(--color-text-secondary)]">
-                      {t('event.yourRsvp')}
-                    </span>
-                    <div className="flex gap-1.5">
-                      {(['accepted', 'tentative', 'declined'] as const).map((answer) => (
-                        <button
-                          key={answer}
-                          type="button"
-                          onClick={() => answerRsvp(answer)}
-                          aria-pressed={rsvp === answer}
-                          className="rounded-full px-3 py-1 text-footnote transition"
-                          style={{
-                            backgroundColor:
-                              rsvp === answer
-                                ? 'var(--color-accent-bg)'
-                                : 'var(--color-surface-inset)',
-                            color:
-                              rsvp === answer
-                                ? 'var(--color-accent)'
-                                : 'var(--color-text-secondary)',
-                          }}
-                        >
-                          {t(
-                            answer === 'accepted'
-                              ? 'event.rsvpAccepted'
-                              : answer === 'tentative'
-                                ? 'event.rsvpTentative'
-                                : 'event.rsvpDeclined',
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-
               {/* Notification. The reminder travels with the event as an
                   iCalendar alarm; the app itself does not deliver one, so the
                   hint names what will. */}
@@ -2119,7 +961,7 @@ export function EventModal() {
 
               <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
-              {/* Visibility on a shared link, and whether the time reads as taken */}
+              {/* Visibility on a shared link */}
               <div className="flex items-center gap-3 py-1.5">
                 <svg
                   width="18"
@@ -2142,12 +984,6 @@ export function EventModal() {
                   onChange={(v) => setForm((f) => ({ ...f, visibility: v as Visibility }))}
                   className="flex-1"
                 />
-                <CustomSelect
-                  value={form.showAs}
-                  options={SHOW_AS_OPTIONS.map((v) => ({ value: v, label: t(showAsLabelKey(v)) }))}
-                  onChange={(v) => setForm((f) => ({ ...f, showAs: v as ShowAs }))}
-                  className="flex-1"
-                />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 py-1.5">
                 <span className="text-body text-[var(--color-text-secondary)]">
@@ -2165,39 +1001,6 @@ export function EventModal() {
                     setForm((current) => ({ ...current, flexibility: value as Flexibility }))
                   }
                   className="min-w-36"
-                />
-              </div>
-
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-
-              {/* Assignee */}
-              <div className="flex items-center gap-3 py-1.5">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="shrink-0"
-                >
-                  <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M22 11l-3 3-1.5-1.5" />
-                </svg>
-                <CustomSelect
-                  value={form.ownerId ?? 'none'}
-                  options={[
-                    { value: 'none', label: t('event.assigneeNone') },
-                    ...(membersMap[form.calendarId] ?? []).map((m) => ({
-                      value: m.id,
-                      label: m.name,
-                    })),
-                  ]}
-                  onChange={(v) => {
-                    setForm((f) => ({ ...f, ownerId: v === 'none' ? null : v }));
-                  }}
-                  className="flex-1"
                 />
               </div>
             </div>

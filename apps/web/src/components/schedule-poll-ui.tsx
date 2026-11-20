@@ -25,28 +25,41 @@ export function SchedulePollFrame({
 }) {
   const t = useT();
   return (
-    <div className="app-bg min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-[1040px] flex-col px-4 py-5 sm:px-6 sm:py-8">
-        <header className="mb-6 flex items-start justify-between gap-4 sm:mb-8">
-          <div className="min-w-0">
-            <div className="mb-4">
-              <BrandRow />
-            </div>
-            {eyebrow && (
-              <p className="mb-1 text-footnote font-medium text-[var(--color-text-secondary)]">
-                {eyebrow}
-              </p>
-            )}
-            <h1 className="break-words text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
-              {title}
-            </h1>
-          </div>
+    // The body never scrolls (the calendar owns its scrollers), so a page this
+    // long scrolls inside its own frame.
+    <div className="app-bg h-full overflow-y-auto">
+      <div className="relative mx-auto flex min-h-full max-w-[1040px] flex-col px-4 py-5 sm:px-6 sm:py-8">
+        <div className="mb-5 flex items-center justify-between gap-4">
           <Link
             to={backTo}
-            className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-body font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]"
+            className="-ml-2 inline-flex h-9 items-center gap-1 rounded-[var(--radius-control)] pr-3 pl-1.5 text-body font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-hover)]"
           >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
             {backTo === '/' ? t('schedulePoll.backToCalendar') : t('schedulePoll.backToList')}
           </Link>
+          <BrandRow />
+        </div>
+        <header className="mb-6 min-w-0 sm:mb-8">
+          {eyebrow && (
+            <p className="mb-1 text-footnote font-medium text-[var(--color-text-secondary)]">
+              {eyebrow}
+            </p>
+          )}
+          <h1 className="break-words text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
+            {title}
+          </h1>
         </header>
         <main className="flex flex-1 flex-col gap-6 pb-10 sm:gap-8">{children}</main>
       </div>

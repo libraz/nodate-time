@@ -2,22 +2,20 @@ import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { BrandRow } from '@/components/brand-mark';
 import { CalendarList } from '@/components/calendar-list';
-import { TipCard } from '@/components/guide';
+import { GuideCard } from '@/components/guide';
 import { LabelledButton } from '@/components/labelled-button';
 import { MemoSection } from '@/components/right-panel';
 import { useT } from '@/i18n';
-import { useGuideStore } from '@/stores/guide-store';
 import { useUiStore } from '@/stores/ui-store';
 
 export function LeftSidebar() {
   const t = useT();
   const navigate = useNavigate();
   const setShowActivity = useUiStore((s) => s.setShowActivity);
-  const openWizard = useGuideStore((s) => s.openWizard);
   const [memoExpanded, setMemoExpanded] = useState(true);
 
   return (
-    <div className="glass-surface hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
+    <div className="glass-surface app-sidebar hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
       <div className="px-4 pt-4 pb-2">
         <BrandRow />
       </div>
@@ -64,20 +62,14 @@ export function LeftSidebar() {
         </div>
       )}
 
-      <TipCard
-        id="guide"
-        action={{ label: t('tip.guideAction'), onClick: openWizard }}
-        className="mx-3 mb-2"
-      >
-        {t('tip.guide')}
-      </TipCard>
+      <GuideCard className="mx-3 mt-2 mb-3" />
 
       {/* Activity, help and settings at the bottom */}
       <div className="border-t border-[var(--color-border)] px-3 py-2">
         <button
           type="button"
           onClick={() => setShowActivity(true)}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+          className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
         >
           <svg
             width="18"
@@ -98,7 +90,7 @@ export function LeftSidebar() {
           type="button"
           onClick={() => navigate({ to: '/help' })}
           data-tour="help"
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+          className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
         >
           <svg
             width="18"
@@ -120,7 +112,7 @@ export function LeftSidebar() {
         <button
           type="button"
           onClick={() => navigate({ to: '/settings' })}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+          className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
         >
           <svg
             width="18"

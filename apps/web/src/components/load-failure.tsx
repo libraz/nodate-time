@@ -46,7 +46,7 @@ export function LoadFailure({ title, detail, onRetry }: LoadFailureProps) {
           type="button"
           onClick={run}
           disabled={retrying}
-          className="mt-4 rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-default font-medium text-[var(--color-accent)] disabled:opacity-50"
+          className="mt-4 rounded-full bg-[var(--color-accent-bg)] px-4 py-2 text-default font-medium text-[var(--color-accent-ink)] disabled:opacity-50"
         >
           {retrying ? t('common.loading') : t('error.retry')}
         </button>

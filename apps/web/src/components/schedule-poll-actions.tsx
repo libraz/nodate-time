@@ -45,6 +45,27 @@ function actionTarget(action: SchedulePollAction) {
   };
 }
 
+/** Calendar with a tick: the shared mark for the scheduling-poll entry points. */
+function PollIcon() {
+  return (
+    <svg
+      aria-hidden
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+      <path d="M3.5 10h17M8 3v4M16 3v4M9 15l2 2 4-4" />
+    </svg>
+  );
+}
+
 function ActionCount({ count }: { count: number }) {
   if (count === 0) return null;
   return (
@@ -63,8 +84,11 @@ export function SchedulePollNavDesktop() {
   return (
     <Link
       to="/schedule-polls"
-      className="hidden h-9 items-center gap-2 rounded-lg px-2.5 text-default font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)] sm:inline-flex"
+      className="hidden h-9 items-center gap-1.5 rounded-lg px-2.5 text-default font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)] sm:inline-flex"
     >
+      <span className="text-[var(--color-text-secondary)]">
+        <PollIcon />
+      </span>
       <span>{t('schedulePoll.nav')}</span>
       <ActionCount count={count} />
     </Link>
@@ -83,7 +107,12 @@ export function SchedulePollNavMobile() {
         to="/schedule-polls"
         className="flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-body font-semibold text-[var(--color-text-primary)] active:bg-[var(--color-hover)]"
       >
-        <span>{t('schedulePoll.nav')}</span>
+        <span className="flex items-center gap-2">
+          <span className="text-[var(--color-text-secondary)]">
+            <PollIcon />
+          </span>
+          {t('schedulePoll.nav')}
+        </span>
         <span className="flex items-center gap-2">
           {count > 0 && (
             <span className="text-footnote font-medium text-[var(--color-text-secondary)] tabular-nums">
@@ -91,6 +120,20 @@ export function SchedulePollNavMobile() {
             </span>
           )}
           <ActionCount count={count} />
+          <svg
+            aria-hidden
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-[var(--color-text-tertiary)]"
+          >
+            <path d="M9 6l6 6-6 6" />
+          </svg>
         </span>
       </Link>
     </div>
@@ -131,13 +174,13 @@ export function SchedulePollActionNotice() {
               <span className="font-semibold">{t(copy.label)}</span>
               <Link
                 {...actionTarget(first)}
-                className="min-w-0 max-w-full truncate font-medium text-[var(--color-accent)] underline decoration-[color-mix(in_srgb,var(--color-accent)_45%,transparent)] underline-offset-2 hover:decoration-current"
+                className="min-w-0 max-w-full truncate font-medium text-[var(--color-accent-ink)] underline decoration-[color-mix(in_srgb,var(--color-accent)_45%,transparent)] underline-offset-2 hover:decoration-current"
               >
                 {first.title}
               </Link>
               <Link
                 {...actionTarget(first)}
-                className="shrink-0 rounded-md bg-[var(--color-surface)] px-2.5 py-1 font-semibold text-[var(--color-accent)] ring-1 ring-[color-mix(in_srgb,var(--color-accent)_30%,var(--color-border))] hover:bg-[var(--color-hover)]"
+                className="shrink-0 rounded-md bg-[var(--color-surface)] px-2.5 py-1 font-semibold text-[var(--color-accent-ink)] ring-1 ring-[color-mix(in_srgb,var(--color-accent)_30%,var(--color-border))] hover:bg-[var(--color-hover)]"
               >
                 {t(copy.action)}
               </Link>

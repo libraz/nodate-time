@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -18,6 +18,7 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+  isAbortError: () => false,
 }));
 
 vi.mock('@/lib/toast', () => ({
@@ -27,6 +28,8 @@ vi.mock('@/lib/toast', () => ({
 const uiState = {
   rightPanel: 'members' as string | null,
   toggleRightPanel: vi.fn(),
+  openPanelFor: vi.fn(),
+  panelCalendarRequest: null as { calendarId: string; addMembers?: boolean } | null,
   locale: 'ja',
 };
 
@@ -85,11 +88,19 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
+import { api } from '@/lib/api';
 import { MembersPanel } from './members-panel';
 
 beforeEach(() => {
   uiState.rightPanel = 'members';
+  uiState.panelCalendarRequest = null;
+  setMyRole('reader');
 });
+
+function setMyRole(role: string) {
+  const cal = calendarState.calendars[0];
+  if (cal) cal.role = role;
+}
 
 afterEach(() => {
   cleanup();
@@ -273,5 +284,36 @@ describe('MembersPanel membership', () => {
 
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(calendarState.updateMemberColor).not.toHaveBeenCalled();
+  });
+});
+
+describe('MembersPanel adding people', () => {
+  it('offers a reader no way to add anyone', () => {
+    render(<MembersPanel />);
+    expect(screen.queryByRole('button', { name: 'members.addShort' })).toBeNull();
+  });
+
+  it('swaps the list for the picker and back', async () => {
+    setMyRole('owner');
+    vi.mocked(api.get).mockResolvedValue({ items: [], hasMore: false });
+    render(<MembersPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'members.addShort' }));
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    expect(screen.queryByText('Jiro')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'members.backToList' }));
+    expect(screen.getByText('Jiro')).toBeInTheDocument();
+    await act(async () => {});
+  });
+
+  it('opens on the picker when another panel asks for it', async () => {
+    setMyRole('owner');
+    vi.mocked(api.get).mockResolvedValue({ items: [], hasMore: false });
+    uiState.panelCalendarRequest = { calendarId: 'cal-1', addMembers: true };
+    render(<MembersPanel />);
+
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    await act(async () => {});
   });
 });

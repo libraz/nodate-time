@@ -29,7 +29,13 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-const calendarState = {
+const calendarState: {
+  memos: unknown[];
+  toggleMemo: ReturnType<typeof vi.fn>;
+  deleteMemo: ReturnType<typeof vi.fn>;
+  calendars: unknown[];
+  activeCalendarIds: string[];
+} = {
   memos: [],
   toggleMemo: vi.fn(),
   deleteMemo: vi.fn(),
@@ -47,7 +53,7 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { SettingsModal } from './right-panel';
+import { MemoSection, SettingsModal } from './right-panel';
 
 /** jsdom reports no layout, so focusable elements have to look painted. */
 function rectList(): DOMRectList {
@@ -62,6 +68,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  calendarState.memos = [];
+  calendarState.calendars = [];
+  calendarState.activeCalendarIds = [];
   vi.clearAllMocks();
   vi.restoreAllMocks();
   document.body.style.overflow = '';
@@ -137,5 +146,31 @@ describe('SettingsModal controls', () => {
     fireEvent.click(close);
 
     expect(uiState.toggleSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
+// With a single calendar on screen nothing named the calendar a memo lived in,
+// so a shared memo read like a private note on the reader's account.
+describe('MemoSection calendar scope', () => {
+  beforeEach(() => {
+    calendarState.calendars = [
+      { id: 'cal-1', name: 'Family', color: '#f00', role: 'editor', memberCount: 2 },
+    ];
+    calendarState.activeCalendarIds = ['cal-1'];
+  });
+
+  it('names the calendar memos are shared in when only one is shown', () => {
+    calendarState.memos = [{ id: 'm-1', calendarId: 'cal-1', title: 'Milk', done: false }];
+    render(<MemoSection />);
+
+    const group = screen.getByRole('region', { name: 'Family' });
+    expect(within(group).getByText('Milk')).toBeTruthy();
+  });
+
+  it('names the calendar a new memo goes to when there is only one choice', () => {
+    render(<MemoSection />);
+
+    expect(screen.getByText('panel.postTo')).toBeTruthy();
+    expect(screen.getByText('Family')).toBeTruthy();
   });
 });

@@ -167,7 +167,7 @@ export function CalendarList() {
           const offerInvite = justCreatedId === cal.id && canManage(cal.role);
           return (
             <div key={cal.id}>
-              <div className="group flex w-full items-center rounded-lg transition-colors hover:bg-[var(--color-hover)]">
+              <div className="group flex w-full items-center rounded-[var(--radius-control)] transition-colors hover:bg-[var(--color-hover)]">
                 <button
                   type="button"
                   onClick={() => toggleCalendarFilter(cal.id)}
@@ -180,13 +180,18 @@ export function CalendarList() {
                     fallbackColor={isActive ? cal.color : 'var(--color-text-tertiary)'}
                     inactive={!isActive}
                   />
-                  <span
-                    className="flex-1 truncate text-default"
-                    style={{
-                      color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
-                    }}
-                  >
-                    {cal.name}
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span
+                      className="truncate text-default"
+                      style={{
+                        color: isActive
+                          ? 'var(--color-text-primary)'
+                          : 'var(--color-text-tertiary)',
+                      }}
+                    >
+                      {cal.name}
+                    </span>
+                    <ShareStateLine memberCount={cal.memberCount} />
                   </span>
                   {cal.publicShared && (
                     <span
@@ -346,5 +351,50 @@ export function CalendarList() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Who sees the calendar: everyone it is shared with, or only the viewer. */
+function ShareStateLine({ memberCount }: { memberCount: number }) {
+  const t = useT();
+  const shared = memberCount > 1;
+  return (
+    <span className="mt-0.5 flex items-center gap-1 text-caption text-[var(--color-text-tertiary)]">
+      <ShareStateIcon shared={shared} />
+      <span className="truncate tabular-nums">
+        {shared ? t('calendar.sharedWith', { count: memberCount }) : t('calendar.onlyMe')}
+      </span>
+    </span>
+  );
+}
+
+/** Two people for a calendar shared with others, one for a calendar only the viewer is in. */
+export function ShareStateIcon({ shared }: { shared: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      {shared ? (
+        <>
+          <circle cx="9" cy="8" r="3.5" />
+          <path d="M2.5 20a6.5 6.5 0 0113 0" />
+          <path d="M16 4.6a3.5 3.5 0 010 6.8M18 14a6.5 6.5 0 013.5 6" />
+        </>
+      ) : (
+        <>
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5.5 20a6.5 6.5 0 0113 0" />
+        </>
+      )}
+    </svg>
   );
 }

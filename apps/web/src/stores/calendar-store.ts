@@ -383,6 +383,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       return {
         membersMap: { ...s.membersMap, [calendarId]: members },
         memberErrors: nextErrors,
+        // The roster just read is newer than the count the calendar came with.
+        calendars: s.calendars.map((c) =>
+          c.id === calendarId && c.memberCount !== members.length
+            ? { ...c, memberCount: members.length }
+            : c,
+        ),
       };
     });
   },

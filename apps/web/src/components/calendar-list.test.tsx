@@ -21,6 +21,7 @@ const initialCalendars: Calendar[] = [
     createdAt: '',
     role: 'owner',
     publicShared: false,
+    memberCount: 1,
     memberColor: '#47B2F7',
   },
   {
@@ -30,6 +31,7 @@ const initialCalendars: Calendar[] = [
     createdAt: '',
     role: 'editor',
     publicShared: false,
+    memberCount: 1,
     memberColor: '#F7A047',
   },
 ];
@@ -94,6 +96,23 @@ describe('CalendarList cover images', () => {
   });
 });
 
+describe('CalendarList share state', () => {
+  it('tells a shared calendar from one only the viewer sees', () => {
+    calendarState.calendars = [
+      { ...(initialCalendars[0] as Calendar), memberCount: 1 },
+      { ...(initialCalendars[1] as Calendar), memberCount: 3 },
+    ];
+    render(<CalendarList />);
+
+    const family = screen.getByRole('button', { name: /Family/ });
+    const work = screen.getByRole('button', { name: /Work/ });
+    expect(family.textContent).toContain('calendar.onlyMe');
+    expect(family.textContent).not.toContain('calendar.sharedWith');
+    expect(work.textContent).toContain('calendar.sharedWith');
+    expect(work.textContent).not.toContain('calendar.onlyMe');
+  });
+});
+
 describe('CalendarList calendar deletion', () => {
   // Deleting takes the calendar's events, memos and album with it for every
   // member, which is the whole reason the trash icon is not the delete.
@@ -139,6 +158,7 @@ describe('CalendarList after creating a calendar', () => {
       createdAt: '',
       role: 'owner',
       publicShared: false,
+      memberCount: 1,
       memberColor: '#47B2F7',
     };
     calendarState.addCalendar.mockImplementation(async () => {

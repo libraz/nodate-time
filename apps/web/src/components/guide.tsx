@@ -6,8 +6,8 @@ import { type TipId, useGuideStore, useTipVisible } from '@/stores/guide-store';
 
 /** The accent tint the tip card and help badge share. */
 const TINT_STYLE = {
-  background: 'color-mix(in srgb, var(--color-accent) 8%, var(--color-surface))',
-  borderColor: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+  background: 'color-mix(in srgb, var(--color-info) 8%, var(--color-surface))',
+  borderColor: 'color-mix(in srgb, var(--color-info) 28%, transparent)',
 } as const;
 
 function BulbIcon() {
@@ -49,10 +49,10 @@ export function TipCard({ id, children, topic, action, className = '' }: TipCard
   return (
     <aside
       aria-label={t('tip.label')}
-      className={`flex gap-3 rounded-xl border p-3 ${className}`}
+      className={`flex gap-3 rounded-[var(--radius-md)] border p-3 ${className}`}
       style={TINT_STYLE}
     >
-      <span className="mt-0.5 shrink-0 text-[var(--color-accent)]">
+      <span className="mt-0.5 shrink-0 text-[var(--color-info)]">
         <BulbIcon />
       </span>
       <div className="min-w-0 flex-1">
@@ -62,7 +62,7 @@ export function TipCard({ id, children, topic, action, className = '' }: TipCard
             <button
               type="button"
               onClick={action.onClick}
-              className="rounded-lg px-2.5 py-1 text-footnote font-semibold text-[var(--color-accent)] hover:bg-[var(--color-hover)]"
+              className="rounded-[var(--radius-control)] px-2.5 py-1 text-footnote font-semibold text-[var(--color-accent-ink)] hover:bg-[var(--color-hover)]"
             >
               {action.label}
             </button>
@@ -71,7 +71,7 @@ export function TipCard({ id, children, topic, action, className = '' }: TipCard
               <Link
                 to="/help"
                 hash={topic}
-                className="rounded-lg px-2.5 py-1 text-footnote font-medium text-[var(--color-accent)] hover:bg-[var(--color-hover)]"
+                className="rounded-[var(--radius-control)] px-2.5 py-1 text-footnote font-medium text-[var(--color-accent-ink)] hover:bg-[var(--color-hover)]"
               >
                 {t('tip.learnMore')}
               </Link>
@@ -80,12 +80,84 @@ export function TipCard({ id, children, topic, action, className = '' }: TipCard
           <button
             type="button"
             onClick={() => dismissTip(id)}
-            className="rounded-lg px-2.5 py-1 text-footnote font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
+            className="rounded-[var(--radius-control)] px-2.5 py-1 text-footnote font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
           >
             {t('tip.dismiss')}
           </button>
         </div>
       </div>
+    </aside>
+  );
+}
+
+/**
+ * The invitation to take the tour. A call to action rather than a tip, so the
+ * filled button carries the emphasis and the card itself stays neutral.
+ */
+export function GuideCard({ className = '' }: { className?: string }) {
+  const t = useT();
+  const visible = useTipVisible('guide');
+  const dismissTip = useGuideStore((s) => s.dismissTip);
+  const openWizard = useGuideStore((s) => s.openWizard);
+  if (!visible) return null;
+
+  return (
+    <aside
+      aria-label={t('tip.guideTitle')}
+      className={`relative rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface-elevated)] p-3 shadow-[var(--shadow-sm)] ${className}`}
+    >
+      <button
+        type="button"
+        onClick={() => dismissTip('guide')}
+        aria-label={t('common.close')}
+        className="icon-btn absolute top-2 right-2 h-7 w-7 text-[var(--color-text-tertiary)]"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+      <div className="flex items-start gap-3 pr-7">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-[var(--color-accent)] text-[var(--color-text-on-accent)]">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M15.5 8.5l-2 5-5 2 2-5z" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="text-body font-semibold text-[var(--color-text-primary)]">
+            {t('tip.guideTitle')}
+          </p>
+          <p className="mt-0.5 text-footnote leading-relaxed text-[var(--color-text-secondary)]">
+            {t('tip.guide')}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={openWizard}
+        className="btn-primary mt-3 h-9 w-full text-body font-semibold"
+      >
+        {t('tip.guideAction')}
+      </button>
     </aside>
   );
 }

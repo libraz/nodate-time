@@ -237,7 +237,7 @@ export function MobileMenu() {
                 key={a.key}
                 type="button"
                 onClick={a.onSelect}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+                className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
               >
                 <span className="shrink-0">{a.icon}</span>
                 <span className="text-body">{t(a.labelKey)}</span>
@@ -253,7 +253,7 @@ export function MobileMenu() {
                 key={a.key}
                 type="button"
                 onClick={a.onSelect}
-                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
+                className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
               >
                 <span className="shrink-0">{a.icon}</span>
                 <span className="text-body">{t(a.labelKey)}</span>

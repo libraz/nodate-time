@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CalendarEvent } from '@/types/calendar';
+import type { CalendarEvent, Member } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
@@ -103,7 +103,7 @@ const calendarState = {
   addEvent: vi.fn(),
   updateEvent: vi.fn(),
   deleteEvent: vi.fn(),
-  membersMap: { 'cal-1': [] },
+  membersMap: { 'cal-1': [] } as Record<string, Member[]>,
   fetchMembers: vi.fn(),
   fetchEvents: vi.fn(),
   visibleRange: () => ({ start: uiState.selectedDate, end: uiState.selectedDate }),
@@ -919,5 +919,54 @@ describe('EventModal task-derived event', () => {
     expect(titleField()).not.toHaveAttribute('readonly');
     expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'event.deleteEvent' })).toBeInTheDocument();
+  });
+});
+
+// On a shared calendar whose plan it is, who takes part and whether the time
+// is taken are what the plan says to everyone else, so they are answered on
+// the form itself rather than behind the optional fields.
+describe('EventModal who and availability', () => {
+  const members: Member[] = [
+    { id: 'u1', name: 'Me', email: '', role: 'owner', color: '#111' },
+    { id: 'u2', name: 'Bob', email: '', role: 'editor', color: '#222' },
+  ];
+
+  afterEach(() => {
+    calendarState.membersMap = { 'cal-1': [] };
+  });
+
+  it('files a new plan under the person picked, with participants and availability', async () => {
+    uiState.editingEventId = null;
+    calendarState.membersMap = { 'cal-1': members };
+
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Dentist' } });
+    const whose = screen.getByRole('group', { name: 'event.whose' });
+    expect(within(whose).getByRole('button', { name: 'event.memberMe' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(within(whose).getByRole('button', { name: 'Bob' }));
+    const people = screen.getByRole('group', { name: 'event.participants' });
+    fireEvent.click(within(people).getByRole('button', { name: 'Bob' }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.showAsTentative' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    expect(calendarState.addEvent.mock.calls[0]?.[1]).toMatchObject({
+      ownerId: 'u2',
+      participants: ['u2'],
+      showAs: 'tentative',
+    });
+  });
+
+  it('leaves out the people on a calendar nobody else is on', () => {
+    uiState.editingEventId = null;
+    calendarState.membersMap = { 'cal-1': [members[0] as Member] };
+
+    render(<EventModal />);
+
+    expect(screen.queryByRole('group', { name: 'event.whose' })).toBeNull();
+    expect(screen.getByRole('group', { name: 'event.showAs' })).toBeInTheDocument();
   });
 });
