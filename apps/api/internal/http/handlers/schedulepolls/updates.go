@@ -231,12 +231,32 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 			}
 		}
 
+		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
+		if err != nil {
+			return nil, apiError(err)
+		}
+		// A rejected memberIds is reported where it was before, after the poll checks.
+		var requestedIDs []uint32
+		var requestedErr error
+		if in.Body.MemberIDs != nil {
+			requestedIDs, requestedErr = memberIDsFromPublic(ctx, deps.Queries, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
+		}
+
 		var result PollDetailResponse
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
-			cal, actorMember, poll, err := lockPollForManager(ctx, q, deps, in.CalendarID, in.PollID, actor)
+			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err
 			}
+			roster, err := pollRoster(ctx, q, poll)
+			if err != nil {
+				return err
+			}
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needManage, requestedIDs, roster)
+			if err != nil {
+				return err
+			}
+			actorMember := locked[actor]
 			assigned := poll.ManagerUserID.Valid && uint32(poll.ManagerUserID.Int32) == actor
 			if !assigned && !in.Body.TakeOver {
 				return apierrors.SchedulePollAccessDenied
@@ -272,21 +292,16 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 			memberIDs := currentMemberIDs
 			memberChanged := false
 			if in.Body.MemberIDs != nil {
-				memberIDs, err = memberIDsFromPublic(ctx, q, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
-				if err != nil {
-					return err
+				if requestedErr != nil {
+					return requestedErr
 				}
-				if err := lockRequestedMembers(ctx, q, cal.ID, memberIDs); err != nil {
-					return err
-				}
+				memberIDs = requestedIDs
 				if !slices.Equal(currentMemberIDs, memberIDs) {
 					memberChanged, err = synchronizePollMembers(ctx, q, poll.ID, memberIDs)
 					if err != nil {
 						return err
 					}
 				}
-			} else if err := lockRequestedMembers(ctx, q, cal.ID, currentMemberIDs); err != nil {
-				return err
 			}
 			_ = activeMembers
 

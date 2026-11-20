@@ -16,12 +16,25 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 		if err != nil {
 			return nil, err
 		}
+		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
+		if err != nil {
+			return nil, apiError(err)
+		}
 		var result PollDetailResponse
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
-			cal, member, poll, err := lockPollForManager(ctx, q, deps, in.CalendarID, in.PollID, actor)
+			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err
 			}
+			roster, err := pollRoster(ctx, q, poll)
+			if err != nil {
+				return err
+			}
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needManage, nil, roster)
+			if err != nil {
+				return err
+			}
+			member := locked[actor]
 			if !poll.ManagerUserID.Valid || uint32(poll.ManagerUserID.Int32) != actor {
 				return apierrors.SchedulePollAccessDenied
 			}

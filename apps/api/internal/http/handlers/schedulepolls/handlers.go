@@ -376,18 +376,30 @@ func validateTimezone(timezone string) error {
 	return nil
 }
 
-func lockPollForManager(ctx context.Context, q *generated.Queries, deps Deps, calendarID, pollID string, actor uint32) (generated.Calendar, generated.CalendarMember, generated.CalendarSchedulePoll, error) {
-	cal, err := calresolve.Manage(ctx, q, deps.WorkspaceID, calendarID, actor)
+// Every poll write locks in one order: calendar shared, poll row, then member
+// rows ascending with the caller among them. The grant is read before the
+// transaction, where a plain read takes no lock, and re-checked under lock by
+// lockPollMembers; under SERIALIZABLE a read inside would S-lock the caller's
+// row out of that order.
+
+// authorizePollManager resolves the calendar and the caller's manager grant
+// before the transaction.
+func authorizePollManager(ctx context.Context, deps Deps, calendarID, pollID string, actor uint32) (generated.Calendar, []byte, error) {
+	cal, err := calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, calendarID, actor)
 	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, generated.CalendarSchedulePoll{}, err
-	}
-	member, err := calresolve.LockManage(ctx, q, cal.ID, actor)
-	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, generated.CalendarSchedulePoll{}, err
+		return generated.Calendar{}, nil, err
 	}
 	publicID, err := parsePublicID(pollID, apierrors.SchedulePollNotFound)
 	if err != nil {
-		return generated.Calendar{}, generated.CalendarMember{}, generated.CalendarSchedulePoll{}, err
+		return generated.Calendar{}, nil, err
+	}
+	return cal, publicID, nil
+}
+
+// lockPollForManager takes the calendar's shared lock and then the poll row.
+func lockPollForManager(ctx context.Context, q *generated.Queries, deps Deps, cal generated.Calendar, publicID []byte) (generated.CalendarSchedulePoll, error) {
+	if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+		return generated.CalendarSchedulePoll{}, err
 	}
 	poll, err := q.GetSchedulePollForUpdateByPublicID(ctx, generated.GetSchedulePollForUpdateByPublicIDParams{
 		WorkspaceID: deps.WorkspaceID,
@@ -395,22 +407,105 @@ func lockPollForManager(ctx context.Context, q *generated.Queries, deps Deps, ca
 		PublicID:    publicID,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return generated.Calendar{}, generated.CalendarMember{}, generated.CalendarSchedulePoll{}, apierrors.SchedulePollNotFound
+		return generated.CalendarSchedulePoll{}, apierrors.SchedulePollNotFound
 	}
-	return cal, member, poll, err
+	return poll, err
 }
 
-func lockRequestedMembers(ctx context.Context, q *generated.Queries, calendarID uint32, memberIDs []uint32) error {
-	locked, err := calresolve.LockMembers(ctx, q, calendarID, memberIDs...)
+// pollRoster lists the poll's enabled recipients and its organizer from the
+// poll's own tables, so no calendar_members row is read before lockPollMembers.
+func pollRoster(ctx context.Context, q *generated.Queries, poll generated.CalendarSchedulePoll) ([]uint32, error) {
+	rows, err := q.ListSchedulePollMembers(ctx, poll.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, id := range memberIDs {
-		if _, ok := locked[id]; !ok {
-			return apierrors.SchedulePollStale
+	ids := make([]uint32, 0, len(rows)+1)
+	for _, row := range rows {
+		if row.Enabled {
+			ids = append(ids, row.UserID)
 		}
 	}
+	if poll.ManagerUserID.Valid {
+		ids = append(ids, uint32(poll.ManagerUserID.Int32))
+	}
+	return ids, nil
+}
+
+// roleNeed is the calendar role a poll write requires of its caller.
+type roleNeed int
+
+const (
+	needMember roleNeed = iota
+	needManage
+)
+
+// lockPollMembers locks the caller, ids and roster in one ascending pass. The
+// caller is checked first: CalendarAccessDenied once the membership is gone,
+// CalendarRoleRequired when need is needManage and the role is below manager.
+// Then every id in ids must still be live, or SchedulePollStale. A roster
+// member who left the calendar is only absent from the result.
+func lockPollMembers(ctx context.Context, q *generated.Queries, calendarID, caller uint32, need roleNeed, ids, roster []uint32) (map[uint32]generated.CalendarMember, error) {
+	all := make([]uint32, 0, len(ids)+len(roster)+1)
+	all = append(all, caller)
+	all = append(all, ids...)
+	all = append(all, roster...)
+	locked, err := calresolve.LockMembers(ctx, q, calendarID, all...)
+	if err != nil {
+		return nil, err
+	}
+	member, ok := locked[caller]
+	if !ok {
+		return nil, apierrors.CalendarAccessDenied
+	}
+	if need == needManage && !calresolve.CanManage(member.Role) {
+		return nil, apierrors.CalendarRoleRequired
+	}
+	for _, id := range ids {
+		if _, ok := locked[id]; !ok {
+			return nil, apierrors.SchedulePollStale
+		}
+	}
+	return locked, nil
+}
+
+// checkPollParticipant admits a current recipient, or with allowOrganizer the
+// assigned organizer holding a manager role, to an open poll.
+func checkPollParticipant(poll generated.CalendarSchedulePoll, memberIDs []uint32, role generated.CalendarMembersRole, actor uint32, allowOrganizer bool) error {
+	isTarget := slices.Contains(memberIDs, actor)
+	isOrganizer := allowOrganizer && managerRole(role) && poll.ManagerUserID.Valid && uint32(poll.ManagerUserID.Int32) == actor
+	if !isTarget && !isOrganizer {
+		return apierrors.SchedulePollNotFound
+	}
+	if poll.Status != generated.CalendarSchedulePollsStatusOpen {
+		return apierrors.SchedulePollConflict
+	}
 	return nil
+}
+
+// authorizePollParticipant runs checkPollParticipant on unlocked reads before
+// the transaction, so a non-member or a closed poll is refused as before
+// without taking a member lock. The run under lock is the authoritative one.
+func authorizePollParticipant(ctx context.Context, deps Deps, calendarID, pollID string, actor uint32, allowOrganizer bool) (generated.Calendar, []byte, error) {
+	cal, member, err := calresolve.Member(ctx, deps.Queries, deps.WorkspaceID, calendarID, actor)
+	if err != nil {
+		return generated.Calendar{}, nil, err
+	}
+	pollPublicID, err := parsePublicID(pollID, apierrors.SchedulePollNotFound)
+	if err != nil {
+		return generated.Calendar{}, nil, err
+	}
+	poll, err := pollByPublicID(ctx, deps.Queries, deps.WorkspaceID, cal.ID, pollPublicID)
+	if err != nil {
+		return generated.Calendar{}, nil, err
+	}
+	_, memberIDs, err := activePollMembers(ctx, deps.Queries, poll.ID)
+	if err != nil {
+		return generated.Calendar{}, nil, err
+	}
+	if err := checkPollParticipant(poll, memberIDs, member.Role, actor, allowOrganizer); err != nil {
+		return generated.Calendar{}, nil, err
+	}
+	return cal, pollPublicID, nil
 }
 
 // CreatePoll snapshots the selected recipients and rechecks candidate times
@@ -443,23 +538,24 @@ func CreatePoll(deps Deps) func(context.Context, *CreatePollInput) (*CreatePollO
 				return nil, internalError(ctx, "generate schedule poll candidate id", err)
 			}
 		}
+		cal, err := calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, in.CalendarID, actor)
+		if err != nil {
+			return nil, apiError(err)
+		}
+		memberIDs, err := memberIDsFromPublic(ctx, deps.Queries, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
+		if err != nil {
+			return nil, apiError(err)
+		}
 		var detail PollDetailResponse
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
-			cal, err := calresolve.Read(ctx, q, deps.WorkspaceID, in.CalendarID, actor)
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needManage, memberIDs, nil)
 			if err != nil {
 				return err
 			}
-			actorMember, err := calresolve.LockManage(ctx, q, cal.ID, actor)
-			if err != nil {
-				return err
-			}
-			memberIDs, err := memberIDsFromPublic(ctx, q, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
-			if err != nil {
-				return err
-			}
-			if err := lockRequestedMembers(ctx, q, cal.ID, memberIDs); err != nil {
-				return err
-			}
+			actorMember := locked[actor]
 			states, err := candidateAvailability(ctx, q, deps.WorkspaceID, cal.ID, memberIDs, slots)
 			if err != nil {
 				return err
@@ -681,18 +777,13 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 		if err != nil {
 			return nil, err
 		}
+		cal, pollPublicID, err := authorizePollParticipant(ctx, deps, in.CalendarID, in.PollID, actor, true)
+		if err != nil {
+			return nil, apiError(err)
+		}
 		var result PollDetailResponse
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
-			cal, err := calresolve.Read(ctx, q, deps.WorkspaceID, in.CalendarID, actor)
-			if err != nil {
-				return err
-			}
-			member, err := calresolve.LockMember(ctx, q, cal.ID, actor)
-			if err != nil {
-				return err
-			}
-			pollPublicID, err := parsePublicID(in.PollID, apierrors.SchedulePollNotFound)
-			if err != nil {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
 				return err
 			}
 			poll, err := q.GetSchedulePollForUpdateByPublicID(ctx, generated.GetSchedulePollForUpdateByPublicIDParams{
@@ -706,30 +797,21 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 			if err != nil {
 				return err
 			}
-			current, memberIDs, err := activePollMembers(ctx, q, poll.ID)
+			roster, err := pollRoster(ctx, q, poll)
 			if err != nil {
 				return err
 			}
-			isTarget := false
-			for _, target := range current {
-				if target.UserID == actor {
-					isTarget = true
-					break
-				}
-			}
-			isOrganizer := managerRole(member.Role) && poll.ManagerUserID.Valid && uint32(poll.ManagerUserID.Int32) == actor
-			if !isTarget && !isOrganizer {
-				return apierrors.SchedulePollNotFound
-			}
-			if poll.Status != generated.CalendarSchedulePollsStatusOpen {
-				return apierrors.SchedulePollConflict
-			}
-			lockedMembers, err := calresolve.LockMembers(ctx, q, cal.ID, memberIDs...)
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needMember, nil, roster)
 			if err != nil {
 				return err
 			}
-			if len(lockedMembers) != len(memberIDs) {
-				return apierrors.SchedulePollStale
+			member := locked[actor]
+			_, memberIDs, err := activePollMembers(ctx, q, poll.ID)
+			if err != nil {
+				return err
+			}
+			if err := checkPollParticipant(poll, memberIDs, member.Role, actor, true); err != nil {
+				return err
 			}
 			if _, _, err := refreshPollAvailability(ctx, q, deps.WorkspaceID, cal.ID, poll); err != nil {
 				return err
@@ -758,22 +840,17 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 		if err != nil {
 			return nil, err
 		}
+		cal, pollPublicID, err := authorizePollParticipant(ctx, deps, in.CalendarID, in.PollID, actor, false)
+		if err != nil {
+			return nil, apiError(err)
+		}
 		var result PollDetailResponse
 		staleAfterRefresh := false
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			staleAfterRefresh = false
-			cal, err := calresolve.Read(ctx, q, deps.WorkspaceID, in.CalendarID, actor)
-			if err != nil {
-				return err
-			}
-			member, err := calresolve.LockMember(ctx, q, cal.ID, actor)
-			if err != nil {
-				return err
-			}
-			pollPublicID, err := parsePublicID(in.PollID, apierrors.SchedulePollNotFound)
-			if err != nil {
-				return err
-			}
 			poll, err := q.GetSchedulePollForUpdateByPublicID(ctx, generated.GetSchedulePollForUpdateByPublicIDParams{
 				WorkspaceID: deps.WorkspaceID,
 				CalendarID:  cal.ID,
@@ -785,22 +862,21 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 			if err != nil {
 				return err
 			}
+			roster, err := pollRoster(ctx, q, poll)
+			if err != nil {
+				return err
+			}
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needMember, nil, roster)
+			if err != nil {
+				return err
+			}
+			member := locked[actor]
 			_, memberIDs, err := activePollMembers(ctx, q, poll.ID)
 			if err != nil {
 				return err
 			}
-			if !slices.Contains(memberIDs, actor) {
-				return apierrors.SchedulePollNotFound
-			}
-			if poll.Status != generated.CalendarSchedulePollsStatusOpen {
-				return apierrors.SchedulePollConflict
-			}
-			lockedMembers, err := calresolve.LockMembers(ctx, q, cal.ID, memberIDs...)
-			if err != nil {
+			if err := checkPollParticipant(poll, memberIDs, member.Role, actor, false); err != nil {
 				return err
-			}
-			if len(lockedMembers) != len(memberIDs) {
-				return apierrors.SchedulePollStale
 			}
 			changed, _, err := refreshPollAvailability(ctx, q, deps.WorkspaceID, cal.ID, poll)
 			if err != nil {

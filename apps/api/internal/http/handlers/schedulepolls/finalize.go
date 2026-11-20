@@ -31,16 +31,29 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			return nil, internalError(ctx, "generate confirmed event id", err)
 		}
 
+		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
+		if err != nil {
+			return nil, apiError(err)
+		}
 		var result PollDetailResponse
 		blockedByNewFixedEvent := false
 		availabilityChangedAtFinalize := false
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
-			blockedByNewFixedEvent = false
-			availabilityChangedAtFinalize = false
-			cal, member, poll, err := lockPollForManager(ctx, q, deps, in.CalendarID, in.PollID, actor)
+			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err
 			}
+			blockedByNewFixedEvent = false
+			availabilityChangedAtFinalize = false
+			roster, err := pollRoster(ctx, q, poll)
+			if err != nil {
+				return err
+			}
+			locked, err := lockPollMembers(ctx, q, cal.ID, actor, needManage, nil, roster)
+			if err != nil {
+				return err
+			}
+			member := locked[actor]
 			if !poll.ManagerUserID.Valid || uint32(poll.ManagerUserID.Int32) != actor {
 				return apierrors.SchedulePollAccessDenied
 			}
@@ -67,9 +80,6 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			}
 			if len(memberIDs) == 0 {
 				return apierrors.SchedulePollConflict
-			}
-			if err := lockRequestedMembers(ctx, q, cal.ID, memberIDs); err != nil {
-				return err
 			}
 			memberCount, err := q.CountSchedulePollCurrentMembers(ctx, poll.ID)
 			if err != nil {
