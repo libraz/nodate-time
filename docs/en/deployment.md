@@ -145,3 +145,82 @@ docker compose -f compose.prod.yml up -d --build --remove-orphans
 Thumbnails need the second step. v0.1.0 stored one underneath its photo (`<photo>/thumb`), a key the new store cannot hold beside the photo itself, and MinIO does not list a key that sits under another object, so `mc mirror` never sees them. The upgrade file has already moved their rows to `<photo>.thumb`; the loop reads that list and copies each one to its new key. A `not copied` line names a thumbnail the old store did not have.
 
 Both stores take the same `TC_S3_*` credentials, so the old container's own variables serve for both. Keep the `minio_data` volume until attachments, album photos and avatars have been checked in the running app, then remove it with `docker volume rm`.
+
+## Migrating from TimeTree
+
+`importtimetree` copies shared calendars out of TimeTree and keeps track of whose event each one is. It logs in to TimeTree itself, fetches every calendar and event up front, then creates the accounts, calendars and members a mapping file describes and imports the events under the owners it assigns. It ships in the API image as `/importtimetree`.
+
+Before you start:
+
+- Every email in the mapping must be the address that person signs in with through Google. The accounts are created without passwords, and the first Google sign-in whose verified email matches claims one. An address nobody can sign in with leaves an account nobody can reach.
+- Set `TIMETREE_EMAIL` and `TIMETREE_PASSWORD` for the command (see [Configuration](configuration.md)). They are read from the environment so they never show up in the process list.
+
+### Mapping file
+
+```yaml
+importer: ops@example.com # runs the import; owns the calendars and is the default owner
+users: # accounts to create (existing ones are skipped)
+  - email: hanako@example.com
+    name: Hanako Yamada # defaults to the local part of the email
+calendars:
+  - timetree: Band # the TimeTree calendar's name or alias code
+    name: Band # name here; defaults to the TimeTree name
+    default_owner: mgr@example.com # owner of events with no mapped label; defaults to importer
+    members:
+      - { email: hanako@example.com, role: viewer }
+      - { email: mgr@example.com, role: manager }
+    labels: # TimeTree label name -> owner's email
+      Hanako: hanako@example.com
+```
+
+- `importer` is the existing or newly created account the import runs as. It becomes the owner of every calendar, so it must not be listed under `members`.
+- `users` lists the accounts to create. An address that already has an account is left alone.
+- `calendars[].timetree` selects one active TimeTree calendar by name or alias code.
+- `calendars[].name` is the calendar's name here. An existing calendar of that name that the importer belongs to (other than a personal one) is reused.
+- `members` gives each person a role: `manager`, `editor` or `viewer`. An existing member keeps the role they have.
+- `labels` maps TimeTree label names to the person who owns those events. Events with no label, or a label not listed, go to `default_owner`.
+
+Everything is checked before anything is written, and any of these stops the command with nothing written:
+
+- an unknown key, a duplicate entry or an unknown role
+- a malformed or non-ASCII email
+- an owner who is not a member of the calendar
+- a `timetree` value that matches no calendar, or more than one
+- a mapped label that no TimeTree label matches
+- two existing calendars with the same name
+
+### Dry run first
+
+```sh
+docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PASSWORD \
+  --entrypoint /importtimetree api -mapping - -dry-run < mapping.yaml
+```
+
+`-mapping` takes a path or `-` for standard input. With `-dry-run` the command logs in, fetches and validates, prints the report and writes nothing. For each TimeTree calendar the report shows the event count, the earliest start date, the count per label (including events with no label), what would be skipped and why, the number of events that have attendees, the number of timed events recorded in UTC, and three all-day events with their raw and converted times. For each calendar in the mapping it adds the count per owner, whether the calendar would be created or reused, and the accounts that would be created. Validation errors are listed at the end. Read the label and owner counts for a label missing from the mapping, and compare the earliest dates and the all-day examples with what TimeTree shows.
+
+### Running it
+
+With ansible, from `ansible/`:
+
+```sh
+ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml --check   # dry run
+ansible-playbook import-timetree.yml -e timetree_mapping=/path/to/mapping.yaml
+```
+
+The mapping file stays on the controller and reaches the container on standard input; the credentials come from `timetree_email` and `timetree_password` in `vault.yml`. `--check` runs the importer with `-dry-run`.
+
+| Exit code | Meaning                                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 0         | Success.                                                                                                                |
+| 1         | One or more events failed while writing. Others were imported.                                                          |
+| 2         | Nothing was written: bad input, missing credentials, a validation error, or a failed login or fetch. Safe to run again. |
+
+Events are identified by their TimeTree id, so running the same import again imports nothing new and reports the already-imported events as duplicates.
+
+### What is not migrated
+
+Attendees, comments, attachments, reminders, memos, birthdays, public calendars and deactivated calendars are not imported; the report counts what it skips. Calendar colors take the default. Events keep only the owner the label gives them.
+
+### Run it before cutover only
+
+The importer does not update what it has already imported. Run it again after people have started using the app and it brings back events they deleted and members they removed, and creates a second calendar for each one they renamed. Re-running is for redoing the migration before cutover, not for catching up afterwards.

@@ -19,11 +19,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/createuser ./cmd/createuser && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/importtimetree ./cmd/importtimetree && \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/healthcheck ./cmd/healthcheck
 
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/api /api
 COPY --from=build /out/createuser /createuser
+COPY --from=build /out/importtimetree /importtimetree
 COPY --from=build /out/healthcheck /healthcheck
 USER nonroot:nonroot
 # 8080 serves the product; 9464 serves metrics, profiles and the detailed
