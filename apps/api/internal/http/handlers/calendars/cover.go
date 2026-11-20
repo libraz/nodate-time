@@ -179,6 +179,11 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			return nil, toAPIError(err)
 		}
 
+		// Storage I/O runs with no transaction open, against the staged key.
+		if err := verifyCalendarCoverBytes(ctx, deps, staged, in.RawBody, contentType, digest[:]); err != nil {
+			return nil, toAPIError(err)
+		}
+
 		var updated generated.Calendar
 		var member generated.CalendarMember
 		changed := false
@@ -215,6 +220,10 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			lockedObjects := make(map[uint32]generated.StorageObject, len(ids))
 			for _, objectID := range ids {
 				object, err := q.GetStorageObjectByIDForUpdate(ctx, objectID)
+				if objectID == staged.ID && errors.Is(err, sql.ErrNoRows) {
+					// The staged object was swept after the bytes were checked.
+					return apierrors.CalendarCoverConflict
+				}
 				if err != nil {
 					return err
 				}
@@ -230,32 +239,12 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 				// endpoint is allowed to write, even though the digest is shared.
 				return apierrors.CalendarCoverConflict
 			}
-
-			verifyCtx, cancel := context.WithTimeout(ctx, calendarCoverIOTimeout)
-			defer cancel()
-			if !blobref.Verified(object) {
-				putErr := deps.Storage.Put(verifyCtx, object.StorageKey, bytes.NewReader(in.RawBody), int64(len(in.RawBody)), contentType)
-				if putErr != nil && !errors.Is(putErr, storage.ErrObjectExists) {
-					return apierrors.StorageUnavailable
-				}
-			}
-			info, exists, err := deps.Storage.StatObject(verifyCtx, object.StorageKey)
-			if err != nil {
-				return apierrors.StorageUnavailable
-			}
-			if !exists {
+			// A verified row that went back to pending was reset after the I/O.
+			if blobref.Verified(staged) && !blobref.Verified(object) {
 				return apierrors.CalendarCoverConflict
 			}
-			if info.Size != int64(len(in.RawBody)) || !storage.SameMediaType(info.ContentType, contentType) ||
-				(object.ByteSize != uint64(len(in.RawBody)) && blobref.Verified(object)) ||
+			if (object.ByteSize != uint64(len(in.RawBody)) && blobref.Verified(object)) ||
 				(blobref.Verified(object) && !storage.SameMediaType(object.ContentType, contentType)) {
-				return apierrors.CalendarCoverConflict
-			}
-			storedDigest, err := deps.Storage.SHA256(verifyCtx, object.StorageKey)
-			if err != nil {
-				return apierrors.StorageUnavailable
-			}
-			if !bytes.Equal(storedDigest, digest[:]) {
 				return apierrors.CalendarCoverConflict
 			}
 			object, err = blobref.MarkVerified(ctx, q, object, blobref.Blob{
@@ -317,6 +306,40 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 		}
 		return &PutCalendarCoverOutput{Body: response}, nil
 	}
+}
+
+// verifyCalendarCoverBytes writes the cover to the staged key when the staged
+// row is still pending, then checks what storage holds there against the
+// request. It must run with no transaction open.
+func verifyCalendarCoverBytes(ctx context.Context, deps Deps, staged generated.StorageObject, body []byte, contentType string, digest []byte) error {
+	verifyCtx, cancel := context.WithTimeout(ctx, calendarCoverIOTimeout)
+	defer cancel()
+	if !blobref.Verified(staged) {
+		putErr := deps.Storage.Put(verifyCtx, staged.StorageKey, bytes.NewReader(body), int64(len(body)), contentType)
+		if putErr != nil && !errors.Is(putErr, storage.ErrObjectExists) {
+			return apierrors.StorageUnavailable
+		}
+	}
+	info, exists, err := deps.Storage.StatObject(verifyCtx, staged.StorageKey)
+	if err != nil {
+		return apierrors.StorageUnavailable
+	}
+	if !exists {
+		return apierrors.CalendarCoverConflict
+	}
+	if info.Size != int64(len(body)) || !storage.SameMediaType(info.ContentType, contentType) ||
+		(staged.ByteSize != uint64(len(body)) && blobref.Verified(staged)) ||
+		(blobref.Verified(staged) && !storage.SameMediaType(staged.ContentType, contentType)) {
+		return apierrors.CalendarCoverConflict
+	}
+	storedDigest, err := deps.Storage.SHA256(verifyCtx, staged.StorageKey)
+	if err != nil {
+		return apierrors.StorageUnavailable
+	}
+	if !bytes.Equal(storedDigest, digest) {
+		return apierrors.CalendarCoverConflict
+	}
+	return nil
 }
 
 // DeleteCalendarCover removes the uploaded cover reference and returns the
