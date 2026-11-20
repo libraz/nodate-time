@@ -295,6 +295,12 @@ carrying a `shared` label _and_ an owner still vanishes when that one person
 is removed. A calendar a group shares leaves `owner_user_id` NULL; that is
 the whole difference, and it is the difference that has teeth.
 
+An attendee row is written only for a user who, at the time of the write,
+holds an enabled `calendar_members` row on the event's calendar, an enabled
+`workspace_members` row and an enabled `users` row. Readers hide rows whose
+user no longer qualifies, and a participant-list replacement may disable
+them.
+
 Resolve the calendar id and check the grant in the same function. Splitting
 them is how an authorization check goes missing — not because someone
 decides to skip it, but because the two steps can be performed apart.
@@ -384,6 +390,10 @@ sit inside workspace membership.
   The transaction that deletes the rows enqueues the key. A drainer removes
   the blob first and the queue row second, and treats removing a missing
   key as success, so drainers from both products can run side by side.
+  A drainer removes a queued key only when no `storage_objects` row holds
+  that key, confirmed or reserved. Otherwise it deletes the queue row and
+  leaves the blob to that row's lifecycle: a confirmed object's release, or
+  the unconfirmed sweep.
 - **Bucket identity.** On start-up each drainer compares its configured
   location, `<endpoint>/<bucket>`, with the `instance_settings` key
   `storage.location`. It inserts the row when it is missing. On a mismatch
@@ -454,7 +464,8 @@ An existing database is brought up to date in this order:
 
 1. Stop every application that writes to it.
 2. Apply `sql/core/upgrades/*.sql` in numeric order.
-3. Apply each hosted product layer's upgrades.
+3. For each hosted product layer, apply `sql/<layer>/upgrades/` in the
+   order given under [Layer upgrades](#layer-upgrades).
 4. Run `bash sql/core/conformance/run.sh --mode schema`.
 5. Start the applications.
 
@@ -470,10 +481,35 @@ An upgrade that rewrites data first makes the changes that do not alter
 meaning, then lists by `public_id` any rows that still violate the new
 constraint and stops, before it adds the constraint.
 
-A product layer's upgrades live in `sql/<layer>/upgrades/`, one file per
-release they upgrade from. A layer that does not promise to preserve data
-ships none and is rebuilt from its DDL instead; the flow layer is rebuilt
-this way until its first stable release.
+### Layer upgrades
+
+A product layer's upgrades live in `sql/<layer>/upgrades/`. A layer that
+does not promise to preserve data ships none and is rebuilt from its DDL
+instead; the flow layer is rebuilt this way until its first stable release.
+A layer that does preserve data ships three kinds of file:
+
+- **`from-<release>.sql`** is the step from that release tag. It is applied
+  once and is not re-run after the new application has served. Its header
+  names its applied-marker, a schema fact that is present once the step has
+  run (for time's `from-v0.1.0.sql`, the column `album_photos.retired_at`
+  exists); the operator skips the file when the marker is present. Once a
+  database past the file has served, the file is frozen and never edited.
+- **Feature files**, `<feature>.sql`, hold layer objects added after the
+  latest release file was frozen. Each is idempotent: `CREATE TABLE IF NOT
+  EXISTS` with a copy of the table file, `CREATE OR REPLACE VIEW`, and steps
+  guarded by `information_schema`. They are applied in the order the
+  layer's README lists.
+- **`triggers.sql`** is generated from `sql/<layer>/triggers/*.sql`: for
+  each file a `DROP TRIGGER IF EXISTS` and a `CREATE TRIGGER`, under a fixed
+  `SET SESSION sql_mode` header. It is never edited by hand. A trigger that
+  is removed from the layer keeps its drop by being listed in the
+  generator's retired list. MySQL cannot replace a trigger atomically, so
+  `triggers.sql` is applied last, with the writers of both products
+  stopped.
+
+The operator order for a layer is: core `upgrades/*`, then the layer's
+release file if its marker is absent, then its feature files, then
+`triggers.sql`, then conformance.
 
 ## Deployment
 
