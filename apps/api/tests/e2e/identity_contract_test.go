@@ -334,6 +334,12 @@ func TestIdentityContractRemovedWorkspaceMemberStaysOut(t *testing.T) {
 		`UPDATE workspace_members SET enabled = FALSE WHERE workspace_id = ? AND user_id = ?`,
 		workspaceID, removedID)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := testDB.Exec(
+			`UPDATE workspace_members SET enabled = TRUE WHERE workspace_id = ? AND user_id = ?`,
+			workspaceID, removedID)
+		require.NoError(t, err)
+	})
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodGet,
 		testServerURL+"/calendars/"+removed.CalendarID, removed.AccessToken, nil)

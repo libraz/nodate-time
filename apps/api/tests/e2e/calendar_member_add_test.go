@@ -140,6 +140,11 @@ func TestDirectAdditionDoesNotBringBackSomeoneTheWorkspaceRemoved(t *testing.T) 
 	_, err := testDB.ExecContext(t.Context(), `UPDATE workspace_members SET enabled = FALSE
 		WHERE user_id = (SELECT id FROM users WHERE public_id = UUID_TO_BIN(?))`, removed.UserID)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := testDB.Exec(`UPDATE workspace_members SET enabled = TRUE
+			WHERE user_id = (SELECT id FROM users WHERE public_id = UUID_TO_BIN(?))`, removed.UserID)
+		require.NoError(t, err)
+	})
 
 	require.Empty(t, candidateIDs(t, calURL, owner.AccessToken, removed.Email))
 	status, body := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/members", owner.AccessToken,

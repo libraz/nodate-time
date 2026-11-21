@@ -170,6 +170,15 @@ func departFromWorkspace(t *testing.T, calendarID, userID string) {
 	n, err := res.RowsAffected()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
+	t.Cleanup(func() {
+		_, err := testDB.Exec(`
+			UPDATE workspace_members wm
+			  JOIN calendars c ON c.workspace_id = wm.workspace_id
+			  JOIN users u ON u.id = wm.user_id
+			   SET wm.enabled = TRUE
+			 WHERE c.public_id = UUID_TO_BIN(?) AND u.public_id = UUID_TO_BIN(?)`, calendarID, userID)
+		require.NoError(t, err)
+	})
 }
 
 // departFromCalendar disables the user's calendar membership only.

@@ -314,6 +314,10 @@ func TestExceptionUndoRemovesEverySpellingOfTheDay(t *testing.T) {
 		Rule:       `{"freq":"daily","interval":1,"count":5}`,
 		Exceptions: `["2026-04-03","2026-04-03T00:00:00Z","2026-04-03T00:00:00","2026-04-04","??"]`,
 	})
+	t.Cleanup(func() {
+		_, err := testDB.Exec(`DELETE FROM calendar_events WHERE public_id = UUID_TO_BIN(?)`, id)
+		require.NoError(t, err)
+	})
 	var master ctEvent
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+id, owner.AccessToken, nil, &master)
 

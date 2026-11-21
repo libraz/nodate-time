@@ -28,6 +28,12 @@ func TestOwnerOutsideTheWorkspaceIsNotAReachableOwner(t *testing.T) {
 		`UPDATE workspace_members wm JOIN users u ON u.id = wm.user_id
 		 SET wm.enabled = FALSE WHERE u.email = ?`, b.Email)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := testDB.Exec(
+			`UPDATE workspace_members wm JOIN users u ON u.id = wm.user_id
+			 SET wm.enabled = TRUE WHERE u.email = ?`, b.Email)
+		require.NoError(t, err)
+	})
 
 	lastOwner := func(status int, body []byte) {
 		t.Helper()

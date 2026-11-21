@@ -125,6 +125,11 @@ func TestCalendarCoverUpload(t *testing.T) {
 	_, err := testDB.ExecContext(t.Context(), `UPDATE workspace_members SET enabled = FALSE
 		WHERE user_id = (SELECT id FROM users WHERE public_id = UUID_TO_BIN(?))`, member.UserID)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := testDB.Exec(`UPDATE workspace_members SET enabled = TRUE
+			WHERE user_id = (SELECT id FROM users WHERE public_id = UUID_TO_BIN(?))`, member.UserID)
+		require.NoError(t, err)
+	})
 	status, body = helpers.DoJSONStatus(t, http.MethodGet, testServerURL+"/calendars", member.AccessToken, nil)
 	require.Equal(t, http.StatusOK, status, "%s", body)
 	require.NotContains(t, string(body), owner.CalendarID)

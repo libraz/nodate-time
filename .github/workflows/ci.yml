@@ -62,6 +62,18 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: apps/api/go.sum
 
+      # verify-codegen regenerates the web API types from the OpenAPI document.
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       # sql/core is a copy of the shared schema contract. This asserts that
       # the copy is unedited here and still matches the commit it claims to
       # come from. Whether upstream has moved on is not asserted here, since
@@ -123,11 +135,11 @@ jobs:
 
       # The schema claims to implement a shared contract; this is what
       # checks that it does, rather than only that it loads.
-      - name: Core contract conformance
+      - name: Core contract conformance (schema)
         run: |
           bash sql/core/conformance/run.sh \
             --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-nodate_time}" \
-            --mode all
+            --mode schema
 
       # Check the historical upgrades against their target schema.
       - name: Upgrade path
@@ -154,6 +166,14 @@ jobs:
       # same command.
       - name: E2E tests (object storage absent)
         run: make test-e2e-storage-absent GOTESTFLAGS='-covermode=atomic -coverpkg=./... -coverprofile=coverage-absent.out'
+
+      # The data rules hold over rows the API wrote, so they run once the e2e
+      # passes have written them.
+      - name: Core contract conformance (data)
+        run: |
+          bash sql/core/conformance/run.sh \
+            --dsn "root:rootpw@127.0.0.1:${TC_DB_PORT:-33306}/${TC_DB_NAME:-nodate_time}" \
+            --mode data
 
       # Public repo: codecov runs tokenless. Uploads never gate CI.
       - name: Upload coverage (api)
