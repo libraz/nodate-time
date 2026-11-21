@@ -137,7 +137,7 @@ var ErrCancelled = errors.New("eventexpand: occurrence cancelled")
 // only what became of it.
 func ResolveOccurrence(ctx context.Context, loader OccurrenceLoader, event generated.CalendarEvent, occ recurrence.Occurrence) (Instance, error) {
 	original := occ.StartAt.UTC()
-	if recurrence.ParseExceptions(event.RecurrenceExceptions).Contains(original) {
+	if recurrence.ParseExceptionList(event.RecurrenceExceptions).Cancels(original, event.AllDay, event.Timezone) {
 		return Instance{}, ErrCancelled
 	}
 	child, err := loader.GetRecurrenceOverride(ctx, generated.GetRecurrenceOverrideParams{
@@ -198,15 +198,16 @@ func expand(
 		return nil
 	}
 
-	cancelled := recurrence.ParseExceptions(event.RecurrenceExceptions)
+	cancelled := recurrence.ParseExceptionList(event.RecurrenceExceptions)
+	zone := recurrence.ExpansionZone(event.AllDay, event.Timezone)
 	consumed := make(map[int64]bool, len(overrides.byInstant))
 
-	occurrences := recurrence.ExpandInZone(rule, event.StartAt.Time, event.EndAt.Time, windowStart, windowEnd, event.Timezone)
+	occurrences := recurrence.ExpandInZone(rule, event.StartAt.Time, event.EndAt.Time, windowStart, windowEnd, zone)
 	instances := make([]Instance, 0, len(occurrences))
 
 	for _, occ := range occurrences {
 		key := occ.StartAt.UTC().UnixMilli()
-		if cancelled.Contains(occ.StartAt) {
+		if cancelled.Cancels(occ.StartAt, event.AllDay, event.Timezone) {
 			// A cancelled occurrence is gone even if an override row still
 			// names it. Marking it consumed stops the pass below from
 			// resurrecting that row as a free-standing instance.
@@ -247,10 +248,10 @@ func expand(
 			continue
 		}
 		original := time.UnixMilli(key).UTC()
-		if cancelled.Contains(original) {
+		if cancelled.Cancels(original, event.AllDay, event.Timezone) {
 			continue
 		}
-		if !recurrence.OccursAt(rule, event.StartAt.Time, event.EndAt.Time, event.Timezone, original) {
+		if !recurrence.OccursAt(rule, event.StartAt.Time, event.EndAt.Time, zone, original) {
 			continue
 		}
 		instances = append(instances, Instance{

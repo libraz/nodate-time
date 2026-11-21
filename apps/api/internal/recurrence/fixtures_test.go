@@ -36,10 +36,7 @@ func TestFixtures(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
-			zone := c.TZ
-			if c.AllDay {
-				zone = "UTC"
-			}
+			zone := ExpansionZone(c.AllDay, c.TZ)
 			loc, err := time.LoadLocation(zone)
 			if err != nil {
 				t.Skipf("tz database unavailable: %v", err)

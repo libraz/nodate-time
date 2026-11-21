@@ -43,9 +43,9 @@ func dailyRule(t *testing.T) *json.RawMessage {
 // exceptions renders the stored exclusion list the way a writer would.
 func exceptions(t *testing.T, starts ...string) *json.RawMessage {
 	t.Helper()
-	var list recurrence.Exceptions
+	var list recurrence.ExceptionList
 	for _, s := range starts {
-		list = list.With(mustTime(t, s))
+		list = list.With(mustTime(t, s), false, "UTC")
 	}
 	column, err := list.MarshalColumn()
 	if err != nil {
@@ -209,5 +209,30 @@ func TestLoadOverridesReportsAFailedRead(t *testing.T) {
 	}
 	if _, err := LoadOverrides(context.Background(), failingBatchLoader{}, nil); err != nil {
 		t.Fatalf("LoadOverrides() with no series = %v; nothing to read cannot fail", err)
+	}
+}
+
+// An all-day series expands in UTC whatever its timezone says, and its
+// cancellations are dates.
+func TestAllDaySeriesExpandsInUTCAndCancelsByDate(t *testing.T) {
+	m := master(t)
+	m.AllDay = true
+	m.Timezone = "America/Los_Angeles"
+	m.StartAt = nullTime(t, "2026-03-07T00:00:00Z")
+	m.EndAt = nullTime(t, "2026-03-08T00:00:00Z")
+	rule := json.RawMessage(`{"freq":"daily","count":5}`)
+	m.RecurrenceRule = &rule
+	ex := json.RawMessage(`["2026-03-09","not a date"]`)
+	m.RecurrenceExceptions = &ex
+
+	got := ExpandWithOverrides(m, nil, mustTime(t, "2026-03-01T00:00:00Z"), mustTime(t, "2026-04-01T00:00:00Z"))
+	want := []string{"2026-03-07", "2026-03-08", "2026-03-10", "2026-03-11"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d instances, want %d", len(got), len(want))
+	}
+	for i, inst := range got {
+		if s := inst.Occurrence.StartAt.Format("2006-01-02T15:04:05Z07:00"); s != want[i]+"T00:00:00Z" {
+			t.Errorf("instance %d starts %s, want %sT00:00:00Z", i, s, want[i])
+		}
 	}
 }
