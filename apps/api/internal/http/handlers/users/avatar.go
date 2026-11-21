@@ -1,7 +1,6 @@
 package users
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -42,19 +41,6 @@ func avatarStorageKey(userPubHex, sha256Hex string) string {
 	return fmt.Sprintf("%s/%s/%s", avatarStoragePath, userPubHex, sha256Hex)
 }
 
-// parseSHA256 accepts the digest the client computed over the bytes it is
-// about to upload; storage_objects is keyed on it.
-func parseSHA256(s string) ([]byte, bool) {
-	if len(s) != 64 {
-		return nil, false
-	}
-	raw, err := hex.DecodeString(strings.ToLower(s))
-	if err != nil {
-		return nil, false
-	}
-	return raw, true
-}
-
 // PresignAvatar issues a signed PUT URL for uploading the current user's avatar.
 // The caller must then call ConfirmAvatar with the returned avatarId to finalize
 // the change.
@@ -79,9 +65,9 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		digest, ok := parseSHA256(in.Body.SHA256)
-		if !ok {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		digest, err := blobref.ParseDigest(in.Body.SHA256)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.UploadDigestMismatch)
 		}
 
 		avatarPubID, err := uuid.NewV7()
@@ -195,14 +181,17 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 		}
 		actualContentType := strings.ToLower(strings.TrimSpace(info.ContentType))
 		valid := uint64(info.Size) == upload.ByteSize && info.Size <= maxAvatarSize && actualContentType == upload.ContentType
+		rejection := apierrors.AvatarUploadInvalid
 		if valid {
 			// The key was derived from the declared digest, so only reading the
 			// bytes back says they are the picture the key names.
-			stored, err := deps.Storage.SHA256(ctx, upload.StorageKey)
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+			if err := verifyStored(ctx, deps, upload); err != nil {
+				spec, isVerdict := apierrors.FromBlobref(err)
+				if !isVerdict {
+					return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+				}
+				valid, rejection = false, spec
 			}
-			valid = bytes.Equal(stored, upload.Sha256)
 		}
 		if !valid {
 			// A key a storage object claims holds verified bytes -- the avatar
@@ -221,7 +210,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			if err := deps.Queries.DeleteAvatarUpload(ctx, upload.ID); err != nil {
 				slog.WarnContext(ctx, "failed to delete invalid avatar upload session", "uploadID", upload.ID, "error", err)
 			}
-			return nil, apierrors.ToHuma(apierrors.AvatarUploadInvalid)
+			return nil, apierrors.ToHuma(rejection)
 		}
 
 		if deps.DB == nil {
@@ -297,6 +286,20 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 	}
 }
 
+// verifyStored reads the object behind an upload back and checks it against the
+// digest declared when the upload was reserved.
+func verifyStored(ctx context.Context, deps Deps, upload generated.AvatarUpload) error {
+	obj, exists, err := deps.Storage.Open(ctx, upload.StorageKey)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return blobref.ErrDigestMismatch
+	}
+	defer obj.Close()
+	return blobref.VerifyReadBack(obj, upload.Sha256, int64(upload.ByteSize))
+}
+
 // DeleteAvatar clears the user's avatar and removes the stored object.
 func DeleteAvatar(deps Deps) func(context.Context, *DeleteAvatarInput) (*DeleteAvatarOutput, error) {
 	return func(ctx context.Context, _ *DeleteAvatarInput) (*DeleteAvatarOutput, error) {
@@ -327,10 +330,6 @@ func DeleteAvatar(deps Deps) func(context.Context, *DeleteAvatarInput) (*DeleteA
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		return &DeleteAvatarOutput{Body: mapUserWithAvatar(ctx, deps, refreshed)}, nil
+		return &DeleteAvatarOutput{}, nil
 	}
 }

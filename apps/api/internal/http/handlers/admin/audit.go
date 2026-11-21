@@ -13,6 +13,7 @@ import (
 
 // Audit actions, one per instance-wide change an administrator can make.
 const (
+	auditInstanceAdminGrant  = "instance_admin.grant"
 	auditInstanceAdminRevoke = "instance_admin.revoke"
 	auditAllowedEmailCreate  = "allowed_email.create"
 	auditAllowedEmailDelete  = "allowed_email.delete"

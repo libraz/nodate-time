@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/blobref"
@@ -13,6 +14,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 )
 
@@ -51,13 +53,15 @@ type ListProvidersOutput struct {
 	Body []ProviderInfo
 }
 
+// UpdateProviderInput is a merge patch. An absent member keeps what is stored;
+// a null clientSecret removes the stored secret. ClientID and Enabled cannot be
+// null.
 type UpdateProviderInput struct {
 	Provider string `path:"provider" enum:"google,line"`
 	Body     struct {
-		ClientID string `json:"clientId" minLength:"0" maxLength:"255"`
-		// Empty string keeps the existing secret. To clear, send "__clear__".
-		ClientSecret string `json:"clientSecret" minLength:"0" maxLength:"512"`
-		Enabled      bool   `json:"enabled"`
+		ClientID     patch.Field[string] `json:"clientId,omitzero" required:"false" doc:"at most 255 characters"`
+		ClientSecret patch.Field[string] `json:"clientSecret,omitzero" required:"false" doc:"1 to 512 characters; null removes the stored secret"`
+		Enabled      patch.Field[bool]   `json:"enabled,omitzero" required:"false"`
 	}
 }
 
@@ -114,11 +118,32 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
+		if in.Body.ClientID.IsNull() || in.Body.Enabled.IsNull() {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		clientID, clientIDSet := in.Body.ClientID.Get()
+		if clientIDSet && utf8.RuneCountInString(clientID) > 255 {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		secret, secretSet := in.Body.ClientSecret.Get()
+		if secretSet {
+			if n := utf8.RuneCountInString(secret); n < 1 || n > 512 {
+				return nil, apierrors.ToHuma(apierrors.Validation)
+			}
+		}
+
 		var encSecret []byte
 		switch {
-		case in.Body.ClientSecret == "" && hadRow:
+		case secretSet:
+			encSecret, err = deps.Cipher.Encrypt([]byte(secret))
+			if err != nil {
+				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			}
+		case in.Body.ClientSecret.IsNull():
+			// Stored as no secret below.
+		case hadRow:
 			encSecret = existing.ClientSecretCiphertext
-		case in.Body.ClientSecret == "":
+		default:
 			// New row but no secret provided. Allow it only when the environment
 			// supplies the secret for this provider (resolveProvider merges the
 			// env secret at runtime), so admins can override clientId/enabled
@@ -127,13 +152,15 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			if deps.EnvFallback == nil || !deps.EnvFallback(in.Provider) {
 				return nil, apierrors.ToHuma(apierrors.BadRequest)
 			}
-		case in.Body.ClientSecret == "__clear__":
-			// Stored as no secret below.
-		default:
-			encSecret, err = deps.Cipher.Encrypt([]byte(in.Body.ClientSecret))
-			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-			}
+		}
+
+		// An absent member keeps the stored value; a new row starts empty and off.
+		if !clientIDSet && hadRow {
+			clientID = existing.ClientID
+		}
+		enabled, enabledSet := in.Body.Enabled.Get()
+		if !enabledSet && hadRow {
+			enabled = existing.Enabled
 		}
 
 		// The column is NOT NULL: no stored secret is an empty one, and nil
@@ -152,9 +179,9 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			if err := q.UpsertOAuthProviderConfig(ctx, generated.UpsertOAuthProviderConfigParams{
 				PublicID:               pubID[:],
 				Provider:               generated.OauthProviderConfigsProvider(in.Provider),
-				ClientID:               in.Body.ClientID,
+				ClientID:               clientID,
 				ClientSecretCiphertext: encSecret,
-				Enabled:                in.Body.Enabled,
+				Enabled:                enabled,
 				UpdatedByUserID:        updatedBy,
 			}); err != nil {
 				return err

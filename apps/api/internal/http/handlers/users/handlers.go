@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 	"github.com/libraz/nodate-time/apps/api/internal/workspace"
@@ -231,6 +233,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			if isDuplicateKey(err) {
 				return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
 			}
+			slog.ErrorContext(ctx, "registration failed", "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -249,6 +252,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, created.ID, userAgent, ipAddress)
 		if err != nil {
+			slog.ErrorContext(ctx, "registration session not opened", "userID", created.ID, "error", err)
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
@@ -270,10 +274,14 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 		}
 
-		identity, err := deps.Queries.GetIdentityByProviderSubject(ctx, generated.GetIdentityByProviderSubjectParams{
-			Provider: generated.IdentitiesProviderLocal,
-			Subject:  email,
-		})
+		// The account is found by the address on the user row and then by its
+		// local identity: an identity's subject is the address at creation and
+		// is not what a sign-in is matched against.
+		user, err := deps.Queries.GetUserByEmail(ctx, email)
+		var identity generated.Identity
+		if err == nil {
+			identity, err = deps.Queries.GetLocalIdentityByUser(ctx, user.ID)
+		}
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// Hash anyway so the response time matches the found path and
@@ -297,16 +305,6 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 		if !passwordMatches(identity.PasswordHash, in.Body.Password) {
 			recordFailedAttempt(ctx, deps, identity)
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
-		}
-
-		// A disabled account is answered like a wrong password: the caller has
-		// shown the password, not that the account still exists.
-		user, err := deps.Queries.GetUserByID(ctx, identity.UserID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
-			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
 		// Admission is decided at every sign-in, not only at registration, so a
@@ -549,45 +547,90 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 	}
 }
 
-func UpdateMe(deps Deps) func(context.Context, *UpdateMeInput) (*UpdateMeOutput, error) {
-	return func(ctx context.Context, in *UpdateMeInput) (*UpdateMeOutput, error) {
+// UpdateUser applies a merge patch to the caller's profile.
+func UpdateUser(deps Deps) func(context.Context, *UpdateUserInput) (*UpdateUserOutput, error) {
+	return func(ctx context.Context, in *UpdateUserInput) (*UpdateUserOutput, error) {
 		userID, ok := middleware.ActorFromContext(ctx)
 		if !ok {
 			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 		}
-		current, err := deps.Queries.GetUserByID(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
 
-		timezone := current.Timezone
-		if in.Body.Timezone != "" {
-			if _, lerr := time.LoadLocation(in.Body.Timezone); lerr != nil {
-				return nil, apierrors.ToHuma(apierrors.BadRequest)
+		// Nothing here is nullable: a column that cannot be empty has no
+		// "clear" to ask for.
+		name, nameSet, ok := patchedString(in.Body.Name, 1, maxUserNameLen)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		locale, localeSet, ok := patchedString(in.Body.Locale, 1, maxLocaleLen)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		timezone, timezoneSet, ok := patchedString(in.Body.Timezone, 1, maxTimezoneLen)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		if timezoneSet {
+			if _, err := time.LoadLocation(timezone); err != nil {
+				return nil, apierrors.ToHuma(apierrors.Validation)
 			}
-			timezone = in.Body.Timezone
-		}
-		locale := current.Locale
-		if in.Body.Locale != "" {
-			locale = in.Body.Locale
 		}
 
-		if err := deps.Queries.UpdateUser(ctx, generated.UpdateUserParams{
-			DisplayName: in.Body.Name,
-			// The uploaded avatar is not touched here: it lives in
-			// avatar_storage_object_id, and this endpoint only sets the
-			// external URL fallback.
-			AvatarURL: current.AvatarURL,
-			Timezone:  timezone,
-			Locale:    locale,
-			ID:        userID,
-		}); err != nil {
+		err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			current, err := q.GetUserByIDForUpdate(ctx, userID)
+			if err != nil {
+				return err
+			}
+			params := generated.UpdateUserParams{
+				DisplayName: current.DisplayName,
+				// The uploaded avatar is not touched here: it lives in
+				// avatar_storage_object_id, and the external URL fallback has
+				// no member in the patch.
+				AvatarURL: current.AvatarURL,
+				Timezone:  current.Timezone,
+				Locale:    current.Locale,
+				ID:        userID,
+			}
+			if nameSet {
+				params.DisplayName = name
+			}
+			if localeSet {
+				params.Locale = locale
+			}
+			if timezoneSet {
+				params.Timezone = timezone
+			}
+			return q.UpdateUser(ctx, params)
+		})
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &UpdateMeOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
+		return &UpdateUserOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
 	}
+}
+
+const (
+	maxUserNameLen = 100
+	maxLocaleLen   = 35
+	maxTimezoneLen = 64
+)
+
+// patchedString reads a patch member that cannot be null. set reports whether
+// it carries a value; ok is false for a null or a length outside [min, max]
+// code points.
+func patchedString(f patch.Field[string], min, max int) (v string, set, ok bool) {
+	if f.IsNull() {
+		return "", false, false
+	}
+	v, set = f.Get()
+	if !set {
+		return "", false, true
+	}
+	if n := utf8.RuneCountInString(v); n < min || n > max {
+		return "", false, false
+	}
+	return v, true, true
 }

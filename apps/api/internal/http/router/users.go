@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/users"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
 )
@@ -23,12 +24,13 @@ func registerUsers(g apiGroups, deps Deps) {
 	}, users.GetMe(userDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "update-me",
-		Method:      http.MethodPut,
+		OperationID: "update-user",
+		Method:      http.MethodPatch,
 		Path:        "/user",
 		Summary:     "Update current user",
 		Tags:        []string{"User"},
-	}, users.UpdateMe(userDeps))
+		Errors:      errorStatuses(apierrors.Validation),
+	}, users.UpdateUser(userDeps))
 
 	if mailOn {
 		huma.Register(api, huma.Operation{
@@ -74,11 +76,14 @@ func registerUsers(g apiGroups, deps Deps) {
 	}, users.ChangePassword(userDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "presign-avatar",
-		Method:      http.MethodPost,
-		Path:        "/user/avatar/presign",
-		Summary:     "Get a presigned URL for uploading a profile avatar",
-		Tags:        []string{"User"},
+		OperationID:   "presign-avatar",
+		Method:        http.MethodPost,
+		Path:          "/user/avatar/presign",
+		Summary:       "Get a presigned URL for uploading a profile avatar",
+		Tags:          []string{"User"},
+		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.AvatarTooLarge, apierrors.InvalidImageContentType,
+			apierrors.UploadDigestMismatch, apierrors.AvatarUploadLimit, apierrors.StorageUnavailable),
 	}, users.PresignAvatar(userDeps))
 
 	huma.Register(api, huma.Operation{
@@ -87,13 +92,16 @@ func registerUsers(g apiGroups, deps Deps) {
 		Path:        "/user/avatar",
 		Summary:     "Confirm a previously uploaded avatar",
 		Tags:        []string{"User"},
+		Errors: errorStatuses(apierrors.AvatarNotFound, apierrors.AvatarUploadInvalid,
+			apierrors.UploadDigestMismatch, apierrors.UploadTooLarge, apierrors.StorageUnavailable),
 	}, users.ConfirmAvatar(userDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "delete-avatar",
-		Method:      http.MethodDelete,
-		Path:        "/user/avatar",
-		Summary:     "Remove the current avatar",
-		Tags:        []string{"User"},
+		OperationID:   "delete-avatar",
+		Method:        http.MethodDelete,
+		Path:          "/user/avatar",
+		Summary:       "Remove the current avatar",
+		Tags:          []string{"User"},
+		DefaultStatus: http.StatusNoContent,
 	}, users.DeleteAvatar(userDeps))
 }

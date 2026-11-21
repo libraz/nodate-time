@@ -24,6 +24,10 @@ import (
 // against on every request.
 const refreshTokenTTL = 30 * 24 * time.Hour
 
+// maxLiveSessions bounds the live sign-ins one user keeps. A further sign-in
+// ends the oldest rather than being refused.
+const maxLiveSessions = 50
+
 // Credentials is what a successful sign-in hands back.
 type Credentials struct {
 	// Token is the short-lived access token. It names the session, so
@@ -105,7 +109,22 @@ func startSession(ctx context.Context, deps Deps, userID uint32, userAgent, ipAd
 			IpAddress:   packIP(ipAddress),
 			ExpiresAt:   expiresAt,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		over, err := q.ListSessionsOverCap(ctx, generated.ListSessionsOverCapParams{
+			UserID: userID,
+			Offset: maxLiveSessions,
+		})
+		if err != nil {
+			return err
+		}
+		for _, id := range over {
+			if err := q.RevokeSession(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return Credentials{}, err

@@ -26,6 +26,10 @@ type AllowedEmail struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// maxAllowedEmails bounds the live address entries, which keeps the listing a
+// bare array.
+const maxAllowedEmails = 500
+
 type ListAllowedEmailsInput struct{}
 
 type ListAllowedEmailsOutput struct {
@@ -119,6 +123,14 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 		// so the answer is read back rather than built from what was sent.
 		var stored generated.GetOauthSigninAllowlistEmailRow
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Counted under lock, so two additions cannot both pass the cap.
+			live, err := q.CountAllowlistEmailsForUpdate(ctx)
+			if err != nil {
+				return err
+			}
+			if live >= maxAllowedEmails {
+				return apierrors.AdminAllowedEmailsLimitReached
+			}
 			if err := q.UpsertOauthSigninAllowlistEmail(ctx, generated.UpsertOauthSigninAllowlistEmailParams{
 				PublicID:      pubID[:],
 				AddedByUserID: sql.NullInt32{Int32: int32(userID), Valid: userID > 0},
@@ -140,6 +152,10 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			})
 		})
 		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		return &CreateAllowedEmailOutput{Body: AllowedEmail{

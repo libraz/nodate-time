@@ -18,11 +18,12 @@ func registerAuth(g apiGroups, deps Deps) {
 	// only when enabled. Disabling it yields an OAuth/OIDC-only deployment.
 	if deps.PasswordLoginEnabled {
 		huma.Register(api, huma.Operation{
-			OperationID: "register",
-			Method:      http.MethodPost,
-			Path:        "/auth/register",
-			Summary:     "Register a new user",
-			Tags:        []string{"Auth"},
+			OperationID:   "register",
+			Method:        http.MethodPost,
+			Path:          "/auth/register",
+			Summary:       "Register a new user",
+			Tags:          []string{"Auth"},
+			DefaultStatus: http.StatusCreated,
 		}, users.Register(userDeps))
 
 		huma.Register(api, huma.Operation{

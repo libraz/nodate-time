@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/admin"
 )
 
@@ -31,10 +32,11 @@ func registerAdmin(g apiGroups, deps Deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "update-oauth-provider",
-		Method:      http.MethodPut,
+		Method:      http.MethodPatch,
 		Path:        "/admin/oauth-providers/{provider}",
 		Summary:     "Update OAuth provider credentials (admin only)",
 		Tags:        []string{"Admin"},
+		Errors:      errorStatuses(apierrors.BadRequest, apierrors.Validation, apierrors.SecretsUnavailable),
 	}, admin.UpdateOAuthProvider(adminDeps))
 
 	huma.Register(api, huma.Operation{
@@ -55,6 +57,17 @@ func registerAdmin(g apiGroups, deps Deps) {
 	}, admin.ListInstanceAdmins(adminDeps))
 
 	huma.Register(api, huma.Operation{
+		OperationID:   "add-instance-admin",
+		Method:        http.MethodPost,
+		Path:          "/admin/instance-admins",
+		Summary:       "Grant a user instance administrator rights (admin only)",
+		Tags:          []string{"Admin"},
+		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.AdminUserNotFound, apierrors.AdminAlreadyAdmin,
+			apierrors.AdminAdminsLimitReached),
+	}, admin.AddInstanceAdmin(adminDeps))
+
+	huma.Register(api, huma.Operation{
 		OperationID:   "revoke-instance-admin",
 		Method:        http.MethodDelete,
 		Path:          "/admin/instance-admins/{userId}",
@@ -72,11 +85,14 @@ func registerAdmin(g apiGroups, deps Deps) {
 	}, admin.ListAllowedEmails(adminDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "create-allowed-email",
-		Method:      http.MethodPost,
-		Path:        "/admin/allowed-emails",
-		Summary:     "Allow an individual email to sign in via OAuth (admin only)",
-		Tags:        []string{"Admin"},
+		OperationID:   "create-allowed-email",
+		Method:        http.MethodPost,
+		Path:          "/admin/allowed-emails",
+		Summary:       "Allow an individual email to sign in via OAuth (admin only)",
+		Tags:          []string{"Admin"},
+		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.AuthEmailUnsupported, apierrors.Conflict,
+			apierrors.AdminAllowedEmailsLimitReached),
 	}, admin.CreateAllowedEmail(adminDeps))
 
 	huma.Register(api, huma.Operation{

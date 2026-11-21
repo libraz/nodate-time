@@ -1,6 +1,10 @@
 package users
 
-import "time"
+import (
+	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
+)
 
 type UserResponse struct {
 	ID        string `json:"id"`
@@ -90,17 +94,17 @@ type GetMeOutput struct {
 	Body UserResponse
 }
 
-type UpdateMeInput struct {
+// UpdateUserInput is a merge patch: an absent member is left alone. None of
+// the members can be cleared, so an explicit null is refused.
+type UpdateUserInput struct {
 	Body struct {
-		Name string `json:"name" minLength:"1" maxLength:"100"`
-		// Locale and Timezone are optional; an empty value keeps the current
-		// setting rather than clearing a column that cannot be null.
-		Locale   string `json:"locale,omitempty" maxLength:"35" required:"false"`
-		Timezone string `json:"timezone,omitempty" maxLength:"64" required:"false" doc:"IANA timezone"`
+		Name     patch.Field[string] `json:"name,omitzero" required:"false" doc:"1 to 100 characters"`
+		Locale   patch.Field[string] `json:"locale,omitzero" required:"false" doc:"BCP 47 tag, at most 35 characters"`
+		Timezone patch.Field[string] `json:"timezone,omitzero" required:"false" doc:"IANA timezone"`
 	}
 }
 
-type UpdateMeOutput struct {
+type UpdateUserOutput struct {
 	Body UserResponse
 }
 
@@ -208,7 +212,7 @@ type PresignAvatarInput struct {
 		// content-addressed, so the same picture is stored once no matter how
 		// many people set it; the digest is also what the storage key is
 		// built from.
-		SHA256 string `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-fA-F]{64}$" doc:"lowercase hex SHA-256 of the file contents"`
+		SHA256 string `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-f]{64}$" doc:"lowercase hex SHA-256 of the file contents"`
 	}
 }
 
@@ -231,9 +235,7 @@ type ConfirmAvatarOutput struct {
 
 type DeleteAvatarInput struct{}
 
-type DeleteAvatarOutput struct {
-	Body UserResponse
-}
+type DeleteAvatarOutput struct{}
 
 // ResendVerificationInput carries no fields: the address is whichever one the
 // signed-in account currently holds, never one the caller names.

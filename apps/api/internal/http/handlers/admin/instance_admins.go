@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -33,10 +34,23 @@ type InstanceAdmin struct {
 	GrantedAt time.Time `json:"grantedAt"`
 }
 
+// maxInstanceAdmins bounds the live grants, which keeps the listing a bare array.
+const maxInstanceAdmins = 500
+
 type ListInstanceAdminsInput struct{}
 
 type ListInstanceAdminsOutput struct {
 	Body []InstanceAdmin
+}
+
+type AddInstanceAdminInput struct {
+	Body struct {
+		Email string `json:"email" format:"email" maxLength:"255"`
+	}
+}
+
+type AddInstanceAdminOutput struct {
+	Body InstanceAdmin
 }
 
 // RevokeInstanceAdminInput names the user losing the rights by their public id,
@@ -70,6 +84,93 @@ func ListInstanceAdmins(deps Deps) func(context.Context, *ListInstanceAdminsInpu
 			})
 		}
 		return out, nil
+	}
+}
+
+// AddInstanceAdmin grants administrator rights to an existing user, named by
+// address.
+//
+// The target row is locked before the live grants are counted, so two grants of
+// one user queue and the second sees the first, and two grants of different
+// users cannot both slip under the cap.
+func AddInstanceAdmin(deps Deps) func(context.Context, *AddInstanceAdminInput) (*AddInstanceAdminOutput, error) {
+	return func(ctx context.Context, in *AddInstanceAdminInput) (*AddInstanceAdminOutput, error) {
+		email := auth.NormalizeEmail(in.Body.Email)
+		if !auth.StorableEmail(email) {
+			return nil, apierrors.ToHuma(apierrors.AdminUserNotFound)
+		}
+		target, err := deps.Queries.GetUserByEmail(ctx, email)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, apierrors.ToHuma(apierrors.AdminUserNotFound)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		actorID, _ := middleware.ActorFromContext(ctx)
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		var granted generated.ListInstanceAdminsRow
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.GetUserByIDForUpdate(ctx, target.ID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.AdminUserNotFound
+				}
+				return err
+			}
+			isAdmin, err := q.IsInstanceAdmin(ctx, target.ID)
+			if err != nil {
+				return err
+			}
+			if isAdmin {
+				return apierrors.AdminAlreadyAdmin
+			}
+			live, err := q.CountInstanceAdminsForUpdate(ctx)
+			if err != nil {
+				return err
+			}
+			if live >= maxInstanceAdmins {
+				return apierrors.AdminAdminsLimitReached
+			}
+			if err := q.GrantInstanceAdmin(ctx, generated.GrantInstanceAdminParams{
+				PublicID:        pubID[:],
+				UserID:          target.ID,
+				GrantedByUserID: sql.NullInt32{Int32: int32(actorID), Valid: actorID > 0},
+			}); err != nil {
+				return err
+			}
+			rows, err := q.ListInstanceAdmins(ctx)
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				if r.UserID == target.ID {
+					granted = r
+				}
+			}
+			return appendAudit(ctx, q, auditEntry{
+				ActorUserID:      actorID,
+				Action:           auditInstanceAdminGrant,
+				ResourceType:     "user",
+				ResourcePublicID: target.PublicID,
+			})
+		})
+		if err != nil {
+			var spec *apierrors.Spec
+			if errors.As(err, &spec) {
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		return &AddInstanceAdminOutput{Body: InstanceAdmin{
+			UserID:    calresolve.PublicIDString(granted.UserPublicID),
+			Email:     granted.Email,
+			Name:      granted.DisplayName,
+			GrantedAt: granted.GrantedAt,
+		}}, nil
 	}
 }
 
