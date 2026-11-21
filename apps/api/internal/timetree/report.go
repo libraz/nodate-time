@@ -17,14 +17,20 @@ type calData struct {
 
 // analysis is what the dry-run report says about one TimeTree calendar.
 type analysis struct {
-	data      calData
-	conv      []converted
-	oldest    time.Time
-	byLabel   map[string]int
-	skips     map[string]int
-	rejects   map[string]int
-	owners    map[string]int
-	attendees int
+	data    calData
+	conv    []converted
+	oldest  time.Time
+	byLabel map[string]int
+	// byAuthor counts the events by TimeTree author, id and name.
+	byAuthor map[string]int
+	skips    map[string]int
+	rejects  map[string]int
+	owners   map[string]int
+	authors  map[string]int
+	// unmappedAuthors counts the events whose TimeTree author is not recorded
+	// as their creator, by author and reason.
+	unmappedAuthors map[string]int
+	attendees       int
 	// withDefaultAttendees counts the events default_attendees will join.
 	withDefaultAttendees int
 	utcTimed             int
@@ -38,17 +44,25 @@ const maxAllDaySamples = 3
 // analyze converts every event of one calendar and tallies the findings.
 func analyze(d calData, cv *converter) *analysis {
 	a := &analysis{
-		data:    d,
-		conv:    make([]converted, len(d.events)),
-		byLabel: map[string]int{},
-		skips:   map[string]int{},
-		rejects: map[string]int{},
-		owners:  map[string]int{},
+		data:            d,
+		conv:            make([]converted, len(d.events)),
+		byLabel:         map[string]int{},
+		byAuthor:        map[string]int{},
+		skips:           map[string]int{},
+		rejects:         map[string]int{},
+		owners:          map[string]int{},
+		authors:         map[string]int{},
+		unmappedAuthors: map[string]int{},
+	}
+	names := map[flexID]string{}
+	for _, u := range d.cal.Users {
+		names[u.UserID] = u.Name
 	}
 	for i, e := range d.events {
 		c := cv.convert(e)
 		a.conv[i] = c
 		a.byLabel[c.Label]++
+		a.byAuthor[authorText(e.AuthorID, names)]++
 		if len(e.Attendees) > 0 {
 			a.attendees++
 		}
@@ -67,6 +81,10 @@ func analyze(d calData, cv *converter) *analysis {
 			a.rejects[c.Reject]++
 		default:
 			a.owners[c.Owner]++
+			a.authors[c.Author]++
+			if _, why := cv.author(e.AuthorID); why != "" {
+				a.unmappedAuthors[fmt.Sprintf("%s (%s)", authorText(e.AuthorID, names), why)]++
+			}
 			if len(c.Attendees) > 0 {
 				a.withDefaultAttendees++
 			}
@@ -79,6 +97,14 @@ func analyze(d calData, cv *converter) *analysis {
 	}
 	a.doubleDisplay = doubleDisplayCandidates(d.events, a.conv)
 	return a
+}
+
+// authorText names a TimeTree author by id and the name the calendar shows.
+func authorText(id flexID, names map[flexID]string) string {
+	if id == "" || id == "0" {
+		return "(no author)"
+	}
+	return fmt.Sprintf("%s %q", id, names[id])
 }
 
 func endText(end time.Time, loc *time.Location) string {
@@ -125,6 +151,7 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 		}
 		fmt.Fprintf(w, "  events: %d, oldest start: %s\n", len(a.data.events), oldest)
 		fmt.Fprintf(w, "  by label: %s\n", tally(a.byLabel))
+		fmt.Fprintf(w, "  by TimeTree author: %s\n", tally(a.byAuthor))
 		fmt.Fprintf(w, "  skipped: %s\n", tally(a.skips))
 		fmt.Fprintf(w, "  rejected: %s\n", tally(a.rejects))
 		fmt.Fprintf(w, "  with attendees: %d, timed events in UTC: %d, possible double display: %d\n",
@@ -136,6 +163,8 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 			continue
 		}
 		fmt.Fprintf(w, "  by owner: %s\n", tally(a.owners))
+		fmt.Fprintf(w, "  by creator: %s\n", tally(a.authors))
+		fmt.Fprintf(w, "  authors recorded as the importer: %s\n", tally(a.unmappedAuthors))
 		fmt.Fprintf(w, "  default attendees: %d people on %d events\n",
 			len(plan.Mapping.DefaultAttendees), a.withDefaultAttendees)
 		if plan.ExistingID != 0 {

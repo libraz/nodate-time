@@ -15,6 +15,8 @@ users:
   - email: hanako@example.com
     name: 山田花子
   - email: mgr@example.com
+authors:
+  10000001: hanako@example.com
 calendars:
   - timetree: Band
     name: Team
@@ -41,6 +43,7 @@ func TestMappingParsesTheDocumentedShape(t *testing.T) {
 	assert.Equal(t, "", m.Users[1].Name, "name is optional")
 	require.Len(t, m.Calendars, 1)
 	assert.Equal(t, "hanako@example.com", m.Calendars[0].Labels["花子"], "non-ASCII label names are kept as written")
+	assert.Equal(t, map[string]string{"10000001": "hanako@example.com"}, m.Authors, "a numeric key reads as the id")
 	assert.Empty(t, m.validate(false))
 }
 
@@ -165,6 +168,12 @@ func TestMappingValidationRules(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) {
 			m.Calendars[0].DefaultAttendees = []string{"hanako@example.com", "HANAKO@example.com"}
 		}), "default_attendees[1]")
+	})
+	t.Run("author keys are TimeTree user ids", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.Authors["hanako"] = "hanako@example.com" }), `authors["hanako"]`)
+	})
+	t.Run("author addresses must be valid", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.Authors["1"] = "not-an-address" }), `authors["1"]`)
 	})
 	t.Run("timetree is required", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars[0].TimeTree = "" }), "timetree is required")

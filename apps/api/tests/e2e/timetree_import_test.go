@@ -82,6 +82,11 @@ func ttAllDay(id, title string, start time.Time, tz string) map[string]any {
 	}
 }
 
+func withAuthor(e map[string]any, userID int) map[string]any {
+	e["author_id"] = userID
+	return e
+}
+
 func withRecurrences(e map[string]any, rows ...string) map[string]any {
 	e["recurrences"] = rows
 	return e
@@ -98,8 +103,8 @@ func ttEvents() []map[string]any {
 	birthday := ttTimed("e-birthday", "birthday", time.Date(2026, 4, 2, 1, 0, 0, 0, time.UTC), 0)
 	birthday["type"] = 1
 	return []map[string]any{
-		ttTimed("e-timed", "timed", time.Date(2026, 4, 8, 1, 0, 0, 0, time.UTC), 11),
-		ttAllDay("e-allday", "allday", d, "UTC"),
+		withAuthor(ttTimed("e-timed", "timed", time.Date(2026, 4, 8, 1, 0, 0, 0, time.UTC), 11), 501),
+		withAuthor(ttAllDay("e-allday", "allday", d, "UTC"), 502),
 		withRecurrences(ttAllDay("e-rec", "rec", auckland, "Pacific/Auckland"),
 			"RRULE:FREQ=WEEKLY;UNTIL=20260426T120000Z", "EXDATE:20260413"),
 		memo,
@@ -137,7 +142,8 @@ func newTTScenario(t *testing.T, events []map[string]any) *ttScenario {
 		case r.URL.Path == "/api/v1/calendars":
 			s.mu.Lock()
 			cals := append([]map[string]any{
-				{"id": 9001, "name": s.calName, "alias_code": "al-" + sfx, "deactivated_at": nil},
+				{"id": 9001, "name": s.calName, "alias_code": "al-" + sfx, "deactivated_at": nil,
+					"calendar_users": []map[string]any{{"user_id": 501, "name": "hana"}, {"user_id": 502, "name": "gone"}}},
 			}, s.extraCals...)
 			s.mu.Unlock()
 			reply(map[string]any{"calendars": append(cals,
@@ -167,6 +173,8 @@ users:
   - email: %s
     name: 山田花子
   - email: %s
+authors:
+  501: %s
 calendars:
   - timetree: %s
     default_owner: %s
@@ -177,7 +185,7 @@ calendars:
     labels:
       hana: %s
       mgr: %s
-`, s.importer, s.hanako, s.mgr, s.calName, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr)
+`, s.importer, s.hanako, s.mgr, s.hanako, s.calName, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr, s.hanako, s.mgr)
 	return s
 }
 
@@ -249,6 +257,17 @@ func (s *ttScenario) eventOwner(t *testing.T, sourceUID string) string {
 	return email
 }
 
+func (s *ttScenario) eventCreator(t *testing.T, sourceUID string) string {
+	t.Helper()
+	var email string
+	require.NoError(t, testDB.QueryRow(
+		`SELECT u.email FROM calendar_events e
+		 JOIN calendars c ON c.id = e.calendar_id
+		 JOIN users u ON u.id = e.created_by_user_id
+		 WHERE c.name = ? AND e.source_uid = ?`, s.calName, sourceUID).Scan(&email))
+	return email
+}
+
 // eventAttendees lists the participants of an imported event, sorted.
 func (s *ttScenario) eventAttendees(t *testing.T, sourceUID string) []string {
 	t.Helper()
@@ -315,6 +334,11 @@ func TestTimeTreeImportDryRunWritesNothing(t *testing.T) {
 	assert.Contains(t, out, "create")
 	assert.Contains(t, out, "users to create: ["+s.hanako)
 	assert.Contains(t, out, "validation errors: 0")
+	assert.Contains(t, out, `by TimeTree author: (no author)=5, 501 "hana"=1, 502 "gone"=1`)
+	creators := []string{s.hanako + "=1", s.importer + "=2"}
+	sort.Strings(creators)
+	assert.Contains(t, out, "by creator: "+strings.Join(creators, ", "))
+	assert.Contains(t, out, `502 "gone" (not in authors)=1`)
 	assert.NotContains(t, out, "stopped-", "a deactivated calendar is not listed")
 }
 
@@ -340,6 +364,9 @@ func TestTimeTreeImportCreatesUsersMembersAndOwners(t *testing.T) {
 
 	require.Equal(t, s.hanako, s.eventOwner(t, "e-timed"), "label hana maps to hanako")
 	require.Equal(t, s.mgr, s.eventOwner(t, "e-allday"), "no label falls back to default_owner")
+	require.Equal(t, s.hanako, s.eventCreator(t, "e-timed"), "author 501 maps to hanako")
+	require.Equal(t, s.importer, s.eventCreator(t, "e-allday"), "an unmapped author leaves the importer")
+	require.Equal(t, s.importer, s.eventCreator(t, "e-rec"), "so does a missing one")
 	everyone := []string{s.hanako, s.mgr}
 	sort.Strings(everyone)
 	require.Equal(t, everyone, s.eventAttendees(t, "e-allday"), "default_attendees join an unlabelled event")

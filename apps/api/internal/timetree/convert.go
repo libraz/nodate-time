@@ -44,8 +44,10 @@ type converted struct {
 	Owner string
 	// Attendees are the normalized addresses of its participants.
 	Attendees []string
-	Label     string
-	Skip      string
+	// Author is the normalized address recorded as the event's creator.
+	Author string
+	Label  string
+	Skip   string
 	// Reject is set when the event cannot be imported as given.
 	Reject string
 }
@@ -64,9 +66,22 @@ type converter struct {
 	defaultOwner string
 	// defaultAttendees are the normalized participants of those events.
 	defaultAttendees []string
+	// authors maps a TimeTree user id to a normalized address.
+	authors map[flexID]string
+	// importer is the normalized address of the importer, and parties every
+	// address that may be recorded as a creator on this calendar.
+	importer string
+	parties  map[string]bool
 }
 
-func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer string) *converter {
+// Why an event's TimeTree author is not recorded as its creator.
+const (
+	authorNotMapped  = "not in authors"
+	authorNotAMember = "not a member of the calendar"
+	authorMissing    = "no author"
+)
+
+func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer string, authors map[string]string) *converter {
 	loc, _ := readZone(wsTZ)
 	cv := &converter{
 		wsTZ:         wsTZ,
@@ -74,11 +89,20 @@ func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer st
 		labels:       map[flexID]string{},
 		owners:       map[string]string{},
 		defaultOwner: norm(importer),
+		authors:      map[flexID]string{},
+		importer:     norm(importer),
+		parties:      map[string]bool{norm(importer): true},
 	}
 	for _, l := range labels {
 		cv.labels[l.ID] = l.Name
 	}
+	for id, email := range authors {
+		cv.authors[flexID(id)] = norm(email)
+	}
 	if m != nil {
+		for _, mem := range m.Members {
+			cv.parties[norm(mem.Email)] = true
+		}
 		for name, email := range m.Labels {
 			cv.owners[name] = norm(email)
 		}
@@ -90,6 +114,21 @@ func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer st
 		}
 	}
 	return cv
+}
+
+// author is the address recorded as the creator of an event TimeTree says
+// id created, and why it is the importer instead when it is.
+func (cv *converter) author(id flexID) (email, unmapped string) {
+	email, ok := cv.authors[id]
+	switch {
+	case id == "" || id == "0":
+		return cv.importer, authorMissing
+	case !ok:
+		return cv.importer, authorNotMapped
+	case !cv.parties[email]:
+		return cv.importer, authorNotAMember
+	}
+	return email, ""
 }
 
 // readZone loads an IANA zone name. Empty and "Local" are not names.
@@ -141,6 +180,7 @@ func (cv *converter) convert(e ttEvent) converted {
 	} else {
 		out.Owner, out.Attendees = cv.defaultOwner, cv.defaultAttendees
 	}
+	out.Author, _ = cv.author(e.AuthorID)
 
 	ev := calimport.Event{
 		SourceUID:  e.ID,

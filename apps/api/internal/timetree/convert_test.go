@@ -25,7 +25,7 @@ func ms(t time.Time) int64 { return t.UnixMilli() }
 
 func testConverter(m *MappingCalendar) *converter {
 	labels := []ttLabel{{ID: "1", Name: "花子"}, {ID: "2", Name: "太郎"}, {ID: "3", Name: "花子"}, {ID: "4", Name: "unmapped"}}
-	return newConverter(testWSZone, labels, m, "Ops@Example.com")
+	return newConverter(testWSZone, labels, m, "Ops@Example.com", nil)
 }
 
 func timed(start, end time.Time) ttEvent {
@@ -214,9 +214,39 @@ func TestConvertDefaultAttendeesJoinOnlyUnmappedEvents(t *testing.T) {
 		"without default_attendees nobody joins")
 }
 
+func TestConvertAuthorIsTheMappedMemberOrTheImporter(t *testing.T) {
+	m := &MappingCalendar{Members: []MappingMember{{Email: "hanako@example.com", Role: "editor"}}}
+	cv := newConverter(testWSZone, nil, m, "Ops@Example.com", map[string]string{
+		"100": "Hanako@Example.com", "200": "taro@example.com", "300": "ops@example.com",
+	})
+	author := func(id flexID) (string, string) {
+		ev := timed(jst(2026, 4, 10, 10), jst(2026, 4, 10, 11))
+		ev.AuthorID = id
+		got := cv.convert(ev).Author
+		_, why := cv.author(id)
+		return got, why
+	}
+	for _, tc := range []struct {
+		id        flexID
+		want, why string
+		reason    string
+	}{
+		{"100", "hanako@example.com", "", "a mapped member"},
+		{"300", "ops@example.com", "", "the importer mapped as an author"},
+		{"200", "ops@example.com", authorNotAMember, "mapped but not a member of this calendar"},
+		{"999", "ops@example.com", authorNotMapped, "an author the mapping does not name"},
+		{"", "ops@example.com", authorMissing, "no author"},
+		{"0", "ops@example.com", authorMissing, "author id 0"},
+	} {
+		got, why := author(tc.id)
+		assert.Equal(t, tc.want, got, tc.reason)
+		assert.Equal(t, tc.why, why, tc.reason)
+	}
+}
+
 func TestConvertLabelNamesAreMatchedExactly(t *testing.T) {
 	m := &MappingCalendar{Labels: map[string]string{"ＡＢ": "a@example.com"}}
-	cv := newConverter(testWSZone, []ttLabel{{ID: "1", Name: "AB"}, {ID: "2", Name: "ＡＢ"}}, m, "ops@example.com")
+	cv := newConverter(testWSZone, []ttLabel{{ID: "1", Name: "AB"}, {ID: "2", Name: "ＡＢ"}}, m, "ops@example.com", nil)
 	ev := timed(jst(2026, 4, 10, 10), jst(2026, 4, 10, 11))
 	ev.LabelID = "1"
 	assert.Equal(t, "ops@example.com", cv.convert(ev).Owner)

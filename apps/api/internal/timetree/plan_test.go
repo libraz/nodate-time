@@ -42,7 +42,7 @@ func cal(id uint32, name string, personal bool) generated.ListCalendarsByUserRow
 
 var (
 	ttCals = []ttCalendar{
-		{ID: "1", Name: "Band", AliasCode: "alias-one"},
+		{ID: "1", Name: "Band", AliasCode: "alias-one", Users: []ttCalendarUser{{UserID: "10000001", Name: "花子"}}},
 		{ID: "2", Name: "Second", AliasCode: "Band2"},
 		{ID: "3", Name: "Dup", AliasCode: "x"},
 		{ID: "4", Name: "Dup", AliasCode: "y"},
@@ -75,14 +75,14 @@ func TestResolveTimeTreeMatchesNameOrAliasExactlyOnce(t *testing.T) {
 	for in, want := range map[string]flexID{"Band": "1", "alias-one": "1", "Second": "2", "Band2": "2"} {
 		m := mustParse(t, goodMapping)
 		m.Calendars[0].TimeTree = in
-		m.Calendars[0].Labels = nil
+		m.Calendars[0].Labels, m.Authors = nil, nil
 		res := resolveWith(t, m, existing())
 		require.Empty(t, res.Errors, in)
 		assert.Equal(t, want, res.Plans[0].TT.ID, in)
 	}
 	for in, msg := range map[string]string{"nothing": "no active TimeTree calendar", "Dup": "2 TimeTree calendars match"} {
 		m := mustParse(t, goodMapping)
-		m.Calendars[0].TimeTree = in
+		m.Calendars[0].TimeTree, m.Authors = in, nil
 		res := resolveWith(t, m, existing())
 		require.Len(t, res.Errors, 1, in)
 		assert.Contains(t, res.Errors[0], msg)
@@ -270,11 +270,43 @@ func TestImportableForcesEventsNamingSomeoneNotYetCreated(t *testing.T) {
 	plain := timed(jst(2026, 5, 1, 10), jst(2026, 5, 1, 11))
 	plain.ID = "plain"
 	a := analyze(calData{events: []ttEvent{labelled, plain}}, cv)
-	users := map[string]generated.User{"h@example.com": {ID: 5}, "mgr@example.com": {ID: 6}}
+	users := map[string]generated.User{"ops@example.com": {ID: 1}, "h@example.com": {ID: 5}, "mgr@example.com": {ID: 6}}
 	events, force := importable(a, users)
 	require.Len(t, events, 2)
+	assert.Equal(t, uint32(1), events[0].CreatedByUserID, "an unmapped author leaves the importer as creator")
 	assert.Equal(t, uint32(5), events[0].OwnerUserID)
 	assert.Equal(t, uint32(6), events[1].OwnerUserID)
 	assert.Empty(t, events[1].Attendees)
 	assert.Equal(t, ids("plain"), force)
+}
+
+func TestImportableFilesTheMappedAuthorAsCreator(t *testing.T) {
+	cv := newConverter(testWSZone, nil, &MappingCalendar{
+		Members: []MappingMember{{Email: "h@example.com", Role: "editor"}, {Email: "new@example.com", Role: "editor"}},
+	}, "ops@example.com", map[string]string{"100": "H@example.com", "200": "new@example.com"})
+	byH := timed(jst(2026, 5, 1, 10), jst(2026, 5, 1, 11))
+	byH.ID, byH.AuthorID = "by-h", "100"
+	byNew := byH
+	byNew.ID, byNew.AuthorID = "by-new", "200"
+	a := analyze(calData{events: []ttEvent{byH, byNew}}, cv)
+	users := map[string]generated.User{"ops@example.com": {ID: 1}, "h@example.com": {ID: 5}}
+	events, force := importable(a, users)
+	require.Len(t, events, 2)
+	assert.Equal(t, uint32(5), events[0].CreatedByUserID)
+	assert.Equal(t, ids("by-new"), force, "an author not created yet is a change a plan cannot compare")
+}
+
+func TestResolveAuthorIDsMustBelongToAMappedCalendar(t *testing.T) {
+	cals := []ttCalendar{
+		{ID: "1", Name: "Band", Users: []ttCalendarUser{{UserID: "100", Name: "花子"}}},
+		{ID: "2", Name: "Other", Users: []ttCalendarUser{{UserID: "200", Name: "太郎"}}},
+	}
+	m := &Mapping{
+		Importer:  "ops@example.com",
+		Authors:   map[string]string{"100": "hanako@example.com", "200": "mgr@example.com"},
+		Calendars: []MappingCalendar{{TimeTree: "Band"}},
+	}
+	res, err := resolve(context.Background(), m, cals, nil, existing())
+	require.NoError(t, err)
+	assert.Equal(t, []string{`authors["200"]: no mapped TimeTree calendar has that user`}, res.Errors)
 }

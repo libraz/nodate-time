@@ -177,6 +177,8 @@ importer: ops@example.com # runs the import; owns the calendars and is the defau
 users: # accounts to create (existing ones are skipped)
   - email: hanako@example.com
     name: Hanako Yamada # defaults to the local part of the email
+authors: # TimeTree user id -> email of who created the events
+  10000001: hanako@example.com
 calendars:
   - timetree: Band # the TimeTree calendar's name or alias code
     name: Band # name here; defaults to the TimeTree name
@@ -196,6 +198,7 @@ calendars:
 - `members` gives each person a role: `manager`, `editor` or `viewer`. An existing member keeps the role they have.
 - `labels` maps TimeTree label names to the person who owns those events. Events with no label, or a label not listed, go to `default_owner`.
 - `default_attendees` makes the listed people participants of the events that go to `default_owner`, such as a whole group's rehearsals. Each must be a member or the importer. Events under a mapped label get no participants. Participants count as busy in availability searches, and an event with two or more participants shows a plain dot instead of its owner's picture.
+- `authors` maps a TimeTree user id to the account shown as the creator of the events that user created. The id is the same in every TimeTree calendar, and the dry run lists each calendar's authors with their ids. An event is filed under the importer as its creator when its author is not listed, or is not a member of that calendar here, as happens with people who have left. The creator does not decide the owner: that is still the label's.
 
 Everything is checked before anything is written, and any of these stops the command with nothing written:
 
@@ -204,6 +207,7 @@ Everything is checked before anything is written, and any of these stops the com
 - an owner who is not a member of the calendar
 - a `timetree` value that matches no calendar, or more than one
 - a mapped label that no TimeTree label matches
+- an `authors` id that is not a user of any mapped TimeTree calendar
 - two existing calendars with the same name
 
 ### Dry run first
@@ -213,7 +217,7 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
   --entrypoint /importtimetree api -mapping - -dry-run < mapping.yaml
 ```
 
-`-mapping` takes a path or `-` for standard input. With `-dry-run` the command logs in, fetches and validates, prints the report and writes nothing. For each TimeTree calendar the report shows the event count, the earliest start date, the count per label (including events with no label), what would be skipped and why, the number of events that have attendees, the number of timed events recorded in UTC, and three all-day events with their raw and converted times. For each calendar in the mapping it adds the count per owner, whether the calendar would be created or reused, and the accounts that would be created. Validation errors are listed at the end. Read the label and owner counts for a label missing from the mapping, and compare the earliest dates and the all-day examples with what TimeTree shows.
+`-mapping` takes a path or `-` for standard input. With `-dry-run` the command logs in, fetches and validates, prints the report and writes nothing. For each TimeTree calendar the report shows the event count, the earliest start date, the count per label (including events with no label), the count per TimeTree author by id and name, what would be skipped and why, the number of events that have attendees, the number of timed events recorded in UTC, and three all-day events with their raw and converted times. For each calendar in the mapping it adds the count per owner and per creator, the authors that would be recorded as the importer and why, whether the calendar would be created or reused, and the accounts that would be created. Validation errors are listed at the end. Read the label and owner counts for a label missing from the mapping, and compare the earliest dates and the all-day examples with what TimeTree shows.
 
 ### Running it
 

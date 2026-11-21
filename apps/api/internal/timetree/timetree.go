@@ -3,9 +3,9 @@
 // Run logs in to TimeTree, fetches every active calendar with its labels and
 // events, checks the operator's mapping file against what it fetched and what
 // the database holds, and only then writes: accounts, calendars, members and
-// events, with each event filed under the owner its label maps to. Any
-// problem found before the first write ends the run with exit code 2 and
-// leaves the database as it was.
+// events, with each event filed under the owner its label maps to and the
+// creator its TimeTree author maps to. Any problem found before the first
+// write ends the run with exit code 2 and leaves the database as it was.
 //
 // With Sync, events this importer wrote earlier follow TimeTree: changed ones
 // are rewritten and ones TimeTree no longer has are soft-deleted. A sync that
@@ -118,7 +118,7 @@ func Run(ctx context.Context, o Options) (int, error) {
 		if p := plans[d.cal.ID]; p != nil {
 			mc = &p.Mapping
 		}
-		cv := newConverter(ws.Timezone, d.labels, mc, m.Importer)
+		cv := newConverter(ws.Timezone, d.labels, mc, m.Importer, m.Authors)
 		analyses[i] = analyze(d, cv)
 	}
 

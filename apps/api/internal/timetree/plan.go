@@ -110,6 +110,19 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		res.Plans = append(res.Plans, plan)
 	}
 
+	// An author id no mapped calendar has is a typo or a person of another one.
+	people := map[flexID]bool{}
+	for _, p := range res.Plans {
+		for _, u := range p.TT.Users {
+			people[u.UserID] = true
+		}
+	}
+	for _, id := range sortedKeys(m.Authors) {
+		if !people[flexID(id)] {
+			add("authors[%q]: no mapped TimeTree calendar has that user", id)
+		}
+	}
+
 	// Nothing else can be said about names until every entry has one.
 	names := map[string]string{}
 	for _, p := range res.Plans {
@@ -233,6 +246,11 @@ func importable(a *analysis, users map[string]generated.User) (events []calimpor
 			force[ev.SourceUID] = true
 		}
 		ev.OwnerUserID = owner.ID
+		author, ok := users[cv.Author]
+		if !ok {
+			force[ev.SourceUID] = true
+		}
+		ev.CreatedByUserID = author.ID
 		for _, email := range cv.Attendees {
 			u, ok := users[email]
 			if !ok {

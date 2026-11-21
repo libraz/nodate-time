@@ -224,6 +224,18 @@ func TestTimeTreeSync(t *testing.T) {
 		assert.Zero(t, s.sourcedLogs(t, s.row(t, "s-plain").id, "calendar.event.updated"))
 	})
 
+	t.Run("creator", func(t *testing.T) {
+		t.Parallel()
+		s := newTTScenario(t, syncEvents())
+		s.syncOK(t)
+		require.Equal(t, s.importer, s.eventCreator(t, "s-plain"))
+
+		s.setFeed(9001, edited(syncEvents(), "s-plain", func(e map[string]any) { e["author_id"] = 501 }))
+		require.Equal(t, ttSyncTotals{updated: 1, duplicates: 2}, s.syncOK(t))
+		assert.Equal(t, s.hanako, s.eventCreator(t, "s-plain"), "a sync records the mapped author as creator")
+		assert.Equal(t, s.importer, s.eventCreator(t, "s-timed"))
+	})
+
 	t.Run("overwrite", func(t *testing.T) {
 		t.Parallel()
 		s := newTTScenario(t, syncEvents())

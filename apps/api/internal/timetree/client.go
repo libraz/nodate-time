@@ -50,6 +50,14 @@ type ttCalendar struct {
 	Name          string          `json:"name"`
 	AliasCode     string          `json:"alias_code"`
 	DeactivatedAt json.RawMessage `json:"deactivated_at"`
+	// Users lists the calendar's people, those who left included.
+	Users []ttCalendarUser `json:"calendar_users"`
+}
+
+// ttCalendarUser is one person of a calendar under the name shown there.
+type ttCalendarUser struct {
+	UserID flexID `json:"user_id"`
+	Name   string `json:"name"`
 }
 
 type ttLabel struct {
@@ -68,6 +76,7 @@ type ttEvent struct {
 	StartTimezone string            `json:"start_timezone"`
 	AllDay        bool              `json:"all_day"`
 	LabelID       flexID            `json:"label_id"`
+	AuthorID      flexID            `json:"author_id"`
 	Attendees     []json.RawMessage `json:"attendees"`
 	Recurrences   []string          `json:"recurrences"`
 	RecurringUUID string            `json:"recurring_uuid"`

@@ -18,8 +18,11 @@ const maxNameRunes = 255
 
 // Mapping is the operator's description of how TimeTree calendars land here.
 type Mapping struct {
-	Importer  string            `yaml:"importer"`
-	Users     []MappingUser     `yaml:"users"`
+	Importer string        `yaml:"importer"`
+	Users    []MappingUser `yaml:"users"`
+	// Authors maps a TimeTree user id to the address recorded as the creator
+	// of the events that user created.
+	Authors   map[string]string `yaml:"authors"`
 	Calendars []MappingCalendar `yaml:"calendars"`
 }
 
@@ -111,6 +114,15 @@ func (m *Mapping) validate(dryRun bool) []string {
 		seenUsers[norm(u.Email)] = true
 	}
 
+	for _, id := range sortedKeys(m.Authors) {
+		if !isUserID(id) {
+			add("authors[%q]: the key is not a TimeTree user id", id)
+		}
+		if email := m.Authors[id]; !validEmail(email) {
+			add("authors[%q]: %q is not a valid ASCII email address", id, email)
+		}
+	}
+
 	seenTT, seenName := map[string]bool{}, map[string]bool{}
 	for i, c := range m.Calendars {
 		where := fmt.Sprintf("calendars[%d]", i)
@@ -165,6 +177,19 @@ func (m *Mapping) validate(dryRun bool) []string {
 	return errs
 }
 
+// isUserID reports whether s is a TimeTree user id: decimal digits.
+func isUserID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // emailRef is an address the mapping names and what it is named for.
 type emailRef struct{ email, what string }
 
@@ -173,6 +198,9 @@ func (m *Mapping) refs() []emailRef {
 	refs := []emailRef{{m.Importer, "importer"}}
 	for _, u := range m.Users {
 		refs = append(refs, emailRef{u.Email, "user"})
+	}
+	for _, id := range sortedKeys(m.Authors) {
+		refs = append(refs, emailRef{m.Authors[id], "author " + id})
 	}
 	for _, c := range m.Calendars {
 		for _, mem := range c.Members {
