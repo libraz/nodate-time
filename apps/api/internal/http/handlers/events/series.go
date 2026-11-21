@@ -79,8 +79,9 @@ func mergeFields(e eventEdit, base generated.CalendarEvent) editedFields {
 
 // Scope values a write to an event may carry.
 const (
-	scopeThis = "this"
-	scopeAll  = "all"
+	scopeThis      = "this"
+	scopeAll       = "all"
+	scopeFollowing = "following"
 )
 
 // writeScope is what an event id and a scope address on a series, as read

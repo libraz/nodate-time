@@ -149,7 +149,7 @@ type CreateEventOutput struct {
 type PatchEventInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
-	Scope      string `query:"scope" enum:"this,all" default:"all" required:"false" doc:"'this' edits only the occurrence a composite id names and is refused on any other id; 'all' edits the whole series, measuring a move from the dates GET returned for that occurrence"`
+	Scope      string `query:"scope" enum:"this,all,following" default:"all" required:"false" doc:"'this' edits only the occurrence a composite id names and is refused on any other id; 'all' edits the whole series, measuring a move from the dates GET returned for that occurrence; 'following' ends the series before that occurrence and creates a new one from it, returned in the response"`
 	// IfMatch is compared with the etag of the copy being changed: the series'
 	// for scope 'all', else the occurrence's own row or, before it has one, the
 	// series'.
@@ -205,7 +205,7 @@ type UpdateEventInput struct {
 type DeleteEventInput struct {
 	CalendarID string               `path:"calendarId"`
 	EventID    string               `path:"eventId"`
-	Scope      string               `query:"scope" enum:"this,all" default:"all" required:"false" doc:"'this' deletes only the occurrence a composite id names and is refused on any other id; 'all' deletes the whole series"`
+	Scope      string               `query:"scope" enum:"this,all,following" default:"all" required:"false" doc:"'this' deletes only the occurrence a composite id names and is refused on any other id; 'all' deletes the whole series; 'following' deletes the occurrence a composite id names and every one after it"`
 	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 }
 type DeleteEventOutput struct{}

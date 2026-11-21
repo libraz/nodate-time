@@ -1011,13 +1011,22 @@ func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEvent
 			if d.DetailsHidden && touchesHiddenField(in) {
 				return apierrors.EventDetailsHidden
 			}
-			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
+			need := editFields
+			if in.Scope == scopeFollowing {
+				need = editGrants
+			}
+			if err := requireEventEdit(ctx, q, w, userID, need); err != nil {
 				return err
 			}
 			// A stale copy is reported as stale before its contents are judged:
 			// what it names may have changed since, a member who has left included.
 			if err := checkTag(in.IfMatch, w); err != nil {
 				return err
+			}
+			if in.Scope == scopeFollowing {
+				if err := requireRecurring(w); err != nil {
+					return err
+				}
 			}
 			resolved, err := resolvePatch(ctx, q, in, w, userID)
 			if err != nil {
@@ -1032,9 +1041,12 @@ func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEvent
 					return err
 				}
 			}
-			if w.scope.confined {
+			switch {
+			case w.scope.confined:
 				edited, err = editOccurrence(ctx, q, deps, resolved.edit, w)
-			} else {
+			case w.splitsSeries(in.Scope):
+				edited, err = splitSeriesEdit(ctx, q, deps, resolved.edit, w)
+			default:
 				edited, err = editSeries(ctx, q, deps, resolved.edit, w)
 			}
 			if err != nil {
@@ -1113,7 +1125,7 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			// Removing a whole series takes every occurrence with it, which an
 			// attendee holding an edit grant may not do to the owner's plans.
 			need := editFields
-			if !w.scope.confined && w.evt.RecurrenceRule != nil {
+			if in.Scope == scopeFollowing || (!w.scope.confined && w.evt.RecurrenceRule != nil) {
 				need = editGrants
 			}
 			if err := requireEventEdit(ctx, q, w, userID, need); err != nil {
@@ -1127,8 +1139,16 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			if w.evt.TaskID.Valid {
 				return apierrors.EventTaskOwned
 			}
-			if w.scope.confined {
+			if in.Scope == scopeFollowing {
+				if err := requireRecurring(w); err != nil {
+					return err
+				}
+			}
+			switch {
+			case w.scope.confined:
 				return cancelOccurrence(ctx, q, deps, userID, w)
+			case w.splitsSeries(in.Scope):
+				return splitSeriesDelete(ctx, q, deps, userID, w)
 			}
 			return deleteWholeEvent(ctx, q, deps, userID, w)
 		})
