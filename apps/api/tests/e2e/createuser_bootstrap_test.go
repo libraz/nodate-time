@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,6 +39,10 @@ func runCreateUserWithEnv(t *testing.T, extraEnv []string, args ...string) (stri
 	name := os.Getenv("TC_DB_NAME")
 	if name == "" {
 		name = "nodate_time"
+	}
+
+	if i := slices.Index(args, "-email"); i >= 0 && i+1 < len(args) && slices.Contains(args, "-admin") {
+		revokeInstanceAdminOnCleanup(t, args[i+1])
 	}
 
 	cmd := exec.Command("go", append([]string{"run", "../../cmd/createuser"}, args...)...)
@@ -86,6 +91,19 @@ func isInstanceAdmin(t *testing.T, email string) bool {
 		 JOIN users u ON u.id = ia.user_id
 		 WHERE u.email = ? AND ia.revoked_at IS NULL AND ia.enabled = TRUE`, email).Scan(&n))
 	return n > 0
+}
+
+// revokeInstanceAdminOnCleanup revokes the grant an -admin run makes once the
+// test ends, so the shared database does not fill up to the admin-list cap.
+func revokeInstanceAdminOnCleanup(t *testing.T, email string) {
+	t.Cleanup(func() {
+		if _, err := testDB.Exec(
+			`UPDATE instance_admins ia JOIN users u ON u.id = ia.user_id
+			    SET ia.revoked_at = NOW(3)
+			  WHERE u.email = ? AND ia.revoked_at IS NULL`, email); err != nil {
+			t.Errorf("revoke instance admin: %v", err)
+		}
+	})
 }
 
 func bootstrapEmail(prefix string) string {

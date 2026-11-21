@@ -91,6 +91,17 @@ func MakeInstanceAdmin(t *testing.T, db *sql.DB, userPublicID string) {
 	if err != nil {
 		t.Fatalf("grant instance admin: %v", err)
 	}
+	// Revoke on the way out, with every grant this admin handed out through the
+	// API, so the shared database does not fill up to the admin-list cap.
+	t.Cleanup(func() {
+		if _, err := db.Exec(
+			`UPDATE instance_admins ia JOIN users u ON u.public_id = UUID_TO_BIN(?)
+			    SET ia.revoked_at = NOW(3)
+			  WHERE ia.revoked_at IS NULL AND (ia.user_id = u.id OR ia.granted_by_user_id = u.id)`,
+			userPublicID); err != nil {
+			t.Errorf("revoke instance admin: %v", err)
+		}
+	})
 }
 
 // DoJSON makes an HTTP request with JSON body, attaches Bearer token, asserts 2xx, unmarshals response.
