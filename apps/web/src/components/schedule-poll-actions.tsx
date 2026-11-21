@@ -69,7 +69,7 @@ function PollIcon() {
 function ActionCount({ count }: { count: number }) {
   if (count === 0) return null;
   return (
-    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--color-danger)] px-1.5 text-[11px] font-semibold leading-5 tabular-nums text-white">
+    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--color-danger)] px-1.5 text-caption font-semibold leading-5 tabular-nums text-[var(--color-text-on-accent)]">
       {count > 99 ? '99+' : count}
     </span>
   );
@@ -115,11 +115,11 @@ export function SchedulePollNavMobile() {
         </span>
         <span className="flex items-center gap-2">
           {count > 0 && (
-            <span className="text-footnote font-medium text-[var(--color-text-secondary)] tabular-nums">
-              {t('schedulePoll.pendingCount', { count })}
-            </span>
+            <span className="sr-only">{t('schedulePoll.pendingCount', { count })}</span>
           )}
-          <ActionCount count={count} />
+          <span aria-hidden>
+            <ActionCount count={count} />
+          </span>
           <svg
             aria-hidden
             width="14"
@@ -159,7 +159,7 @@ export function SchedulePollActionNotice() {
     <section
       aria-label={t('schedulePoll.pendingActions')}
       aria-live="polite"
-      className="relative z-[1] border-b border-[var(--color-border)] bg-[var(--color-accent-bg)] px-3 py-2 sm:px-5"
+      className="relative z-[1] hidden border-b border-[var(--color-border)] bg-[var(--color-accent-bg)] px-5 py-2 sm:block"
     >
       <div className="mx-auto flex max-w-[1600px] flex-col gap-1.5">
         {Array.from(byKind.entries()).map(([kind, group]) => {
@@ -172,22 +172,20 @@ export function SchedulePollActionNotice() {
               className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-footnote text-[var(--color-text-primary)]"
             >
               <span className="font-semibold">{t(copy.label)}</span>
-              <Link
-                {...actionTarget(first)}
-                className="min-w-0 max-w-full truncate font-medium text-[var(--color-accent-ink)] underline decoration-[color-mix(in_srgb,var(--color-accent)_45%,transparent)] underline-offset-2 hover:decoration-current"
-              >
+              <span aria-hidden className="min-w-0 max-w-full truncate">
                 {first.title}
-              </Link>
+              </span>
               <Link
                 {...actionTarget(first)}
-                className="shrink-0 rounded-md bg-[var(--color-surface)] px-2.5 py-1 font-semibold text-[var(--color-accent-ink)] ring-1 ring-[color-mix(in_srgb,var(--color-accent)_30%,var(--color-border))] hover:bg-[var(--color-hover)]"
+                aria-label={`${t(copy.action)} ${first.title}`}
+                className="shrink-0 rounded-[var(--radius-control)] bg-[var(--color-surface)] px-2.5 py-1 font-semibold text-[var(--color-accent-ink)] ring-1 ring-[color-mix(in_srgb,var(--color-accent)_30%,var(--color-border))] hover:bg-[var(--color-hover)]"
               >
                 {t(copy.action)}
               </Link>
               {group.length > 1 && (
                 <Link
                   to="/schedule-polls"
-                  className="shrink-0 text-[var(--color-text-secondary)] underline underline-offset-2"
+                  className="shrink-0 font-medium text-[var(--color-accent-ink)] hover:underline"
                 >
                   {t('schedulePoll.moreActions', { count: group.length - 1 })}
                 </Link>

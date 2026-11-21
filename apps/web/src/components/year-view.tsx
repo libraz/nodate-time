@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { useT } from '@/i18n';
 import { dayInZone, getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
@@ -8,7 +7,6 @@ import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
 export function YearView() {
-  const t = useT();
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
   const timezone = useUiStore((s) => s.timezone);
@@ -53,14 +51,6 @@ export function YearView() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex items-center justify-between border-b border-[var(--color-separator)] px-4 py-3">
-        <h2 className="text-title font-semibold tabular-nums text-[var(--color-text-primary)]">
-          {currentMonth.year}
-        </h2>
-        <span className="text-footnote text-[var(--color-text-tertiary)]">
-          {t('calendar.year')}
-        </span>
-      </div>
       {/* Two columns on a phone, three from the one breakpoint up: twelve
           months then fall into four rows of a quarter each. */}
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4">

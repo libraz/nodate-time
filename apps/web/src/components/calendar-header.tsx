@@ -4,7 +4,7 @@ import { Avatar } from '@/components/avatar';
 import { SchedulePollNavDesktop, SchedulePollNavMobile } from '@/components/schedule-poll-actions';
 import { useT } from '@/i18n';
 import { startCreateEvent } from '@/lib/create-event';
-import { formatMonthYear } from '@/lib/date-utils';
+import { formatMonthYear, formatYear } from '@/lib/date-utils';
 import { shortcutProps } from '@/lib/shortcuts';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -162,6 +162,12 @@ export function CalendarHeader() {
       : calendarView === 'year'
         ? { prev: t('calendar.prevYear'), next: t('calendar.nextYear') }
         : { prev: t('calendar.prevMonth'), next: t('calendar.nextMonth') };
+
+  // The year view steps by year, so its title names the year alone.
+  const viewTitle =
+    calendarView === 'year'
+      ? formatYear(currentMonth, locale)
+      : formatMonthYear(currentMonth, locale);
 
   const VIEWS = [
     { value: 'month', label: t('calendar.monthly') },
@@ -373,7 +379,7 @@ export function CalendarHeader() {
         </button>
         <div className="flex min-w-0 items-center gap-1">
           <span className="truncate text-title font-bold tabular-nums text-[var(--color-text-primary)]">
-            {formatMonthYear(currentMonth, locale)}
+            {viewTitle}
           </span>
 
           <div className="relative" ref={viewMenuRef}>
@@ -489,7 +495,7 @@ export function CalendarHeader() {
         {/* Left: month label + nav arrows + today */}
         <div className="flex items-center gap-1">
           <span className="mr-1 text-subhead font-semibold tabular-nums text-[var(--color-text-primary)]">
-            {formatMonthYear(currentMonth, locale)}
+            {viewTitle}
           </span>
 
           <button
@@ -515,7 +521,7 @@ export function CalendarHeader() {
           <button
             type="button"
             onClick={goToToday}
-            className="today-button flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-sm font-medium text-[var(--color-accent-ink)] transition-transform active:scale-95"
+            className="today-button flex h-9 items-center rounded-full bg-[var(--color-accent-bg)] px-3 text-default font-medium text-[var(--color-accent-ink)] transition-transform active:scale-95"
             {...shortcutProps('today', t('calendar.today'))}
           >
             <span className="leading-none">{t('calendar.today')}</span>
@@ -578,12 +584,7 @@ export function CalendarHeader() {
             type="button"
             onClick={startCreateEvent}
             data-tour="add-event"
-            className="flex h-9 items-center justify-center px-3 font-medium text-default hover:opacity-85 active:scale-[0.97] transition-all"
-            style={{
-              borderRadius: 'var(--radius-sm)',
-              background: 'var(--color-accent)',
-              color: 'var(--color-text-on-accent, #fff)',
-            }}
+            className="icon-btn icon-btn-accent h-9 w-10"
             aria-label={t('event.createEvent')}
             {...shortcutProps('create', t('event.createEvent'))}
           >

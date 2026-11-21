@@ -9,8 +9,18 @@ const logout = vi.fn();
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
   // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
-  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
-    <a href={to}>{children}</a>
+  Link: ({
+    to,
+    children,
+    'aria-label': ariaLabel,
+  }: {
+    to: string;
+    children: React.ReactNode;
+    'aria-label'?: string;
+  }) => (
+    <a href={to} aria-label={ariaLabel}>
+      {children}
+    </a>
   ),
 }));
 

@@ -150,6 +150,10 @@ export function formatMonthYear(date: DateTime, locale: Locale = 'ja'): string {
   return `${date.year}年${date.month}月`;
 }
 
+export function formatYear(date: DateTime, locale: Locale = 'ja'): string {
+  return locale === 'en' ? `${date.year}` : `${date.year}年`;
+}
+
 export function jsDayOfWeek(dt: DateTime): number {
   return dt.weekday % 7;
 }
