@@ -1125,4 +1125,34 @@ describe('ProviderCard', () => {
       }),
     );
   });
+
+  it('sends null to remove the stored secret', async () => {
+    vi.mocked(client.PATCH).mockResolvedValue({ data: info } as never);
+    render(<ProviderCard info={info} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('settings.adminProviderRemoveSecret'));
+    expect(screen.getByText('settings.adminProviderSecretWillBeRemoved')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() =>
+      expect(client.PATCH).toHaveBeenLastCalledWith('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: 'google' } },
+        body: { clientId: 'client-1', enabled: true, clientSecret: null },
+      }),
+    );
+  });
+
+  it('keeps the stored secret when its removal is undone', async () => {
+    vi.mocked(client.PATCH).mockResolvedValue({ data: info } as never);
+    render(<ProviderCard info={info} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('settings.adminProviderRemoveSecret'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() =>
+      expect(client.PATCH).toHaveBeenLastCalledWith('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: 'google' } },
+        body: { clientId: 'client-1', enabled: true },
+      }),
+    );
+  });
 });

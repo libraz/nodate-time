@@ -1975,6 +1975,7 @@ export function ProviderCard({
   const [secret, setSecret] = useState('');
   const [enabled, setEnabled] = useState(info.enabled);
   const [editingSecret, setEditingSecret] = useState(!info.hasSecret);
+  const [clearingSecret, setClearingSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -1983,16 +1984,22 @@ export function ProviderCard({
     setClientId(info.clientId);
     setEnabled(info.enabled);
     setEditingSecret(!info.hasSecret);
+    setClearingSecret(false);
     setSecret('');
   }, [info]);
 
   const save = async () => {
     setSaving(true);
     try {
-      // Omitting the secret keeps the stored one; only a typed value replaces it.
+      // Omitting the secret keeps the stored one; a typed value replaces it and null removes it.
+      const secretChange = clearingSecret
+        ? { clientSecret: null }
+        : editingSecret && secret
+          ? { clientSecret: secret }
+          : {};
       await client.PATCH('/admin/oauth-providers/{provider}', {
         params: { path: { provider: info.provider } },
-        body: { clientId, enabled, ...(editingSecret && secret ? { clientSecret: secret } : {}) },
+        body: { clientId, enabled, ...secretChange },
       });
       toast.success(t('panel.updated'));
       setSecret('');
@@ -2106,6 +2113,19 @@ export function ProviderCard({
               </button>
             )}
           </div>
+        ) : clearingSecret ? (
+          <div className="flex items-center gap-3">
+            <span className="text-body text-[var(--color-danger)]">
+              {t('settings.adminProviderSecretWillBeRemoved')}
+            </span>
+            <button
+              type="button"
+              onClick={() => setClearingSecret(false)}
+              className="text-footnote text-[var(--color-text-secondary)] hover:underline"
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
         ) : (
           <div className="flex items-center gap-3">
             <span className="font-mono text-body text-[var(--color-text-secondary)]">
@@ -2117,6 +2137,13 @@ export function ProviderCard({
               className="text-footnote font-medium text-[var(--color-accent-ink)] hover:underline"
             >
               {t('settings.adminProviderReplaceSecret')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setClearingSecret(true)}
+              className="text-footnote font-medium text-[var(--color-danger)] hover:underline"
+            >
+              {t('settings.adminProviderRemoveSecret')}
             </button>
           </div>
         )}
