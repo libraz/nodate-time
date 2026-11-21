@@ -106,6 +106,18 @@ func TestAlbumConfirmRefusesBytesThatDoNotMatchTheDigest(t *testing.T) {
 	// The reservation was discarded with the refusal.
 	status, _ = helpers.DoJSONStatus(t, http.MethodPost, albumURL(tt)+"/"+pres.PhotoID+"/confirm", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNotFound, status)
+
+	// The refused bytes were removed, so the same file can be sent again.
+	retry := presignDigestPhoto(t, tt, map[string]any{
+		"contentType": "image/png", "byteSize": len(declared), "sha256": helpers.SHA256Hex(declared),
+	})
+	require.Equal(t, http.StatusCreated, retry.status, string(retry.raw))
+	helpers.UploadToSignedURL(t, retry.UploadURL, "image/png", declared)
+	status, raw = helpers.DoJSONStatus(t, http.MethodPost, albumURL(tt)+"/"+retry.PhotoID+"/confirm", tt.AccessToken, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+
+	helpers.DoJSON(t, http.MethodGet, albumURL(tt), tt.AccessToken, nil, &list)
+	require.Len(t, list.Items, 1)
 }
 
 func TestAlbumThumbnailNeedsItsOwnDigestAndIsDroppedWhenItDoesNotMatch(t *testing.T) {
