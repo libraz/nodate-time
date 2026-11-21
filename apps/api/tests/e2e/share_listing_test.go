@@ -128,9 +128,11 @@ func TestInviteLimitIsEnforcedAndFreedByRevoking(t *testing.T) {
 
 // Accepting an invite creates a membership, so it is held to the same
 // member limit as adding one directly.
+//
+// It is not parallel: deleting its 499 users on cleanup cascades into
+// workspace_members and would deadlock against a concurrent registration.
 func TestAcceptingAnInviteIsHeldToTheMemberLimit(t *testing.T) {
 	bootstrap(t)
-	t.Parallel()
 
 	owner := helpers.NewTenant(t, testServerURL)
 	joiner := helpers.NewTenant(t, testServerURL)
