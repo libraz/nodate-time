@@ -22,7 +22,7 @@ interface ConfirmSheetProps {
 const SHEET_TONES = {
   dark: {
     card: 'bg-neutral-800/95 text-white',
-    hint: 'text-white/60',
+    hint: 'text-white/80',
     rule: 'border-white/10',
     hover: 'hover:bg-white/5',
     danger: 'text-[var(--color-danger)]',
@@ -30,7 +30,7 @@ const SHEET_TONES = {
   },
   theme: {
     card: 'glass-surface-heavy ring-1 ring-[var(--color-border)] text-[var(--color-text-primary)]',
-    hint: 'text-[var(--color-text-tertiary)]',
+    hint: 'text-[var(--color-text-secondary)]',
     rule: 'border-[var(--color-border)]',
     hover: 'hover:bg-[var(--color-hover)]',
     danger: 'text-[var(--color-danger)]',
@@ -85,7 +85,7 @@ export function ConfirmSheet({
             {title}
           </p>
           {hint && (
-            <p id={hintId} className={`px-4 pb-3 text-caption ${c.hint}`}>
+            <p id={hintId} className={`px-4 pb-3 text-footnote ${c.hint}`}>
               {hint}
             </p>
           )}

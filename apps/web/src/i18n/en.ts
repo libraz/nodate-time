@@ -154,6 +154,12 @@ export const en: Record<TranslationKey, string> = {
   'event.visibilityPublic': 'Public',
   'event.visibilityPrivate': 'Time only',
   'event.visibilityConfidential': 'Not shared',
+  'event.visibilityDefaultHint': 'Visibility follows the calendar settings.',
+  'event.visibilityPublicHint':
+    'Event details are shown according to the calendar’s public settings.',
+  'event.visibilityPrivateHint':
+    'Public links show only that this time is busy, without event details.',
+  'event.visibilityConfidentialHint': 'This event does not appear in public links or embeds.',
   'event.flexibility': 'Rescheduling',
   'event.flexibilityFixed': 'Fixed',
   'event.flexibilityNegotiable': 'Can move',
@@ -164,6 +170,10 @@ export const en: Record<TranslationKey, string> = {
   'event.ownerOtherHint': "This becomes {name}'s event. You won't be able to edit it after saving",
   'event.flexibilityShort.negotiable': 'Flexible',
   'event.flexibilityShort.conditional': 'Conditional',
+  'picker.tomorrow': 'Tomorrow',
+  'picker.inAWeek': 'In a week',
+  'picker.prevYear': 'Previous year',
+  'picker.nextYear': 'Next year',
   'picker.typeTime': 'Type a time',
   'event.privateBusy': 'Busy',
   'event.showAsBusy': 'Busy',
@@ -409,7 +419,8 @@ export const en: Record<TranslationKey, string> = {
   'settings.adminProviderDisabled': 'Disabled',
   'settings.adminProviderEnable': 'Enabled',
   'settings.adminProviderUnconfigured': 'Not configured',
-  'settings.adminProviderRemoveConfirm': 'Remove {provider} configuration?',
+  'settings.adminProviderRemoveConfirm':
+    'The saved {provider} client ID and secret are deleted. This cannot be undone',
   'settings.adminAllowedEmails': 'Allowed sign-in emails',
   'settings.adminAllowedEmailsDescription':
     'Individually permit addresses to sign up or sign in when domain restriction is active.',
@@ -436,7 +447,7 @@ export const en: Record<TranslationKey, string> = {
   'members.roleManager': 'Manager',
   'members.roleEditor': 'Editor',
   'members.roleViewer': 'Viewer',
-  'members.removeConfirm': 'Remove this member?',
+  'members.removeConfirm': 'They lose access to this calendar',
   'members.you': 'You',
   'members.layerHint':
     "Each event is drawn in its owner's colour, and colours are the same for every member",
@@ -655,8 +666,8 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.myActions': 'Needs your attention',
   'schedulePoll.create': 'Create a schedule poll',
   'schedulePoll.cancelCreate': 'Close form',
-  'schedulePoll.createHint':
-    'Find candidate times, review who will receive the request, then send it.',
+  'schedulePoll.lead':
+    'Choose who to ask, find candidate times, and send the request. Once answers are in, finalize a time to create the event.',
   'schedulePoll.invitees': 'Invitees ({count})',
   'schedulePoll.inviteesHint':
     'Everyone in the calendar is selected by default. You can invite a smaller group.',
@@ -674,6 +685,7 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.addManualCandidate': 'Check availability',
   'schedulePoll.invalidManualCandidate':
     'The end time must be after the start and within 24 hours.',
+  'schedulePoll.pastManualCandidate': 'A candidate cannot start in the past.',
   'schedulePoll.fromDate': 'From date',
   'schedulePoll.toDate': 'Through date',
   'schedulePoll.startTime': 'Window starts',
@@ -741,6 +753,12 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.addCandidatesRequired':
     'There are no available candidates. Add new times to continue.',
   'schedulePoll.finalize': 'Finalize a time',
+  'schedulePoll.finalizeRules':
+    'A time that someone answered “Cannot make it” for cannot be chosen. A time with “Needs adjustment” answers or event conflicts can be finalized once you confirm you checked with the people involved.',
+  'schedulePoll.finalizeWithPendingHint':
+    'The time will be finalized and the event created without hearing from everyone.',
+  'schedulePoll.inviteesEditHint':
+    'Saving changes who is asked to answer. People you add are asked to respond.',
   'schedulePoll.waitingForResponses': 'Waiting for {count} more response(s).',
   'schedulePoll.selectFinalCandidate': 'Choose the time to finalize',
   'schedulePoll.blockedByNo': 'Someone cannot make this time',

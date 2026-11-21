@@ -1,4 +1,5 @@
 import { Avatar } from '@/components/avatar';
+import { Callout } from '@/components/callout';
 import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
@@ -230,7 +231,9 @@ export function EventPeople({
         )}
       </div>
       {ownerHint && !readOnly && canChangeOwner && (
-        <p className="mt-2 text-caption text-[var(--color-text-secondary)]">{ownerHint}</p>
+        <Callout tone="warning" className="mt-2">
+          {ownerHint}
+        </Callout>
       )}
 
       <div className="my-3 border-t border-[var(--color-border)] opacity-50" />
@@ -271,7 +274,7 @@ export function EventPeople({
             />
           )}
         </div>
-        <p className="mt-2 text-caption text-[var(--color-text-tertiary)]">
+        <p className="mt-2 text-footnote text-[var(--color-text-secondary)]">
           {t('event.participantsHint')}
         </p>
       </fieldset>
@@ -314,7 +317,7 @@ export function ShowAsPicker({
             </button>
           ))}
         </div>
-        <p className="mt-2 text-caption text-[var(--color-text-tertiary)]">
+        <p className="mt-2 text-footnote text-[var(--color-text-secondary)]">
           {t(SHOW_AS_HINT[value])}
         </p>
       </fieldset>

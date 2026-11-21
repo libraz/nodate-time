@@ -3043,3 +3043,33 @@ textarea,
     background: color-mix(in srgb, var(--color-accent) 30%, transparent);
   }
 }
+
+/* Date picker: a turned month slides in from the side it was turned toward. */
+@media (prefers-reduced-motion: no-preference) {
+  .picker-turn[data-dir="1"] {
+    animation: picker-turn-next 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+  .picker-turn[data-dir="-1"] {
+    animation: picker-turn-prev 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}
+@keyframes picker-turn-next {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes picker-turn-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

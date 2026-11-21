@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { type InputHTMLAttributes, useEffect, useRef, useState } from 'react';
+import { DateField, TimeField } from '@/components/pickers';
 import { formatSchedulePollSlotTime, slotTimeRange } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/client';
@@ -38,7 +39,8 @@ export function SchedulePollCandidateFinder({
   memberKeyRef.current = memberKey;
   selectedRef.current = selected;
   onChangeRef.current = onChange;
-  const today = DateTime.now().setZone(timezone).toISODate() ?? '';
+  const todayDate = DateTime.now().setZone(timezone).startOf('day');
+  const today = todayDate.toISODate() ?? '';
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(
     DateTime.now().setZone(timezone).plus({ days: 14 }).toISODate() ?? today,
@@ -147,6 +149,10 @@ export function SchedulePollCandidateFinder({
       toast.error(t('schedulePoll.invalidManualCandidate'));
       return;
     }
+    if (start <= DateTime.now()) {
+      toast.error(t('schedulePoll.pastManualCandidate'));
+      return;
+    }
     const startAt = start.toISO({ includeOffset: true });
     const endAt = end.toISO({ includeOffset: true });
     if (!startAt || !endAt) {
@@ -190,30 +196,22 @@ export function SchedulePollCandidateFinder({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,0.8fr)]">
-        <Field
+        <DateField
           label={t('schedulePoll.fromDate')}
-          type="date"
-          value={fromDate}
-          onChange={(event) => setFromDate(event.target.value)}
+          value={DateTime.fromISO(fromDate, { zone: timezone })}
+          range={{ role: 'start', other: DateTime.fromISO(toDate, { zone: timezone }) }}
+          minDate={todayDate}
+          onChange={(date) => setFromDate(date.toISODate() ?? fromDate)}
         />
-        <Field
+        <DateField
           label={t('schedulePoll.toDate')}
-          type="date"
-          value={toDate}
-          onChange={(event) => setToDate(event.target.value)}
+          value={DateTime.fromISO(toDate, { zone: timezone })}
+          range={{ role: 'end', other: DateTime.fromISO(fromDate, { zone: timezone }) }}
+          minDate={todayDate}
+          onChange={(date) => setToDate(date.toISODate() ?? toDate)}
         />
-        <Field
-          label={t('schedulePoll.startTime')}
-          type="time"
-          value={startTime}
-          onChange={(event) => setStartTime(event.target.value)}
-        />
-        <Field
-          label={t('schedulePoll.endTime')}
-          type="time"
-          value={endTime}
-          onChange={(event) => setEndTime(event.target.value)}
-        />
+        <TimeField label={t('schedulePoll.startTime')} value={startTime} onChange={setStartTime} />
+        <TimeField label={t('schedulePoll.endTime')} value={endTime} onChange={setEndTime} />
         <div className="col-span-2 sm:col-span-1">
           <Field
             label={t('schedulePoll.durationMinutes')}
@@ -296,29 +294,29 @@ export function SchedulePollCandidateFinder({
           {t('schedulePoll.manualCandidateHint', { timezone })}
         </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_auto] sm:items-end">
-          <Field
+          <DateField
             label={t('schedulePoll.manualStartDate')}
-            type="date"
-            value={manualStartDate}
-            onChange={(event) => setManualStartDate(event.target.value)}
+            value={DateTime.fromISO(manualStartDate, { zone: timezone })}
+            range={{ role: 'start', other: DateTime.fromISO(manualEndDate, { zone: timezone }) }}
+            minDate={todayDate}
+            onChange={(date) => setManualStartDate(date.toISODate() ?? manualStartDate)}
           />
-          <Field
+          <TimeField
             label={t('schedulePoll.manualStartTime')}
-            type="time"
             value={manualStartTime}
-            onChange={(event) => setManualStartTime(event.target.value)}
+            onChange={setManualStartTime}
           />
-          <Field
+          <DateField
             label={t('schedulePoll.manualEndDate')}
-            type="date"
-            value={manualEndDate}
-            onChange={(event) => setManualEndDate(event.target.value)}
+            value={DateTime.fromISO(manualEndDate, { zone: timezone })}
+            range={{ role: 'end', other: DateTime.fromISO(manualStartDate, { zone: timezone }) }}
+            minDate={todayDate}
+            onChange={(date) => setManualEndDate(date.toISODate() ?? manualEndDate)}
           />
-          <Field
+          <TimeField
             label={t('schedulePoll.manualEndTime')}
-            type="time"
             value={manualEndTime}
-            onChange={(event) => setManualEndTime(event.target.value)}
+            onChange={setManualEndTime}
           />
           <button
             type="button"

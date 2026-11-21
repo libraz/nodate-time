@@ -6,6 +6,7 @@ import { MemberAdder } from '@/components/member-adder';
 import { MemberColorEditor } from '@/components/member-color-editor';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
+import { RoleHint } from '@/components/role-hint';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { memberRowRules } from '@/lib/member-row';
@@ -121,6 +122,11 @@ export function MembersPanel() {
               <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
                 {t('members.layerHint')}
               </p>
+              {members.length === 1 && (
+                <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
+                  {t('members.soloHint')}
+                </p>
+              )}
               <TipCard id="members" topic="calendars" className="mt-3">
                 {t('tip.members')}
               </TipCard>
@@ -225,6 +231,7 @@ export function MembersPanel() {
                         <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                           {m.email}
                         </p>
+                        {canChangeRole && <RoleHint role={m.role} />}
                       </div>
                       {canChangeRole ? (
                         <CustomSelect
@@ -288,11 +295,6 @@ export function MembersPanel() {
                 </button>
               </div>
             )}
-          {members.length === 1 && (
-            <p className="px-5 py-4 text-caption text-[var(--color-text-tertiary)]">
-              {t('members.soloHint')}
-            </p>
-          )}
         </div>
       )}
 

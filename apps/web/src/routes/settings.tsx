@@ -8,6 +8,7 @@ import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { PageTopBar } from '@/components/page-top-bar';
 import { CustomSelect } from '@/components/pickers';
+import { RoleHint } from '@/components/role-hint';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
 import type { components } from '@/lib/api-schema';
@@ -311,11 +312,11 @@ function FieldRow({
 }) {
   return (
     <div className="mb-5 last:mb-0">
-      <div className="mb-1.5 flex items-baseline justify-between">
+      <div className="mb-1.5">
         <span className="text-body font-medium text-[var(--color-text-primary)]">{label}</span>
-        {hint && <span className="text-caption text-[var(--color-text-tertiary)]">{hint}</span>}
       </div>
       {children}
+      {hint && <p className="mt-1.5 text-footnote text-[var(--color-text-secondary)]">{hint}</p>}
     </div>
   );
 }
@@ -980,7 +981,10 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
         />
       </FieldRow>
       {(canUploadCover || hasCover) && (
-        <FieldRow label={t('settings.calendarCover')}>
+        <FieldRow
+          label={t('settings.calendarCover')}
+          hint={canUploadCover ? t('settings.calendarCoverHint') : undefined}
+        >
           <div className="flex items-start gap-4">
             {canUploadCover ? (
               <ImageUploadTile
@@ -1061,11 +1065,6 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
                     onCancel={() => setConfirmingCover(false)}
                   />
                 </div>
-              )}
-              {canUploadCover && (
-                <p className="mt-1 text-caption text-[var(--color-text-tertiary)]">
-                  {t('settings.calendarCoverHint')}
-                </p>
               )}
             </div>
           </div>
@@ -1188,6 +1187,9 @@ export function CalendarsSection() {
         title={t('settings.members')}
         description={`${members.length} · ${t('members.role')}`}
       >
+        <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
+          {t('members.layerHint')}
+        </p>
         {members.length === 0 ? (
           <p className="py-2 text-body text-[var(--color-text-secondary)]">—</p>
         ) : (
@@ -1220,6 +1222,7 @@ export function CalendarsSection() {
                     <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                       {m.email}
                     </p>
+                    {canChangeRole && <RoleHint role={m.role} />}
                   </div>
                   {canChangeRole ? (
                     <CustomSelect
@@ -1286,6 +1289,9 @@ export function CalendarsSection() {
 
       {isAdmin && (
         <Section title={t('settings.invites')}>
+          <p className="mb-2 text-footnote text-[var(--color-text-secondary)]">
+            {t('share.inviteLead')}
+          </p>
           <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
             {t('share.inviteTermsNote')}
           </p>
@@ -1297,9 +1303,10 @@ export function CalendarsSection() {
               value: role,
               label: t(roleLabelKey(role)),
             }))}
-            className="mb-3 max-w-xs"
+            className="max-w-xs"
             triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
           />
+          <RoleHint role={inviteRole} className="mt-1.5 mb-3" />
           <div className="mb-3 flex max-w-md gap-2">
             <CustomSelect
               className="flex-1"
@@ -1582,6 +1589,9 @@ export function ExportSection() {
           </button>
         </div>
 
+        <p className="mb-4 text-footnote text-[var(--color-text-secondary)]">
+          {t('settings.importSkipsDuplicates')}
+        </p>
         <FieldRow label={t('settings.importIcal')}>
           <input
             type="file"
@@ -1607,7 +1617,6 @@ export function ExportSection() {
         >
           {importing ? '...' : t('settings.importPasted')}
         </button>
-        <p className="mt-3 text-footnote text-muted">{t('settings.importSkipsDuplicates')}</p>
       </Section>
     </>
   );

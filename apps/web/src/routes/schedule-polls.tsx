@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useEffect, useState } from 'react';
-import { EmptyState, GUIDE_ICONS, TipCard } from '@/components/guide';
+import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { CustomSelect } from '@/components/pickers';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
@@ -80,9 +80,9 @@ function AvailabilitySharingControl({ calendarId }: { calendarId: string }) {
   };
 
   return (
-    <section className="page-card flex items-center justify-between gap-4 p-4 sm:px-5">
+    <section className="flex items-center justify-between gap-4 rounded-[var(--radius-lg)] bg-[var(--color-surface-inset)] px-4 py-3 sm:px-5">
       <div className="min-w-0">
-        <h2 className="text-default font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-body font-semibold text-[var(--color-text-primary)]">
           {t('schedulePoll.availabilitySharing')}
         </h2>
         <p className="mt-0.5 max-w-[640px] text-footnote text-[var(--color-text-secondary)]">
@@ -245,6 +245,7 @@ function SchedulePollIndexPage() {
     <SchedulePollFrame
       title={t('schedulePoll.title')}
       eyebrow={t('schedulePoll.eyebrow')}
+      lead={t('schedulePoll.lead')}
       backTo="/"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -272,11 +273,12 @@ function SchedulePollIndexPage() {
         )}
       </div>
 
+      {canManage && selectedCalendarId && (
+        <AvailabilitySharingControl key={selectedCalendarId} calendarId={selectedCalendarId} />
+      )}
+
       {creating && canManage && (
         <div className="flex flex-col gap-5">
-          <p className="text-body text-[var(--color-text-secondary)]">
-            {t('schedulePoll.createHint')}
-          </p>
           {membersError && <SchedulePollNotice tone="error">{membersError}</SchedulePollNotice>}
           {membersLoading ? (
             <p className="py-5 text-body text-[var(--color-text-secondary)]">
@@ -427,9 +429,6 @@ function SchedulePollIndexPage() {
           ) : undefined
         }
       >
-        <TipCard id="polls" topic="polls" className="mb-4">
-          {t('tip.polls')}
-        </TipCard>
         {pollsError && <SchedulePollNotice tone="error">{pollsError}</SchedulePollNotice>}
         {!selectedCalendarId ? (
           <SchedulePollNotice>{t('schedulePoll.noCalendars')}</SchedulePollNotice>
@@ -488,10 +487,6 @@ function SchedulePollIndexPage() {
           </ul>
         )}
       </SchedulePollSection>
-
-      {canManage && selectedCalendarId && (
-        <AvailabilitySharingControl key={selectedCalendarId} calendarId={selectedCalendarId} />
-      )}
     </SchedulePollFrame>
   );
 }

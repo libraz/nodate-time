@@ -45,8 +45,6 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'tip.event':
     'A plan is shown in the colour of the person picked under "Whose plan". Mark it "Tentative" or "Free" to keep that time open when scheduling.',
   'tip.album': 'Every member of this calendar can see the photos in its album.',
-  'tip.polls':
-    'A schedule poll sends a few candidate times to members so everyone can settle on one that works.',
 
   'empty.calendarsTitle': 'No calendars yet',
   'empty.calendarsDesc': 'Create a calendar to start adding plans.',

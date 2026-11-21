@@ -158,6 +158,10 @@ export const ja = {
   'event.visibilityPublic': '公開',
   'event.visibilityPrivate': '時間のみ',
   'event.visibilityConfidential': '共有しない',
+  'event.visibilityDefaultHint': 'カレンダーの公開設定に従います。',
+  'event.visibilityPublicHint': 'カレンダーの公開設定に応じて、予定の詳細が表示されます。',
+  'event.visibilityPrivateHint': '公開リンクでは予定の内容を隠し、時刻だけを表示します。',
+  'event.visibilityConfidentialHint': 'この予定は公開リンクや埋め込みには表示されません。',
   'event.flexibility': '日時の変更可否',
   'event.flexibilityFixed': '変更できない',
   'event.flexibilityNegotiable': '変更可能',
@@ -168,6 +172,10 @@ export const ja = {
   'event.ownerOtherHint': '{name}さんの予定になります。保存後はあなたが編集できなくなります',
   'event.flexibilityShort.negotiable': '変更可',
   'event.flexibilityShort.conditional': '条件付き',
+  'picker.tomorrow': '明日',
+  'picker.inAWeek': '1週間後',
+  'picker.prevYear': '前年',
+  'picker.nextYear': '翌年',
   'picker.typeTime': '時刻を入力',
   'event.privateBusy': '予定あり',
   'event.showAsBusy': '予定あり',
@@ -425,7 +433,8 @@ export const ja = {
   'settings.adminProviderDisabled': '無効',
   'settings.adminProviderEnable': '有効化',
   'settings.adminProviderUnconfigured': '未設定',
-  'settings.adminProviderRemoveConfirm': '{provider} の設定を削除しますか？',
+  'settings.adminProviderRemoveConfirm':
+    '保存した {provider} のクライアント ID とシークレットを削除します。元に戻せません',
   'settings.adminAllowedEmails': 'ログイン許可メール',
   'settings.adminAllowedEmailsDescription':
     'ドメイン制限が有効なとき、個別のアドレスのサインアップ・サインインを許可します。',
@@ -453,7 +462,7 @@ export const ja = {
   'members.roleManager': '管理者',
   'members.roleEditor': '編集者',
   'members.roleViewer': '閲覧者',
-  'members.removeConfirm': 'このメンバーを削除しますか？',
+  'members.removeConfirm': 'このカレンダーを見られなくなります',
   'members.you': 'あなた',
   'members.layerHint': '予定は、その予定の持ち主の色で表示されます。色はメンバー全員に共通です',
   'members.soloHint':
@@ -673,7 +682,8 @@ export const ja = {
   'schedulePoll.myActions': 'あなたの対応待ち',
   'schedulePoll.create': '日程調整を作成',
   'schedulePoll.cancelCreate': '作成を閉じる',
-  'schedulePoll.createHint': '候補日時を探し、対象者に確認してから依頼を送ります。',
+  'schedulePoll.lead':
+    '対象者を選んで候補の日時を探し、依頼を送ります。回答が集まったら日時を確定すると、予定が作成されます。',
   'schedulePoll.invitees': '対象者（{count} 人）',
   'schedulePoll.inviteesHint':
     '初期状態ではカレンダーのメンバー全員が選択されています。必要な人だけに変更できます。',
@@ -691,6 +701,7 @@ export const ja = {
   'schedulePoll.addManualCandidate': '空き状況を確認',
   'schedulePoll.invalidManualCandidate':
     '終了日時は開始日時より後、かつ 24 時間以内にしてください。',
+  'schedulePoll.pastManualCandidate': '過去の日時は候補にできません。',
   'schedulePoll.fromDate': '開始日',
   'schedulePoll.toDate': '終了日',
   'schedulePoll.startTime': '時間帯の開始',
@@ -755,6 +766,12 @@ export const ja = {
   'schedulePoll.addCandidatesRequired':
     '回答できる候補がありません。新しい候補を追加してください。',
   'schedulePoll.finalize': '日程を確定する',
+  'schedulePoll.finalizeRules':
+    '「難しい」と答えた人がいる日時は選べません。「要調整」の回答や予定の重なりがある日時は、関係者に確認したことをチェックしてから確定します。',
+  'schedulePoll.finalizeWithPendingHint':
+    'まだ回答していない人の都合を確かめないまま、日時を確定して予定を作成します。',
+  'schedulePoll.inviteesEditHint':
+    '保存すると回答を求める相手が変わります。新しく加えた人には回答の依頼が届きます。',
   'schedulePoll.waitingForResponses': 'あと {count} 人の回答を待っています。',
   'schedulePoll.selectFinalCandidate': '確定する候補を選択',
   'schedulePoll.blockedByNo': '「難しい」の回答あり',

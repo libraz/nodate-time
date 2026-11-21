@@ -1,9 +1,11 @@
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
-import { formatMonthYear, getWeekdayLabel, isToday } from '@/lib/date-utils';
+import { formatMonthYear, formatYear, getWeekdayLabel, isToday } from '@/lib/date-utils';
+import { getHoliday } from '@/lib/holidays';
+import { useHolidayLoader } from '@/lib/use-holidays';
 import { useUiStore } from '@/stores/ui-store';
 
 /* ============================================
@@ -117,15 +119,125 @@ function handlePopupKeys(e: React.KeyboardEvent<HTMLElement>, close: () => void)
   }
 }
 
-/* ============================================
-   DatePicker — inline calendar for date selection
-   ============================================ */
+/** Six weeks of seven days: every month fits, so the panel never changes height. */
+const PICKER_GRID_CELLS = 42;
+
+/** Below `sm`, pickers open as a bottom sheet with thumb-sized targets instead of a popover. */
+function useSheetPicker(): boolean {
+  const query = '(max-width: 639px)';
+  const [sheet, setSheet] = useState(() => window.matchMedia?.(query).matches === true);
+  useEffect(() => {
+    const mql = window.matchMedia?.(query);
+    if (!mql) return;
+    const update = () => setSheet(mql.matches);
+    mql.addEventListener('change', update);
+    return () => mql.removeEventListener('change', update);
+  }, []);
+  return sheet;
+}
+
+/**
+ * The surface every picker panel sits on: a popover anchored to its field, or
+ * on a phone a bottom sheet over a dimmed backdrop. A tap on the backdrop is
+ * outside `floatingRef`, so the panel's outside-click handler closes it.
+ */
+function PickerSurface({
+  sheet,
+  title,
+  floatingRef,
+  style,
+  popoverClassName,
+  onKeyDown,
+  children,
+}: {
+  sheet: boolean;
+  title?: string | undefined;
+  floatingRef: React.RefObject<HTMLDivElement | null>;
+  style: React.CSSProperties;
+  popoverClassName: string;
+  onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  children: React.ReactNode;
+}) {
+  if (sheet) {
+    return createPortal(
+      <>
+        <div
+          aria-hidden
+          className="modal-backdrop fixed inset-0 z-[9998] bg-[var(--color-overlay)]"
+        />
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: the sheet only receives key events bubbling from its controls */}
+        <div
+          ref={floatingRef}
+          onKeyDown={onKeyDown}
+          className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-[9999] flex max-h-[85dvh] flex-col rounded-t-[var(--radius-xl)] px-4 pt-2 pb-[max(env(safe-area-inset-bottom),16px)] ring-1 ring-[var(--color-border)]"
+          style={{ boxShadow: 'var(--shadow-elevated)' }}
+        >
+          <div
+            aria-hidden
+            className="mx-auto mb-2 h-1 w-9 shrink-0 rounded-full bg-[var(--color-border-strong)]"
+          />
+          {title && (
+            <p className="mb-1 px-1 text-footnote font-medium text-[var(--color-text-secondary)]">
+              {title}
+            </p>
+          )}
+          {children}
+        </div>
+      </>,
+      document.body,
+    );
+  }
+  return createPortal(
+    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its controls
+    <div
+      ref={floatingRef}
+      onKeyDown={onKeyDown}
+      className={`dropdown-panel fixed z-[9999] bg-[var(--color-surface-elevated)] ring-1 ring-[var(--color-border)] ${popoverClassName}`}
+      style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function Chevron({ dir }: { dir: 'left' | 'right' | 'down' }) {
+  const d = dir === 'left' ? 'M15 18l-6-6 6-6' : dir === 'right' ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6';
+  return (
+    <svg
+      width={dir === 'down' ? 14 : 16}
+      height={dir === 'down' ? 14 : 16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+/**
+ * The other end of a date range the field belongs to. The panel draws the
+ * span between it and the day under the pointer, so picking one end shows the
+ * period it produces before it is committed.
+ */
+export interface DateRangeLink {
+  role: 'start' | 'end';
+  other: DateTime;
+}
 
 interface DatePickerDropdownProps {
   value: DateTime;
   onChange: (date: DateTime) => void;
   onClose: () => void;
   minDate?: DateTime;
+  range?: DateRangeLink;
+  /** Heads the bottom sheet on a phone, where the field itself is covered. */
+  title?: string;
   style: React.CSSProperties;
   floatingRef: React.RefObject<HTMLDivElement | null>;
   /** The field that opened the picker; takes focus back when the picker closes. */
@@ -137,18 +249,27 @@ function DatePickerDropdown({
   onChange,
   onClose,
   minDate,
+  range,
+  title,
   style,
   floatingRef,
   returnFocusRef,
 }: DatePickerDropdownProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const holidaysCountry = useUiStore((s) => s.holidaysCountry);
+  const sheet = useSheetPicker();
   const [viewMonth, setViewMonth] = useState(value.startOf('month'));
+  const [mode, setMode] = useState<'days' | 'months'>('days');
+  // Which way the last month turn went, so the new grid slides in from that side.
+  const [turn, setTurn] = useState(0);
   // The day the arrow keys are on; only that day is a Tab stop.
   const [focusDay, setFocusDay] = useState(value);
+  const [hoverDay, setHoverDay] = useState<DateTime | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useOutsideClose([floatingRef], onClose, true);
+  useHolidayLoader(holidaysCountry, [viewMonth.year]);
 
   const closeToField = () => {
     onClose();
@@ -162,11 +283,21 @@ function DatePickerDropdown({
       ?.focus({ preventScroll: true });
   }, [focusDay]);
 
+  const minDay = minDate?.startOf('day');
+  const minMonth = minDate?.setZone(value.zone).startOf('month');
+  const todayDate = DateTime.now().setZone(value.zone).startOf('day');
+  const isBeforeMin = (day: DateTime) => (minDay ? day < minDay : false);
+
+  const showMonth = (month: DateTime) => {
+    setTurn(month > viewMonth ? 1 : month < viewMonth ? -1 : 0);
+    setViewMonth(month.startOf('month'));
+  };
+
   const moveFocus = (e: React.KeyboardEvent, next: DateTime) => {
     e.preventDefault();
-    if (minDate && next < minDate.startOf('day')) return;
+    if (isBeforeMin(next)) return;
     setFocusDay(next);
-    setViewMonth(next.startOf('month'));
+    if (!next.hasSame(viewMonth, 'month')) showMonth(next);
   };
 
   const handleGridKey = (e: React.KeyboardEvent) => {
@@ -196,140 +327,271 @@ function DatePickerDropdown({
     return locale === 'ja' ? label : label.slice(0, 2);
   });
 
-  const { emptySlots, calendarDays } = useMemo(() => {
+  const { emptySlots, calendarDays, trailingSlots } = useMemo(() => {
     const first = viewMonth.startOf('month');
     const startOffset = first.weekday % 7;
     const daysInMonth = first.daysInMonth ?? 30;
     const days: DateTime[] = [];
     for (let d = 1; d <= daysInMonth; d++) days.push(first.set({ day: d }));
-    return { emptySlots: startOffset, calendarDays: days };
+    // Always six rows, so the panel keeps its height from month to month.
+    return {
+      emptySlots: startOffset,
+      calendarDays: days,
+      trailingSlots: PICKER_GRID_CELLS - startOffset - daysInMonth,
+    };
   }, [viewMonth]);
 
-  const monthLabel = formatMonthYear(viewMonth, locale);
-
   const handleSelect = (day: DateTime) => {
-    if (minDate && day < minDate.startOf('day')) return;
+    if (isBeforeMin(day)) return;
     onChange(day);
     closeToField();
   };
 
+  const stepView = (step: 1 | -1) =>
+    mode === 'days'
+      ? showMonth(viewMonth.plus({ months: step }))
+      : setViewMonth((m) => m.plus({ years: step }));
+  const atFirstPage = minMonth
+    ? mode === 'days'
+      ? viewMonth <= minMonth
+      : viewMonth.year <= minMonth.year
+    : false;
+
+  // The span the field would produce: its own end follows the pointer.
+  const span = (() => {
+    if (!range) return null;
+    const own = (hoverDay ?? value).startOf('day');
+    const other = range.other.startOf('day');
+    const [start, end] = range.role === 'start' ? [own, other] : [other, own];
+    return start <= end ? { start, end } : null;
+  })();
+
+  const shortcuts = [
+    { label: t('calendar.today'), day: todayDate },
+    { label: t('picker.tomorrow'), day: todayDate.plus({ days: 1 }) },
+    { label: t('picker.inAWeek'), day: todayDate.plus({ weeks: 1 }) },
+  ];
+
+  const cellHeight = sheet ? 'h-11' : 'h-10';
+  const dayButton = sheet ? 'h-11 w-11 text-callout' : 'h-9 w-9 text-body';
   const tabDay = focusDay.hasSame(viewMonth, 'month') ? focusDay : viewMonth.startOf('month');
 
-  return createPortal(
-    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons
-    <div
-      ref={floatingRef}
+  return (
+    <PickerSurface
+      sheet={sheet}
+      title={title}
+      floatingRef={floatingRef}
+      style={style}
+      popoverClassName="w-[296px] p-3"
       onKeyDown={(e) => handlePopupKeys(e, closeToField)}
-      className="dropdown-panel fixed z-[9999] w-[280px] bg-[var(--color-surface-elevated)] p-3 ring-1 ring-[var(--color-border)]"
-      style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
-      {/* Month navigation */}
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between">
         <button
           type="button"
-          onClick={() => setViewMonth((m) => m.minus({ months: 1 }))}
-          className="icon-btn h-8 w-8"
-          aria-label={t('calendar.prevMonth')}
+          onClick={() => setMode((m) => (m === 'days' ? 'months' : 'days'))}
+          aria-expanded={mode === 'months'}
+          className="-ml-1 inline-flex h-8 items-center gap-1 rounded-[var(--radius-control)] px-2 text-default font-semibold tabular-nums text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-hover)]"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-text-primary)"
-            strokeWidth="2"
+          {mode === 'days' ? formatMonthYear(viewMonth, locale) : formatYear(viewMonth, locale)}
+          <span
+            className={`text-[var(--color-text-tertiary)] transition-transform ${mode === 'months' ? 'rotate-180' : ''}`}
           >
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
+            <Chevron dir="down" />
+          </span>
         </button>
-        <span className="text-default font-semibold tabular-nums text-[var(--color-text-primary)]">
-          {monthLabel}
-        </span>
-        <button
-          type="button"
-          onClick={() => setViewMonth((m) => m.plus({ months: 1 }))}
-          className="icon-btn h-8 w-8"
-          aria-label={t('calendar.nextMonth')}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-text-primary)"
-            strokeWidth="2"
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => stepView(-1)}
+            disabled={atFirstPage}
+            className="icon-btn h-8 w-8 text-[var(--color-text-primary)] disabled:opacity-30"
+            aria-label={mode === 'days' ? t('calendar.prevMonth') : t('picker.prevYear')}
           >
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </button>
+            <Chevron dir="left" />
+          </button>
+          <button
+            type="button"
+            onClick={() => stepView(1)}
+            className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
+            aria-label={mode === 'days' ? t('calendar.nextMonth') : t('picker.nextYear')}
+          >
+            <Chevron dir="right" />
+          </button>
+        </div>
       </div>
 
-      {/* Weekday header */}
-      <div className="mb-1 grid grid-cols-7 gap-0">
-        {weekdays.map((wd, i) => (
-          <div
-            key={wd}
-            className="py-1 text-center text-caption font-medium"
-            style={{
-              color:
-                i === 0
-                  ? 'var(--color-sunday)'
-                  : i === 6
-                    ? 'var(--color-saturday)'
-                    : 'var(--color-text-tertiary)',
-            }}
-          >
-            {wd}
+      {mode === 'months' ? (
+        <div
+          className={`grid grid-cols-3 grid-rows-4 gap-1.5 ${sheet ? 'h-[292px]' : 'h-[268px]'}`}
+        >
+          {Array.from({ length: 12 }, (_, i) => {
+            const month = viewMonth.set({ month: i + 1 }).startOf('month');
+            const disabled = minMonth ? month < minMonth : false;
+            const selected = month.hasSame(value, 'month');
+            const current = month.hasSame(todayDate, 'month');
+            return (
+              <button
+                key={month.month}
+                type="button"
+                disabled={disabled}
+                aria-pressed={selected}
+                onClick={() => {
+                  showMonth(month);
+                  setMode('days');
+                }}
+                className={`rounded-[var(--radius-control)] text-body font-medium transition-colors disabled:opacity-30 ${
+                  selected
+                    ? 'bg-[var(--color-accent)] text-[var(--color-text-on-accent)]'
+                    : current
+                      ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)] enabled:hover:bg-[var(--color-accent-subtle)]'
+                      : 'text-[var(--color-text-primary)] enabled:hover:bg-[var(--color-hover)]'
+                }`}
+              >
+                {locale === 'en' ? month.setLocale('en').toFormat('MMM') : `${month.month}月`}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-7">
+            {weekdays.map((wd, i) => (
+              <div
+                key={wd}
+                className="py-1 text-center text-caption font-medium"
+                style={{
+                  color:
+                    i === 0
+                      ? 'var(--color-sunday)'
+                      : i === 6
+                        ? 'var(--color-saturday)'
+                        : 'var(--color-text-tertiary)',
+                }}
+              >
+                {wd}
+              </div>
+            ))}
           </div>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: the grid only receives key events bubbling from its buttons */}
+          <div
+            key={viewMonth.toISODate()}
+            ref={gridRef}
+            onKeyDown={handleGridKey}
+            onMouseLeave={() => setHoverDay(null)}
+            data-dir={turn}
+            className="picker-turn grid grid-cols-7"
+          >
+            {Array.from({ length: emptySlots }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells have no identity
+              <div key={`lead-${i}`} className={cellHeight} />
+            ))}
+            {calendarDays.map((day) => {
+              const iso = day.toISODate() ?? '';
+              const isSelected = day.hasSame(value, 'day');
+              // The grid is built from `value`, so "today" has to be read in the
+              // same zone that value carries rather than the browser's.
+              const today = isToday(day, value.zoneName ?? undefined);
+              const isDisabled = isBeforeMin(day);
+              const holiday = getHoliday(holidaysCountry, iso);
+              const dayOfWeek = day.weekday % 7;
+              const inSpan = span && day >= span.start && day <= span.end;
+              const spanStart = inSpan && day.hasSame(span.start, 'day');
+              const spanEnd = inSpan && day.hasSame(span.end, 'day');
+              const isOtherEnd = range ? day.hasSame(range.other, 'day') : false;
+              const openLeft = !spanStart && (dayOfWeek === 0 || day.day === 1);
+              const openRight = !spanEnd && (dayOfWeek === 6 || day.day === calendarDays.length);
+              return (
+                <div
+                  key={iso}
+                  className={`relative flex items-center justify-center ${cellHeight}`}
+                >
+                  {inSpan && !(spanStart && spanEnd) && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-1 bg-[var(--color-accent-bg)]"
+                      style={{
+                        left: spanStart ? '50%' : 0,
+                        right: spanEnd ? '50%' : 0,
+                        // The band breaks at a row or month edge; round it there.
+                        borderTopLeftRadius: openLeft ? 999 : 0,
+                        borderBottomLeftRadius: openLeft ? 999 : 0,
+                        borderTopRightRadius: openRight ? 999 : 0,
+                        borderBottomRightRadius: openRight ? 999 : 0,
+                      }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(day)}
+                    onMouseEnter={() => !isDisabled && setHoverDay(day)}
+                    disabled={isDisabled}
+                    data-day={iso}
+                    tabIndex={day.hasSame(tabDay, 'day') ? 0 : -1}
+                    aria-label={
+                      holiday
+                        ? `${day.toFormat('yyyy-MM-dd')} ${holiday.name}`
+                        : day.toFormat('yyyy-MM-dd')
+                    }
+                    aria-pressed={isSelected}
+                    aria-current={today ? 'date' : undefined}
+                    title={holiday?.name}
+                    className={`relative flex items-center justify-center rounded-full tabular-nums transition-colors disabled:cursor-default ${dayButton} ${
+                      isSelected
+                        ? 'bg-[var(--color-accent)] shadow-[0_2px_8px_-2px_color-mix(in_srgb,var(--color-accent)_60%,transparent)]'
+                        : isOtherEnd
+                          ? 'ring-[1.5px] ring-[var(--color-accent)] ring-inset enabled:hover:bg-[var(--color-hover)]'
+                          : 'enabled:hover:bg-[var(--color-hover)]'
+                    }`}
+                    style={{
+                      color: isSelected
+                        ? 'var(--color-text-on-accent)'
+                        : dayOfWeek === 0 || holiday
+                          ? 'var(--color-sunday)'
+                          : dayOfWeek === 6
+                            ? 'var(--color-saturday)'
+                            : 'var(--color-text-primary)',
+                      fontWeight: isSelected || today ? 600 : 400,
+                      opacity: isDisabled ? 0.32 : 1,
+                    }}
+                  >
+                    {day.day}
+                    {today && (
+                      <span
+                        aria-hidden
+                        className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full"
+                        style={{
+                          backgroundColor: isSelected
+                            ? 'var(--color-text-on-accent)'
+                            : 'var(--color-accent)',
+                        }}
+                      />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+            {Array.from({ length: trailingSlots }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells have no identity
+              <div key={`pad-${i}`} className={cellHeight} />
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="mt-2 flex items-center gap-1.5 border-t border-[var(--color-separator)] pt-2.5">
+        {shortcuts.map(({ label, day }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => handleSelect(day)}
+            disabled={isBeforeMin(day)}
+            className={`rounded-full bg-[var(--color-surface-inset)] px-3 text-footnote font-medium text-[var(--color-text-secondary)] transition-colors enabled:hover:bg-[var(--color-accent-bg)] enabled:hover:text-[var(--color-accent-ink)] disabled:opacity-40 ${sheet ? 'h-9' : 'h-7'}`}
+          >
+            {label}
+          </button>
         ))}
       </div>
-
-      {/* Date grid */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its buttons */}
-      <div ref={gridRef} onKeyDown={handleGridKey} className="grid grid-cols-7 gap-0">
-        {emptySlots > 0 && <div style={{ gridColumn: `span ${emptySlots}` }} />}
-        {calendarDays.map((day) => {
-          const isSelected = day.hasSame(value, 'day');
-          // The grid is built from `value`, so "today" has to be read in the
-          // same zone that value carries rather than the browser's.
-          const today = isToday(day, value.zoneName ?? undefined);
-          const isDisabled = minDate ? day < minDate.startOf('day') : false;
-          const dayOfWeek = day.weekday % 7;
-          return (
-            <button
-              key={day.toISODate()}
-              type="button"
-              onClick={() => handleSelect(day)}
-              disabled={isDisabled}
-              data-day={day.toISODate()}
-              tabIndex={day.hasSame(tabDay, 'day') ? 0 : -1}
-              aria-label={day.toFormat('yyyy-MM-dd')}
-              aria-pressed={isSelected}
-              className="flex h-9 w-full items-center justify-center rounded-full text-body tabular-nums transition-colors"
-              style={{
-                backgroundColor: isSelected ? 'var(--color-accent)' : 'transparent',
-                color: isSelected
-                  ? 'var(--color-text-on-accent)'
-                  : isDisabled
-                    ? 'var(--color-text-tertiary)'
-                    : dayOfWeek === 0
-                      ? 'var(--color-sunday)'
-                      : dayOfWeek === 6
-                        ? 'var(--color-saturday)'
-                        : 'var(--color-text-primary)',
-                fontWeight: today ? 700 : isSelected ? 600 : 400,
-                opacity: isDisabled ? 0.3 : 1,
-                outline: today && !isSelected ? '2px solid var(--color-accent)' : 'none',
-                outlineOffset: '-2px',
-              }}
-            >
-              {day.day}
-            </button>
-          );
-        })}
-      </div>
-    </div>,
-    document.body,
+    </PickerSurface>
   );
 }
 
@@ -341,6 +603,8 @@ interface TimePickerDropdownProps {
   value: string;
   onChange: (time: string) => void;
   onClose: () => void;
+  /** Heads the bottom sheet on a phone, where the field itself is covered. */
+  title?: string;
   style: React.CSSProperties;
   floatingRef: React.RefObject<HTMLDivElement | null>;
   /** The field that opened the picker; takes focus back when the picker closes. */
@@ -390,6 +654,7 @@ function TimePickerDropdown({
   value,
   onChange,
   onClose,
+  title,
   style,
   floatingRef,
   returnFocusRef,
@@ -457,19 +722,21 @@ function TimePickerDropdown({
   };
 
   const nearestSlot = useMemo(() => nearestSlotOf(value), [value]);
+  const sheet = useSheetPicker();
 
-  return createPortal(
-    // biome-ignore lint/a11y/noStaticElementInteractions: the panel only receives key events bubbling from its controls
-    <div
-      ref={floatingRef}
+  return (
+    <PickerSurface
+      sheet={sheet}
+      title={title}
+      floatingRef={floatingRef}
+      style={style}
+      popoverClassName="flex max-h-[300px] w-[120px] flex-col"
       onKeyDown={(e) => {
         handlePopupKeys(e, closeToField);
         handleListKey(e);
       }}
-      className="dropdown-panel fixed z-[9999] flex max-h-[284px] w-[100px] flex-col bg-[var(--color-surface-elevated)] ring-1 ring-[var(--color-border)]"
-      style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >
-      <div className="border-b border-[var(--color-separator)] p-1.5">
+      <div className={sheet ? 'pb-2' : 'border-b border-[var(--color-separator)] p-1.5'}>
         <input
           data-1p-ignore
           type="text"
@@ -485,9 +752,14 @@ function TimePickerDropdown({
           }`}
         />
       </div>
-      <div ref={listRef} className="flex-1 overflow-y-auto py-1">
+      <div
+        ref={listRef}
+        className={`overflow-y-auto ${sheet ? '-mx-1 grid max-h-[46dvh] grid-cols-4 gap-1.5 p-1' : 'flex-1 p-1'}`}
+      >
         {TIME_SLOTS.map((slot) => {
           const isSelected = slot === nearestSlot;
+          // On the hour reads as a heading; the quarters under it recede.
+          const onHour = slot.endsWith(':00');
           return (
             <button
               key={slot}
@@ -500,20 +772,22 @@ function TimePickerDropdown({
                 onChange(slot);
                 closeToField();
               }}
-              className="flex w-full items-center justify-center py-2 text-default tabular-nums transition-colors"
-              style={{
-                backgroundColor: isSelected ? 'var(--color-accent-bg)' : 'transparent',
-                color: isSelected ? 'var(--color-accent-ink)' : 'var(--color-text-primary)',
-                fontWeight: isSelected ? 600 : 400,
-              }}
+              className={`flex w-full items-center justify-center rounded-[var(--radius-control)] tabular-nums transition-colors ${
+                sheet ? 'h-11 text-callout' : 'h-8 text-default'
+              } ${
+                isSelected
+                  ? 'bg-[var(--color-accent)] font-semibold text-[var(--color-text-on-accent)]'
+                  : onHour
+                    ? 'font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
+                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-primary)]'
+              } ${sheet && !isSelected ? 'bg-[var(--color-surface-inset)]' : ''}`}
             >
               {slot}
             </button>
           );
         })}
       </div>
-    </div>,
-    document.body,
+    </PickerSurface>
   );
 }
 
@@ -878,6 +1152,141 @@ export function CustomSelect({
    that opens DatePicker and TimePicker
    ============================================ */
 
+/** Shared look for a form field that opens a picker panel, matching `input-modern input-compact`. */
+const FORM_PICKER_TRIGGER =
+  'input-modern input-compact flex w-full items-center justify-between gap-2 text-left tabular-nums text-[var(--color-text-primary)]';
+
+function PickerFormLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 text-footnote font-medium text-[var(--color-text-secondary)]">
+      <span className="mb-1.5 block">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function TriggerIcon({ path }: { path: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0 text-[var(--color-text-tertiary)]"
+    >
+      <path d={path} />
+    </svg>
+  );
+}
+
+const CALENDAR_ICON =
+  'M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z';
+const CLOCK_ICON = 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z';
+
+/** A labelled form date field; the year is shown only when it is not the current one. */
+export function DateField({
+  label,
+  value,
+  onChange,
+  minDate,
+  range,
+}: {
+  label: string;
+  value: DateTime;
+  onChange: (date: DateTime) => void;
+  minDate?: DateTime;
+  range?: DateRangeLink;
+}) {
+  const locale = useUiStore((s) => s.locale);
+  const [open, setOpen] = useState(false);
+  const floating = useFloating(open, 280);
+  const close = useCallback(() => setOpen(false), []);
+  const dow = getWeekdayLabel(value.weekday % 7, locale);
+  const sameYear = value.year === DateTime.now().setZone(value.zone).year;
+  const text =
+    locale === 'en'
+      ? value.setLocale('en').toFormat(sameYear ? 'EEE, MMM d' : 'MMM d, yyyy')
+      : `${sameYear ? '' : `${value.year}年`}${value.month}月${value.day}日(${dow})`;
+  return (
+    <PickerFormLabel label={label}>
+      <button
+        ref={floating.anchorRef}
+        type="button"
+        aria-label={`${label} ${value.toISODate()}`}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={FORM_PICKER_TRIGGER}
+      >
+        <span className="truncate">{text}</span>
+        <TriggerIcon path={CALENDAR_ICON} />
+      </button>
+      {open && (
+        <DatePickerDropdown
+          value={value}
+          onChange={onChange}
+          onClose={close}
+          {...(minDate ? { minDate } : {})}
+          {...(range ? { range } : {})}
+          title={label}
+          style={{ top: floating.pos.top, left: floating.pos.left }}
+          floatingRef={floating.floatingRef}
+          returnFocusRef={floating.anchorRef}
+        />
+      )}
+    </PickerFormLabel>
+  );
+}
+
+/** A labelled form time field (`HH:mm`) that opens the 15-minute slot list. */
+export function TimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (time: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const floating = useFloating(open, 100);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <PickerFormLabel label={label}>
+      <button
+        ref={floating.anchorRef}
+        type="button"
+        aria-label={`${label} ${value}`}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={FORM_PICKER_TRIGGER}
+      >
+        <span className="truncate">{value}</span>
+        <TriggerIcon path={CLOCK_ICON} />
+      </button>
+      {open && (
+        <TimePickerDropdown
+          value={value}
+          onChange={onChange}
+          onClose={close}
+          title={label}
+          style={{
+            top: floating.pos.top,
+            left: floating.pos.left,
+            width: Math.max(120, floating.pos.width),
+          }}
+          floatingRef={floating.floatingRef}
+          returnFocusRef={floating.anchorRef}
+        />
+      )}
+    </PickerFormLabel>
+  );
+}
+
 interface DateTimeFieldProps {
   label: string;
   dateValue: DateTime;
@@ -933,6 +1342,7 @@ export function DateTimeField({
             onChange={onDateChange}
             onClose={handleCloseDatePicker}
             {...(minDate ? { minDate } : {})}
+            {...(label ? { title: label } : {})}
             style={{ top: dateFloating.pos.top, left: dateFloating.pos.left }}
             floatingRef={dateFloating.floatingRef}
             returnFocusRef={dateFloating.anchorRef}
@@ -956,6 +1366,7 @@ export function DateTimeField({
                 value={timeValue}
                 onChange={onTimeChange}
                 onClose={handleCloseTimePicker}
+                {...(label ? { title: label } : {})}
                 style={{ top: timeFloating.pos.top, left: timeFloating.pos.left }}
                 floatingRef={timeFloating.floatingRef}
                 returnFocusRef={timeFloating.anchorRef}

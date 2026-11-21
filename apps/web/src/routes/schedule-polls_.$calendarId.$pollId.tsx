@@ -719,6 +719,13 @@ function SchedulePollDetailPage() {
             </SchedulePollNotice>
           ) : (
             <>
+              {poll.slots.some((slot) => !slot.active || slot.availability === 'hard') && (
+                <div className="mb-3">
+                  <SchedulePollNotice tone="warning">
+                    {t('schedulePoll.someCandidatesUnavailable')}
+                  </SchedulePollNotice>
+                </div>
+              )}
               <div className="page-card divide-y divide-[var(--color-separator)]">
                 {activeSlots.map((slot) => (
                   <AnswerSlot
@@ -732,13 +739,6 @@ function SchedulePollDetailPage() {
                   />
                 ))}
               </div>
-              {poll.slots.some((slot) => !slot.active || slot.availability === 'hard') && (
-                <div className="mt-3">
-                  <SchedulePollNotice tone="warning">
-                    {t('schedulePoll.someCandidatesUnavailable')}
-                  </SchedulePollNotice>
-                </div>
-              )}
               <div className="page-card sticky bottom-4 z-10 mt-4 flex items-center justify-between gap-3 px-4 py-3 shadow-[var(--shadow-md)] sm:px-5">
                 <p
                   role="status"
@@ -987,6 +987,9 @@ function SchedulePollDetailPage() {
                     : undefined
                 }
               >
+                <p className="mb-3 max-w-[62ch] text-footnote text-[var(--color-text-secondary)]">
+                  {t('schedulePoll.finalizeRules')}
+                </p>
                 <div className="page-card p-4 sm:p-5">
                   {activeSlots.length === 0 && (
                     <p className="mb-3 text-footnote text-[var(--color-warning)]">
@@ -1103,6 +1106,7 @@ function SchedulePollDetailPage() {
                   <ConfirmSheet
                     open={confirmingPending}
                     title={t('poll.finalizeWithoutPending')}
+                    hint={t('schedulePoll.finalizeWithPendingHint')}
                     confirmLabel={t('schedulePoll.finalizeAndCreateEvent')}
                     destructive={false}
                     busy={finalizing}
@@ -1124,7 +1128,7 @@ function SchedulePollDetailPage() {
                       {t('schedulePoll.invitees', { count: memberIdsDraft.length })}
                     </span>
                     <span className="mt-0.5 block text-footnote text-[var(--color-text-secondary)]">
-                      {t('schedulePoll.inviteesHint')}
+                      {t('schedulePoll.inviteesEditHint')}
                     </span>
                   </span>
                   <svg

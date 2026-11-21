@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { AttachmentsSection } from '@/components/event-attachments';
 import { ChecklistSection } from '@/components/event-checklist';
@@ -48,6 +49,13 @@ import type {
   Visibility,
 } from '@/types/calendar';
 import { FALLBACK_LABEL_COLOR, NOTIFICATION_OFFSETS, VISIBILITY_OPTIONS } from '@/types/calendar';
+
+const VISIBILITY_HINT_KEY: Record<Visibility, TranslationKey> = {
+  default: 'event.visibilityDefaultHint',
+  public: 'event.visibilityPublicHint',
+  private: 'event.visibilityPrivateHint',
+  confidential: 'event.visibilityConfidentialHint',
+};
 
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
 function toLocalDatetime(iso: string, zone: string): string {
@@ -873,13 +881,6 @@ export function EventModal() {
           nobody else is on, where both answers are the author. */}
       {!detailsHidden && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
         <div className="px-6 pb-3">
-          {/* No "learn more" link: the help page is another route, and
-              leaving for it would throw away the plan being written. */}
-          {!editingEvent && (
-            <TipCard id="event" className="mb-3">
-              {t('tip.event')}
-            </TipCard>
-          )}
           <EventPeople
             members={membersMap[formCalendarId] ?? []}
             myId={me?.id}
@@ -900,18 +901,14 @@ export function EventModal() {
       )}
 
       {detailsHidden && (
-        <p className="px-6 pb-3 text-footnote text-[var(--color-text-tertiary)]">
+        <p className="px-6 pb-3 text-footnote text-[var(--color-text-secondary)]">
           {t('event.detailsHidden')}
         </p>
       )}
 
       {/* Date & Time card */}
       <div className="px-6">
-        {taskOwned && (
-          <p className="pb-2 text-footnote text-[var(--color-text-tertiary)]">
-            {t('event.taskOwnedNote')}
-          </p>
-        )}
+        {taskOwned && <Callout className="mb-2">{t('event.taskOwnedNote')}</Callout>}
         <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           <fieldset disabled={!editable || taskOwned} className="contents">
             <DateTimeField
@@ -1010,6 +1007,13 @@ export function EventModal() {
           disabled={!editable}
           onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
         />
+        {/* No "learn more" link: the help page is another route, and
+            leaving for it would throw away the plan being written. */}
+        {!editingEvent && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
+          <TipCard id="event" className="mt-3">
+            {t('tip.event')}
+          </TipCard>
+        )}
       </div>
 
       {/* Optional fields: collapsed by default on create, expanded when used */}
@@ -1189,6 +1193,9 @@ export function EventModal() {
                       className="flex-1"
                     />
                   </div>
+                  <p className="pb-1.5 pl-[30px] text-footnote text-[var(--color-text-secondary)]">
+                    {t(VISIBILITY_HINT_KEY[form.visibility])}
+                  </p>
                 </>
               )}
               <div className="flex flex-wrap items-center justify-between gap-2 py-1.5">
@@ -1219,7 +1226,7 @@ export function EventModal() {
       {editingEvent && (
         <div className="mx-6 mt-5 flex items-center gap-3">
           <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
-          <h3 className="shrink-0 text-caption font-medium text-[var(--color-text-tertiary)]">
+          <h3 className="shrink-0 text-footnote font-medium text-[var(--color-text-secondary)]">
             {t('event.savedImmediately')}
           </h3>
           <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />

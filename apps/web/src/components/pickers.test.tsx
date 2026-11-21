@@ -417,14 +417,7 @@ describe('DateTimeField', () => {
     await user.click(screen.getByText(/Apr 19, 2026/));
     expect(screen.getByText('April 2026')).toBeInTheDocument();
 
-    // Click next month arrow (the second arrow button)
-    const picker = document.querySelector('.fixed.z-\\[9999\\]');
-    expect(picker).not.toBeNull();
-    const navButtons = picker?.querySelectorAll('button') ?? [];
-    // First button is prev, second is next (in the month nav row)
-    const nextBtn = navButtons[1];
-    expect(nextBtn).toBeDefined();
-    await user.click(nextBtn as HTMLButtonElement);
+    await user.click(screen.getByRole('button', { name: 'Next month' }));
 
     expect(screen.getByText('May 2026')).toBeInTheDocument();
   });
@@ -519,7 +512,7 @@ describe('DateTimeField from the keyboard', () => {
 
     for (let i = 0; i < 6; i++) await user.tab();
 
-    const panel = screen.getByRole('button', { name: '2026-04-19' }).parentElement?.parentElement;
+    const panel = screen.getByRole('button', { name: '2026-04-19' }).closest('.dropdown-panel');
     expect(panel?.contains(document.activeElement)).toBe(true);
   });
 

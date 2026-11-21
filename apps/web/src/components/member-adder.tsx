@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { RoleHint } from '@/components/role-hint';
 import { useT } from '@/i18n';
 import { client, errorMessage, isAbortError } from '@/lib/client';
 import {
@@ -25,11 +26,6 @@ interface CandidatePage {
 }
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-const ROLE_HINT_KEY = {
-  editor: 'members.roleEditorHint',
-  viewer: 'members.roleViewerHint',
-} as const;
 
 interface MemberAdderProps {
   calendarId: string;
@@ -327,9 +323,7 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
               </button>
             ))}
           </div>
-          <p className="text-caption text-[var(--color-text-secondary)]">
-            {t(ROLE_HINT_KEY[role as keyof typeof ROLE_HINT_KEY])}
-          </p>
+          <RoleHint role={role} />
         </div>
         <button
           type="button"

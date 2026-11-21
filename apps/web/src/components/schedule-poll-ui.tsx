@@ -9,11 +9,14 @@ import { useUiStore } from '@/stores/ui-store';
 export function SchedulePollFrame({
   title,
   eyebrow,
+  lead,
   children,
   backTo = '/schedule-polls',
 }: {
   title: string;
   eyebrow?: string;
+  /** Intro paragraph under the title saying what the screen is for. */
+  lead?: ReactNode;
   children: ReactNode;
   backTo?: '/' | '/schedule-polls';
 }) {
@@ -36,6 +39,9 @@ export function SchedulePollFrame({
           <h1 className="break-words text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
             {title}
           </h1>
+          {lead && (
+            <p className="mt-2 max-w-[62ch] text-body text-[var(--color-text-secondary)]">{lead}</p>
+          )}
         </header>
         <main className="flex flex-1 flex-col gap-6 pb-10 sm:gap-8">{children}</main>
       </div>

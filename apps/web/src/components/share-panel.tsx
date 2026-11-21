@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { CustomSelect } from '@/components/pickers';
+import { RoleHint } from '@/components/role-hint';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { copyText } from '@/lib/clipboard';
@@ -208,6 +210,7 @@ export function SharePanel() {
                 }))}
                 triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-body text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
               />
+              <RoleHint role={inviteRole} />
               <div className="flex gap-2">
                 <CustomSelect
                   className="flex-1"
@@ -241,6 +244,7 @@ export function SharePanel() {
                       <div key={inv.id} className="space-y-2">
                         {url ? (
                           <>
+                            <Callout tone="warning">{t('invites.linkShownOnce')}</Callout>
                             <UrlRow
                               value={url}
                               copied={copiedKey === key}
@@ -257,9 +261,6 @@ export function SharePanel() {
                                 {t('invites.shareLink')}
                               </button>
                             )}
-                            <p className="text-caption text-[var(--color-text-tertiary)]">
-                              {t('invites.linkShownOnce')}
-                            </p>
                           </>
                         ) : (
                           <p className="rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)] px-3 py-2 text-caption text-[var(--color-text-secondary)]">
@@ -357,6 +358,7 @@ export function SharePanel() {
                 <div className="space-y-3">
                   {publicUrl ? (
                     <>
+                      <Callout tone="warning">{t('invites.linkShownOnce')}</Callout>
                       <UrlRow
                         value={publicUrl}
                         copied={copiedKey === 'public'}
@@ -364,9 +366,6 @@ export function SharePanel() {
                         copyLabel={t('share.copyUrl')}
                         copiedLabel={t('common.copied')}
                       />
-                      <p className="text-caption text-[var(--color-text-tertiary)]">
-                        {t('invites.linkShownOnce')}
-                      </p>
                       <div className="space-y-1.5">
                         <span className="text-caption font-medium text-[var(--color-text-secondary)]">
                           {t('share.embedCode')}
