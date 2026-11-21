@@ -332,7 +332,7 @@ export function AlbumViewer({
       {infoOpen && (
         <section
           aria-label={t('album.info')}
-          className="album-viewer-sheet absolute inset-x-0 bottom-0 z-20 mx-auto max-h-[70vh] w-full max-w-[560px] overflow-y-auto rounded-t-[20px] bg-neutral-900/95 px-5 pt-3 pb-[max(env(safe-area-inset-bottom),1.25rem)] backdrop-blur-xl"
+          className="album-viewer-sheet absolute inset-x-0 bottom-0 z-20 mx-auto max-h-[70vh] w-full max-w-[560px] overflow-y-auto rounded-t-[var(--radius-lg)] bg-neutral-900/95 px-5 pt-3 pb-[max(env(safe-area-inset-bottom),1.25rem)] backdrop-blur-xl"
         >
           <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/25" aria-hidden="true" />
           <div className="flex items-center justify-between gap-3">
@@ -371,13 +371,13 @@ export function AlbumViewer({
                   onChange={(e) => setCaptionDraft(e.target.value)}
                   placeholder={t('album.captionPlaceholder')}
                   aria-label={t('album.caption')}
-                  className="min-w-0 flex-1 rounded-[10px] bg-white/10 px-3 py-2.5 text-body text-white outline-none placeholder:text-white/45 focus:bg-white/15"
+                  className="min-w-0 flex-1 rounded-[var(--radius-control)] bg-white/10 px-3 py-2.5 text-body text-white outline-none placeholder:text-white/45 focus:bg-white/15"
                 />
                 <button
                   type="button"
                   onClick={handleSaveCaption}
                   disabled={savingCaption || captionDraft === photo.caption}
-                  className="btn-primary shrink-0 px-3 py-2 text-footnote disabled:opacity-40"
+                  className="btn-primary btn-sm shrink-0 disabled:opacity-40"
                 >
                   {savingCaption ? t('profile.saving') : t('album.saveCaption')}
                 </button>
@@ -387,7 +387,7 @@ export function AlbumViewer({
             )}
           </div>
 
-          <dl className="mt-4 divide-y divide-white/10 rounded-[12px] bg-white/[0.06] text-footnote">
+          <dl className="mt-4 divide-y divide-white/10 rounded-[var(--radius-sm)] bg-white/[0.06] text-footnote">
             <div className="flex items-center gap-3 px-3.5 py-2.5">
               <dt className="w-16 shrink-0 text-white/60">{t('album.event')}</dt>
               <dd className="flex min-w-0 flex-1 items-center gap-2">
@@ -397,7 +397,7 @@ export function AlbumViewer({
                     onChange={handleLinkEvent}
                     ariaLabel={t('album.event')}
                     className="min-w-0 flex-1"
-                    triggerClassName="rounded-[8px] bg-white/10 px-3 py-1.5 text-footnote text-white hover:bg-white/15"
+                    triggerClassName="rounded-[var(--radius-control)] bg-white/10 px-3 py-1.5 text-footnote text-white hover:bg-white/15"
                     options={[
                       { value: '', label: t('album.noEvent') },
                       ...linkableEvents.map((evt) => ({ value: evt.id, label: evt.title })),

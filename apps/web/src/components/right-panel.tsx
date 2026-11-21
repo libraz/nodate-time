@@ -224,8 +224,7 @@ export function MemoSection() {
                         }}
                         aria-label={t('common.delete')}
                         title={t('common.delete')}
-                        className="flex h-[26px] w-[26px] items-center justify-center text-[var(--color-text-tertiary)] hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
-                        style={{ borderRadius: 'var(--radius-sm)' }}
+                        className="icon-btn icon-btn-danger h-[26px] w-[26px]"
                       >
                         <svg
                           width="15"

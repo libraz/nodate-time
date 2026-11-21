@@ -230,8 +230,7 @@ export function ChecklistSection({
               }
             }}
             placeholder={t('event.checklistPlaceholder')}
-            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-            style={{ borderRadius: 'var(--radius-sm)' }}
+            className="input-modern h-10 min-w-0 flex-1 text-default"
           />
         </div>
       )}

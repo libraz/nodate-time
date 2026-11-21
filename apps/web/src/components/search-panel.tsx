@@ -178,7 +178,7 @@ export function SearchPanel() {
         <button
           type="button"
           onClick={toggleSearch}
-          className="icon-btn h-7 w-7"
+          className="icon-btn h-9 w-9"
           aria-label={t('common.close')}
         >
           <svg

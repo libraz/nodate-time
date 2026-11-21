@@ -264,7 +264,7 @@ export function CommentsSection({
                       type="text"
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
-                      className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-body text-[var(--color-text-primary)] outline-none"
+                      className="input-modern min-w-0 flex-1 text-body"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') saveEdit(c.id);
                         if (e.key === 'Escape') {
@@ -310,17 +310,15 @@ export function CommentsSection({
               }
             }}
             placeholder={t('event.commentPlaceholder')}
-            className="h-10 min-w-0 flex-1 border border-[var(--color-border)] bg-[var(--color-surface)] px-4 text-default text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)]"
-            style={{ borderRadius: 'var(--radius-sm)' }}
+            className="input-modern h-10 min-w-0 flex-1 text-default"
           />
           <LabelledButton
             label={t('event.send')}
             onClick={handleSend}
             disabled={!newComment.trim() || isSending}
-            className="icon-btn h-10 w-10 shrink-0 bg-[var(--color-accent)] disabled:opacity-40"
-            style={{ borderRadius: 'var(--radius-sm)' }}
+            className="icon-btn icon-btn-accent h-10 w-10 shrink-0 disabled:opacity-40"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
             </svg>
           </LabelledButton>

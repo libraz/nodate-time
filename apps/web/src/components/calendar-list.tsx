@@ -289,14 +289,14 @@ export function CalendarList() {
                     <button
                       type="button"
                       onClick={() => setJustCreatedId(null)}
-                      className="btn-secondary h-8 flex-1 text-footnote"
+                      className="btn-secondary btn-sm flex-1"
                     >
                       {t('calendar.inviteLater')}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleInvite(cal.id)}
-                      className="btn-primary h-8 flex-1 text-footnote"
+                      className="btn-primary btn-sm flex-1"
                     >
                       {t('calendar.inviteMembers')}
                     </button>
@@ -320,7 +320,7 @@ export function CalendarList() {
                 if (e.key === 'Escape') setShowNewForm(false);
               }}
               placeholder={t('calendar.calendarName')}
-              className="input-modern h-9 w-full text-sm"
+              className="input-modern h-9 w-full text-default"
               aria-describedby={newHintId}
             />
             <p id={newHintId} className="mt-1.5 text-caption text-[var(--color-text-tertiary)]">
@@ -330,14 +330,14 @@ export function CalendarList() {
               <button
                 type="button"
                 onClick={() => setShowNewForm(false)}
-                className="btn-secondary h-8 flex-1 text-footnote"
+                className="btn-secondary btn-sm flex-1"
               >
                 {t('common.cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleCreateCalendar}
-                className="btn-primary h-8 flex-1 text-footnote"
+                className="btn-primary btn-sm flex-1"
               >
                 {t('common.create')}
               </button>

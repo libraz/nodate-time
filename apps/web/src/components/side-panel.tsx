@@ -63,7 +63,7 @@ export function SidePanel({
             <button
               type="button"
               onClick={onClose}
-              className="icon-btn h-8 w-8"
+              className="icon-btn h-9 w-9"
               aria-label={t('common.close')}
             >
               <svg

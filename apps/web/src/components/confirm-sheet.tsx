@@ -25,7 +25,7 @@ const SHEET_TONES = {
     hint: 'text-white/60',
     rule: 'border-white/10',
     hover: 'hover:bg-white/5',
-    danger: 'text-[#ff453a]',
+    danger: 'text-[var(--color-danger)]',
     accent: 'text-white',
   },
   theme: {
@@ -78,7 +78,9 @@ export function ConfirmSheet({
         aria-describedby={hint ? hintId : undefined}
         className="confirm-sheet relative flex w-full max-w-[420px] flex-col gap-2"
       >
-        <div className={`overflow-hidden rounded-[14px] text-center backdrop-blur-xl ${c.card}`}>
+        <div
+          className={`overflow-hidden rounded-[var(--radius-md)] text-center backdrop-blur-xl ${c.card}`}
+        >
           <p id={titleId} className="px-4 pt-3.5 pb-1 text-callout font-semibold">
             {title}
           </p>
@@ -101,7 +103,7 @@ export function ConfirmSheet({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className={`w-full rounded-[14px] py-3.5 text-callout font-semibold backdrop-blur-xl transition-colors disabled:opacity-50 ${c.card} ${c.hover}`}
+          className={`w-full rounded-[var(--radius-md)] py-3.5 text-callout font-semibold backdrop-blur-xl transition-colors disabled:opacity-50 ${c.card} ${c.hover}`}
         >
           {cancelLabel ?? t('common.cancel')}
         </button>

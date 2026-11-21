@@ -914,7 +914,7 @@ export function DateTimeField({
 
   return (
     <div className="flex items-center justify-between py-2.5">
-      {label && <span className="text-default text-[var(--color-text-secondary)]">{label}</span>}
+      {label && <span className="text-default text-[var(--color-text-primary)]">{label}</span>}
       <div className="flex items-center gap-2">
         <button
           ref={dateFloating.anchorRef}

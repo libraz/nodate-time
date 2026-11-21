@@ -89,7 +89,7 @@ export function MembersPanel() {
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="btn-primary inline-flex h-8 items-center gap-1 pr-3 pl-2.5 text-footnote font-semibold"
+            className="btn-primary btn-sm inline-flex items-center gap-1 pr-3 pl-2.5"
           >
             <svg
               width="14"
@@ -158,7 +158,7 @@ export function MembersPanel() {
               <button
                 type="button"
                 onClick={() => fetchMembers(calendarId)}
-                className="btn-secondary h-8 px-4 text-footnote"
+                className="btn-secondary btn-sm"
               >
                 {t('error.retry')}
               </button>
@@ -282,7 +282,7 @@ export function MembersPanel() {
                 <button
                   type="button"
                   onClick={() => setPendingRemove(myRow)}
-                  className="btn-secondary h-9 w-full px-4 text-body text-[var(--color-danger)]"
+                  className="btn-secondary btn-sm btn-danger w-full"
                 >
                   {t('members.leaveButton')}
                 </button>

@@ -129,13 +129,13 @@ export function useScopedUpdate() {
           <p className="text-default font-semibold">{t('event.scopeEditTitle')}</p>
           {pending.confirmingFollowing ? (
             <>
-              <p className="text-sm text-[var(--color-text-secondary)]">
+              <p className="text-default text-[var(--color-text-secondary)]">
                 {t('scope.followingDropsChanges')}
               </p>
               <button
                 type="button"
                 onClick={() => choose('following')}
-                className="btn-secondary py-3 text-default font-medium"
+                className="btn-secondary text-default font-medium"
               >
                 {t('scope.following')}
               </button>
@@ -145,21 +145,21 @@ export function useScopedUpdate() {
               <button
                 type="button"
                 onClick={() => choose('this')}
-                className="btn-secondary py-3 text-default font-medium"
+                className="btn-secondary text-default font-medium"
               >
                 {t('event.scopeThis')}
               </button>
               <button
                 type="button"
                 onClick={() => choose('following')}
-                className="btn-secondary py-3 text-default font-medium"
+                className="btn-secondary text-default font-medium"
               >
                 {t('scope.following')}
               </button>
               <button
                 type="button"
                 onClick={() => choose('all')}
-                className="btn-secondary py-3 text-default font-medium"
+                className="btn-secondary text-default font-medium"
               >
                 {t('event.scopeAll')}
               </button>
@@ -168,7 +168,7 @@ export function useScopedUpdate() {
           <button
             type="button"
             onClick={() => setPending(null)}
-            className="py-2 text-sm text-[var(--color-text-secondary)]"
+            className="py-2 text-default text-[var(--color-text-secondary)]"
           >
             {t('common.cancel')}
           </button>

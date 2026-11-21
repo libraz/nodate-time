@@ -26,7 +26,7 @@ export function FabButton() {
         right: '16px',
         borderRadius: 'var(--radius-lg)',
         background: 'var(--color-accent)',
-        color: 'var(--color-text-on-accent, #fff)',
+        color: 'var(--color-text-on-accent)',
       }}
       aria-label={t('event.addEvent')}
     >

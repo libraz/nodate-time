@@ -97,7 +97,7 @@ function MobileSearchView() {
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 py-3">
-        <div className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-inset)] px-4 py-2.5">
+        <div className="flex items-center gap-3 rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)] px-4 py-2.5">
           <svg
             width="18"
             height="18"
@@ -276,7 +276,7 @@ function MobileSettingsView() {
         </div>
       </div>
 
-      <div className="mt-2 divide-y divide-[var(--color-separator)] rounded-xl bg-[var(--color-surface)]">
+      <div className="mt-2 divide-y divide-[var(--color-separator)] rounded-[var(--radius-sm)] bg-[var(--color-surface)]">
         {(
           [
             { to: '/settings', label: t('settings.openAll') },

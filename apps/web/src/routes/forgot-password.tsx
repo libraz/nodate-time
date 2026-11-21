@@ -82,7 +82,7 @@ function ForgotPasswordPage() {
           {error && (
             <div
               role="alert"
-              className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
+              className="mb-4 callout callout-danger text-default text-[var(--color-danger)]"
             >
               {error}
             </div>

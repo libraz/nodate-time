@@ -375,7 +375,7 @@ export function SharedCalendarView() {
         {calendar.joinable && (
           <div className="bg-[var(--color-surface)] px-4 py-5 shadow-inner sm:px-6">
             {joinError && (
-              <div className="mb-3 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-center text-body text-[var(--color-danger)]">
+              <div className="mb-3 callout callout-danger text-center text-body text-[var(--color-danger)]">
                 {joinError}
               </div>
             )}

@@ -73,7 +73,7 @@ function VerifyEmailPage() {
       {status === 'invalid' && (
         <div
           role="alert"
-          className="rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
+          className="callout callout-danger text-default text-[var(--color-danger)]"
         >
           {t('auth.verifyEmailInvalid')}
         </div>

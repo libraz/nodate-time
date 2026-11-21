@@ -48,7 +48,7 @@ export function PublicDaySheet({
           type="button"
           onClick={onClose}
           aria-label={t('common.close')}
-          className="icon-btn h-8 w-8 rounded-full"
+          className="icon-btn h-9 w-9"
         >
           <svg
             width="16"

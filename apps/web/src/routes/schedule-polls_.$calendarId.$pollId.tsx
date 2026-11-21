@@ -1177,7 +1177,7 @@ function SchedulePollDetailPage() {
                   type="button"
                   onClick={() => setConfirmingCancel(true)}
                   disabled={cancelling}
-                  className="rounded-full px-3 py-2 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)] disabled:opacity-50"
+                  className="btn-secondary btn-sm btn-danger disabled:opacity-50"
                 >
                   {cancelling ? t('common.saving') : t('schedulePoll.cancelPoll')}
                 </button>

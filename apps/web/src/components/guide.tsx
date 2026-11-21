@@ -110,7 +110,7 @@ export function GuideCard({ className = '' }: { className?: string }) {
         type="button"
         onClick={() => dismissTip('guide')}
         aria-label={t('common.close')}
-        className="icon-btn absolute top-2 right-2 h-7 w-7 text-[var(--color-text-tertiary)]"
+        className="icon-btn absolute top-1 right-1 h-9 w-9 text-[var(--color-text-tertiary)]"
       >
         <svg
           width="14"
@@ -151,11 +151,7 @@ export function GuideCard({ className = '' }: { className?: string }) {
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={openWizard}
-        className="btn-primary mt-3 h-9 w-full text-body font-semibold"
-      >
+      <button type="button" onClick={openWizard} className="btn-primary btn-sm mt-3 w-full">
         {t('tip.guideAction')}
       </button>
     </aside>
@@ -190,11 +186,7 @@ export function EmptyState({ icon, title, description, action, compact }: EmptyS
         {description}
       </p>
       {action && (
-        <button
-          type="button"
-          onClick={action.onClick}
-          className="btn-primary mt-4 h-9 px-4 text-body font-medium"
-        >
+        <button type="button" onClick={action.onClick} className="btn-primary btn-sm mt-4">
           {action.label}
         </button>
       )}

@@ -823,6 +823,8 @@ export function EventModal() {
               <Avatar
                 src={editingEvent.creatorAvatarUrl}
                 name={name}
+                color={member?.color}
+                round
                 size="h-5 w-5"
                 className="text-caption"
               />
@@ -1016,7 +1018,7 @@ export function EventModal() {
           type="button"
           onClick={() => setShowMore((v) => !v)}
           aria-expanded={showMore}
-          className="flex w-full items-center justify-between rounded-[var(--radius-md)] px-1 py-2 text-callout font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+          className="flex w-full items-center justify-between rounded-[var(--radius-md)] px-4 py-2 text-default font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
         >
           <span>{t('event.moreOptions')}</span>
           <svg
@@ -1438,7 +1440,7 @@ export function EventModal() {
               <button
                 type="button"
                 onClick={() => setScopePrompt(null)}
-                className="py-2 text-sm text-[var(--color-text-secondary)]"
+                className="py-2 text-default text-[var(--color-text-secondary)]"
               >
                 {t('common.cancel')}
               </button>

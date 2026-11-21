@@ -214,7 +214,7 @@ function LoginPage() {
         {oauthErrorKey && (
           <div
             role="alert"
-            className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
+            className="mb-4 callout callout-danger text-default text-[var(--color-danger)]"
           >
             {t(oauthErrorKey)}
           </div>
@@ -222,7 +222,7 @@ function LoginPage() {
         {error && (
           <div
             role="alert"
-            className="mb-4 rounded-xl bg-[var(--color-danger-bg)] px-4 py-3 text-default text-[var(--color-danger)]"
+            className="mb-4 callout callout-danger text-default text-[var(--color-danger)]"
           >
             {error}
           </div>
@@ -306,7 +306,7 @@ function LoginPage() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
-                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
+                  className="icon-btn absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2 rounded-lg text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
                 >
                   {showPassword ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
@@ -359,7 +359,7 @@ function LoginPage() {
               {providers.includes('google') && (
                 <a
                   href={`${API_BASE}/auth/oauth/google/start${oauthSuffix}`}
-                  className="flex h-[46px] w-full items-center justify-center gap-2.5 rounded-xl border border-[var(--color-border-strong)] bg-white text-default font-semibold text-[#1f1f1f] shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4285F4]/45"
+                  className="flex h-11 w-full items-center justify-center gap-2.5 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-white text-default font-semibold text-[#1f1f1f] shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4285F4]/45"
                 >
                   <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
                     <path
@@ -385,7 +385,7 @@ function LoginPage() {
               {providers.includes('line') && (
                 <a
                   href={`${API_BASE}/auth/oauth/line/start${oauthSuffix}`}
-                  className="flex h-[46px] w-full items-center justify-center gap-2.5 rounded-xl bg-[#06C755] text-default font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md hover:brightness-105 active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#06C755]/45"
+                  className="flex h-11 w-full items-center justify-center gap-2.5 rounded-[var(--radius-sm)] bg-[#06C755] text-default font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:shadow-md hover:brightness-105 active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#06C755]/45"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="currentColor">
                     <path d="M19.365 9.89c.40 0 .73.33.73.74 0 .4-.33.73-.73.73h-2.03v1.3h2.03c.4 0 .73.33.73.74 0 .4-.33.73-.73.73h-2.76a.73.73 0 0 1-.73-.73V8.85c0-.4.33-.73.73-.73h2.76c.4 0 .73.33.73.74 0 .4-.33.73-.73.73h-2.03v1.3h2.03zm-3.85 3.51a.73.73 0 0 1-.59.72.74.74 0 0 1-.79-.27l-2.83-3.84v3.39a.73.73 0 1 1-1.46 0V8.85a.73.73 0 0 1 .59-.72.74.74 0 0 1 .8.28l2.81 3.84V8.85a.73.73 0 1 1 1.46 0v4.55zm-6.85 0a.73.73 0 0 1-.73.73.73.73 0 0 1-.73-.73V8.85a.73.73 0 0 1 .73-.73.73.73 0 0 1 .73.73v4.55zm-2.5.73H3.4a.73.73 0 0 1-.73-.73V8.85a.73.73 0 1 1 1.46 0v3.82h2.03a.73.73 0 1 1 0 1.46zM12 0C5.37 0 0 4.39 0 9.81c0 4.86 4.27 8.93 10.04 9.7.39.08.92.26 1.06.59.12.3.08.78.04 1.09l-.17 1.03c-.05.3-.24 1.19 1.03.65 1.27-.54 6.83-4.02 9.31-6.89 1.72-1.88 2.55-3.79 2.55-6.17C23.86 4.39 18.49 0 12 0z" />
@@ -411,7 +411,7 @@ function LoginPage() {
               type="button"
               onClick={() => devLogin('demo@example.com').catch(() => {})}
               disabled={isLoading}
-              className="flex h-[42px] items-center justify-center rounded-xl border border-transparent bg-[var(--color-accent-bg)] text-default font-semibold text-[var(--color-accent-ink)] transition-all hover:bg-[var(--color-accent-subtle)] active:scale-[0.98] disabled:opacity-50"
+              className="btn-secondary btn-sm"
             >
               {t('auth.demoLogin')}
             </button>
@@ -419,7 +419,7 @@ function LoginPage() {
               type="button"
               onClick={() => devLogin('admin@example.com').catch(() => {})}
               disabled={isLoading}
-              className="flex h-[42px] items-center justify-center rounded-xl border border-transparent bg-[var(--color-danger-bg)] text-default font-semibold text-[var(--color-danger)] transition-all hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
+              className="btn-secondary btn-sm btn-danger"
             >
               {t('auth.adminLogin')}
             </button>

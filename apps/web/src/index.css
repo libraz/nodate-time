@@ -1097,6 +1097,12 @@
   background: var(--color-accent);
 }
 
+/* A full-page scroller keeps its cards clear of the visible scrollbar line
+   that Washi and Nothing draw; the other themes hide it and stay flush. */
+:root:is([data-theme="washi"], [data-theme="nothing"]) .page-scroll {
+  padding-right: 8px;
+}
+
 /* ============================================
    Hover-revealed controls
    Hidden until the row is hovered only where a pointer can hover; touch
@@ -1200,10 +1206,28 @@ body {
   height: 0;
 }
 
-input,
-textarea,
-select {
-  font-size: 16px;
+@layer base {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* iOS zooms into a focused field set below 16px, so on touch the small type
+   steps are floored there; larger steps (a title field) keep their size. */
+@media (pointer: coarse) {
+  :is(input, textarea, select):is(
+    .text-micro,
+    .text-caption,
+    .text-footnote,
+    .text-body,
+    .text-default,
+    .text-callout,
+    .input-compact
+  ) {
+    font-size: 16px;
+  }
 }
 
 /* Accent-tinted text selection — applies across themes via tokens */
@@ -1287,10 +1311,6 @@ textarea,
 :root[data-theme="washi"] .whitespace-pre-wrap,
 :root[data-theme="washi"] .whitespace-pre-line {
   line-height: 1.75;
-}
-
-.calendar-transition {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============================================
@@ -1506,6 +1526,20 @@ textarea,
     opacity: 0.7;
     transform: scale(0.98);
   }
+
+  /* Smaller step of either button, for inline rows and panel toolbars. */
+  .btn-sm {
+    height: 36px;
+    padding-inline: 14px;
+    font-size: var(--text-default);
+    border-radius: var(--radius-control);
+  }
+
+  /* Destructive tone of .btn-secondary: same shape, danger ink on a danger tint. */
+  .btn-danger {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
 }
 
 /* ============================================
@@ -1518,6 +1552,26 @@ textarea,
 }
 
 @layer base {
+  /* Japanese wraps between phrases rather than leaving one kana on the last
+     line; headings balance their lines, prose avoids a lone last word. */
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  legend {
+    word-break: auto-phrase;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
   /* Every button eases its colour changes instead of snapping. Transform is
      left out on purpose: dragged blocks move by inline transform. */
   button {
@@ -1573,6 +1627,18 @@ textarea,
   .icon-btn:disabled {
     opacity: 0.4;
     pointer-events: none;
+  }
+  /* On touch, a small icon button reaches 44px through an invisible margin
+     rather than a bigger box. `absolute`/`fixed` utilities still win. */
+  @media (pointer: coarse) {
+    .icon-btn {
+      position: relative;
+    }
+    .icon-btn::after {
+      content: "";
+      position: absolute;
+      inset: min(0px, calc((100% - 44px) / 2));
+    }
   }
   .icon-btn-accent {
     background: var(--color-accent);
@@ -1749,12 +1815,6 @@ textarea,
   transition: background-color 0.15s ease;
 }
 
-/* Color selector dot */
-.color-dot {
-  border-radius: 999px;
-  transition: box-shadow 0.15s ease;
-}
-
 /* ============================================
    Nothing theme — Dialog overrides
    ============================================ */
@@ -1775,11 +1835,6 @@ textarea,
   border-radius: 1px;
   box-shadow: none;
   border: 1px solid var(--color-border-strong);
-}
-
-/* Nothing: squared color dots */
-:root[data-theme="nothing"] .color-dot {
-  border-radius: 2px;
 }
 
 /* Nothing: squared pill buttons */

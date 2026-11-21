@@ -302,7 +302,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       <button
         type="button"
         onClick={guardedClose}
-        className="btn-secondary flex-1 py-3 text-default font-medium"
+        className="btn-secondary flex-1 text-default font-medium"
       >
         {editable ? t('common.cancel') : t('common.close')}
       </button>
@@ -311,7 +311,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           type="button"
           onClick={handleSave}
           disabled={saving || !form.title.trim()}
-          className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+          className="btn-primary flex-1 text-default font-medium disabled:opacity-50"
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>

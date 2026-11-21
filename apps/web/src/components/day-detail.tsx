@@ -166,7 +166,7 @@ export function DayDetail() {
                           <p className="text-subhead font-medium text-[var(--color-text-primary)]">
                             {evt.title}
                           </p>
-                          <p className="mt-1 text-default text-[var(--color-text-secondary)]">
+                          <p className="mt-1 text-default tabular-nums text-[var(--color-text-secondary)]">
                             {evt.allDay ? t('calendar.allDay') : eventTimeLabel(evt, timezone)}
                           </p>
                           {evt.location && (

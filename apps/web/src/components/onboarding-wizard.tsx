@@ -238,7 +238,7 @@ export function OnboardingWizard() {
             <div className="px-6 pb-6 pt-4">
               <span
                 aria-hidden="true"
-                className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl text-[var(--color-accent-ink)]"
+                className="mb-5 flex h-14 w-14 items-center justify-center rounded-[var(--radius-lg)] text-[var(--color-accent-ink)]"
                 style={{ background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)' }}
               >
                 <span className="h-7 w-7">{GUIDE_ICONS.calendar}</span>
@@ -269,11 +269,10 @@ export function OnboardingWizard() {
       {spot && (
         <div
           aria-hidden="true"
-          className="pointer-events-none fixed z-[70] rounded-[14px] motion-safe:transition-all motion-safe:duration-300"
+          className="pointer-events-none fixed z-[70] rounded-[var(--radius-md)] motion-safe:transition-all motion-safe:duration-300"
           style={{
             ...spot,
-            boxShadow:
-              '0 0 0 2px var(--color-accent), 0 0 0 9999px color-mix(in srgb, #000 55%, transparent)',
+            boxShadow: '0 0 0 2px var(--color-accent), 0 0 0 9999px var(--color-overlay)',
           }}
         />
       )}

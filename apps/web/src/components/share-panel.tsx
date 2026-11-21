@@ -126,7 +126,7 @@ export function SharePanel() {
     >
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {!target ? (
-          <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
+          <p className="rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
             {t('invites.empty')}
           </p>
         ) : (
@@ -473,11 +473,7 @@ function UrlRow({ value, copied, onCopy, copyLabel, copiedLabel }: UrlRowProps) 
         onFocus={(e) => e.currentTarget.select()}
         className="flex-1 truncate bg-transparent text-footnote text-[var(--color-text-secondary)] outline-none"
       />
-      <button
-        type="button"
-        onClick={onCopy}
-        className="btn-primary shrink-0 px-3 py-1 text-footnote"
-      >
+      <button type="button" onClick={onCopy} className="btn-primary btn-sm shrink-0">
         {copied ? copiedLabel : copyLabel}
       </button>
     </div>

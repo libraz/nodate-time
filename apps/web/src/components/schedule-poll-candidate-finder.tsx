@@ -324,7 +324,7 @@ export function SchedulePollCandidateFinder({
             type="button"
             onClick={addManualCandidate}
             disabled={searching || memberIds.length === 0}
-            className="btn-secondary col-span-2 h-[34px] px-4 text-body sm:col-span-1"
+            className="btn-secondary btn-sm col-span-2 sm:col-span-1"
           >
             {t('schedulePoll.addManualCandidate')}
           </button>
