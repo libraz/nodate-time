@@ -4,9 +4,11 @@ import "time"
 
 // HistoryItem is one audit-log entry for a single entity's history.
 type HistoryItem struct {
-	ID             string    `json:"id"`
-	Action         string    `json:"action"`
-	Summary        string    `json:"summary"`
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Summary string `json:"summary"`
+	// OriginalStart names the occurrence of a recurring event the entry is about.
+	OriginalStart  string    `json:"originalStart,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	ActorID        string    `json:"actorId,omitempty"`
 	ActorName      string    `json:"actorName,omitempty"`
@@ -25,9 +27,15 @@ type FeedItem struct {
 type EventHistoryInput struct {
 	CalendarID string `path:"calendarId"`
 	EventID    string `path:"eventId"`
+	Cursor     string `query:"cursor" required:"false" doc:"Opaque cursor from a previous response"`
+	Limit      int    `query:"limit" required:"false" minimum:"1" maximum:"200" default:"50"`
+}
+type HistoryPage struct {
+	Items      []HistoryItem `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
 }
 type EventHistoryOutput struct {
-	Body []HistoryItem
+	Body HistoryPage
 }
 
 type MemoHistoryInput struct {

@@ -14,11 +14,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -117,6 +119,8 @@ type payloadFields struct {
 	InviteID   string `json:"inviteId"`
 	UserID     string `json:"userId"`
 	CalendarID string `json:"calendarId"`
+	// OriginalStart names the occurrence of a series the row is about.
+	OriginalStart string `json:"originalStart"`
 }
 
 // label is the line a feed shows for the row: the summary a writer gave, else
@@ -154,7 +158,7 @@ func entityTypeOf(eventType string) string {
 	return eventType
 }
 
-// EventHistory returns the log entries for a single event.
+// EventHistory returns the log entries for a single event, newest first.
 func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHistoryOutput, error) {
 	return func(ctx context.Context, in *EventHistoryInput) (*EventHistoryOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -167,22 +171,105 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 		// for an occurrence -- whether the edit was to "this" instance or to
 		// "all" -- is recorded against the parent series' public id, with the
 		// occurrence carried in the payload, so the history of any instance
-		// is the parent's history. The parent is not looked up in
-		// calendar_events: the log is deliberately independent of the live
-		// row, so a deleted series' history stays readable.
+		// is the parent's history. A series that no longer has a row keeps
+		// its history readable.
 		eventID := in.EventID
 		if parentUUID, _ := calresolve.SplitCompositeID(eventID); parentUUID != "" {
 			eventID = parentUUID
 		}
-		if _, err := uuid.Parse(eventID); err != nil {
+		subject, err := uuid.Parse(eventID)
+		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
 		}
 
-		items, err := subjectHistory(ctx, deps, cal.ID, eventID)
+		rd := newReader(cal, userID)
+		hidden, err := eventHiddenFrom(ctx, deps, rd, subject[:])
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &EventHistoryOutput{Body: items}, nil
+		if hidden {
+			return nil, apierrors.ToHuma(apierrors.EventNotFound)
+		}
+
+		limit := pageLimit(in.Limit)
+		before, err := resolveActivityCursor(ctx, deps, cal.ID, in.Cursor)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		}
+		shown, more, err := pageOf(ctx, deps, rd, subjectLogSource(deps, cal.ID, subject[:]), beforeBound(before), limit)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		out := &EventHistoryOutput{Body: HistoryPage{Items: make([]HistoryItem, 0, len(shown))}}
+		av := avatars.New(deps.Queries, deps.Storage)
+		for _, e := range shown {
+			out.Body.Items = append(out.Body.Items, historyItem(ctx, av, e))
+		}
+		if more {
+			out.Body.NextCursor = encodeActivityCursor(shown[len(shown)-1].PublicID)
+		}
+		return out, nil
+	}
+}
+
+func newReader(cal generated.Calendar, userID uint32) reader {
+	return reader{userID: userID, calendarID: cal.ID, calendarDefault: eventacl.Visibility(cal.DefaultEventVisibility)}
+}
+
+// eventHiddenFrom reports whether the event has a row in the calendar that
+// the reader may not see at all. An event with no row is not hidden: there is
+// nothing to protect, and its log rows are dropped one by one.
+func eventHiddenFrom(ctx context.Context, deps Deps, rd reader, subject []byte) (bool, error) {
+	rows, err := deps.Queries.ListLogSubjectEvents(ctx, generated.ListLogSubjectEventsParams{
+		WorkspaceID: deps.WorkspaceID, CalendarID: rd.calendarID, PublicIds: [][]byte{subject},
+	})
+	if err != nil || len(rows) == 0 {
+		return false, err
+	}
+	probe := logEntry{Type: eventKindPrefix + "updated", SubjectPublicID: subject}
+	visible, err := filterVisible(ctx, deps, rd, []logEntry{probe})
+	return len(visible) == 0, err
+}
+
+func pageLimit(requested int) int {
+	switch {
+	case requested <= 0:
+		return defaultActivityLimit
+	case requested > maxActivityLimit:
+		return maxActivityLimit
+	}
+	return requested
+}
+
+// beforeBound turns a resolved cursor (0 for the first page) into the
+// exclusive upper bound the log queries take.
+func beforeBound(resolved uint64) uint64 {
+	if resolved == 0 {
+		return math.MaxUint64
+	}
+	return resolved
+}
+
+// historyItem renders a log row. A row the reader sees only in part keeps its
+// title and loses every other label, since those can carry what was changed.
+func historyItem(ctx context.Context, av *avatars.Resolver, e shownEntry) HistoryItem {
+	payload := readPayload(e.Payload)
+	summary := payload.label()
+	if e.masked {
+		summary = payload.Title
+	}
+	actorID, actorName, actorAvatarURL := resolveActor(ctx, av, e.ActorPublicID, e.ActorDisplayName, e.ActorAvatarStorageKey, e.ActorAvatarURL)
+	return HistoryItem{
+		ID:             pubIDToHex(e.PublicID),
+		Action:         e.Type,
+		Summary:        summary,
+		OriginalStart:  payload.OriginalStart,
+		CreatedAt:      e.OccurredAt,
+		ActorID:        actorID,
+		ActorName:      actorName,
+		ActorAvatarURL: actorAvatarURL,
+		SystemActor:    e.ActorSystemSource.Valid,
 	}
 }
 
@@ -249,55 +336,28 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 			return nil, toAPIError(err)
 		}
 
-		limit := in.Limit
-		if limit <= 0 {
-			limit = defaultActivityLimit
-		}
-		if limit > maxActivityLimit {
-			limit = maxActivityLimit
-		}
-		afterID, err := resolveActivityCursor(ctx, deps, cal.ID, in.Cursor)
+		limit := pageLimit(in.Limit)
+		before, err := resolveActivityCursor(ctx, deps, cal.ID, in.Cursor)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
-		fetchLimit := limit + 1
-
-		rows, err := deps.Queries.ListEventsByCalendar(ctx, generated.ListEventsByCalendarParams{
-			WorkspaceID: deps.WorkspaceID,
-			CalendarID:  sql.NullInt32{Int32: int32(cal.ID), Valid: true},
-			AfterID:     afterID,
-			Limit:       int32(fetchLimit),
-		})
+		shown, more, err := pageOf(ctx, deps, newReader(cal, userID), calendarLogSource(deps, cal.ID), beforeBound(before), limit)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		nextCursor := ""
-		if len(rows) > limit {
-			nextCursor = encodeActivityCursor(rows[limit-1].PublicID)
-			rows = rows[:limit]
-		}
-
 		out := &ActivityOutput{
-			Body: ActivityPage{Items: make([]FeedItem, 0, len(rows)), NextCursor: nextCursor},
+			Body: ActivityPage{Items: make([]FeedItem, 0, len(shown))},
+		}
+		if more {
+			out.Body.NextCursor = encodeActivityCursor(shown[len(shown)-1].PublicID)
 		}
 		av := avatars.New(deps.Queries, deps.Storage)
-		for _, r := range rows {
-			payload := readPayload(r.PayloadJSON)
-			actorID, actorName, actorAvatarURL := resolveActor(ctx, av, r.ActorPublicID, r.ActorDisplayName, r.ActorAvatarStorageKey, r.ActorAvatarURL)
+		for _, e := range shown {
 			out.Body.Items = append(out.Body.Items, FeedItem{
-				HistoryItem: HistoryItem{
-					ID:             pubIDToHex(r.PublicID),
-					Action:         r.Type,
-					Summary:        payload.label(),
-					CreatedAt:      r.OccurredAt,
-					ActorID:        actorID,
-					ActorName:      actorName,
-					ActorAvatarURL: actorAvatarURL,
-					SystemActor:    r.ActorSystemSource.Valid,
-				},
-				EntityType: entityTypeOf(r.Type),
-				EntityID:   payload.entityID(),
+				HistoryItem: historyItem(ctx, av, e),
+				EntityType:  entityTypeOf(e.Type),
+				EntityID:    readPayload(e.Payload).entityID(),
 			})
 		}
 		return out, nil
