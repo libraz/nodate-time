@@ -109,6 +109,7 @@ Huma v2 が OpenAPI 記述を自動生成します。認証なしで `/openapi.j
 
 - 回の項目は `isRecurrence`、`recurrenceDate`、`id` が指す行の `etag`（上書き行があればそれ、なければシリーズ）、シリーズの `seriesEtag` を持ちます。
 - `following` は、その回でシリーズを分割します。前半は短く切り詰められ、編集ならその回以降の新しいシリーズが作られて応答に返ります。削除なら 204 です。最初の回での分割は `all` と同じ扱いです。`count` で回数を決めているときは、規則が生成する回で数えて 2 つに分けます。編集で規則か `allDay` が変わる場合、以降の回への変更は捨てられます。`following` とシリーズ全体の削除は、予定の所有者とカレンダーを管理する人に限られ、編集権を付与された参加者はできません。task が所有する予定では 409 `EVENT.TASK_OWNED`、繰り返さない予定では 400 `EVENT.NOT_RECURRING` で拒否されます。
+- `following` の編集で回を別の日へ動かし、規則を送らなかった場合、新しいシリーズも一緒に動きます。weekly の曜日と monthly の日付は、同じ日数だけずれます。monthly の日付が 1〜31 の外に出るずれ方は 422 `REQUEST.VALIDATION` です。その場合は、望む規則を編集と一緒に送ってください。2 月 29 日の代わりの 2 月 28 日で分割すると、新しいシリーズは間隔 12 の monthly で 29 日を指す規則として返ります。日付は元と同じです。
 - 1 回分の取り消し（`DELETE ...?scope=this`）は、`DELETE /calendars/{calendarId}/events/{eventId}/exceptions/{occurrenceDate}`（`YYYY-MM-DD`、シリーズの `etag` で条件付け、204）で元に戻せます。戻す変更がない回は 404 `EVENT.EXCEPTION_NOT_FOUND` です。`following` の削除は元に戻せません。
 
 ### 削除した予定の復元

@@ -127,8 +127,10 @@ func sameRule(a, b *json.RawMessage) bool {
 // the rule alone: the same grid from the cut on. A count keeps what remains of
 // it, and a rule whose pattern is read off its start follows the cut's date
 // (to) -- or, when the edit moved nothing, keeps the date the original grid is
-// anchored on, so a month's clamped day does not become the new anchor.
-func (c seriesCut) tail(master generated.CalendarEvent, from, to time.Time, toZone string) recurrence.Rule {
+// anchored on, so a month's clamped day does not become the new anchor. A move
+// shifts every day of the month the rule names; one that leaves 1..31 needs
+// the edit to send a rule.
+func (c seriesCut) tail(master generated.CalendarEvent, from, to time.Time, toZone string) (recurrence.Rule, error) {
 	r := *c.rule
 	r.ByDay = append([]string(nil), r.ByDay...)
 	r.ByMonthDay = append([]int(nil), r.ByMonthDay...)
@@ -139,6 +141,7 @@ func (c seriesCut) tail(master generated.CalendarEvent, from, to time.Time, toZo
 	f := from.In(recurrence.LoadLocation(c.zone))
 	t := to.In(recurrence.LoadLocation(toZone))
 	moved := f.Year() != t.Year() || f.Month() != t.Month() || f.Day() != t.Day()
+	anchorDay := master.StartAt.Time.In(recurrence.LoadLocation(c.zone)).Day()
 	switch r.Freq {
 	case "weekly":
 		if delta := (int(t.Weekday()) - int(f.Weekday()) + 7) % 7; delta != 0 {
@@ -149,7 +152,7 @@ func (c seriesCut) tail(master generated.CalendarEvent, from, to time.Time, toZo
 	case "monthly":
 		switch {
 		case len(r.ByDay) == 0 && len(r.ByMonthDay) == 0:
-			day := master.StartAt.Time.In(recurrence.LoadLocation(c.zone)).Day()
+			day := anchorDay
 			if moved {
 				day = t.Day()
 			}
@@ -158,14 +161,27 @@ func (c seriesCut) tail(master generated.CalendarEvent, from, to time.Time, toZo
 			}
 		case len(r.ByMonthDay) == 1 && moved:
 			r.ByMonthDay = []int{t.Day()}
+		case len(r.ByMonthDay) > 1 && moved:
+			for i, d := range r.ByMonthDay {
+				r.ByMonthDay[i] = d + t.Day() - f.Day()
+			}
 		case len(r.ByDay) == 1 && len(r.BySetPos) == 1 && moved:
 			r.ByDay = []string{weekdayCodes[t.Weekday()]}
 			if r.BySetPos[0] != -1 {
 				r.BySetPos = []int{(t.Day()-1)/7 + 1}
 			}
 		}
+	case "yearly":
+		// A cut at a Feb 28 that stands in for Feb 29 keeps the leap day: the
+		// same grid, spelled as every twelfth month on the 29th.
+		if !moved && anchorDay != t.Day() {
+			r.Freq, r.Interval, r.ByMonthDay = "monthly", max(r.Interval, 1)*12, []int{anchorDay}
+		}
 	}
-	return r
+	if r.Validate(t) != nil {
+		return recurrence.Rule{}, apierrors.Validation
+	}
+	return r, nil
 }
 
 var (
@@ -293,7 +309,11 @@ func splitSeriesEdit(ctx context.Context, q *generated.Queries, deps Deps, e eve
 	rule := body.RecurrenceRule
 	if !ruleChanged {
 		var err error
-		if rule, err = marshalRule(cut.tail(master, occ.StartAt, newStart, newZone)); err != nil {
+		tail, err := cut.tail(master, occ.StartAt, newStart, newZone)
+		if err != nil {
+			return editedRows{}, err
+		}
+		if rule, err = marshalRule(tail); err != nil {
 			return editedRows{}, err
 		}
 		if toggled {

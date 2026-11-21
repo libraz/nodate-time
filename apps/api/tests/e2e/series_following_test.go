@@ -574,3 +574,93 @@ func TestFollowingSplitCarriesPeopleAndChecklist(t *testing.T) {
 	require.Equal(t, colleague.UserID, head.OwnerID)
 	require.Len(t, head.Attendees, 1)
 }
+
+// fwList lists calURL's occurrences in [start, end) in time order.
+func fwList(t *testing.T, calURL, token, start, end string) []flEvent {
+	t.Helper()
+	var out struct {
+		Items []flEvent `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start="+start+"&end="+end, token, nil, &out)
+	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].key(t) < out.Items[j].key(t) })
+	return out.Items
+}
+
+// Moving an occurrence of a rule with several days of the month moves every
+// one of those days by the same amount from the cut on, as a weekly rule's
+// days do; a move that would push one out of 1..31 needs a rule sent with it.
+func TestFollowingSplitShiftsEveryMonthDay(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	setup := func(t *testing.T) (string, string, flEvent) {
+		owner := helpers.NewTenant(t, testServerURL)
+		calURL := testServerURL + "/calendars/" + owner.CalendarID
+		var series flEvent
+		helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken, map[string]any{
+			"title": "Twice a month", "allDay": false, "timezone": "UTC",
+			"startAt": "2026-03-01T10:00:00Z", "endAt": "2026-03-01T11:00:00Z",
+			"recurrenceRule": map[string]any{"freq": "monthly", "interval": 1, "byMonthDay": []int{1, 15}, "count": 8},
+		}, &series)
+		items := fwList(t, calURL, owner.AccessToken, "2026-03-01", "2026-07-01")
+		require.Len(t, items, 8)
+		return calURL, owner.AccessToken, items[3] // 2026-04-15
+	}
+	move := func(occ flEvent, days int) map[string]any {
+		start, _ := time.Parse(time.RFC3339, occ.StartAt)
+		end, _ := time.Parse(time.RFC3339, occ.EndAt)
+		return map[string]any{
+			"title":   "Twice a month",
+			"startAt": start.AddDate(0, 0, days).UTC().Format(time.RFC3339),
+			"endAt":   end.AddDate(0, 0, days).UTC().Format(time.RFC3339),
+		}
+	}
+
+	t.Run("shift", func(t *testing.T) {
+		calURL, token, occ := setup(t)
+		status, raw, _ := flPatch(t, calURL, token, occ, "following", occ.SeriesEtag, move(occ, 1))
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, []string{
+			"2026-03-01T10:00:00Z", "2026-03-15T10:00:00Z", "2026-04-01T10:00:00Z", "2026-04-16T10:00:00Z",
+			"2026-05-02T10:00:00Z", "2026-05-16T10:00:00Z", "2026-06-02T10:00:00Z", "2026-06-16T10:00:00Z",
+		}, flKeys(t, fwList(t, calURL, token, "2026-03-01", "2026-07-01")))
+	})
+
+	t.Run("out of range", func(t *testing.T) {
+		calURL, token, occ := setup(t)
+		status, raw, _ := flPatch(t, calURL, token, occ, "following", occ.SeriesEtag, move(occ, -1))
+		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
+		require.Contains(t, string(raw), "REQUEST.VALIDATION")
+		require.Len(t, fwList(t, calURL, token, "2026-03-01", "2026-07-01"), 8, "a refused split changes nothing")
+	})
+}
+
+// A cut at the Feb 28 that stands in for Feb 29 in a common year keeps the
+// series on Feb 29 in the leap years after it.
+func TestFollowingSplitKeepsTheLeapDay(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken, map[string]any{
+		"title": "Leap day", "allDay": false, "timezone": "UTC",
+		"startAt": "2028-02-29T10:00:00Z", "endAt": "2028-02-29T11:00:00Z",
+		"recurrenceRule": map[string]any{"freq": "yearly", "interval": 1},
+	}, nil)
+	stand := fwList(t, calURL, owner.AccessToken, "2029-02-01", "2029-03-01")
+	require.Len(t, stand, 1)
+	require.Equal(t, "2029-02-28T10:00:00Z", stand[0].key(t))
+
+	status, raw, _ := flPatch(t, calURL, owner.AccessToken, stand[0], "following", stand[0].SeriesEtag,
+		map[string]any{"title": "Leap day, renamed"})
+	require.Equal(t, http.StatusOK, status, string(raw))
+
+	leap := fwList(t, calURL, owner.AccessToken, "2032-02-01", "2032-03-01")
+	require.Len(t, leap, 1)
+	require.Equal(t, "2032-02-29T10:00:00Z", leap[0].key(t))
+	require.Equal(t, "Leap day, renamed", leap[0].Title)
+	common := fwList(t, calURL, owner.AccessToken, "2030-02-01", "2030-03-01")
+	require.Len(t, common, 1)
+	require.Equal(t, "2030-02-28T10:00:00Z", common[0].key(t))
+}
