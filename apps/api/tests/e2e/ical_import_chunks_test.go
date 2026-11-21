@@ -72,10 +72,11 @@ func TestICalImportOutcomesDoNotDependOnWhereTransactionsSplitTheFile(t *testing
 // A file at the event cap is one the endpoint accepts, so its report has to
 // come back inside the write timeout the server is deployed with. Past it the
 // events are stored but the response is cut off, and the caller never learns
-// what landed.
+// what landed. Not parallel: the bound is a wall-clock one, and the rest of
+// the suite writing alongside it doubles the time without saying anything
+// about the endpoint.
 func TestICalImportAtTheEventCapAnswersWithinTheWriteTimeout(t *testing.T) {
 	bootstrap(t)
-	t.Parallel()
 
 	tt := helpers.NewTenant(t, testServerURL)
 	calID := newCalendar(t, tt, "Import at the cap")

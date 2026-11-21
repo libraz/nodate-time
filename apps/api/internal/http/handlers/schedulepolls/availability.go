@@ -56,19 +56,6 @@ func parsePollSlots(inputs []PollSlotInput) ([]availability.Slot, error) {
 	return slots, nil
 }
 
-func availabilityError(ctx context.Context, err error) error {
-	switch {
-	case errors.Is(err, availability.ErrInvalid):
-		return apierrors.ToHuma(apierrors.BadRequest)
-	case errors.Is(err, availability.ErrLimit):
-		return apierrors.ToHuma(apierrors.SchedulePollTooManySlots)
-	case errors.Is(err, availability.ErrMembership):
-		return apierrors.ToHuma(apierrors.SchedulePollStale)
-	default:
-		return apierrors.Internal(ctx, err)
-	}
-}
-
 func toCandidateSlots(slots []availability.Slot, states []availability.State) []CandidateSlotResponse {
 	result := make([]CandidateSlotResponse, 0, len(slots))
 	for i, slot := range slots {
