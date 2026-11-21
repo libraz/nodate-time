@@ -1,5 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import type { components } from '@/lib/api-schema';
+import { client } from '@/lib/client';
 import type { Role } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { type InviteData, inviteCreateBody, isPublicLink, mergeInviteTokens } from '@/types/invite';
@@ -19,6 +21,19 @@ export interface InviteTerms {
  * it reaches.
  */
 const PUBLIC_LINK_ROLE: Role = 'viewer';
+
+type InviteRole = components['schemas']['CreateInviteInputBody']['role'];
+
+/** The wire row read into the shape the screens hold: an absent limit is null. */
+function toInviteData(row: components['schemas']['InviteResponse']): InviteData {
+  const { $schema: _schema, maxUses, expiresAt, token, ...rest } = row;
+  return {
+    ...rest,
+    ...(token ? { token } : {}),
+    maxUses: maxUses ?? null,
+    expiresAt: expiresAt ?? null,
+  };
+}
 
 export interface CalendarInvites {
   invites: InviteData[];
@@ -107,10 +122,13 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
     activationRef.current = activation;
     refresh();
 
-    void api
-      .get<InviteData[]>(`/calendars/${scope.calendarId}/invites`)
-      .then((listed) => {
+    void client
+      .GET('/calendars/{calendarId}/invites', {
+        params: { path: { calendarId: scope.calendarId } },
+      })
+      .then(({ data }) => {
         if (activationRef.current !== activation) return;
+        const listed = (data ?? []).map(toInviteData);
 
         // Preserve the created token from current rows, then apply mutations
         // that succeeded while this first listing was still in flight.
@@ -190,11 +208,15 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
       const operation = startCreate(activation, 'invite');
       try {
         if (activationRef.current !== activation) return false;
-        const created = await api.post<InviteData>(
-          `/calendars/${activation.scope.calendarId}/invites`,
-          inviteCreateBody(terms.role, terms.expiryHours, terms.maxUses),
-        );
-        commitMutation(activation, { kind: 'join', invite: created });
+        const { data } = await client.POST('/calendars/{calendarId}/invites', {
+          params: { path: { calendarId: activation.scope.calendarId } },
+          body: {
+            ...inviteCreateBody(terms.role, terms.expiryHours, terms.maxUses),
+            role: terms.role as InviteRole,
+          },
+        });
+        if (!data) return false;
+        commitMutation(activation, { kind: 'join', invite: toInviteData(data) });
         return true;
       } catch (error) {
         if (activationRef.current === activation) toast.error(errorMessage(error));
@@ -214,14 +236,12 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
     const operation = startCreate(activation, 'public');
     try {
       if (activationRef.current !== activation) return false;
-      const created = await api.post<InviteData>(
-        `/calendars/${activation.scope.calendarId}/invites`,
-        {
-          role: PUBLIC_LINK_ROLE,
-          isPublic: true,
-        },
-      );
-      commitMutation(activation, { kind: 'public', invite: created });
+      const { data } = await client.POST('/calendars/{calendarId}/invites', {
+        params: { path: { calendarId: activation.scope.calendarId } },
+        body: { role: PUBLIC_LINK_ROLE as InviteRole, isPublic: true },
+      });
+      if (!data) return false;
+      commitMutation(activation, { kind: 'public', invite: toInviteData(data) });
       return true;
     } catch (error) {
       if (activationRef.current === activation) toast.error(errorMessage(error));
@@ -238,7 +258,9 @@ export function useInvites(calendarId: string, enabled = true): CalendarInvites 
 
       try {
         if (activationRef.current !== activation) return false;
-        await api.delete(`/calendars/${activation.scope.calendarId}/invites/${id}`);
+        await client.DELETE('/calendars/{calendarId}/invites/{inviteId}', {
+          params: { path: { calendarId: activation.scope.calendarId, inviteId: id } },
+        });
         commitMutation(activation, { kind: 'revoke', id });
         return true;
       } catch (error) {

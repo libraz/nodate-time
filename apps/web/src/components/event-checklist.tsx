@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import type { ChecklistItem } from '@/types/calendar';
 
@@ -25,10 +27,10 @@ export function ChecklistSection({
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await api.get<ChecklistItem[]>(
-        `/calendars/${calendarId}/events/${eventId}/checklist`,
-      );
-      setItems(data);
+      const { data } = await client.GET('/calendars/{calendarId}/events/{eventId}/checklist', {
+        params: { path: { calendarId, eventId } },
+      });
+      setItems(data ?? []);
       setLoadError(null);
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -45,9 +47,9 @@ export function ChecklistSection({
     const title = newTitle.trim();
     if (!title) return;
     try {
-      await api.post(`/calendars/${calendarId}/events/${eventId}/checklist`, {
-        title,
-        sortOrder: items.length,
+      await client.POST('/calendars/{calendarId}/events/{eventId}/checklist', {
+        params: { path: { calendarId, eventId } },
+        body: { title, sortOrder: items.length },
       });
       setNewTitle('');
       await fetchItems();
@@ -60,18 +62,37 @@ export function ChecklistSection({
     try {
       // Only done: a title or position read earlier would revert another
       // member's rename or reorder made since.
-      await api.put(`/calendars/${calendarId}/events/${eventId}/checklist/${item.id}`, {
-        done: !item.done,
+      await client.PATCH('/calendars/{calendarId}/events/{eventId}/checklist/{itemId}', {
+        params: {
+          path: { calendarId, eventId, itemId: item.id },
+          header: { 'If-Match': item.etag },
+        },
+        body: { done: !item.done },
       });
       await fetchItems();
     } catch (err) {
-      toast.error(errorMessage(err));
+      await failWrite(err);
     }
+  };
+
+  // A stale item is never retried with a newer version; the list is read again.
+  const failWrite = async (err: unknown) => {
+    if (isStaleError(err)) {
+      toast.error(t('conflict.stale'));
+      await fetchItems();
+      return;
+    }
+    toast.error(errorMessage(err));
   };
 
   const handleDelete = async (item: ChecklistItem) => {
     try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/checklist/${item.id}`);
+      await client.DELETE('/calendars/{calendarId}/events/{eventId}/checklist/{itemId}', {
+        params: {
+          path: { calendarId, eventId, itemId: item.id },
+          header: { 'If-Match': item.etag },
+        },
+      });
       await fetchItems();
       // The item comes back as a new row carrying the same title, state and
       // sort order; its id and creation time are the server's to assign.
@@ -80,12 +101,22 @@ export function ChecklistSection({
         run: () => {
           void (async () => {
             try {
-              const base = `/calendars/${calendarId}/events/${eventId}/checklist`;
-              const created = await api.post<ChecklistItem>(base, {
-                title: item.title,
-                sortOrder: item.sortOrder,
-              });
-              if (item.done) await api.put(`${base}/${created.id}`, { done: true });
+              const { data: created } = await client.POST(
+                '/calendars/{calendarId}/events/{eventId}/checklist',
+                {
+                  params: { path: { calendarId, eventId } },
+                  body: { title: item.title, sortOrder: item.sortOrder },
+                },
+              );
+              if (created && item.done) {
+                await client.PATCH('/calendars/{calendarId}/events/{eventId}/checklist/{itemId}', {
+                  params: {
+                    path: { calendarId, eventId, itemId: created.id },
+                    header: { 'If-Match': created.etag },
+                  },
+                  body: { done: true },
+                });
+              }
               await fetchItems();
             } catch (err) {
               toast.error(errorMessage(err));
@@ -94,7 +125,7 @@ export function ChecklistSection({
         },
       });
     } catch (err) {
-      toast.error(errorMessage(err));
+      await failWrite(err);
     }
   };
 

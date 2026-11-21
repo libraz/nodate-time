@@ -86,7 +86,7 @@ export function canEdit(role: string | undefined | null): boolean {
  * 403.
  */
 export function canEditEvent(
-  event: Pick<CalendarEvent, 'ownerId'> & { attendees?: Attendee[] },
+  event: Pick<CalendarEvent, 'ownerId'> & { attendees?: Attendee[] | null },
   role: string | undefined | null,
   myUserId: string | undefined,
 ): boolean {

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({
@@ -6,10 +6,19 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
-}));
+vi.mock('@/lib/api', () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+  return { ApiError, errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error') };
+});
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -31,12 +40,14 @@ const calendarState: {
   memos: unknown[];
   toggleMemo: ReturnType<typeof vi.fn>;
   deleteMemo: ReturnType<typeof vi.fn>;
+  fetchMemos: ReturnType<typeof vi.fn>;
   calendars: unknown[];
   activeCalendarIds: string[];
 } = {
   memos: [],
   toggleMemo: vi.fn(),
   deleteMemo: vi.fn(),
+  fetchMemos: vi.fn(),
   calendars: [],
   activeCalendarIds: [],
 };
@@ -51,6 +62,8 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
+import { ApiError } from '@/lib/api';
+import { toast } from '@/lib/toast';
 import { MemoSection } from './right-panel';
 
 afterEach(() => {
@@ -86,5 +99,24 @@ describe('MemoSection calendar scope', () => {
 
     expect(screen.getByText('panel.postTo')).toBeTruthy();
     expect(screen.getByText('Family')).toBeTruthy();
+  });
+});
+
+// A toggle refused as stale is reported and the list read again, never retried.
+describe('MemoSection stale writes', () => {
+  it('reports a stale toggle and refetches the memos', async () => {
+    calendarState.calendars = [
+      { id: 'cal-1', name: 'Family', color: '#f00', role: 'editor', memberCount: 2 },
+    ];
+    calendarState.activeCalendarIds = ['cal-1'];
+    calendarState.memos = [{ id: 'm-1', calendarId: 'cal-1', title: 'Milk', done: false }];
+    calendarState.toggleMemo.mockRejectedValueOnce(new ApiError(412, 'stale', 'MEMO.STALE'));
+    render(<MemoSection />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'memo.markDone' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('conflict.stale'));
+    expect(calendarState.toggleMemo).toHaveBeenCalledTimes(1);
+    expect(calendarState.fetchMemos).toHaveBeenCalledTimes(1);
   });
 });

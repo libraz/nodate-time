@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
-import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { getT, useT } from '@/i18n';
+import { ApiError, errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { startDownload } from '@/lib/download';
 import { toast } from '@/lib/toast';
-import { uploadViaPresign } from '@/lib/upload';
+import { sha256Hex, validateUpload } from '@/lib/upload';
 import type { EventAttachment } from '@/types/calendar';
 
 export function AttachmentsSection({
@@ -29,10 +30,10 @@ export function AttachmentsSection({
 
   const fetchAttachments = useCallback(async () => {
     try {
-      const data = await api.get<EventAttachment[]>(
-        `/calendars/${calendarId}/events/${eventId}/attachments`,
-      );
-      setAttachments(data);
+      const { data } = await client.GET('/calendars/{calendarId}/events/{eventId}/attachments', {
+        params: { path: { calendarId, eventId } },
+      });
+      setAttachments(data ?? []);
       setLoadError(null);
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -49,18 +50,29 @@ export function AttachmentsSection({
     setUploading(true);
     const contentType = file.type || 'application/octet-stream';
     try {
-      const presign = await uploadViaPresign<{ attachmentId: string; uploadUrl: string }>({
-        kind: 'attachment',
-        presignPath: `/calendars/${calendarId}/events/${eventId}/attachments/presign`,
-        presignBody: { filename: file.name, contentType, byteSize: file.size },
-        contentAddressed: true,
-        contentType,
-        body: file,
-        byteSize: file.size,
-      });
+      validateUpload('attachment', contentType, file.size);
+      const sha256 = await sha256Hex(file);
+      const { data: presign } = await client.POST(
+        '/calendars/{calendarId}/events/{eventId}/attachments/presign',
+        {
+          params: { path: { calendarId, eventId } },
+          body: { filename: file.name, contentType, byteSize: file.size, sha256 },
+        },
+      );
+      if (!presign) throw new ApiError(502, 'Malformed presign response');
+      // An empty URL means these bytes are already stored; only the confirm is left.
+      if (presign.uploadUrl) {
+        const put = await fetch(presign.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': contentType },
+          body: file,
+        });
+        if (!put.ok) throw new ApiError(put.status, getT()('error.uploadFailed'));
+      }
       // The row is created disabled; confirm enables it once the object is stored.
-      await api.post(
-        `/calendars/${calendarId}/events/${eventId}/attachments/${presign.attachmentId}/confirm`,
+      await client.POST(
+        '/calendars/{calendarId}/events/{eventId}/attachments/{attachmentId}/confirm',
+        { params: { path: { calendarId, eventId, attachmentId: presign.attachmentId } } },
       );
       await fetchAttachments();
     } catch (err) {
@@ -73,10 +85,11 @@ export function AttachmentsSection({
 
   const handleDownload = async (att: EventAttachment) => {
     try {
-      const { downloadUrl } = await api.get<{ downloadUrl: string }>(
-        `/calendars/${calendarId}/events/${eventId}/attachments/${att.id}/download`,
+      const { data } = await client.GET(
+        '/calendars/{calendarId}/events/{eventId}/attachments/{attachmentId}/download',
+        { params: { path: { calendarId, eventId, attachmentId: att.id } } },
       );
-      startDownload(downloadUrl);
+      if (data) startDownload(data.downloadUrl);
     } catch (err) {
       toast.error(errorMessage(err));
     }
@@ -85,7 +98,9 @@ export function AttachmentsSection({
   const handleDelete = async (id: string) => {
     setDeleting(true);
     try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/attachments/${id}`);
+      await client.DELETE('/calendars/{calendarId}/events/{eventId}/attachments/{attachmentId}', {
+        params: { path: { calendarId, eventId, attachmentId: id } },
+      });
       await fetchAttachments();
     } catch (err) {
       toast.error(errorMessage(err));

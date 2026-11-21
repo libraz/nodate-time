@@ -14,7 +14,6 @@ vi.mock('@/lib/api', () => {
   return {
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
     setToken: vi.fn(),
     endSession: vi.fn(),
     hasToken: vi.fn(() => false),
@@ -27,6 +26,12 @@ vi.mock('@/lib/api', () => {
   };
 });
 
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
+  createApiClient: vi.fn(),
+}));
+
 vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
@@ -35,13 +40,15 @@ vi.mock('@/lib/image-resize', () => ({
   resizeImageForAvatar: vi.fn(),
 }));
 
-import { ApiError, api, endSession, hasToken, setToken } from '@/lib/api';
+import { ApiError, endSession, hasToken, setToken } from '@/lib/api';
+import { client } from '@/lib/client';
+import { resizeImageForAvatar } from '@/lib/image-resize';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from './auth-store';
 
-const mockApi = vi.mocked(api);
+const mockClient = vi.mocked(client);
 const mockSetToken = vi.mocked(setToken);
 const mockEndSession = vi.mocked(endSession);
 const mockHasToken = vi.mocked(hasToken);
@@ -84,10 +91,12 @@ beforeEach(() => {
 
 describe('login', () => {
   it('stores the token and marks the user authenticated', async () => {
-    mockApi.post.mockResolvedValue({
-      token: 'tok',
-      refreshToken: 'refresh-tok',
-      user: sampleUser,
+    mockClient.POST.mockResolvedValue({
+      data: {
+        token: 'tok',
+        refreshToken: 'refresh-tok',
+        user: sampleUser,
+      },
     } as never);
 
     await useAuthStore.getState().login('alice@example.com', 'pw');
@@ -102,7 +111,7 @@ describe('login', () => {
   });
 
   it('records the error detail and rethrows on failure', async () => {
-    mockApi.post.mockRejectedValue(new ApiError(401, 'Invalid credentials'));
+    mockClient.POST.mockRejectedValue(new ApiError(401, 'Invalid credentials'));
 
     await expect(useAuthStore.getState().login('a@b.c', 'bad')).rejects.toBeInstanceOf(ApiError);
 
@@ -113,7 +122,7 @@ describe('login', () => {
   });
 
   it('falls back to a generic message for non-ApiError failures', async () => {
-    mockApi.post.mockRejectedValue(new Error('network'));
+    mockClient.POST.mockRejectedValue(new Error('network'));
 
     await expect(useAuthStore.getState().login('a@b.c', 'pw')).rejects.toThrow();
 
@@ -145,6 +154,8 @@ describe('logout', () => {
           memberCount: 1,
           role: 'owner',
           memberColor: '#000',
+          coverUploadAllowed: false,
+          etag: '',
         },
       ],
       events: [],
@@ -218,6 +229,8 @@ describe('logout', () => {
           memberCount: 1,
           role: 'owner',
           memberColor: '#000',
+          coverUploadAllowed: false,
+          etag: '',
         },
       ],
       events: [],
@@ -245,16 +258,17 @@ describe('logout', () => {
 
 describe('changePassword', () => {
   it('persists the rotated token so the device stays signed in', async () => {
-    mockApi.put.mockResolvedValue({
-      token: 'rotated-token',
-      refreshToken: 'rotated-refresh',
+    mockClient.PUT.mockResolvedValue({
+      data: {
+        token: 'rotated-token',
+        refreshToken: 'rotated-refresh',
+      },
     } as never);
 
     await useAuthStore.getState().changePassword('old-pw', 'new-pw-1234');
 
-    expect(mockApi.put).toHaveBeenCalledWith('/user/password', {
-      currentPassword: 'old-pw',
-      newPassword: 'new-pw-1234',
+    expect(mockClient.PUT).toHaveBeenCalledWith('/user/password', {
+      body: { currentPassword: 'old-pw', newPassword: 'new-pw-1234' },
     });
     expect(mockSetToken).toHaveBeenCalledWith('rotated-token', 'rotated-refresh');
     // The current session is preserved, not cleared.
@@ -262,7 +276,7 @@ describe('changePassword', () => {
   });
 
   it('does not persist a token and rethrows when the change fails', async () => {
-    mockApi.put.mockRejectedValue(new ApiError(400, 'wrong password'));
+    mockClient.PUT.mockRejectedValue(new ApiError(400, 'wrong password'));
 
     await expect(
       useAuthStore.getState().changePassword('bad', 'new-pw-1234'),
@@ -308,13 +322,13 @@ describe('fetchMe', () => {
 
     await useAuthStore.getState().fetchMe();
 
-    expect(mockApi.get).not.toHaveBeenCalled();
+    expect(mockClient.GET).not.toHaveBeenCalled();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 
   it('hydrates the user when the token is valid', async () => {
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockResolvedValue(sampleUser as never);
+    mockClient.GET.mockResolvedValue({ data: sampleUser } as never);
 
     await useAuthStore.getState().fetchMe();
 
@@ -326,7 +340,7 @@ describe('fetchMe', () => {
 
   it('clears the session when the token is rejected', async () => {
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockRejectedValue(new ApiError(401, 'expired'));
+    mockClient.GET.mockRejectedValue(new ApiError(401, 'expired'));
 
     await useAuthStore.getState().fetchMe();
 
@@ -339,9 +353,9 @@ describe('fetchMe', () => {
 
   it('does not restore isAuthenticated when logout lands during an in-flight request', async () => {
     mockHasToken.mockReturnValue(true);
-    let resolveUser: ((user: typeof sampleUser) => void) | undefined;
-    mockApi.get.mockReturnValue(
-      new Promise<typeof sampleUser>((resolve) => {
+    let resolveUser: ((response: { data: typeof sampleUser }) => void) | undefined;
+    mockClient.GET.mockReturnValue(
+      new Promise<{ data: typeof sampleUser }>((resolve) => {
         resolveUser = resolve;
       }) as never,
     );
@@ -351,7 +365,7 @@ describe('fetchMe', () => {
     // Logout clears the token and auth flag mid-flight.
     mockHasToken.mockReturnValue(false);
     useAuthStore.setState({ user: null, isAuthenticated: false });
-    resolveUser?.(sampleUser);
+    resolveUser?.({ data: sampleUser });
     await request;
 
     const s = useAuthStore.getState();
@@ -361,7 +375,7 @@ describe('fetchMe', () => {
 
   it('keeps the current session when user hydration fails with a server error', async () => {
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockRejectedValue(new ApiError(500, 'temporary outage'));
+    mockClient.GET.mockRejectedValue(new ApiError(500, 'temporary outage'));
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true, isInitializing: true });
 
     await useAuthStore.getState().fetchMe();
@@ -375,7 +389,7 @@ describe('fetchMe', () => {
 
   it('says why the profile is missing, and recovers on a second attempt', async () => {
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockRejectedValueOnce(new ApiError(500, 'temporary outage'));
+    mockClient.GET.mockRejectedValueOnce(new ApiError(500, 'temporary outage'));
     useAuthStore.setState({ user: null, isAuthenticated: true, isInitializing: true });
 
     await useAuthStore.getState().fetchMe();
@@ -385,7 +399,7 @@ describe('fetchMe', () => {
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().initError).toBe('temporary outage');
 
-    mockApi.get.mockResolvedValueOnce(sampleUser as never);
+    mockClient.GET.mockResolvedValueOnce({ data: sampleUser } as never);
     await useAuthStore.getState().fetchMe();
 
     const s = useAuthStore.getState();
@@ -402,10 +416,12 @@ describe('fetchMe', () => {
 describe('account preferences', () => {
   it('takes on the account timezone on sign-in rather than the device one', async () => {
     useUiStore.setState({ timezone: 'America/New_York', locale: 'en' });
-    mockApi.post.mockResolvedValue({
-      token: 't',
-      refreshToken: 'r',
-      user: { ...sampleUser, locale: 'ja', timezone: 'Europe/Paris' },
+    mockClient.POST.mockResolvedValue({
+      data: {
+        token: 't',
+        refreshToken: 'r',
+        user: { ...sampleUser, locale: 'ja', timezone: 'Europe/Paris' },
+      },
     } as never);
 
     await useAuthStore.getState().login('alice@example.com', 'pw');
@@ -417,7 +433,9 @@ describe('account preferences', () => {
   it('takes it on when the session is restored, not only when signing in', async () => {
     useUiStore.setState({ timezone: 'America/New_York' });
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockResolvedValue({ ...sampleUser, timezone: 'Europe/Paris' } as never);
+    mockClient.GET.mockResolvedValue({
+      data: { ...sampleUser, timezone: 'Europe/Paris' },
+    } as never);
 
     await useAuthStore.getState().fetchMe();
 
@@ -427,10 +445,12 @@ describe('account preferences', () => {
   it('ignores a preference this build cannot honour', async () => {
     useUiStore.setState({ timezone: 'Asia/Tokyo', locale: 'ja' });
     mockHasToken.mockReturnValue(true);
-    mockApi.get.mockResolvedValue({
-      ...sampleUser,
-      locale: 'fr',
-      timezone: 'Mars/Olympus_Mons',
+    mockClient.GET.mockResolvedValue({
+      data: {
+        ...sampleUser,
+        locale: 'fr',
+        timezone: 'Mars/Olympus_Mons',
+      },
     } as never);
 
     await useAuthStore.getState().fetchMe();
@@ -441,17 +461,83 @@ describe('account preferences', () => {
     expect(useUiStore.getState().timezone).toBe('Asia/Tokyo');
   });
 
-  it('stores a changed preference against the account, keeping the name', async () => {
+  it('stores a changed preference against the account as a partial update', async () => {
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
-    mockApi.put.mockResolvedValue({ ...sampleUser, timezone: 'Europe/Paris' } as never);
+    mockClient.PATCH.mockResolvedValue({
+      data: { ...sampleUser, timezone: 'Europe/Paris' },
+    } as never);
 
     await useAuthStore.getState().saveAccountPreference({ timezone: 'Europe/Paris' });
 
-    // The endpoint requires a name; sending the preference alone is a 422.
-    expect(mockApi.put).toHaveBeenCalledWith('/user', {
-      name: 'Alice',
-      timezone: 'Europe/Paris',
-    });
+    // A merge patch: the name is left out, so it stays as it is.
+    expect(mockClient.PATCH).toHaveBeenCalledWith('/user', { body: { timezone: 'Europe/Paris' } });
     expect(useUiStore.getState().timezone).toBe('Europe/Paris');
+  });
+});
+
+describe('profile', () => {
+  it('updates the profile with a partial PATCH', async () => {
+    useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
+    mockClient.PATCH.mockResolvedValue({ data: { ...sampleUser, name: 'Alicia' } } as never);
+
+    await useAuthStore.getState().updateProfile({ name: 'Alicia' });
+
+    expect(mockClient.PATCH).toHaveBeenCalledWith('/user', { body: { name: 'Alicia' } });
+    expect(useAuthStore.getState().user?.name).toBe('Alicia');
+  });
+
+  it('sends the device locale and zone after registering, without the name', async () => {
+    mockClient.POST.mockResolvedValue({
+      data: { token: 't', refreshToken: 'r', user: sampleUser },
+    } as never);
+    mockClient.PATCH.mockResolvedValue({ data: sampleUser } as never);
+
+    await useAuthStore.getState().register('Alice', 'alice@example.com', 'pw-12345678');
+
+    expect(mockClient.POST).toHaveBeenCalledWith('/auth/register', {
+      body: { name: 'Alice', email: 'alice@example.com', password: 'pw-12345678' },
+    });
+    const [path, init] = mockClient.PATCH.mock.calls[0] as unknown as [
+      string,
+      { body: Record<string, unknown> },
+    ];
+    expect(path).toBe('/user');
+    expect(Object.keys(init.body).sort()).toEqual(['locale', 'timezone']);
+  });
+});
+
+describe('avatar upload', () => {
+  const bytes = new TextEncoder().encode('abc').buffer as ArrayBuffer;
+  // sha256('abc')
+  const digest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+
+  it('presigns with the lowercase hex digest, uploads, then confirms', async () => {
+    vi.mocked(resizeImageForAvatar).mockResolvedValue({
+      bytes,
+      contentType: 'image/png',
+      width: 1,
+      height: 1,
+    });
+    const put = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', put);
+    mockClient.POST.mockResolvedValue({
+      data: { avatarId: 'av-1', uploadUrl: 'https://blob.test/put' },
+    } as never);
+    mockClient.PUT.mockResolvedValue({
+      data: { ...sampleUser, avatarUrl: 'https://a/1' },
+    } as never);
+
+    await useAuthStore.getState().uploadAvatar(new File([bytes], 'a.png', { type: 'image/png' }));
+    vi.unstubAllGlobals();
+
+    expect(mockClient.POST).toHaveBeenCalledWith('/user/avatar/presign', {
+      body: { contentType: 'image/png', byteSize: 3, sha256: digest },
+    });
+    expect(put).toHaveBeenCalledWith(
+      'https://blob.test/put',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(mockClient.PUT).toHaveBeenCalledWith('/user/avatar', { body: { avatarId: 'av-1' } });
+    expect(useAuthStore.getState().user?.avatarUrl).toBe('https://a/1');
   });
 });

@@ -1,7 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router';
+import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useState } from 'react';
+import { formatSheetDay, PublicDaySheet } from '@/components/public-day-sheet';
 import { useT } from '@/i18n';
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import {
   type PublicCalendar,
@@ -28,12 +30,13 @@ export function EmbeddedCalendarView() {
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   const [failure, setFailure] = useState<ShareFailure | null>(null);
   const { month: currentMonth, shiftMonth } = usePublicMonth(timezone);
+  const [openDay, setOpenDay] = useState<DateTime | null>(null);
 
   const loadCalendar = useCallback(() => {
-    api
-      .get<PublicCalendar>(`/share/${token}`, true)
-      .then((cal) => {
-        setCalendar(cal);
+    client
+      .GET('/share/{token}', { params: { path: { token } } })
+      .then(({ data }) => {
+        setCalendar(data ?? null);
         setFailure(null);
       })
       .catch((e: unknown) => setFailure(shareFailureOf(e)));
@@ -49,7 +52,7 @@ export function EmbeddedCalendarView() {
   const publishes = calendar !== null && publishesEvents(calendar);
   const {
     events,
-    truncated,
+    hasMore,
     failure: eventsFailure,
     retry: retryEvents,
   } = usePublicEvents(token, publishes, currentMonth, timezone);
@@ -144,7 +147,7 @@ export function EmbeddedCalendarView() {
         </button>
       </div>
 
-      {truncated && (
+      {hasMore && (
         <output className="block px-4 py-1.5 text-micro text-[var(--color-text-secondary)]">
           {t('calendar.eventsTruncated')}
         </output>
@@ -188,13 +191,19 @@ export function EmbeddedCalendarView() {
               return (
                 <div
                   key={day.toISO()}
-                  className="min-h-[58px] p-1"
+                  className="relative min-h-[58px] p-1"
                   style={{
                     opacity: isCurrentMonth ? 1 : 0.35,
                     borderRight:
                       '1px solid color-mix(in srgb, var(--color-border) 30%, transparent)',
                   }}
                 >
+                  <button
+                    type="button"
+                    aria-label={formatSheetDay(day, locale)}
+                    onClick={() => setOpenDay(day)}
+                    className="absolute inset-0"
+                  />
                   <div className="mb-0.5 flex items-center justify-center">
                     <span
                       className="flex h-5 w-5 items-center justify-center rounded-full text-micro tabular-nums"
@@ -219,7 +228,7 @@ export function EmbeddedCalendarView() {
                       className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white"
                       style={{ backgroundColor: evt.color || calendar.color }}
                     >
-                      {evt.private ? t('event.privateBusy') : evt.title}
+                      {evt.detailsHidden ? t('share.busy') : evt.title}
                     </div>
                   ))}
                   {dayEvents.length > 3 && (
@@ -233,6 +242,17 @@ export function EmbeddedCalendarView() {
           </div>
         ))}
       </div>
+
+      {openDay && (
+        <PublicDaySheet
+          day={openDay}
+          events={eventsOn(openDay)}
+          timezone={timezone}
+          locale={locale}
+          fallbackColor={calendar.color}
+          onClose={() => setOpenDay(null)}
+        />
+      )}
     </div>
   );
 }

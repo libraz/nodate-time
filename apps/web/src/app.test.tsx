@@ -14,12 +14,28 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
+  getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  errorMessage: (e: unknown) => String(e),
-}));
+vi.mock('@/lib/api', () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      public detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  return {
+    // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+    ApiError,
+    errorMessage: (e: unknown) => String(e),
+  };
+});
+
+// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
 
 // The month views stand in for themselves here. Nothing in this file asserts
 // anything about a day cell, and jsdom applies no CSS, so both layouts mount at
@@ -79,6 +95,8 @@ vi.mock('@/stores/auth-store', () => ({
   }),
 }));
 
+import { ApiError } from '@/lib/api';
+import { client } from '@/lib/client';
 import { App } from './app';
 import { fetchWindow } from './lib/date-utils';
 import { useUiStore } from './stores/ui-store';
@@ -106,7 +124,7 @@ function event(id: string, calendarId: string, title: string): CalendarEvent {
     recurrenceDate: null,
     createdAt: '2026-08-01T00:00:00+09:00',
     updatedAt: '2026-08-01T00:00:00+09:00',
-  };
+  } as unknown as CalendarEvent;
 }
 
 // jsdom has no scrollTo, and the panels position themselves on open.
@@ -150,36 +168,52 @@ describe('App right sidebar', () => {
 });
 
 describe('App mobile search', () => {
+  const searchGet = vi.mocked(client.GET);
+  const line = (text: string) => (_: string, el: Element | null) =>
+    el?.tagName === 'P' && el.textContent === text;
+
   afterEach(() => {
     useUiStore.setState({ mobileTab: 'calendar' });
-    calendarState.calendars = calendarState.calendars.slice(0, 1);
-    calendarState.activeCalendarIds = ['cal-1'];
-    calendarState.events = [];
+    searchGet.mockReset();
   });
 
-  it('leaves out events from a calendar the reader has switched off', async () => {
-    // The store keeps every calendar's events. Offering one from a hidden
-    // calendar leads to a day that does not draw it.
-    calendarState.calendars = [
-      ...calendarState.calendars,
-      { id: 'cal-2', name: 'Work', color: '#F76B47', role: 'owner', publicShared: false },
-    ];
-    calendarState.activeCalendarIds = ['cal-1'];
-    calendarState.events = [
-      event('e-shown', 'cal-1', 'Rehearsal at home'),
-      event('e-hidden', 'cal-2', 'Rehearsal at work'),
-    ];
+  async function typeQuery(text: string) {
     useUiStore.setState({ mobileTab: 'search' });
-
     const user = userEvent.setup();
     render(<App />);
-    await user.type(screen.getByPlaceholderText('search.placeholder'), 'rehearsal');
+    await user.type(screen.getByPlaceholderText('search.placeholder'), text);
+  }
 
-    // Whole-line text: the match highlight splits a title across nodes.
-    const line = (text: string) => (_: string, el: Element | null) =>
-      el?.tagName === 'P' && el.textContent === text;
-    expect(screen.getByText(line('Rehearsal at home'))).toBeInTheDocument();
-    expect(screen.queryByText(line('Rehearsal at work'))).toBeNull();
+  it('lists what the server found and says when more matched than were returned', async () => {
+    searchGet.mockResolvedValue({
+      data: { items: [event('e-1', 'cal-1', 'Rehearsal at home')], hasMore: true },
+    } as never);
+
+    await typeQuery('rehearsal');
+
+    expect(await screen.findByText(line('Rehearsal at home'))).toBeInTheDocument();
+    expect(searchGet).toHaveBeenCalledWith('/search', {
+      params: { query: { q: 'rehearsal' } },
+      signal: expect.any(AbortSignal),
+    });
+    expect(screen.getByText('search.hasMore')).toBeInTheDocument();
+  });
+
+  it('says nothing matched when the server returns no events', async () => {
+    searchGet.mockResolvedValue({ data: { items: [], hasMore: false } } as never);
+
+    await typeQuery('nothing');
+
+    expect(await screen.findByText('search.noResults')).toBeInTheDocument();
+    expect(screen.queryByText('search.hasMore')).toBeNull();
+  });
+
+  it('shows a refused query as an alert', async () => {
+    searchGet.mockRejectedValue(new ApiError(422, 'too broad', 'SEARCH.TOO_BROAD'));
+
+    await typeQuery('a');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('search.tooBroad');
   });
 });
 

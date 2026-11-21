@@ -4,6 +4,8 @@ import { fromISOInZone, nowInZone } from '@/lib/date-utils';
 
 export interface AlbumPhoto {
   id: string;
+  /** Sent as If-Match when the photo is edited or deleted. */
+  etag: string;
   caption: string;
   imageUrl: string;
   /**

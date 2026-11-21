@@ -306,8 +306,8 @@ export const en: Record<TranslationKey, string> = {
   'tabs.settings': 'Settings',
 
   'search.searchEvents': 'Search events',
-  'search.placeholder': 'Search events...',
-  'search.noResults': 'Nothing matches in the loaded events, {from} to {to}',
+  'search.placeholder': 'Search titles, places and notes...',
+  'search.noResults': 'No events match',
 
   // Password reset
   'auth.forgotPassword': 'Forgot your password?',
@@ -926,4 +926,32 @@ export const en: Record<TranslationKey, string> = {
   'invites.closeTitle': "You haven't copied the link",
   'invites.closeAnyway': 'Close',
   'checklist.deleted': 'Item deleted',
+  'restore.toast': '"{name}" deleted',
+  'restore.undo': 'Undo',
+  'restore.expired': "Too much time has passed since it was deleted, so it can't be restored",
+  'search.tooBroad': 'Too many matches. Add a keyword to narrow it down',
+  'search.hasMore': 'There are more matches than shown. Add a keyword to narrow it down',
+  'share.daySheetTitle': 'Events on {date}',
+  'share.busy': 'Busy',
+  'invite.joined': 'Joined "{name}"',
+  'invite.joinFailed': "Couldn't join the invited calendar",
+  'admin.instanceAdmins': 'Instance admins',
+  'admin.grant': 'Make admin',
+  'admin.revoke': 'Remove admin',
+  'admin.userNotFound': 'No matching user found',
+  'scope.following': 'This and following events',
+  'scope.followingDropsChanges':
+    'Changes made to individual later occurrences will be overwritten by this edit',
+  'scope.followingDeleteIrreversible':
+    "This deletes this and all later occurrences. This can't be undone",
+  'poll.finalizeWithoutPending': "Some people haven't answered yet. Finalize anyway?",
+  'notification.customMinutes': '{n} min before',
+  'notification.customHours': '{n} h before',
+  'notification.customDays': '{n} d before',
+  'notification.deliveryNote':
+    "All-day events notify at midnight of the day, in the event's time zone",
+  'event.busy': 'Busy',
+  'event.detailsHidden': 'Details are hidden',
+  'attendee.canEdit': 'Can edit',
+  'conflict.stale': 'This was changed elsewhere. Reload to continue',
 };

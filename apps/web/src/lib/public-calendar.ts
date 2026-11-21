@@ -1,25 +1,22 @@
-/** What `GET /share/{token}` answers. */
-export interface PublicCalendar {
-  calendarId: string;
-  name: string;
-  color: string;
-  joinable: boolean;
-  /** The link was a join link, but it has been followed as often as it allowed. */
-  spent: boolean;
-}
+import type { components } from '@/lib/api-schema';
+import type { DayEvent } from '@/lib/week-layout';
 
-/** An event as a published link shows it. */
-export interface PublicEvent {
-  id: string;
-  title: string;
-  allDay: boolean;
-  startAt: string;
-  endAt: string;
-  timezone?: string;
-  color: string;
-  location?: string;
-  /** The event's details are withheld; only the time is published. */
-  private?: boolean;
+/** What `GET /share/{token}` answers. */
+export type PublicCalendar = Omit<components['schemas']['PublicCalendarOutputBody'], '$schema'>;
+
+/**
+ * An event as a published link shows it. A withheld event has `detailsHidden`
+ * and no title; an all-day one carries `startDate`/`endDate` (end exclusive).
+ */
+export type PublicEvent = components['schemas']['PublicEventResponse'];
+
+/**
+ * The event as day placement reads it. An all-day event is placed by its
+ * calendar dates, never by the instants, which would shift it with the zone.
+ */
+export function publicDayEvent(evt: PublicEvent): PublicEvent & DayEvent {
+  if (!evt.allDay || !evt.startDate || !evt.endDate) return evt;
+  return { ...evt, startAt: `${evt.startDate}T00:00:00`, endAt: `${evt.endDate}T00:00:00` };
 }
 
 /**

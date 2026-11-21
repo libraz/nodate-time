@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { LoadFailure } from '@/components/load-failure';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { useAuthConfig } from '@/lib/auth-config';
+import { client } from '@/lib/client';
 
 export interface ResetSearch {
   token?: string | undefined;
@@ -50,7 +51,9 @@ function ResetPasswordPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await api.post('/auth/password-reset/confirm', { token, newPassword: password });
+      await client.POST('/auth/password-reset/confirm', {
+        body: { token, newPassword: password },
+      });
       setDone(true);
       redirectTimer.current = setTimeout(() => {
         navigate({ to: '/login' });

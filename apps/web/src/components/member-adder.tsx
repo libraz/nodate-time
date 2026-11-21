@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
-import { api, errorMessage, isAbortError } from '@/lib/api';
+import { errorMessage, isAbortError } from '@/lib/api';
+import { client } from '@/lib/client';
 import {
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,
@@ -67,12 +68,11 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
     const timer = setTimeout(
       async () => {
         try {
-          const res = await api.get<CandidatePage>(
-            `/calendars/${calendarId}/member-candidates?q=${encodeURIComponent(q)}`,
-            false,
-            controller.signal,
-          );
-          setPage(res);
+          const { data } = await client.GET('/calendars/{calendarId}/member-candidates', {
+            params: { path: { calendarId }, query: { q } },
+            signal: controller.signal,
+          });
+          setPage(data ? { items: data.items ?? [], hasMore: data.hasMore } : null);
           setFailed(null);
         } catch (e) {
           if (isAbortError(e)) return;
@@ -105,7 +105,11 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
     // One at a time: each grant takes the calendar's lock on the server anyway.
     for (const person of people) {
       try {
-        await api.post(`/calendars/${calendarId}/members`, { userId: person.id, role });
+        await client.POST('/calendars/{calendarId}/members', {
+          params: { path: { calendarId } },
+          // The picker only offers the two roles a grant may carry.
+          body: { userId: person.id, role: role as 'editor' | 'viewer' },
+        });
         added.push(person.id);
       } catch (e) {
         firstError ??= errorMessage(e);

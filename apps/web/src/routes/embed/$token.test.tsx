@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -13,28 +14,44 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api')>();
-  return { ...actual, api: { get: vi.fn(), getListing: vi.fn() } };
+// The typed client is replaced by an adapter over one stub that sees the
+// resolved path (query included), so the assertions read as the requests made.
+const raw = vi.hoisted(() => {
+  type Init = {
+    params?: { path?: Record<string, string>; query?: Record<string, string> };
+    signal?: AbortSignal;
+  };
+  const resolve = (path: string, init?: Init) => {
+    const filled = path.replace(/\{(\w+)\}/g, (_, key: string) => init?.params?.path?.[key] ?? '');
+    const query = new URLSearchParams(init?.params?.query).toString();
+    return query ? `${filled}?${query}` : filled;
+  };
+  return { resolve, get: vi.fn() };
 });
+
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    GET: async (path: string, init?: Parameters<typeof raw.resolve>[1]) => ({
+      data: await raw.get(raw.resolve(path, init), init?.signal),
+    }),
+  },
+}));
 
 vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: { locale: string; timezone: string }) => unknown) =>
     selector({ locale: 'ja', timezone: 'Asia/Tokyo' }),
 }));
 
-import { ApiError, api } from '@/lib/api';
+import { formatSheetDay } from '@/components/public-day-sheet';
+import { ApiError } from '@/lib/api';
 import { EmbeddedCalendarView } from './$token';
 
-const apiGet = vi.mocked(api.get);
-const apiGetListing = vi.mocked(api.getListing);
+const apiGet = raw.get;
 
-/** A listing answers through the same stub as a plain GET, uncut. */
-function listingFromGet() {
-  apiGetListing.mockImplementation(async (path, skip, signal) => ({
-    data: (await apiGet(path, skip, signal)) as never,
-    truncated: false,
-  }));
+/** What `GET /share/{token}/events` answers. */
+function page(items: unknown[] = [], hasMore = false) {
+  return { items, hasMore };
 }
 
 function calendar(overrides: Record<string, unknown> = {}) {
@@ -54,8 +71,6 @@ function eventsAsked(): number {
 
 beforeEach(() => {
   apiGet.mockReset();
-  apiGetListing.mockReset();
-  listingFromGet();
 });
 
 afterEach(cleanup);
@@ -63,7 +78,7 @@ afterEach(cleanup);
 describe('embedded calendar', () => {
   it('draws a published calendar', async () => {
     apiGet.mockImplementation((path) =>
-      Promise.resolve(String(path).includes('/events') ? [] : calendar()),
+      Promise.resolve(String(path).includes('/events') ? page() : calendar()),
     );
 
     render(<EmbeddedCalendarView />);
@@ -120,9 +135,10 @@ describe('embedded calendar', () => {
   });
 
   // A month cut at the server's cap looked complete; its last days read as free.
-  it('says when the month was cut short', async () => {
-    apiGet.mockResolvedValue(calendar());
-    apiGetListing.mockResolvedValue({ data: [] as never, truncated: true });
+  it('says when the page reports more events than it carried', async () => {
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(String(path).includes('/events') ? page([], true) : calendar()),
+    );
 
     render(<EmbeddedCalendarView />);
 
@@ -131,13 +147,13 @@ describe('embedded calendar', () => {
 
   it('says nothing about a month that arrived whole', async () => {
     apiGet.mockImplementation((path) =>
-      Promise.resolve(String(path).includes('/events') ? [] : calendar()),
+      Promise.resolve(String(path).includes('/events') ? page() : calendar()),
     );
 
     render(<EmbeddedCalendarView />);
 
     expect(await screen.findByText('share.readOnly')).toBeTruthy();
-    await waitFor(() => expect(apiGetListing).toHaveBeenCalled());
+    await waitFor(() => expect(eventsAsked()).toBe(1));
     expect(screen.queryByText('calendar.eventsTruncated')).toBeNull();
   });
 
@@ -145,7 +161,7 @@ describe('embedded calendar', () => {
   it('offers a retry that refetches the calendar after a busy lookup', async () => {
     let lookups = 0;
     apiGet.mockImplementation((path) => {
-      if (String(path).includes('/events')) return Promise.resolve([]);
+      if (String(path).includes('/events')) return Promise.resolve(page());
       lookups++;
       if (lookups === 1) return Promise.reject(new ApiError(429, 'busy'));
       return Promise.resolve(calendar());
@@ -164,7 +180,7 @@ describe('embedded calendar', () => {
     apiGet.mockImplementation((path) => {
       if (!String(path).includes('/events')) return Promise.resolve(calendar());
       listings++;
-      return listings === 1 ? Promise.reject(new ApiError(503, 'down')) : Promise.resolve([]);
+      return listings === 1 ? Promise.reject(new ApiError(503, 'down')) : Promise.resolve(page());
     });
 
     render(<EmbeddedCalendarView />);
@@ -181,7 +197,7 @@ describe('embedded calendar', () => {
     vi.setSystemTime(new Date('2026-10-31T16:30:00Z')); // 2026-11-01 01:30 in Tokyo
     try {
       apiGet.mockImplementation((path) =>
-        Promise.resolve(String(path).includes('/events') ? [] : calendar()),
+        Promise.resolve(String(path).includes('/events') ? page() : calendar()),
       );
 
       render(<EmbeddedCalendarView />);
@@ -189,6 +205,43 @@ describe('embedded calendar', () => {
       await waitFor(() => expect(eventsAsked()).toBe(1));
       const asked = String(apiGet.mock.calls.find((c) => String(c[0]).includes('/events'))?.[0]);
       expect(asked).toContain('start=2026-11-01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A withheld event is published without a title; the sheet lists it as busy.
+  it('shows withheld events as busy, in the grid and in the day sheet', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-10T03:00:00Z'));
+    try {
+      apiGet.mockImplementation((path) =>
+        Promise.resolve(
+          String(path).includes('/events')
+            ? page([
+                {
+                  id: 'e1',
+                  title: null,
+                  detailsHidden: true,
+                  allDay: false,
+                  startAt: '2026-11-10T01:00:00Z',
+                  endAt: '2026-11-10T02:00:00Z',
+                  timezone: 'Asia/Tokyo',
+                  color: '#000',
+                },
+              ])
+            : calendar(),
+        ),
+      );
+
+      render(<EmbeddedCalendarView />);
+      expect(await screen.findByText('share.busy')).toBeTruthy();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: formatSheetDay(DateTime.fromISO('2026-11-10'), 'ja') }),
+      );
+      const sheet = screen.getByRole('region', { name: 'share.daySheetTitle' });
+      expect(within(sheet).getByText('share.busy')).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

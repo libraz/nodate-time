@@ -13,11 +13,12 @@ import type { Calendar } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
+  getT: () => (key: string) => key,
   translate: (_locale: string, key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
 }));
 
@@ -38,11 +39,36 @@ vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
-import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { jsonResponse } from '@/test/mock-client';
 import { ActivityPanel } from './activity-panel';
 
-const mockApi = vi.mocked(api);
+type Step = object | Error | 'pending';
+
+/** Requests the panel sent, in order. */
+let requests: URL[] = [];
+
+/**
+ * Answers the activity endpoint step by step; the last step repeats. An Error
+ * fails the request and 'pending' never answers.
+ */
+function serve(...steps: Step[]) {
+  const queue = [...steps];
+  const fetchMock = vi.fn(async (input: Request | string, init?: RequestInit) => {
+    const request = typeof input === 'string' ? new Request(input, init) : input;
+    requests.push(new URL(request.url));
+    const step = queue.length > 1 ? queue.shift() : queue[0];
+    if (step === 'pending') return new Promise<Response>(() => {});
+    if (step instanceof Error) throw step;
+    return jsonResponse(step);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function lastRequest(): URL | undefined {
+  return requests[requests.length - 1];
+}
 const mockToast = vi.mocked(toast);
 
 function calendar(id: string, name: string): Calendar {
@@ -55,6 +81,8 @@ function calendar(id: string, name: string): Calendar {
     memberCount: 1,
     role: 'owner',
     memberColor: '#3b82f6',
+    etag: '"e1"',
+    coverUploadAllowed: true,
   };
 }
 
@@ -134,7 +162,8 @@ const ENTITIES: { action: string; entityType: string; label: TranslationKey }[] 
 ];
 
 beforeEach(() => {
-  mockApi.get.mockReset();
+  requests = [];
+  vi.unstubAllGlobals();
   mockToast.error.mockClear();
   calendarState.calendars = [calendar('cal-1', 'Family')];
   calendarState.activeCalendarIds = ['cal-1'];
@@ -153,17 +182,18 @@ function rectList(): DOMRectList {
 }
 
 describe('ActivityPanel', () => {
-  it('says it is loading until the first page arrives', () => {
-    mockApi.get.mockReturnValue(new Promise(() => {}));
+  it('says it is loading until the first page arrives', async () => {
+    serve('pending');
 
     render(<ActivityPanel open onClose={() => {}} />);
 
     expect(screen.getByText('history.loading')).toBeInTheDocument();
-    expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/activity?limit=50');
+    await waitFor(() => expect(lastRequest()?.pathname).toBe('/calendars/cal-1/activity'));
+    expect(lastRequest()?.searchParams.get('limit')).toBe('50');
   });
 
   it('renders each entry with who did it, to what, and what changed', async () => {
-    mockApi.get.mockResolvedValue({
+    serve({
       items: [feedItem({ summary: 'Dinner with Rin' })],
       nextCursor: undefined,
     });
@@ -179,7 +209,7 @@ describe('ActivityPanel', () => {
   });
 
   it('labels a marked system entry as the system', async () => {
-    mockApi.get.mockResolvedValue({
+    serve({
       items: [feedItem({ actorId: undefined, actorName: undefined, systemActor: true })],
     });
 
@@ -190,7 +220,7 @@ describe('ActivityPanel', () => {
   });
 
   it('keeps the deleted-user label for an unmarked entry without an actor', async () => {
-    mockApi.get.mockResolvedValue({
+    serve({
       items: [feedItem({ actorId: undefined, actorName: undefined })],
     });
 
@@ -201,7 +231,7 @@ describe('ActivityPanel', () => {
   });
 
   it.each(ENTITIES)('badges a $action row as $label', async ({ action, entityType, label }) => {
-    mockApi.get.mockResolvedValue({ items: [feedItem({ action, entityType })] });
+    serve({ items: [feedItem({ action, entityType })] });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -219,7 +249,7 @@ describe('ActivityPanel', () => {
   // server reaches this panel before the client knows a word for it. Naming it
   // as itself keeps the row readable instead of dropping the badge.
   it('names an entity it has no word for rather than leaving the row bare', async () => {
-    mockApi.get.mockResolvedValue({
+    serve({
       items: [feedItem({ action: 'calendar.reminder.created', entityType: 'reminder' })],
     });
 
@@ -230,7 +260,7 @@ describe('ActivityPanel', () => {
   });
 
   it('shows the empty state for a calendar with no activity', async () => {
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -243,11 +273,11 @@ describe('ActivityPanel', () => {
     render(<ActivityPanel open onClose={() => {}} />);
 
     expect(screen.getByText('activity.empty')).toBeInTheDocument();
-    expect(mockApi.get).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(0);
   });
 
   it('reports a failed load instead of leaving the panel spinning', async () => {
-    mockApi.get.mockRejectedValue(new Error('feed unavailable'));
+    serve(new Error('feed unavailable'));
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -258,14 +288,15 @@ describe('ActivityPanel', () => {
 
   it('pages with the cursor the server handed back and appends the next page', async () => {
     const cursor = '00000000-0000-7000-8000-0000000000c1';
-    mockApi.get
-      .mockResolvedValueOnce({
+    serve(
+      {
         items: [feedItem({ id: 'row-1', summary: 'first page' })],
         nextCursor: cursor,
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         items: [feedItem({ id: 'row-2', summary: 'second page' })],
-      });
+      },
+    );
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -274,20 +305,20 @@ describe('ActivityPanel', () => {
     expect(await screen.findByText('second page')).toBeInTheDocument();
     // The first page stays: paging adds to the feed rather than replacing it.
     expect(screen.getByText('first page')).toBeInTheDocument();
-    expect(mockApi.get).toHaveBeenLastCalledWith(
-      `/calendars/cal-1/activity?limit=50&cursor=${cursor}`,
-    );
+    expect(lastRequest()?.pathname).toBe('/calendars/cal-1/activity');
+    expect(lastRequest()?.searchParams.get('cursor')).toBe(cursor);
     // The last page carries no cursor, so there is nothing left to ask for.
     await waitFor(() => expect(screen.queryByText('activity.loadMore')).not.toBeInTheDocument());
   });
 
   it('keeps the loaded feed on screen when paging fails', async () => {
-    mockApi.get
-      .mockResolvedValueOnce({
+    serve(
+      {
         items: [feedItem({ summary: 'first page' })],
         nextCursor: '00000000-0000-7000-8000-0000000000c1',
-      })
-      .mockRejectedValueOnce(new Error('paging failed'));
+      },
+      new Error('paging failed'),
+    );
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -305,7 +336,7 @@ describe('ActivityPanel', () => {
       calendar('cal-3', 'Hidden'),
     ];
     calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -318,23 +349,21 @@ describe('ActivityPanel', () => {
 
     fireEvent.click(screen.getByRole('option', { name: 'Work' }));
 
-    await waitFor(() =>
-      expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-2/activity?limit=50'),
-    );
+    await waitFor(() => expect(lastRequest()?.pathname).toBe('/calendars/cal-2/activity'));
   });
 
   it('names the single calendar in view instead of offering a choice', async () => {
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
-    await waitFor(() => expect(mockApi.get).toHaveBeenCalled());
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.getByText('Family')).toBeInTheDocument();
   });
 
   it('closes from the header button and from the backdrop', async () => {
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
     const onClose = vi.fn();
 
     render(<ActivityPanel open onClose={onClose} />);
@@ -350,7 +379,7 @@ describe('ActivityPanel', () => {
 // walked into the calendar behind it and Escape did nothing.
 describe('ActivityPanel keyboard', () => {
   it('announces itself as a modal dialog', async () => {
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
 
     render(<ActivityPanel open onClose={() => {}} />);
 
@@ -360,7 +389,7 @@ describe('ActivityPanel keyboard', () => {
   });
 
   it('locks the page behind it and closes on Escape', () => {
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
     const onClose = vi.fn();
 
     render(<ActivityPanel open onClose={onClose} />);
@@ -374,7 +403,7 @@ describe('ActivityPanel keyboard', () => {
 
   it('keeps Tab inside the panel', async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
-    mockApi.get.mockResolvedValue({
+    serve({
       items: [feedItem()],
       nextCursor: '00000000-0000-7000-8000-0000000000c1',
     });
@@ -404,7 +433,7 @@ describe('ActivityPanel keyboard', () => {
 
   it('returns focus to whatever opened it', async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
-    mockApi.get.mockResolvedValue({ items: [] });
+    serve({ items: [] });
 
     function Harness({ open }: { open: boolean }) {
       return (

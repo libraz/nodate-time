@@ -1,13 +1,15 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigate = vi.fn();
+const searchState: { join?: string | undefined } = {};
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({
     ...options,
     useParams: () => ({ token: 'tok-1' }),
+    useSearch: () => searchState,
   }),
   useNavigate: () => navigate,
 }));
@@ -29,32 +31,54 @@ vi.mock('@/lib/toast', () => ({
 // test on the join path, so it runs for real.
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
-  return {
-    ...actual,
-    api: { get: vi.fn(), getListing: vi.fn(), post: vi.fn() },
-    hasToken: () => true,
-  };
+  return { ...actual, hasToken: vi.fn(() => true) };
 });
+
+// The typed client is replaced by an adapter over two stubs that see the
+// resolved path (query included), so the assertions read as the requests made.
+const raw = vi.hoisted(() => {
+  type Init = {
+    params?: { path?: Record<string, string>; query?: Record<string, string> };
+    signal?: AbortSignal;
+  };
+  const resolve = (path: string, init?: Init) => {
+    const filled = path.replace(/\{(\w+)\}/g, (_, key: string) => init?.params?.path?.[key] ?? '');
+    const query = new URLSearchParams(init?.params?.query).toString();
+    return query ? `${filled}?${query}` : filled;
+  };
+  return { resolve, get: vi.fn(), post: vi.fn() };
+});
+
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    GET: async (path: string, init?: Parameters<typeof raw.resolve>[1]) => ({
+      data: await raw.get(raw.resolve(path, init), init?.signal),
+    }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    POST: async (path: string, init?: Parameters<typeof raw.resolve>[1]) => ({
+      data: await raw.post(raw.resolve(path, init)),
+    }),
+  },
+}));
 
 vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: { locale: string; timezone: string }) => unknown) =>
     selector({ locale: 'ja', timezone: 'Asia/Tokyo' }),
 }));
 
-import { ApiError, api } from '@/lib/api';
+import { formatSheetDay } from '@/components/public-day-sheet';
+import { ApiError, hasToken } from '@/lib/api';
+import { toast } from '@/lib/toast';
 import { SharedCalendarView } from './$token';
 
-const apiGet = vi.mocked(api.get);
-const apiGetListing = vi.mocked(api.getListing);
+const apiGet = raw.get;
+const apiPost = raw.post;
 
-/** A listing answers through the same stub as a plain GET, uncut. */
-function listingFromGet() {
-  apiGetListing.mockImplementation(async (path, skip, signal) => ({
-    data: (await apiGet(path, skip, signal)) as never,
-    truncated: false,
-  }));
+/** What `GET /share/{token}/events` answers. */
+function page(items: unknown[] = [], hasMore = false) {
+  return { items, hasMore };
 }
-const apiPost = vi.mocked(api.post);
 
 /** What `GET /share/{token}` answers, as `PublicCalendarOutput` serialises it. */
 function shareResponse(overrides: Partial<Record<string, unknown>> = {}) {
@@ -74,10 +98,11 @@ function askedFor(fragment: string): string[] {
 
 beforeEach(() => {
   apiGet.mockReset();
-  apiGetListing.mockReset();
-  listingFromGet();
   apiPost.mockReset();
   navigate.mockReset();
+  vi.mocked(hasToken).mockReturnValue(true);
+  searchState.join = undefined;
+  vi.mocked(toast.success).mockReset();
 });
 
 afterEach(cleanup);
@@ -145,7 +170,7 @@ describe('share landing for a public link', () => {
   it('asks for the events and draws them', async () => {
     apiGet.mockImplementation((path) =>
       String(path).includes('/events')
-        ? Promise.resolve([])
+        ? Promise.resolve(page())
         : Promise.resolve(shareResponse({ joinable: false, spent: false })),
     );
 
@@ -166,7 +191,7 @@ describe('share landing near midnight in the grid zone', () => {
     try {
       apiGet.mockImplementation((path) =>
         String(path).includes('/events')
-          ? Promise.resolve([])
+          ? Promise.resolve(page())
           : Promise.resolve(shareResponse({ joinable: false, spent: false })),
       );
 
@@ -189,6 +214,7 @@ describe('share landing when the month does not arrive', () => {
   const publicEvent = (id: string, title: string, startAt: string) => ({
     id,
     title,
+    detailsHidden: false,
     allDay: false,
     startAt,
     endAt: startAt,
@@ -203,7 +229,9 @@ describe('share landing when the month does not arrive', () => {
     apiGet.mockImplementation((path) => {
       if (!String(path).includes('/events')) return Promise.resolve(published());
       eventsCalls += 1;
-      return eventsCalls === 1 ? Promise.reject(new ApiError(503, 'down')) : Promise.resolve([]);
+      return eventsCalls === 1
+        ? Promise.reject(new ApiError(503, 'down'))
+        : Promise.resolve(page());
     });
 
     render(<SharedCalendarView />);
@@ -225,9 +253,11 @@ describe('share landing when the month does not arrive', () => {
           answerFirst = resolve;
         });
       }
-      return Promise.resolve([
-        publicEvent('next', 'Next month plan', DateTime.now().plus({ months: 1 }).toISO() ?? ''),
-      ]);
+      return Promise.resolve(
+        page([
+          publicEvent('next', 'Next month plan', DateTime.now().plus({ months: 1 }).toISO() ?? ''),
+        ]),
+      );
     });
 
     render(<SharedCalendarView />);
@@ -244,10 +274,15 @@ describe('share landing when the month does not arrive', () => {
   });
 });
 
-describe('share landing for a month cut at the cap', () => {
-  it('says the latest events are missing', async () => {
-    apiGet.mockResolvedValue(shareResponse({ joinable: false, spent: false }));
-    apiGetListing.mockResolvedValue({ data: [] as never, truncated: true });
+describe('share landing for a month with more events than the page', () => {
+  it('says the latest events are missing when the page reports hasMore', async () => {
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(
+        String(path).includes('/events')
+          ? page([], true)
+          : shareResponse({ joinable: false, spent: false }),
+      ),
+    );
 
     render(<SharedCalendarView />);
 
@@ -301,6 +336,155 @@ describe('joining a calendar that refuses', () => {
 
     await join();
 
-    expect(await screen.findByText('share.joinFailed')).toBeTruthy();
+    expect(await screen.findByText('invite.joinFailed')).toBeTruthy();
+  });
+});
+
+/**
+ * An event whose details are withheld is published as a time with no title.
+ * The page names it for what it is, rather than drawing an empty chip.
+ */
+describe('share landing for withheld events', () => {
+  const published = () => shareResponse({ joinable: false, spent: false });
+  const eventsOf = (items: unknown[], hasMore = false) =>
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(String(path).includes('/events') ? page(items, hasMore) : published()),
+    );
+  const timed = (id: string, title: string | null, hidden: boolean, startAt: string) => ({
+    id,
+    title,
+    detailsHidden: hidden,
+    allDay: false,
+    startAt,
+    endAt: startAt,
+    timezone: 'Asia/Tokyo',
+    color: '#000',
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-10T03:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('shows share.busy instead of a title', async () => {
+    eventsOf([
+      timed('a', null, true, '2026-11-10T01:00:00Z'),
+      timed('b', 'Team lunch', false, '2026-11-11T01:00:00Z'),
+    ]);
+
+    render(<SharedCalendarView />);
+
+    expect(await screen.findByText('share.busy')).toBeTruthy();
+    expect(screen.getByText('Team lunch')).toBeTruthy();
+  });
+
+  it('opens a sheet for the tapped day listing its events, busy ones as busy', async () => {
+    eventsOf([
+      timed('a', null, true, '2026-11-10T01:00:00Z'),
+      timed('b', 'Standup', false, '2026-11-10T02:00:00Z'),
+      timed('c', 'Another day', false, '2026-11-12T02:00:00Z'),
+    ]);
+
+    render(<SharedCalendarView />);
+    await screen.findByText('Standup');
+    expect(screen.queryByRole('region', { name: 'share.daySheetTitle' })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: formatSheetDay(DateTime.fromISO('2026-11-10'), 'ja') }),
+    );
+
+    const sheet = screen.getByRole('region', { name: 'share.daySheetTitle' });
+    expect(within(sheet).getByText('share.busy')).toBeTruthy();
+    expect(within(sheet).getByText('Standup')).toBeTruthy();
+    expect(within(sheet).queryByText('Another day')).toBeNull();
+
+    fireEvent.click(within(sheet).getByRole('button', { name: 'common.close' }));
+    expect(screen.queryByRole('region', { name: 'share.daySheetTitle' })).toBeNull();
+  });
+
+  it('places an all-day event on its dates, whatever the instants say', async () => {
+    // startAt/endAt are the UTC instants of Tokyo midnight, a day off in New York.
+    eventsOf([
+      {
+        id: 'ad',
+        title: 'Holiday',
+        detailsHidden: false,
+        allDay: true,
+        startAt: '2026-11-04T15:00:00Z',
+        endAt: '2026-11-05T15:00:00Z',
+        startDate: '2026-11-05',
+        endDate: '2026-11-06',
+        timezone: 'America/New_York',
+        color: '#000',
+      },
+    ]);
+
+    render(<SharedCalendarView />);
+    await screen.findByText('Holiday');
+
+    const open = (iso: string) =>
+      fireEvent.click(
+        screen.getByRole('button', { name: formatSheetDay(DateTime.fromISO(iso), 'ja') }),
+      );
+    open('2026-11-05');
+    expect(
+      within(screen.getByRole('region', { name: 'share.daySheetTitle' })).getByText('Holiday'),
+    ).toBeTruthy();
+    open('2026-11-06');
+    expect(
+      within(screen.getByRole('region', { name: 'share.daySheetTitle' })).queryByText('Holiday'),
+    ).toBeNull();
+  });
+});
+
+/** Returning from sign-in with join=1 accepts the invite without another tap. */
+describe('share landing with join=1', () => {
+  it('accepts once, says so, and moves on to the app', async () => {
+    searchState.join = '1';
+    apiGet.mockResolvedValue(shareResponse({ joinable: true }));
+    apiPost.mockResolvedValue({ calendarId: 'cal', role: 'editor' });
+
+    render(<SharedCalendarView />);
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: '/' }));
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(apiPost).toHaveBeenCalledWith('/invites/tok-1/accept');
+    expect(toast.success).toHaveBeenCalledWith('invite.joined');
+  });
+
+  it('does not accept on a plain visit', async () => {
+    apiGet.mockResolvedValue(shareResponse({ joinable: true }));
+
+    render(<SharedCalendarView />);
+
+    await screen.findByRole('button', { name: 'share.joinCalendar' });
+    await act(async () => {});
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('sends a signed-out visitor to register, and back here with join=1', async () => {
+    vi.mocked(hasToken).mockReturnValue(false);
+    apiGet.mockResolvedValue(shareResponse({ joinable: true }));
+
+    render(<SharedCalendarView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'share.joinCalendar' }));
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/login',
+      search: { mode: 'register', redirect: '/share/tok-1?join=1' },
+    });
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('shows the failure and stays when the accept is refused', async () => {
+    searchState.join = '1';
+    apiGet.mockResolvedValue(shareResponse({ joinable: true }));
+    apiPost.mockRejectedValue(new ApiError(410, 'expired', 'INVITE.EXPIRED'));
+
+    render(<SharedCalendarView />);
+
+    expect(await screen.findByText('apiError.INVITE.EXPIRED')).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

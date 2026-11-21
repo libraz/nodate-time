@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { getT, type Locale } from '@/i18n';
 import {
   ApiError,
-  api,
   endSession,
   errorMessage,
   hasToken,
@@ -10,9 +9,11 @@ import {
   SESSION_EXPIRED_EVENT,
   setToken,
 } from '@/lib/api';
+import type { components } from '@/lib/api-schema';
+import { client, createApiClient } from '@/lib/client';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { accountPreferences, detectLocale, detectTimezone } from '@/lib/preferences';
-import { uploadViaPresign } from '@/lib/upload';
+import { present, uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -72,13 +73,16 @@ interface AuthState {
   clearError: () => void;
 }
 
-interface AuthResponse {
-  token: string;
-  // Returned by every sign-in path and kept beside the access token: the
-  // access token lasts a day, the session thirty, and without this the
-  // shorter of the two would decide when everyone signs in again.
-  refreshToken: string;
-  user: User;
+/** The development sign-in, which the generated document leaves out because it is only mounted in dev mode. */
+interface DevPaths {
+  '/auth/dev-login': {
+    post: {
+      requestBody: { content: { 'application/json': { email: string } } };
+      responses: {
+        200: { content: { 'application/json': components['schemas']['LoginOutputBody'] } };
+      };
+    };
+  };
 }
 
 let fetchMeInFlight = false;
@@ -107,11 +111,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const data = await api.post<AuthResponse>('/auth/login', { email, password });
-      setToken(data.token, data.refreshToken);
-      resetStoresIfAccountChanged(data.user);
-      set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
-      useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
+      const { data } = await client.POST('/auth/login', { body: { email, password } });
+      const { token, refreshToken, user } = present(data);
+      // Kept beside the access token: the access token lasts a day, the session
+      // thirty, and without the refresh token the shorter would decide when
+      // everyone signs in again.
+      setToken(token, refreshToken);
+      resetStoresIfAccountChanged(user);
+      set({ user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
     } catch (e) {
       set({ isLoading: false, error: errorMessage(e, getT()('auth.loginFailed')) });
       throw e;
@@ -121,11 +129,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   devLogin: async (email) => {
     set({ isLoading: true, error: null });
     try {
-      const data = await api.post<AuthResponse>('/auth/dev-login', { email });
-      setToken(data.token, data.refreshToken);
-      resetStoresIfAccountChanged(data.user);
-      set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
-      useUiStore.getState().adoptAccountPreferences(accountPreferences(data.user));
+      const { data } = await createApiClient<DevPaths>().POST('/auth/dev-login', {
+        body: { email },
+      });
+      const { token, refreshToken, user } = present(data);
+      setToken(token, refreshToken);
+      resetStoresIfAccountChanged(user);
+      set({ user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
     } catch (e) {
       set({ isLoading: false, error: errorMessage(e, getT()('auth.loginFailed')) });
       throw e;
@@ -135,21 +146,25 @@ export const useAuthStore = create<AuthState>((set) => ({
   register: async (name, email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const data = await api.post<AuthResponse>('/auth/register', { name, email, password });
-      setToken(data.token, data.refreshToken);
-      resetStoresIfAccountChanged(data.user);
-      set({ user: data.user, isAuthenticated: true, isInitializing: false, isLoading: false });
+      const { data } = await client.POST('/auth/register', { body: { name, email, password } });
+      const registered = present(data);
+      setToken(registered.token, registered.refreshToken);
+      resetStoresIfAccountChanged(registered.user);
+      set({
+        user: registered.user,
+        isAuthenticated: true,
+        isInitializing: false,
+        isLoading: false,
+      });
       // A new account is seeded with the server's defaults, which know
       // nothing about where the person signing up actually is. Send what
       // this device reports once, so a first calendar opens in local time.
       try {
-        const user = await api.put<User>('/user', {
-          name: data.user.name,
-          locale: detectLocale(),
-          timezone: detectTimezone(),
+        const { data: user } = await client.PATCH('/user', {
+          body: { locale: detectLocale(), timezone: detectTimezone() },
         });
-        set({ user });
-        useUiStore.getState().adoptAccountPreferences(accountPreferences(user));
+        set({ user: present(user) });
+        useUiStore.getState().adoptAccountPreferences(accountPreferences(present(user)));
       } catch {
         // Not worth failing a registration over: the account keeps the
         // defaults and the settings screen can still change them.
@@ -183,7 +198,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     fetchMeInFlight = true;
     try {
-      const user = await api.get<User>('/user');
+      const { data } = await client.GET('/user');
+      const user = present(data);
       // Re-check the token: a logout may have landed while the request was in
       // flight. Without this, a late success would restore isAuthenticated and
       // flash the authed shell before the next request bounces to /login.
@@ -213,16 +229,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   changePassword: async (currentPassword, newPassword) => {
     // The server rotates the token on a password change; persist the fresh one
     // so the current device stays signed in instead of failing the next request.
-    const { token, refreshToken } = await api.put<{ token: string; refreshToken?: string }>(
-      '/user/password',
-      { currentPassword, newPassword },
-    );
+    const { data } = await client.PUT('/user/password', { body: { currentPassword, newPassword } });
+    const { token, refreshToken } = present(data);
     setToken(token, refreshToken);
   },
 
   updateProfile: async (data) => {
-    const user = await api.put<User>('/user', data);
-    set({ user });
+    const { data: user } = await client.PATCH('/user', { body: data });
+    set({ user: present(user) });
   },
 
   saveAccountPreference: async (prefs) => {
@@ -231,30 +245,39 @@ export const useAuthStore = create<AuthState>((set) => ({
     useUiStore.getState().adoptAccountPreferences(prefs);
     const current = useAuthStore.getState().user;
     if (!current) return;
-    const user = await api.put<User>('/user', { name: current.name, ...prefs });
-    set({ user });
+    const { data: user } = await client.PATCH('/user', { body: prefs });
+    set({ user: present(user) });
   },
 
   uploadAvatar: async (file: File) => {
     const resized = await resizeImageForAvatar(file);
-    const presign = await uploadViaPresign<{ avatarId: string; uploadUrl: string }>({
+    const presign = await uploadViaPresign({
       kind: 'avatar',
-      presignPath: '/user/avatar/presign',
-      presignBody: {
-        contentType: resized.contentType,
-        byteSize: resized.bytes.byteLength,
-      },
       contentType: resized.contentType,
       body: resized.bytes,
       byteSize: resized.bytes.byteLength,
-      contentAddressed: true,
+      presign: async (sha256) => {
+        const { data } = await client.POST('/user/avatar/presign', {
+          body: {
+            contentType: resized.contentType,
+            byteSize: resized.bytes.byteLength,
+            sha256,
+          },
+        });
+        return present(data);
+      },
     });
-    const user = await api.put<User>('/user/avatar', { avatarId: presign.avatarId });
-    set({ user });
+    const { data: user } = await client.PUT('/user/avatar', {
+      body: { avatarId: presign.avatarId },
+    });
+    set({ user: present(user) });
   },
 
   removeAvatar: async () => {
-    const user = await api.delete<User>('/user/avatar');
+    await client.DELETE('/user/avatar');
+    const current = useAuthStore.getState().user;
+    if (!current) return;
+    const { avatarUrl: _removed, ...user } = current;
     set({ user });
   },
 

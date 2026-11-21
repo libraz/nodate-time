@@ -6,7 +6,7 @@ import type { CalendarEvent } from '@/types/calendar';
 vi.mock('@/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/i18n')>()),
   useT: () => (key: string, params?: Record<string, string>) =>
-    params ? `${key} ${params.from}..${params.to}` : key,
+    params ? `${key} ${JSON.stringify(params)}` : key,
 }));
 
 const uiState = {
@@ -24,23 +24,30 @@ const uiState = {
 };
 
 vi.mock('@/stores/ui-store', () => ({
-  useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
+  useUiStore: Object.assign((selector: (s: typeof uiState) => unknown) => selector(uiState), {
+    getState: () => uiState,
+  }),
 }));
 
-const calendarState = {
-  events: [] as CalendarEvent[],
-  activeCalendarIds: ['cal-1'],
-};
-
-vi.mock('@/stores/calendar-store', () => ({
-  useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
+const get = vi.fn();
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the HTTP method name of the client
+    GET: (...args: unknown[]) => get(...args),
+  },
 }));
 
+import { ApiError } from '@/lib/api';
 import { SearchPanel } from './search-panel';
 
 /** Matches a result line by its whole text, which the match highlight splits across nodes. */
 function fullText(text: string) {
   return (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === text;
+}
+
+/** Answers the next search with `events`. */
+function serve(events: CalendarEvent[], hasMore = false) {
+  get.mockResolvedValue({ data: { items: events, hasMore } });
 }
 
 function event(id: string, calendarId: string, title: string): CalendarEvent {
@@ -52,7 +59,15 @@ function event(id: string, calendarId: string, title: string): CalendarEvent {
     startAt: '2026-08-05T10:00:00+09:00',
     endAt: '2026-08-05T11:00:00+09:00',
     color: '#47B2F7',
-    ownerId: null,
+    ownerId: 'u1',
+    ownerName: 'Owner',
+    creatorId: 'u1',
+    creatorName: 'Owner',
+    detailsHidden: false,
+    etag: 'W/"1"',
+    kind: 'event',
+    taskOwned: false,
+    timezone: 'Asia/Tokyo',
     showAs: 'busy',
     flexibility: 'fixed',
     visibility: 'default',
@@ -75,8 +90,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   uiState.showSearch = true;
   uiState.searchQuery = '';
-  calendarState.events = [];
-  calendarState.activeCalendarIds = ['cal-1'];
+  get.mockReset();
   document.body.style.overflow = '';
 });
 
@@ -111,11 +125,8 @@ describe('SearchPanel', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('opens onto a search box and lists what the query matches', () => {
-    calendarState.events = [
-      event('e1', 'cal-1', 'Morning Rehearsal'),
-      event('e2', 'cal-1', 'Lunch'),
-    ];
+  it('opens onto a search box and lists what the server matched', async () => {
+    serve([event('e1', 'cal-1', 'Morning Rehearsal')]);
     uiState.searchQuery = 'rehearsal';
 
     render(<SearchPanel />);
@@ -123,54 +134,124 @@ describe('SearchPanel', () => {
     // The panel draws twice: a fullscreen overlay for narrow widths and a
     // dropdown for wide ones. Both are in the document; CSS picks one.
     expect(screen.getAllByPlaceholderText('search.placeholder')).toHaveLength(2);
-    expect(screen.getAllByText(fullText('Morning Rehearsal'))).toHaveLength(2);
-    expect(screen.queryAllByText('Lunch')).toHaveLength(0);
+    expect(await screen.findAllByText(fullText('Morning Rehearsal'))).toHaveLength(2);
+    expect(get).toHaveBeenCalledWith('/search', {
+      params: { query: { q: 'rehearsal' } },
+      signal: expect.any(AbortSignal),
+    });
   });
 
-  // Search runs over the loaded window only; "no results" alone claims the
-  // event does not exist anywhere.
-  it('says which months an empty search covered', () => {
-    calendarState.events = [event('e1', 'cal-1', 'Lunch')];
+  it('does not ask the server for a blank query', () => {
+    uiState.searchQuery = '   ';
+
+    render(<SearchPanel />);
+
+    expect(screen.getAllByText('search.searchEvents').length).toBeGreaterThan(0);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('says so when nothing matches', async () => {
+    serve([]);
     uiState.searchQuery = 'dentist';
 
     render(<SearchPanel />);
 
-    expect(screen.getAllByText('search.noResults July 2026..September 2026')).toHaveLength(2);
+    expect(await screen.findAllByText('search.noResults')).toHaveLength(2);
   });
 
-  it('leaves out events from a calendar the reader has switched off', () => {
-    calendarState.events = [
-      event('e1', 'cal-1', 'Rehearsal at home'),
-      event('e2', 'cal-2', 'Rehearsal at work'),
-    ];
-    calendarState.activeCalendarIds = ['cal-1'];
+  it('opens the matched event on its day and closes the panel', async () => {
+    serve([event('e1', 'cal-1', 'Morning Rehearsal')]);
+    uiState.searchQuery = 'rehearsal';
+
+    render(<SearchPanel />);
+    const [first] = await screen.findAllByText(fullText('Morning Rehearsal'));
+    if (!first) throw new Error('no result');
+    fireEvent.click(first);
+
+    expect(uiState.setSelectedDate.mock.calls[0]?.[0]?.toISODate()).toBe('2026-08-05');
+    expect(uiState.setCurrentMonth.mock.calls[0]?.[0]?.toISODate()).toBe('2026-08-01');
+    expect(uiState.toggleSearch).toHaveBeenCalledTimes(1);
+    expect(uiState.openEventModal).toHaveBeenCalledWith('e1');
+  });
+
+  // A series is found as its next occurrence, whose id names the occurrence.
+  it('opens the occurrence of a series by its own id', async () => {
+    serve([
+      {
+        ...event('master_2026-08-05', 'cal-1', 'Standup'),
+        isRecurrence: true,
+        recurrenceDate: '2026-08-05',
+      },
+    ]);
+    uiState.searchQuery = 'standup';
+
+    render(<SearchPanel />);
+    const [first] = await screen.findAllByText(fullText('Standup'));
+    if (!first) throw new Error('no result');
+    fireEvent.click(first);
+
+    expect(uiState.openEventModal).toHaveBeenCalledWith('master_2026-08-05');
+  });
+
+  it('says when there are more matches than were returned', async () => {
+    serve([event('e1', 'cal-1', 'Rehearsal')], true);
     uiState.searchQuery = 'rehearsal';
 
     render(<SearchPanel />);
 
-    expect(screen.getAllByText(fullText('Rehearsal at home'))).toHaveLength(2);
-    expect(screen.queryAllByText('Rehearsal at work')).toHaveLength(0);
+    expect(await screen.findAllByText('search.hasMore')).toHaveLength(2);
+  });
+
+  it('does not claim more matches when the server says there are none', async () => {
+    serve([event('e1', 'cal-1', 'Rehearsal')], false);
+    uiState.searchQuery = 'rehearsal';
+
+    render(<SearchPanel />);
+    await screen.findAllByText(fullText('Rehearsal'));
+
+    expect(screen.queryAllByText('search.hasMore')).toHaveLength(0);
+  });
+
+  it('shows the too-broad message for a query that matches too much', async () => {
+    get.mockRejectedValue(new ApiError(422, 'too broad', 'SEARCH.TOO_BROAD'));
+    uiState.searchQuery = 'a';
+
+    render(<SearchPanel />);
+
+    expect(await screen.findAllByRole('alert')).toHaveLength(2);
+    expect(screen.getAllByText('Too many matches. Add a keyword to narrow it down')).toHaveLength(
+      2,
+    );
+    expect(screen.queryAllByText('search.noResults')).toHaveLength(0);
+  });
+
+  it('shows the server reason when a query is refused for its length', async () => {
+    get.mockRejectedValue(new ApiError(422, 'q must be 1 to 100 characters', 'REQUEST.INVALID'));
+    uiState.searchQuery = 'x'.repeat(101);
+
+    render(<SearchPanel />);
+
+    expect(await screen.findAllByRole('alert')).toHaveLength(2);
+    expect(screen.queryAllByText('search.noResults')).toHaveLength(0);
   });
 });
 
 describe('SearchPanel results', () => {
-  it('marks the part of a title the query matched', () => {
-    calendarState.events = [event('e1', 'cal-1', 'Morning Rehearsal')];
+  it('marks the part of a title the query matched', async () => {
+    serve([event('e1', 'cal-1', 'Morning Rehearsal')]);
     uiState.searchQuery = 'rehe';
 
     render(<SearchPanel />);
 
-    const marks = screen.getAllByText('Rehe', { selector: 'mark' });
+    const marks = await screen.findAllByText('Rehe', { selector: 'mark' });
     expect(marks).toHaveLength(2);
   });
 
-  it('walks the results with the arrow keys and opens the top one on Enter', () => {
-    calendarState.events = [
-      event('e1', 'cal-1', 'Rehearsal A'),
-      event('e2', 'cal-1', 'Rehearsal B'),
-    ];
+  it('walks the results with the arrow keys and opens the top one on Enter', async () => {
+    serve([event('e1', 'cal-1', 'Rehearsal A'), event('e2', 'cal-1', 'Rehearsal B')]);
     uiState.searchQuery = 'rehearsal';
     const { container } = render(<SearchPanel />);
+    await screen.findAllByText(fullText('Rehearsal A'));
     const dropdown = container.querySelector('.modal-panel') as HTMLElement;
     const box = dropdown.querySelector('input') as HTMLInputElement;
     const rows = dropdown.querySelectorAll<HTMLElement>('[data-search-result]');
@@ -280,22 +361,24 @@ describe('SearchPanel dates', () => {
     uiState.timezone = 'Asia/Tokyo';
   });
 
-  it('names and jumps to an all-day event on its own date in any viewer zone', () => {
+  it('names and jumps to an all-day event on its own date in any viewer zone', async () => {
     uiState.timezone = 'America/New_York';
-    calendarState.events = [
+    serve([
       {
         ...event('e1', 'cal-1', 'Birthday'),
         allDay: true,
-        startAt: '2026-08-05T00:00:00+09:00',
-        endAt: '2026-08-06T00:00:00+09:00',
+        startAt: '2026-08-05T00:00:00Z',
+        endAt: '2026-08-06T00:00:00Z',
+        startDate: '2026-08-05',
+        endDate: '2026-08-06',
         timezone: 'Asia/Tokyo',
       },
-    ];
+    ]);
     uiState.searchQuery = 'birthday';
 
     render(<SearchPanel />);
 
-    expect(screen.getAllByText('2026/08/05 (Wed)')).toHaveLength(2);
+    expect(await screen.findAllByText('2026/08/05 (Wed)')).toHaveLength(2);
 
     const [first] = screen.getAllByText('Birthday');
     if (!first) throw new Error('no result');
@@ -308,29 +391,27 @@ describe('SearchPanel dates', () => {
     expect(uiState.openEventModal).toHaveBeenCalledWith('e1');
   });
 
-  it('keeps a timed event on the viewer clock', () => {
+  it('keeps a timed event on the viewer clock', async () => {
     uiState.timezone = 'America/New_York';
-    calendarState.events = [event('e1', 'cal-1', 'Call')];
+    serve([event('e1', 'cal-1', 'Call')]);
     uiState.searchQuery = 'call';
 
     render(<SearchPanel />);
 
     // 10:00 in Tokyo is 21:00 the previous evening in New York.
-    expect(screen.getAllByText('2026/08/04 (Tue) 21:00 - 22:00')).toHaveLength(2);
+    expect(await screen.findAllByText('2026/08/04 (Tue) 21:00 - 22:00')).toHaveLength(2);
   });
 });
 
 describe('SearchPanel availability states', () => {
-  it('shows the showAs and flexibility labels on a result', () => {
-    calendarState.events = [
-      { ...event('e1', 'cal-1', 'Rehearsal'), showAs: 'free', flexibility: 'negotiable' },
-    ];
+  it('shows the showAs and flexibility labels on a result', async () => {
+    serve([{ ...event('e1', 'cal-1', 'Rehearsal'), showAs: 'free', flexibility: 'negotiable' }]);
     uiState.searchQuery = 'rehearsal';
 
     render(<SearchPanel />);
 
     expect(
-      screen.getAllByText('event.showAsFree · event.flexibilityShort.negotiable'),
+      await screen.findAllByText('event.showAsFree · event.flexibilityShort.negotiable'),
     ).toHaveLength(2);
   });
 });

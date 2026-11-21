@@ -1,4 +1,5 @@
-import { api } from '@/lib/api';
+import type { components } from '@/lib/api-schema';
+import { client } from '@/lib/client';
 import type { CalendarEvent } from '@/types/calendar';
 
 export type PollAnswer = 'yes' | 'maybe' | 'no';
@@ -32,14 +33,12 @@ export interface PollResponse {
 
 export interface SchedulePoll {
   id: string;
+  /** Sent as If-Match on every write to the poll. */
+  etag: string;
   calendarId: string;
   title: string;
   timezone: string;
   status: PollStatus;
-  version: number;
-  reviewVersion: number;
-  /** The caller's own answer version; present only for recipients. */
-  answerVersion?: number;
   canManage: boolean;
   canTakeOver?: boolean;
   canRespond: boolean;
@@ -52,6 +51,12 @@ export interface SchedulePoll {
   memberCount: number;
   confirmedEventId?: string;
   selectedSlotId?: string;
+}
+
+/** The caller's own answers with the etag that PUT .../response must send. */
+export interface PollMyResponse {
+  etag: string;
+  answers: PollAnswerEntry[];
 }
 
 export interface SchedulePollAction {
@@ -87,106 +92,175 @@ export interface SchedulePollCreateInput {
   slots: Array<{ startAt: string; endAt: string }>;
 }
 
-const calendarPollsPath = (calendarId: string) =>
-  `/calendars/${encodeURIComponent(calendarId)}/schedule-polls`;
-const pollPath = (calendarId: string, pollId: string) =>
-  `${calendarPollsPath(calendarId)}/${encodeURIComponent(pollId)}`;
+type PollWire = Omit<components['schemas']['PollDetailResponse'], '$schema'>;
+
+/** Collapses the wire's nullable lists into the arrays the UI iterates. */
+function toPoll(wire: PollWire): SchedulePoll {
+  const { members, myAnswers, responses, slots, ...rest } = wire;
+  return {
+    ...rest,
+    slots: slots ?? [],
+    myAnswers: myAnswers ?? [],
+    ...(members ? { members } : {}),
+    ...(responses
+      ? { responses: responses.map((r) => ({ memberId: r.memberId, answers: r.answers ?? [] })) }
+      : {}),
+  };
+}
+
+function present<T>(data: T | undefined): T {
+  if (data === undefined) throw new Error('Empty response body');
+  return data;
+}
+
+/** Leaves `signal` out when absent, as exactOptionalPropertyTypes requires. */
+const withSignal = (signal?: AbortSignal) => (signal ? { signal } : {});
+
+const pathOf = (calendarId: string, pollId: string) => ({ calendarId, pollId });
 
 export const schedulePollApi = {
   async actions(signal?: AbortSignal): Promise<SchedulePollAction[]> {
-    return api.get<SchedulePollAction[]>('/me/schedule-poll-actions', false, signal);
+    const { data } = await client.GET('/user/schedule-poll-actions', { ...withSignal(signal) });
+    return present(data) ?? [];
   },
 
   async list(calendarId: string, signal?: AbortSignal): Promise<SchedulePoll[]> {
-    return api.get<SchedulePoll[]>(calendarPollsPath(calendarId), false, signal);
+    const { data } = await client.GET('/calendars/{calendarId}/schedule-polls', {
+      params: { path: { calendarId } },
+      ...withSignal(signal),
+    });
+    return (present(data) ?? []).map(toPoll);
   },
 
-  get(calendarId: string, pollId: string, signal?: AbortSignal): Promise<SchedulePoll> {
-    return api.get<SchedulePoll>(pollPath(calendarId, pollId), false, signal);
+  async get(calendarId: string, pollId: string, signal?: AbortSignal): Promise<SchedulePoll> {
+    const { data } = await client.GET('/calendars/{calendarId}/schedule-polls/{pollId}', {
+      params: { path: pathOf(calendarId, pollId) },
+      ...withSignal(signal),
+    });
+    return toPoll(present(data));
   },
 
-  availability(
+  async getResponse(
+    calendarId: string,
+    pollId: string,
+    signal?: AbortSignal,
+  ): Promise<PollMyResponse> {
+    const { data } = await client.GET('/calendars/{calendarId}/schedule-polls/{pollId}/response', {
+      params: { path: pathOf(calendarId, pollId) },
+      ...withSignal(signal),
+    });
+    const body = present(data);
+    return { etag: body.etag, answers: body.answers ?? [] };
+  },
+
+  async availability(
     calendarId: string,
     input: SchedulePollAvailabilityInput,
     signal?: AbortSignal,
   ): Promise<SchedulePollCandidate[]> {
-    return api.post<SchedulePollCandidate[]>(
-      `${calendarPollsPath(calendarId)}/availability`,
-      input,
-      signal,
-    );
+    const { data } = await client.POST('/calendars/{calendarId}/schedule-polls/availability', {
+      params: { path: { calendarId } },
+      body: input,
+      ...withSignal(signal),
+    });
+    return present(data) ?? [];
   },
 
-  create(calendarId: string, input: SchedulePollCreateInput): Promise<SchedulePoll> {
-    return api.post<SchedulePoll>(calendarPollsPath(calendarId), input);
+  async create(calendarId: string, input: SchedulePollCreateInput): Promise<SchedulePoll> {
+    const { data } = await client.POST('/calendars/{calendarId}/schedule-polls', {
+      params: { path: { calendarId } },
+      body: input,
+    });
+    return toPoll(present(data));
   },
 
-  update(
+  async update(
     calendarId: string,
     pollId: string,
+    etag: string,
     input: {
-      version: number;
       title?: string;
       memberIds?: string[];
       slots?: Array<{ id?: string; startAt: string; endAt: string }>;
       takeOver?: boolean;
     },
   ): Promise<SchedulePoll> {
-    return api.patch<SchedulePoll>(pollPath(calendarId, pollId), input);
+    const { data } = await client.PATCH('/calendars/{calendarId}/schedule-polls/{pollId}', {
+      params: { path: pathOf(calendarId, pollId), header: { 'If-Match': etag } },
+      body: input,
+    });
+    return toPoll(present(data));
   },
 
-  refresh(calendarId: string, pollId: string): Promise<SchedulePoll> {
-    return api.post<SchedulePoll>(`${pollPath(calendarId, pollId)}/refresh-availability`);
+  async refresh(calendarId: string, pollId: string): Promise<SchedulePoll> {
+    const { data } = await client.POST(
+      '/calendars/{calendarId}/schedule-polls/{pollId}/refresh-availability',
+      { params: { path: pathOf(calendarId, pollId) } },
+    );
+    return toPoll(present(data));
   },
 
-  respond(
+  async respond(
     calendarId: string,
     pollId: string,
-    input: { version: number; answerVersion: number; answers: PollAnswerEntry[] },
-  ): Promise<SchedulePoll> {
-    return api.put<SchedulePoll>(`${pollPath(calendarId, pollId)}/response`, input);
+    answerEtag: string,
+    answers: PollAnswerEntry[],
+  ): Promise<PollMyResponse> {
+    const { data } = await client.PUT('/calendars/{calendarId}/schedule-polls/{pollId}/response', {
+      params: { path: pathOf(calendarId, pollId), header: { 'If-Match': answerEtag } },
+      body: { answers },
+    });
+    const body = present(data);
+    return { etag: body.etag, answers: body.answers ?? [] };
   },
 
-  finalize(
+  async finalize(
     calendarId: string,
     pollId: string,
-    input: {
-      version: number;
-      reviewVersion: number;
-      slotId: string;
-      acknowledged: boolean;
-      ownerId?: string;
-    },
+    etag: string,
+    input: { slotId: string; acknowledged: boolean; ownerId?: string },
   ): Promise<SchedulePoll> {
-    return api.post<SchedulePoll>(`${pollPath(calendarId, pollId)}/finalize`, input);
+    const { data } = await client.POST('/calendars/{calendarId}/schedule-polls/{pollId}/finalize', {
+      params: { path: pathOf(calendarId, pollId), header: { 'If-Match': etag } },
+      body: input,
+    });
+    return toPoll(present(data));
   },
 
-  cancel(calendarId: string, pollId: string, version: number): Promise<SchedulePoll> {
-    return api.post<SchedulePoll>(`${pollPath(calendarId, pollId)}/cancel`, { version });
+  async cancel(calendarId: string, pollId: string, etag: string): Promise<SchedulePoll> {
+    const { data } = await client.POST('/calendars/{calendarId}/schedule-polls/{pollId}/cancel', {
+      params: { path: pathOf(calendarId, pollId), header: { 'If-Match': etag } },
+    });
+    return toPoll(present(data));
   },
 
   async getAvailabilitySharing(calendarId: string, signal?: AbortSignal): Promise<boolean> {
-    const result = await api.get<{ enabled: boolean }>(
-      `${calendarPollsPath(calendarId)}/availability-sharing`,
-      false,
-      signal,
+    const { data } = await client.GET(
+      '/calendars/{calendarId}/schedule-polls/availability-sharing',
+      {
+        params: { path: { calendarId } },
+        ...withSignal(signal),
+      },
     );
-    return result.enabled;
+    return present(data).enabled;
   },
 
   async setAvailabilitySharing(calendarId: string, enabled: boolean): Promise<boolean> {
-    const result = await api.put<{ enabled: boolean }>(
-      `${calendarPollsPath(calendarId)}/availability-sharing`,
-      { enabled },
+    const { data } = await client.PUT(
+      '/calendars/{calendarId}/schedule-polls/availability-sharing',
+      {
+        params: { path: { calendarId } },
+        body: { enabled },
+      },
     );
-    return result.enabled;
+    return present(data).enabled;
   },
 
-  event(calendarId: string, eventId: string, signal?: AbortSignal): Promise<CalendarEvent> {
-    return api.get<CalendarEvent>(
-      `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-      false,
-      signal,
-    );
+  async event(calendarId: string, eventId: string, signal?: AbortSignal): Promise<CalendarEvent> {
+    const { data } = await client.GET('/calendars/{calendarId}/events/{eventId}', {
+      params: { path: { calendarId, eventId } },
+      ...withSignal(signal),
+    });
+    return present(data) as CalendarEvent;
   },
 };

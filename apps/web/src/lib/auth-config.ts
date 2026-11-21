@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 
 export type OAuthProvider = 'google' | 'line';
 
@@ -8,6 +9,9 @@ interface AuthConfigResponse {
   passwordEnabled: boolean;
   mailEnabled: boolean;
 }
+
+/** The providers this build has a button for; the server may list others. */
+const KNOWN_PROVIDERS: readonly string[] = ['google', 'line'];
 
 type Snapshot =
   | { status: 'loading' }
@@ -45,12 +49,15 @@ function load(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     try {
-      const r = await api.get<AuthConfigResponse>('/auth/oauth/providers', true);
+      const { data } = await client.GET('/auth/oauth/providers');
+      if (!data) throw new Error('Empty response');
       publish({
         status: 'ready',
-        providers: r.providers,
-        passwordEnabled: r.passwordEnabled,
-        mailEnabled: r.mailEnabled,
+        providers: (data.providers ?? []).filter((p): p is OAuthProvider =>
+          KNOWN_PROVIDERS.includes(p),
+        ),
+        passwordEnabled: data.passwordEnabled,
+        mailEnabled: data.mailEnabled,
       });
     } catch (e) {
       publish({ status: 'error', detail: errorMessage(e) });

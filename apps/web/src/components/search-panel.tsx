@@ -1,18 +1,11 @@
-import { useMemo } from 'react';
 import { OwnerMark } from '@/components/owner-mark';
 import { Highlight, handleResultListKeys } from '@/components/search-results';
 import { useT } from '@/i18n';
 import { isGroupEvent } from '@/lib/event-group';
 import { flexibilityLabelKey } from '@/lib/event-style';
 import { showAsLabelKey } from '@/lib/permissions';
-import {
-  filterEventsForSearch,
-  searchedMonths,
-  searchResultDay,
-  searchResultLabel,
-} from '@/lib/search';
+import { searchResultDay, searchResultLabel, useEventSearch } from '@/lib/search';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -20,8 +13,6 @@ export function SearchPanel() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
-  const calendarView = useUiStore((s) => s.calendarView);
-  const currentMonth = useUiStore((s) => s.currentMonth);
   const showSearch = useUiStore((s) => s.showSearch);
   const searchQuery = useUiStore((s) => s.searchQuery);
   const setSearchQuery = useUiStore((s) => s.setSearchQuery);
@@ -29,17 +20,13 @@ export function SearchPanel() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const openEventModal = useUiStore((s) => s.openEventModal);
-  const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   // Both layouts are in the document at once, so the trap is anchored above
   // them: it walks whichever one CSS has painted, and the search box of that
   // layout is the first focusable inside it.
   const panelRef = useModalA11y<HTMLDivElement>(showSearch, toggleSearch);
 
-  const filtered = useMemo(
-    () => filterEventsForSearch(events, activeCalendarIds, searchQuery),
-    [searchQuery, events, activeCalendarIds],
-  );
+  const search = useEventSearch(showSearch ? searchQuery : '');
+  const results = search.status === 'done' ? search.items : [];
 
   const handleSelect = (evt: CalendarEvent) => {
     const day = searchResultDay(evt, timezone);
@@ -70,7 +57,21 @@ export function SearchPanel() {
           </svg>
           <span className="text-callout">{t('search.searchEvents')}</span>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : search.status === 'loading' ? (
+        <div
+          role="status"
+          className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]"
+        >
+          {t('common.loading')}
+        </div>
+      ) : search.status === 'error' ? (
+        <div
+          role="alert"
+          className="reveal-in px-8 py-16 text-center text-callout text-balance text-[var(--color-text-tertiary)]"
+        >
+          {search.message}
+        </div>
+      ) : results.length === 0 ? (
         <div className="reveal-in flex flex-col items-center justify-center gap-2 px-8 py-16 text-center text-[var(--color-text-tertiary)]">
           <svg
             width="24"
@@ -87,13 +88,11 @@ export function SearchPanel() {
             <line x1="16.65" y1="16.65" x2="21" y2="21" />
             <line x1="8.5" y1="11" x2="13.5" y2="11" />
           </svg>
-          <span className="text-callout text-balance">
-            {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
-          </span>
+          <span className="text-callout text-balance">{t('search.noResults')}</span>
         </div>
       ) : (
         <div className="py-1">
-          {filtered.map((evt) => {
+          {results.map((evt) => {
             const dateLabel = searchResultLabel(evt, timezone, locale);
             const flexKey = flexibilityLabelKey(evt.flexibility, { short: true });
             const state = [
@@ -139,6 +138,11 @@ export function SearchPanel() {
               </button>
             );
           })}
+          {search.status === 'done' && search.hasMore && (
+            <p className="px-7 py-3 text-body text-[var(--color-text-tertiary)]">
+              {t('search.hasMore')}
+            </p>
+          )}
         </div>
       )}
     </div>

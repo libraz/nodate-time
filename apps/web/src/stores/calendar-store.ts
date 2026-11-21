@@ -1,9 +1,14 @@
 import { create } from 'zustand';
-import { api, errorMessage, isAbortError } from '@/lib/api';
+import { errorMessage, isAbortError } from '@/lib/api';
+import type { components } from '@/lib/api-schema';
+import { client } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
+import { type EventScope, scopeEtag, seriesId } from '@/lib/event-move';
+import { offerOccurrenceRestore, offerRestore } from '@/lib/event-restore';
 import { resizeImageForCover } from '@/lib/image-resize';
 import { loadJson, saveJson } from '@/lib/storage';
 import { toast } from '@/lib/toast';
+import { present, uploadCalendarCover as uploadCover } from '@/lib/upload';
 import { useUiStore } from '@/stores/ui-store';
 import type {
   Calendar,
@@ -17,12 +22,18 @@ import type {
   Visibility,
 } from '@/types/calendar';
 
-/** Request body shared by event create and update. */
+/**
+ * Request body for an event create. An all-day event carries `startDate` and
+ * `endDate` (`YYYY-MM-DD`, end exclusive) and a timed one `startAt` and
+ * `endAt`; sending the other pair is refused.
+ */
 export interface EventInput {
   title: string;
   allDay: boolean;
-  startAt: string;
-  endAt: string;
+  startAt?: string | undefined;
+  endAt?: string | undefined;
+  startDate?: string | undefined;
+  endDate?: string | undefined;
   timezone?: string | undefined;
   location?: string | undefined;
   memo?: string | undefined;
@@ -31,19 +42,48 @@ export interface EventInput {
   participantIds?: string[] | undefined;
   ownerId?: string | null | undefined;
   recurrenceRule?: RecurrenceRule | null | undefined;
-  // showAs, flexibility and visibility are omitted-means-unchanged on the
-  // wire. They have to be listed here all the same: a caller that carries
-  // them forward -- a drag, say -- must be able to send them back, or the
-  // server's defaults would silently overwrite what the user chose.
   showAs?: ShowAs | undefined;
   flexibility?: Flexibility | undefined;
   visibility?: Visibility | undefined;
 }
 
+/**
+ * A partial update. An omitted field keeps its stored value, so a caller sends
+ * only what it changes; a drag sends the time fields and nothing else.
+ */
+export type EventPatch = Partial<EventInput>;
+
+/** A memo as the store holds it: the listing it came from is part of its identity. */
+export type StoredMemo = Memo & { calendarId: string };
+
+type Schemas = components['schemas'];
+
+/** The create body: the generated schema has no null for these, an omission says the same. */
+function createBody(evt: EventInput): Schemas['CreateEventInputBody'] {
+  const { ownerId, notificationOffset, recurrenceRule, ...rest } = evt;
+  return {
+    ...rest,
+    ...(ownerId ? { ownerId } : {}),
+    ...(notificationOffset != null ? { notificationOffset } : {}),
+    // The schema types the rule as an opaque object.
+    ...(recurrenceRule ? { recurrenceRule } : {}),
+  } as Schemas['CreateEventInputBody'];
+}
+
+/** The patch body, with the rule typed as the opaque object the schema declares. */
+function patchBody(evt: EventPatch): Schemas['PatchEventInputBody'] {
+  return evt as unknown as Schemas['PatchEventInputBody'];
+}
+
+/** A listing item as the store holds it. */
+function toEvent(item: Schemas['EventResponse'], calendarId: string): CalendarEvent {
+  return { ...(item as unknown as CalendarEvent), calendarId };
+}
+
 interface CalendarState {
   calendars: Calendar[];
   events: CalendarEvent[];
-  memos: Memo[];
+  memos: StoredMemo[];
   membersMap: Record<string, Member[]>;
   labels: Label[];
   activeCalendarIds: string[];
@@ -61,8 +101,8 @@ interface CalendarState {
    */
   memberErrors: Record<string, string>;
   /**
-   * Calendars whose last event listing stopped at the server's cap. The grid
-   * would otherwise read the missing tail of the window as free time.
+   * Calendars whose last event listing had more to give than it returned. The
+   * grid would otherwise read the missing tail of the window as free time.
    */
   truncatedCalendarIds: string[];
   /** True while an event listing is in flight and no newer one has replaced it. */
@@ -111,20 +151,25 @@ interface CalendarState {
   updateMemberColor: (calendarId: string, memberId: string, color: string) => Promise<void>;
 
   addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
+  /**
+   * Applies a partial update. `etag` is the version of the copy the edit
+   * started from -- the listing's `etag`, or `seriesEtag` for a scope over the
+   * whole series -- so a save built on a copy someone else has since replaced
+   * is refused (a stale error) instead of overwriting them.
+   */
   updateEvent: (
     calendarId: string,
     eventId: string,
-    evt: EventInput,
-    scope?: 'this' | 'all',
-    /**
-     * The revision this edit started from, as the server reported it. Sent as
-     * If-Match so a save built on a copy someone else has since replaced is
-     * refused instead of overwriting them. Omitted where there is nothing to
-     * be stale about -- a caller that has no copy to compare against.
-     */
-    revision?: string | null,
+    evt: EventPatch,
+    scope?: EventScope,
+    etag?: string,
   ) => Promise<void>;
-  deleteEvent: (calendarId: string, eventId: string, scope?: 'this' | 'all') => Promise<void>;
+  /**
+   * Deletes the event, or one occurrence, or the occurrences from this one on.
+   * The version checked is the one the listing carried. A delete that can be
+   * undone offers the undo in a toast; `following` cannot.
+   */
+  deleteEvent: (event: CalendarEvent, scope?: EventScope) => Promise<void>;
 
   addMemo: (calendarId: string, memo: { title: string; body: string }) => Promise<void>;
   updateMemo: (
@@ -166,12 +211,6 @@ function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
   };
 }
 
-/** One page of a paged list endpoint. */
-interface MemoPage {
-  items: Memo[];
-  nextCursor?: string;
-}
-
 /**
  * How many memo pages one calendar is walked for. A backstop, not a limit
  * anyone should reach: at the server's default page size this is far more
@@ -189,6 +228,21 @@ function mergeCalendarResponse(current: Calendar, updated: Calendar): Calendar {
   const merged = { ...current, ...updated };
   if (!updated.coverImageUrl) delete merged.coverImageUrl;
   return merged;
+}
+
+/** Patches a memo against the version the store holds for it. */
+async function patchMemo(
+  memos: StoredMemo[],
+  calendarId: string,
+  memoId: string,
+  body: Schemas['UpdateMemoInputBody'],
+): Promise<Memo> {
+  const etag = memos.find((m) => m.id === memoId)?.etag ?? '';
+  const { data } = await client.PATCH('/calendars/{calendarId}/memos/{memoId}', {
+    params: { path: { calendarId, memoId }, header: { 'If-Match': etag } },
+    body,
+  });
+  return present(data);
 }
 
 export const useCalendarStore = create<CalendarState>((set, get) => ({
@@ -214,7 +268,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     try {
       let cals: Calendar[];
       try {
-        cals = await api.get<Calendar[]>('/calendars');
+        cals = present((await client.GET('/calendars')).data) ?? [];
       } catch (e) {
         if (
           requestGeneration === calendarRequestGeneration &&
@@ -295,17 +349,17 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         // The dates are days, and which instants a day spans depends on where
         // it is read. Saying so keeps the grid and the server agreeing on
         // which month an early-morning event belongs to.
-        const tz = encodeURIComponent(useUiStore.getState().timezone);
-        const { data: evts, truncated: cut } = await api.getListing<CalendarEvent[]>(
-          `/calendars/${cal.id}/events?start=${start}&end=${end}&tz=${tz}`,
-          false,
-          signal,
-        );
+        const { data } = await client.GET('/calendars/{calendarId}/events', {
+          params: {
+            path: { calendarId: cal.id },
+            query: { start, end, tz: useUiStore.getState().timezone },
+          },
+          ...(signal ? { signal } : {}),
+        });
+        const page = present(data);
         answered.add(cal.id);
-        if (cut) truncated.add(cal.id);
-        for (const evt of evts) {
-          allEvents.push({ ...evt, calendarId: cal.id });
-        }
+        if (page.hasMore) truncated.add(cal.id);
+        for (const evt of page.items ?? []) allEvents.push(toEvent(evt, cal.id));
       }),
     );
     if (
@@ -340,7 +394,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const currentAccountGeneration = accountGeneration;
     const { calendars } = get();
     set({ memosLoading: true });
-    const allMemos: Memo[] = [];
+    const allMemos: StoredMemo[] = [];
     // As in fetchEvents: a calendar that did not answer keeps what it had.
     const answered = new Set<string>();
     const results = await Promise.allSettled(
@@ -349,11 +403,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         // arranged list, so the pages are walked to the end rather than
         // stopping at the first -- the bound is there to keep one response
         // from being unbounded, not to hide the rest.
-        const collected: Memo[] = [];
+        const collected: StoredMemo[] = [];
         let cursor = '';
         for (let page = 0; page < maxMemoPages; page++) {
-          const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-          const res = await api.get<MemoPage>(`/calendars/${cal.id}/memos${query}`, false, signal);
+          const { data } = await client.GET('/calendars/{calendarId}/memos', {
+            params: { path: { calendarId: cal.id }, ...(cursor ? { query: { cursor } } : {}) },
+            ...(signal ? { signal } : {}),
+          });
+          const res = present(data);
           for (const m of res.items ?? []) {
             collected.push({ ...m, calendarId: cal.id });
           }
@@ -388,7 +445,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const currentAccountGeneration = accountGeneration;
     let members: Member[];
     try {
-      members = await api.get<Member[]>(`/calendars/${calendarId}/members`);
+      const { data } = await client.GET('/calendars/{calendarId}/members', {
+        params: { path: { calendarId } },
+      });
+      members = present(data) ?? [];
     } catch (e) {
       if (currentAccountGeneration !== accountGeneration) return;
       set((s) => ({
@@ -415,7 +475,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async fetchLabels(calendarId) {
     const currentAccountGeneration = accountGeneration;
-    const labels = await api.get<Label[]>(`/calendars/${calendarId}/labels`);
+    const { data } = await client.GET('/calendars/{calendarId}/labels', {
+      params: { path: { calendarId } },
+    });
+    const labels: Label[] = present(data) ?? [];
     if (currentAccountGeneration !== accountGeneration) return;
     set({ labels });
   },
@@ -439,7 +502,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async addCalendar(cal) {
     const currentAccountGeneration = accountGeneration;
-    const newCal = await api.post<Calendar>('/calendars', cal);
+    const newCal = present((await client.POST('/calendars', { body: cal })).data);
     if (currentAccountGeneration !== accountGeneration) return null;
     set((s) => {
       const ids = [...s.activeCalendarIds, newCal.id];
@@ -455,7 +518,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async updateCalendar(id, patch) {
     const currentAccountGeneration = accountGeneration;
-    const updated = await api.put<Calendar>(`/calendars/${id}`, patch);
+    const etag = get().calendars.find((c) => c.id === id)?.etag ?? '';
+    const { data } = await client.PATCH('/calendars/{calendarId}', {
+      params: { path: { calendarId: id }, header: { 'If-Match': etag } },
+      body: patch,
+    });
+    const updated = present(data);
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
@@ -465,8 +533,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   async uploadCalendarCover(id, file) {
     const currentAccountGeneration = accountGeneration;
     const resized = await resizeImageForCover(file);
-    const body = new Blob([resized.bytes], { type: resized.contentType });
-    const updated = await api.putBlob<Calendar>(`/calendars/${id}/cover`, body);
+    const updated = await uploadCover(id, resized.bytes, resized.contentType);
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
@@ -475,23 +542,34 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async deleteCalendarCover(id) {
     const currentAccountGeneration = accountGeneration;
-    const updated = await api.delete<Calendar>(`/calendars/${id}/cover`);
+    await client.DELETE('/calendars/{calendarId}/cover', {
+      params: { path: { calendarId: id } },
+    });
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
-      calendars: s.calendars.map((c) => (c.id === id ? mergeCalendarResponse(c, updated) : c)),
+      calendars: s.calendars.map((c) => {
+        if (c.id !== id) return c;
+        const { coverImageUrl: _removed, ...rest } = c;
+        return rest;
+      }),
     }));
   },
 
   async deleteCalendar(id) {
     const currentAccountGeneration = accountGeneration;
-    await api.delete(`/calendars/${id}`);
+    const etag = get().calendars.find((c) => c.id === id)?.etag ?? '';
+    await client.DELETE('/calendars/{calendarId}', {
+      params: { path: { calendarId: id }, header: { 'If-Match': etag } },
+    });
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => forgetCalendar(s, id));
   },
 
   async leaveCalendar(calendarId, memberId) {
     const currentAccountGeneration = accountGeneration;
-    await api.delete(`/calendars/${calendarId}/members/${memberId}`);
+    await client.DELETE('/calendars/{calendarId}/members/{userId}', {
+      params: { path: { calendarId, userId: memberId } },
+    });
     if (currentAccountGeneration !== accountGeneration) return;
     // Everything this calendar contributed goes with the membership. Refetching
     // its members instead -- which is what the generic remove path does -- asks
@@ -502,9 +580,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async updateMemberColor(calendarId, memberId, color) {
     const currentAccountGeneration = accountGeneration;
-    const updated = await api.put<Member>(`/calendars/${calendarId}/members/${memberId}/color`, {
-      color,
-    });
+    const updated = present(
+      (
+        await client.PUT('/calendars/{calendarId}/members/{userId}/color', {
+          params: { path: { calendarId, userId: memberId } },
+          body: { color },
+        })
+      ).data,
+    );
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       events: s.events.map((e) =>
@@ -521,7 +604,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async addEvent(calendarId, evt) {
     const currentAccountGeneration = accountGeneration;
-    const newEvt = await api.post<CalendarEvent>(`/calendars/${calendarId}/events`, evt);
+    const { data } = await client.POST('/calendars/{calendarId}/events', {
+      params: { path: { calendarId } },
+      body: createBody(evt),
+    });
+    const newEvt = toEvent(present(data), calendarId);
     if (currentAccountGeneration !== accountGeneration) return;
     if (newEvt.recurrenceRule) {
       // The POST returns a single un-expanded master row, so appending it would
@@ -536,17 +623,19 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     }));
   },
 
-  async updateEvent(calendarId, eventId, evt, scope, revision) {
+  async updateEvent(calendarId, eventId, evt, scope, etag) {
     const currentAccountGeneration = accountGeneration;
-    const query = scope ? `?scope=${scope}` : '';
-    // The update replaces every field, so a save from a copy read before
-    // someone else's save erases theirs rather than merging with it. Naming
-    // the copy being replaced turns that into a refusal the user can see.
-    const updated = await api.put<CalendarEvent>(
-      `/calendars/${calendarId}/events/${eventId}${query}`,
-      evt,
-      revision ? { 'If-Match': revision } : undefined,
-    );
+    // Naming the copy being replaced turns a save built on a copy someone
+    // else has since changed into a refusal the user can see.
+    const { data } = await client.PATCH('/calendars/{calendarId}/events/{eventId}', {
+      params: {
+        path: { calendarId, eventId },
+        header: { 'If-Match': etag ?? '' },
+        ...(scope ? { query: { scope } } : {}),
+      },
+      body: patchBody(evt),
+    });
+    const updated = toEvent(present(data), calendarId);
     if (currentAccountGeneration !== accountGeneration) return;
     const wasRecurring = eventId.includes('_') || !!evt.recurrenceRule;
     if (updated.recurrenceRule || wasRecurring) {
@@ -557,16 +646,44 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       await get().fetchEvents(start, end);
     } else {
       set((s) => ({
-        events: s.events.map((e) => (e.id === eventId ? { ...updated, calendarId } : e)),
+        events: s.events.map((e) => (e.id === eventId ? updated : e)),
       }));
     }
   },
 
-  async deleteEvent(calendarId, eventId, scope) {
+  async deleteEvent(event, scope) {
     const currentAccountGeneration = accountGeneration;
-    const query = scope ? `?scope=${scope}` : '';
-    await api.delete(`/calendars/${calendarId}/events/${eventId}${query}`);
+    const { calendarId, id: eventId } = event;
+    await client.DELETE('/calendars/{calendarId}/events/{eventId}', {
+      params: {
+        path: { calendarId, eventId },
+        header: { 'If-Match': scopeEtag(event, scope) },
+        ...(scope ? { query: { scope } } : {}),
+      },
+    });
     if (currentAccountGeneration !== accountGeneration) return;
+    const reload = () => {
+      const { start, end } = get().visibleRange();
+      void get().fetchEvents(start, end);
+    };
+    const date = event.recurrenceDate ?? eventId.split('_')[1];
+    if (scope === 'this' && date?.length === 8) {
+      offerOccurrenceRestore({
+        calendarId,
+        title: event.title,
+        seriesId: seriesId(eventId),
+        occurrenceDate: `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`,
+        seriesEtag: event.seriesEtag ?? event.etag,
+        onRestored: reload,
+      });
+    } else if (scope !== 'following') {
+      offerRestore({
+        calendarId,
+        eventId: seriesId(eventId),
+        title: event.title,
+        onRestored: reload,
+      });
+    }
     if (eventId.includes('_')) {
       // Recurring instance: re-fetch the visible range so a single-occurrence
       // delete leaves the rest of the series intact. The answer replaces the
@@ -583,11 +700,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   async addMemo(calendarId, memo) {
     const currentAccountGeneration = accountGeneration;
     const existing = get().memos.filter((m) => m.calendarId === calendarId);
-    const newMemo = await api.post<Memo>(`/calendars/${calendarId}/memos`, {
-      title: memo.title,
-      body: memo.body,
-      sortOrder: existing.length,
+    const { data } = await client.POST('/calendars/{calendarId}/memos', {
+      params: { path: { calendarId } },
+      body: { title: memo.title, body: memo.body, sortOrder: existing.length },
     });
+    const newMemo = present(data);
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: [...s.memos, { ...newMemo, calendarId }],
@@ -599,7 +716,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   // list reorder a memo that someone else had already moved.
   async updateMemo(calendarId, memoId, patch) {
     const currentAccountGeneration = accountGeneration;
-    const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, {
+    const updated = await patchMemo(get().memos, calendarId, memoId, {
       title: patch.title,
       body: patch.body,
       done: patch.done,
@@ -612,7 +729,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async toggleMemo(calendarId, memoId, done) {
     const currentAccountGeneration = accountGeneration;
-    const updated = await api.put<Memo>(`/calendars/${calendarId}/memos/${memoId}`, { done });
+    const updated = await patchMemo(get().memos, calendarId, memoId, { done });
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: s.memos.map((m) => (m.id === memoId ? { ...updated, calendarId } : m)),
@@ -621,7 +738,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async deleteMemo(calendarId, memoId) {
     const currentAccountGeneration = accountGeneration;
-    await api.delete(`/calendars/${calendarId}/memos/${memoId}`);
+    const etag = get().memos.find((m) => m.id === memoId)?.etag ?? '';
+    await client.DELETE('/calendars/{calendarId}/memos/{memoId}', {
+      params: { path: { calendarId, memoId }, header: { 'If-Match': etag } },
+    });
     if (currentAccountGeneration !== accountGeneration) return;
     set((s) => ({
       memos: s.memos.filter((m) => m.id !== memoId),

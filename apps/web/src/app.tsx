@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
 import { FabButton } from '@/components/fab-button';
@@ -16,12 +16,7 @@ import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { fetchWindow } from '@/lib/date-utils';
-import {
-  filterEventsForSearch,
-  searchedMonths,
-  searchResultDay,
-  searchResultLabel,
-} from '@/lib/search';
+import { searchResultDay, searchResultLabel, useEventSearch } from '@/lib/search';
 import { useCalendarShortcuts } from '@/lib/shortcuts';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
@@ -76,8 +71,6 @@ function Deferred({ children }: { children: ReactNode }) {
 function MobileSearchView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
-  const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setMobileTab = useUiStore((s) => s.setMobileTab);
@@ -89,15 +82,10 @@ function MobileSearchView() {
     inputRef.current?.focus();
   }, []);
 
-  const q = query.trim().toLowerCase();
-  const filtered = useMemo(
-    () => filterEventsForSearch(events, activeCalendarIds, query),
-    [query, events, activeCalendarIds],
-  );
+  const search = useEventSearch(query);
+  const results = search.status === 'done' ? search.items : [];
 
   const timezone = useUiStore((s) => s.timezone);
-  const calendarView = useUiStore((s) => s.calendarView);
-  const currentMonth = useUiStore((s) => s.currentMonth);
   const handleSelect = (evt: CalendarEvent) => {
     const day = searchResultDay(evt, timezone);
     setCurrentMonth(day.startOf('month'));
@@ -135,7 +123,7 @@ function MobileSearchView() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {q === '' ? (
+        {query.trim() === '' ? (
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-[var(--color-text-tertiary)]">
             <svg
               width="24"
@@ -151,13 +139,27 @@ function MobileSearchView() {
             </svg>
             <span className="text-callout">{t('search.searchEvents')}</span>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : search.status === 'loading' ? (
+          <div
+            role="status"
+            className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]"
+          >
+            {t('common.loading')}
+          </div>
+        ) : search.status === 'error' ? (
+          <div
+            role="alert"
+            className="px-8 py-16 text-center text-callout text-balance text-[var(--color-text-tertiary)]"
+          >
+            {search.message}
+          </div>
+        ) : results.length === 0 ? (
           <div className="flex items-center justify-center py-16 text-callout text-[var(--color-text-tertiary)]">
-            {t('search.noResults', searchedMonths(calendarView, currentMonth, locale))}
+            {t('search.noResults')}
           </div>
         ) : (
           <div className="py-1">
-            {filtered.map((evt) => {
+            {results.map((evt) => {
               const dateLabel = searchResultLabel(evt, timezone, locale);
               return (
                 <button
@@ -184,6 +186,11 @@ function MobileSearchView() {
                 </button>
               );
             })}
+            {search.status === 'done' && search.hasMore && (
+              <p className="px-4 py-3 text-body text-[var(--color-text-tertiary)]">
+                {t('search.hasMore')}
+              </p>
+            )}
           </div>
         )}
       </div>

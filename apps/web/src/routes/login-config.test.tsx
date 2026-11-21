@@ -26,10 +26,9 @@ vi.mock('@/components/auth-shell', () => ({
   ),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
-  errorMessage: () => 'error',
-}));
+vi.mock('@/lib/api', () => ({ errorMessage: () => 'error' }));
+// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
 
 const authState = {
   isAuthenticated: false,
@@ -44,11 +43,11 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { api } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
+import { client } from '@/lib/client';
 import { Route } from './login';
 
-const apiGet = vi.mocked(api.get);
+const apiGet = vi.mocked(client.GET);
 const Page = (Route as unknown as { options: { component: () => React.ReactNode } }).options
   .component;
 
@@ -67,7 +66,7 @@ afterEach(cleanup);
 
 describe('login page', () => {
   it('passes an authenticated return path to the router with its query intact', async () => {
-    apiGet.mockResolvedValue(config({ providers: [], mailEnabled: false }));
+    apiGet.mockResolvedValue({ data: config({ providers: [], mailEnabled: false }) } as never);
     const redirect = '/schedule-polls/calendar/poll?view=respond';
     search.redirect = redirect;
     authState.isAuthenticated = true;
@@ -86,7 +85,7 @@ describe('login page', () => {
   });
 
   it('shows the form, the forgot-password link and the providers when all are on', async () => {
-    apiGet.mockResolvedValue(config({}));
+    apiGet.mockResolvedValue({ data: config({}) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByText('auth.forgotPassword')).toBeTruthy());
     expect(screen.getByLabelText('auth.email')).toBeTruthy();
@@ -94,14 +93,14 @@ describe('login page', () => {
   });
 
   it('hides the forgot-password link when mail is off', async () => {
-    apiGet.mockResolvedValue(config({ mailEnabled: false }));
+    apiGet.mockResolvedValue({ data: config({ mailEnabled: false }) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByLabelText('auth.email')).toBeTruthy());
     expect(screen.queryByText('auth.forgotPassword')).toBeNull();
   });
 
   it('hides the password form when password sign-in is off', async () => {
-    apiGet.mockResolvedValue(config({ passwordEnabled: false }));
+    apiGet.mockResolvedValue({ data: config({ passwordEnabled: false }) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByText('auth.oauthGoogle')).toBeTruthy());
     expect(screen.queryByLabelText('auth.email')).toBeNull();
@@ -114,7 +113,7 @@ describe('login page', () => {
     await waitFor(() => expect(screen.getByText('error.authConfigUnavailable')).toBeTruthy());
     expect(screen.queryByLabelText('auth.email')).toBeNull();
 
-    apiGet.mockResolvedValue(config({}));
+    apiGet.mockResolvedValue({ data: config({}) } as never);
     fireEvent.click(screen.getByText('error.retry'));
     await waitFor(() => expect(screen.getByLabelText('auth.email')).toBeTruthy());
   });

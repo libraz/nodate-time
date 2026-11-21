@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { makeEvent as makeFullEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 import {
   bucketEventsByDay,
@@ -20,28 +21,11 @@ const ZONE = 'Asia/Tokyo';
 function makeEvent(
   overrides: Partial<CalendarEvent> & { startAt: string; endAt: string },
 ): CalendarEvent {
-  return {
+  return makeFullEvent({
     id: overrides.id ?? Math.random().toString(36).slice(2),
-    calendarId: 'cal',
     title: overrides.title ?? 'Event',
-    allDay: overrides.allDay ?? false,
-    color: '#47B2F7',
-    ownerId: null,
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    location: '',
-    memo: '',
-    url: '',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
-    createdAt: '',
-    updatedAt: '',
     ...overrides,
-  };
+  });
 }
 
 // Share and embed pages place published events with the same helper as the
@@ -63,9 +47,10 @@ describe('eventOccupiesDay for a published event', () => {
 
   it('keeps an all-day event on its own dates', () => {
     const holiday = {
-      startAt: '2026-04-01T00:00:00-05:00',
-      endAt: '2026-04-02T00:00:00-05:00',
-      timezone: 'America/Chicago',
+      startAt: '2026-04-01T00:00:00Z',
+      endAt: '2026-04-02T00:00:00Z',
+      startDate: '2026-04-01',
+      endDate: '2026-04-02',
       allDay: true,
     };
 
@@ -103,8 +88,10 @@ describe('isMultiDay', () => {
   it('is false for a single all-day event (exclusive end)', () => {
     const evt = makeEvent({
       allDay: true,
-      startAt: '2026-04-20T00:00:00+09:00',
-      endAt: '2026-04-21T00:00:00+09:00',
+      startAt: '2026-04-20T00:00:00Z',
+      endAt: '2026-04-21T00:00:00Z',
+      startDate: '2026-04-20',
+      endDate: '2026-04-21',
     });
     expect(isMultiDay(evt, ZONE)).toBe(false);
   });
@@ -112,8 +99,10 @@ describe('isMultiDay', () => {
   it('is true for a two-day all-day event (exclusive end)', () => {
     const evt = makeEvent({
       allDay: true,
-      startAt: '2026-04-20T00:00:00+09:00',
-      endAt: '2026-04-22T00:00:00+09:00',
+      startAt: '2026-04-20T00:00:00Z',
+      endAt: '2026-04-22T00:00:00Z',
+      startDate: '2026-04-20',
+      endDate: '2026-04-22',
     });
     expect(isMultiDay(evt, ZONE)).toBe(true);
   });
@@ -127,8 +116,10 @@ describe('all-day events read in a viewer zone behind the event zone', () => {
   const tokyoBirthday = makeEvent({
     allDay: true,
     timezone: 'Asia/Tokyo',
-    startAt: '2026-08-05T00:00:00+09:00',
-    endAt: '2026-08-06T00:00:00+09:00',
+    startAt: '2026-08-05T00:00:00Z',
+    endAt: '2026-08-06T00:00:00Z',
+    startDate: '2026-08-05',
+    endDate: '2026-08-06',
   });
 
   it('stays a single day', () => {
@@ -187,8 +178,10 @@ describe('layoutWeek', () => {
     });
     const singleAllDay = makeEvent({
       allDay: true,
-      startAt: '2026-04-20T00:00:00+09:00',
-      endAt: '2026-04-21T00:00:00+09:00',
+      startAt: '2026-04-20T00:00:00Z',
+      endAt: '2026-04-21T00:00:00Z',
+      startDate: '2026-04-20',
+      endDate: '2026-04-21',
     });
     expect(layoutWeek(weekStart, [timed, nightToMidnight, singleAllDay], ZONE)).toHaveLength(0);
   });
@@ -459,8 +452,10 @@ describe('bucketEventsByDay', () => {
       makeEvent({
         allDay: true,
         timezone: ZONE,
-        startAt: '2026-03-20T00:00:00+09:00',
-        endAt: '2026-03-22T00:00:00+09:00',
+        startAt: '2026-03-20T00:00:00Z',
+        endAt: '2026-03-22T00:00:00Z',
+        startDate: '2026-03-20',
+        endDate: '2026-03-22',
       }),
       makeEvent({ startAt: '2026-02-27T10:00:00+09:00', endAt: '2026-03-02T10:00:00+09:00' }),
     ];

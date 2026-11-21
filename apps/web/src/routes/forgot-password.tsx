@@ -3,8 +3,9 @@ import { useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { LoadFailure } from '@/components/load-failure';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
 import { useAuthConfig } from '@/lib/auth-config';
+import { client } from '@/lib/client';
 
 export const Route = createFileRoute('/forgot-password')({
   component: ForgotPasswordPage,
@@ -23,7 +24,7 @@ function ForgotPasswordPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await api.post('/auth/password-reset/request', { email });
+      await client.POST('/auth/password-reset/request', { body: { email } });
       setDone(true);
     } catch (e) {
       setError(errorMessage(e));

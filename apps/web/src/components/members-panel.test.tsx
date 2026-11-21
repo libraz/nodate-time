@@ -15,8 +15,12 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() },
+}));
+
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
   isAbortError: () => false,
 }));
@@ -89,7 +93,7 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 import { MembersPanel } from './members-panel';
 
 beforeEach(() => {
@@ -328,7 +332,7 @@ describe('MembersPanel adding people', () => {
 
   it('swaps the list for the picker and back', async () => {
     setMyRole('owner');
-    vi.mocked(api.get).mockResolvedValue({ items: [], hasMore: false });
+    vi.mocked(client.GET).mockResolvedValue({ data: { items: [], hasMore: false } } as never);
     render(<MembersPanel />);
 
     fireEvent.click(screen.getByRole('button', { name: 'members.addShort' }));
@@ -342,7 +346,7 @@ describe('MembersPanel adding people', () => {
 
   it('opens on the picker when another panel asks for it', async () => {
     setMyRole('owner');
-    vi.mocked(api.get).mockResolvedValue({ items: [], hasMore: false });
+    vi.mocked(client.GET).mockResolvedValue({ data: { items: [], hasMore: false } } as never);
     uiState.panelCalendarRequest = { calendarId: 'cal-1', addMembers: true };
     render(<MembersPanel />);
 

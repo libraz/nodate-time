@@ -3,9 +3,11 @@ import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { canDeleteComment, canEditComment } from '@/lib/permissions';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -63,11 +65,12 @@ export function CommentsSection({
       // The thread is paged: the first page is the newest run of comments,
       // already oldest-first within itself, and the cursor reaches the older
       // ones before it.
-      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
-        `/calendars/${calendarId}/events/${eventId}/activities`,
+      const { data: page } = await client.GET(
+        '/calendars/{calendarId}/events/{eventId}/activities',
+        { params: { path: { calendarId, eventId } } },
       );
-      setComments(page.items ?? []);
-      setOlderCursor(page.nextCursor ?? '');
+      setComments(page?.items ?? []);
+      setOlderCursor(page?.nextCursor ?? '');
       setLoadError(null);
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -82,11 +85,12 @@ export function CommentsSection({
     if (!olderCursor || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const page = await api.get<{ items: EventComment[]; nextCursor?: string }>(
-        `/calendars/${calendarId}/events/${eventId}/activities?cursor=${encodeURIComponent(olderCursor)}`,
+      const { data: page } = await client.GET(
+        '/calendars/{calendarId}/events/{eventId}/activities',
+        { params: { path: { calendarId, eventId }, query: { cursor: olderCursor } } },
       );
-      setComments((cur) => [...(page.items ?? []), ...cur]);
-      setOlderCursor(page.nextCursor ?? '');
+      setComments((cur) => [...(page?.items ?? []), ...cur]);
+      setOlderCursor(page?.nextCursor ?? '');
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -111,7 +115,10 @@ export function CommentsSection({
     if (!content || isSending) return;
     setIsSending(true);
     try {
-      await api.post(`/calendars/${calendarId}/events/${eventId}/activities`, { body: content });
+      await client.POST('/calendars/{calendarId}/events/{eventId}/activities', {
+        params: { path: { calendarId, eventId } },
+        body: { body: content },
+      });
       setNewComment('');
       await fetchComments();
     } catch (err) {
@@ -121,13 +128,27 @@ export function CommentsSection({
     }
   };
 
+  // A stale comment is never retried with a newer version; the thread is read again.
+  const failWrite = async (err: unknown) => {
+    if (isStaleError(err)) {
+      toast.error(t('conflict.stale'));
+      setEditingId(null);
+      await fetchComments();
+      return;
+    }
+    toast.error(errorMessage(err));
+  };
+
   const saveEdit = async (commentId: string) => {
+    const comment = comments.find((c) => c.id === commentId);
+    if (!comment) return;
     try {
-      await api.put(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`, {
-        body: editContent,
+      await client.PATCH('/calendars/{calendarId}/events/{eventId}/activities/{commentId}', {
+        params: { path: { calendarId, eventId, commentId }, header: { 'If-Match': comment.etag } },
+        body: { body: editContent },
       });
     } catch (err) {
-      toast.error(errorMessage(err));
+      await failWrite(err);
       return;
     }
     setEditingId(null);
@@ -135,11 +156,18 @@ export function CommentsSection({
   };
 
   const deleteComment = async (commentId: string) => {
+    const comment = comments.find((c) => c.id === commentId);
+    if (!comment) {
+      setPendingDeleteId(null);
+      return;
+    }
     setDeleting(true);
     try {
-      await api.delete(`/calendars/${calendarId}/events/${eventId}/activities/${commentId}`);
+      await client.DELETE('/calendars/{calendarId}/events/{eventId}/activities/{commentId}', {
+        params: { path: { calendarId, eventId, commentId }, header: { 'If-Match': comment.etag } },
+      });
     } catch (err) {
-      toast.error(errorMessage(err));
+      await failWrite(err);
       return;
     } finally {
       setDeleting(false);

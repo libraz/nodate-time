@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -17,29 +18,15 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-const newYear: CalendarEvent = {
+const newYear = makeEvent({
   id: 'e1',
-  calendarId: 'cal-1',
   title: 'Shrine visit',
-  allDay: false,
   startAt: '2026-01-01T01:00:00+09:00',
   endAt: '2026-01-01T03:00:00+09:00',
-  color: '#47B2F7',
   ownerId: 'u1',
-  location: '',
-  memo: '',
-  url: '',
-  showAs: 'busy',
-  flexibility: 'fixed',
-  visibility: 'default',
-  notificationOffset: null,
-  participantIds: [],
-  recurrenceRule: null,
-  isRecurrence: false,
-  recurrenceDate: null,
   createdAt: '',
   updatedAt: '',
-};
+});
 
 const calendarState = {
   events: [newYear] as CalendarEvent[],

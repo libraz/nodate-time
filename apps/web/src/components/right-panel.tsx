@@ -7,10 +7,11 @@ import { CustomSelect } from '@/components/pickers';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canEdit } from '@/lib/permissions';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
-import { useCalendarStore } from '@/stores/calendar-store';
-import type { Calendar, Memo } from '@/types/calendar';
+import { type StoredMemo, useCalendarStore } from '@/stores/calendar-store';
+import type { Calendar } from '@/types/calendar';
 
 type MemoDialogState = { calendarId: string; memoId?: string } | null;
 
@@ -21,6 +22,7 @@ export function MemoSection() {
   const memos = useCalendarStore((s) => s.memos);
   const toggleMemo = useCalendarStore((s) => s.toggleMemo);
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
+  const fetchMemos = useCalendarStore((s) => s.fetchMemos);
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const memosLoading = useCalendarStore((s) => s.memosLoading);
@@ -28,7 +30,7 @@ export function MemoSection() {
   const allHidden =
     calendars.length > 0 && !calendars.some((c) => activeCalendarIds.includes(c.id));
   const [dialog, setDialog] = useState<MemoDialogState>(null);
-  const [pendingDelete, setPendingDelete] = useState<Memo | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<StoredMemo | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   // Calendars the user can post a memo to: active in the sidebar and editable.
@@ -49,22 +51,32 @@ export function MemoSection() {
     [calendars, memos, activeCalendarIds],
   );
 
-  const handleToggle = async (memo: Memo) => {
+  const handleToggle = async (memo: StoredMemo) => {
     if (!editable) return;
     try {
       await toggleMemo(memo.calendarId, memo.id, !memo.done);
     } catch (e) {
-      toast.error(errorMessage(e));
+      failWrite(e);
     }
   };
 
-  const handleDelete = async (memo: Memo) => {
+  // A stale memo is never retried with a newer version; the list is read again.
+  const failWrite = (e: unknown) => {
+    if (isStaleError(e)) {
+      toast.error(t('conflict.stale'));
+      void fetchMemos();
+      return;
+    }
+    toast.error(errorMessage(e));
+  };
+
+  const handleDelete = async (memo: StoredMemo) => {
     if (!editable) return;
     setDeleting(true);
     try {
       await deleteMemo(memo.calendarId, memo.id);
     } catch (e) {
-      toast.error(errorMessage(e));
+      failWrite(e);
     } finally {
       setDeleting(false);
       setPendingDelete(null);

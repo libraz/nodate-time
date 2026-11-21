@@ -1,75 +1,85 @@
-import { DateTime } from 'luxon';
-import { describe, expect, it } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/lib/api';
 import type { CalendarEvent } from '@/types/calendar';
-import { filterEventsForSearch, searchedMonths } from './search';
 
-function event(id: string, overrides: Partial<CalendarEvent> = {}): CalendarEvent {
-  return {
-    id,
-    calendarId: 'cal-1',
-    title: `Event ${id}`,
-    allDay: false,
-    startAt: '2026-07-02T10:00:00+09:00',
-    endAt: '2026-07-02T11:00:00+09:00',
-    color: '#47B2F7',
-    ownerId: null,
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    location: '',
-    memo: '',
-    url: '',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
-    createdAt: '',
-    updatedAt: '',
-    ...overrides,
-  };
-}
+const get = vi.fn();
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the HTTP method name of the client
+    GET: (...args: unknown[]) => get(...args),
+  },
+}));
 
-const shown = ['cal-1'];
+import { useUiStore } from '@/stores/ui-store';
+import { searchEvents, searchResultLabel, useEventSearch } from './search';
 
-describe('filterEventsForSearch', () => {
-  it('matches title, location, and memo case-insensitively', () => {
-    const events = [
-      event('title', { title: 'Morning Rehearsal' }),
-      event('location', { location: 'Studio Alpha' }),
-      event('memo', { memo: 'bring script draft' }),
-      event('miss', { title: 'Lunch' }),
-    ];
+const item = { id: 'e1', title: 'Rehearsal' } as CalendarEvent;
 
-    expect(filterEventsForSearch(events, shown, 'rehearsal').map((e) => e.id)).toEqual(['title']);
-    expect(filterEventsForSearch(events, shown, 'STUDIO').map((e) => e.id)).toEqual(['location']);
-    expect(filterEventsForSearch(events, shown, 'script').map((e) => e.id)).toEqual(['memo']);
+afterEach(() => {
+  get.mockReset();
+});
+
+describe('searchEvents', () => {
+  it('asks the server with the trimmed query and returns the envelope', async () => {
+    get.mockResolvedValue({ data: { items: [item], hasMore: true } });
+
+    const page = await searchEvents('  rehearsal  ');
+
+    expect(get).toHaveBeenCalledWith('/search', { params: { query: { q: 'rehearsal' } } });
+    expect(page).toEqual({ items: [item], hasMore: true });
   });
 
-  it('trims queries and returns no results for blank input', () => {
-    const events = [event('one', { title: 'Meeting' })];
+  it('reads a null item list as no matches', async () => {
+    get.mockResolvedValue({ data: { items: null, hasMore: false } });
 
-    expect(filterEventsForSearch(events, shown, '  meet  ').map((e) => e.id)).toEqual(['one']);
-    expect(filterEventsForSearch(events, shown, '   ')).toEqual([]);
-  });
-
-  it('leaves out calendars the reader has switched off', () => {
-    // Following a result from a hidden calendar lands on a day that does not
-    // draw it, so offering it at all is a dead end.
-    const events = [
-      event('shown', { calendarId: 'cal-1', title: 'Rehearsal' }),
-      event('hidden', { calendarId: 'cal-2', title: 'Rehearsal' }),
-    ];
-
-    expect(filterEventsForSearch(events, shown, 'rehearsal').map((e) => e.id)).toEqual(['shown']);
-    expect(filterEventsForSearch(events, [], 'rehearsal')).toEqual([]);
+    expect(await searchEvents('x')).toEqual({ items: [], hasMore: false });
   });
 });
 
-describe('searchedMonths', () => {
-  it('names the months the view loaded, the only ones a search covers', () => {
-    const aug = DateTime.fromISO('2026-08-01', { zone: 'Asia/Tokyo' });
-    expect(searchedMonths('month', aug, 'en')).toEqual({ from: 'July 2026', to: 'September 2026' });
-    expect(searchedMonths('year', aug, 'ja')).toEqual({ from: '2026年1月', to: '2026年12月' });
+describe('useEventSearch', () => {
+  it('stays idle and sends nothing for a blank query', () => {
+    const { result } = renderHook(() => useEventSearch('   '));
+
+    expect(result.current).toEqual({ status: 'idle' });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('settles on the page the server returned', async () => {
+    get.mockResolvedValue({ data: { items: [item], hasMore: true } });
+
+    const { result } = renderHook(() => useEventSearch('reh'));
+
+    await waitFor(() =>
+      expect(result.current).toEqual({ status: 'done', items: [item], hasMore: true }),
+    );
+  });
+
+  it('reports a query that matches too much with its own message', async () => {
+    useUiStore.setState({ locale: 'en' });
+    get.mockRejectedValue(new ApiError(422, 'too broad', 'SEARCH.TOO_BROAD'));
+
+    const { result } = renderHook(() => useEventSearch('a'));
+
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current).toMatchObject({
+      message: 'Too many matches. Add a keyword to narrow it down',
+    });
+  });
+});
+
+describe('searchResultLabel', () => {
+  it('names an all-day event by its own date only', () => {
+    const evt = {
+      ...item,
+      allDay: true,
+      startAt: '2026-08-05T00:00:00Z',
+      endAt: '2026-08-06T00:00:00Z',
+      startDate: '2026-08-05',
+      endDate: '2026-08-06',
+      timezone: 'Asia/Tokyo',
+    } as CalendarEvent;
+
+    expect(searchResultLabel(evt, 'America/New_York', 'en')).toBe('2026/08/05 (Wed)');
   });
 });

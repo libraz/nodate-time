@@ -31,6 +31,7 @@ describe('event comment API contract', () => {
         authorAvatarUrl: 'A',
         authorId: 'user-1',
         createdAt: '2026-07-16T00:00:00Z',
+        etag: 'etag-1',
       }),
     ).toBe('Visible comment');
   });

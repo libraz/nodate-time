@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -20,31 +21,16 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-const rehearsal: CalendarEvent = {
+const rehearsal = makeEvent({
   id: 'e1',
-  calendarId: 'cal-1',
   title: 'Rehearsal',
-  allDay: false,
   // Stored in UTC, shown on the account's Tokyo clock: 09:00 to 10:00 there.
   startAt: '2026-08-05T00:00:00Z',
   endAt: '2026-08-05T01:00:00Z',
-  timezone: 'Asia/Tokyo',
-  color: '#47B2F7',
   ownerId: 'u1',
-  location: '',
-  memo: '',
-  url: '',
-  showAs: 'busy',
-  flexibility: 'fixed',
-  visibility: 'default',
-  notificationOffset: null,
-  participantIds: [],
-  recurrenceRule: null,
-  isRecurrence: false,
-  recurrenceDate: null,
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
-};
+});
 
 const calendarState = {
   events: [] as CalendarEvent[],

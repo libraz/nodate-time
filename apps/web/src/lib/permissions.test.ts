@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Calendar } from '@/types/calendar';
 import {
   assignableRoles,
   canDeleteComment,
@@ -134,7 +135,7 @@ describe('roleForCalendar', () => {
 });
 
 describe('roleOnCalendar', () => {
-  const calendars = [
+  const calendars: Pick<Calendar, 'id' | 'role'>[] = [
     { id: 'cal-1', role: 'owner' },
     { id: 'cal-2', role: 'viewer' },
   ];

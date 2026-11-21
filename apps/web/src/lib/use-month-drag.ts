@@ -4,7 +4,7 @@ import type { DragLanding } from '@/components/month-week-row';
 import { fromISOInZone } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { eventDayZone } from '@/lib/event-zone';
-import type { EventInput } from '@/stores/calendar-store';
+import type { EventPatch } from '@/stores/calendar-store';
 import type { CalendarEvent } from '@/types/calendar';
 import { useCanMoveEvent } from './use-can-move-event';
 import { useEventDrag } from './use-event-drag';
@@ -21,8 +21,8 @@ function dayDelta(fromKey: string, toKey: string): number {
  * The start an event moves to when dragged from one month cell to another.
  *
  * The days are added on the wall clock of the zone the event's days are
- * measured in, so an all-day event stays at midnight in its own zone however
- * many DST changes the viewer's zone crosses between the two cells. Null when
+ * measured in, so an all-day event stays on whole dates however many DST
+ * changes the viewer's zone crosses between the two cells. Null when
  * the drop lands on the cell it started from.
  */
 export function monthDropStart(
@@ -69,7 +69,7 @@ export function useMonthDrag({
   requestUpdate,
 }: {
   timezone: string;
-  requestUpdate: (evt: CalendarEvent, payload: EventInput) => void;
+  requestUpdate: (evt: CalendarEvent, payload: EventPatch) => void;
 }) {
   const canMove = useCanMoveEvent();
   const dragEnded = useRef(false);

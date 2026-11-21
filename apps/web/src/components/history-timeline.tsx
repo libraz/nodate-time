@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -39,13 +40,28 @@ export function HistoryTimeline({ kind, calendarId, entityId }: HistoryTimelineP
     let cancelled = false;
     setIsLoading(true);
     setError('');
-    const path =
-      kind === 'event'
-        ? `/calendars/${calendarId}/events/${entityId}/history`
-        : `/calendars/${calendarId}/memos/${entityId}/history`;
+    // The event log is paged newest-first; the timeline shows all of it.
+    const loadEvent = async (): Promise<HistoryItem[]> => {
+      const all: HistoryItem[] = [];
+      let cursor: string | undefined;
+      do {
+        const { data } = await client.GET('/calendars/{calendarId}/events/{eventId}/history', {
+          params: { path: { calendarId, eventId: entityId }, query: cursor ? { cursor } : {} },
+        });
+        all.push(...(data?.items ?? []));
+        cursor = data?.nextCursor || undefined;
+      } while (cursor);
+      return all;
+    };
+    const loadMemo = async (): Promise<HistoryItem[]> => {
+      const { data } = await client.GET('/calendars/{calendarId}/memos/{memoId}/history', {
+        params: { path: { calendarId, memoId: entityId } },
+      });
+      return data ?? [];
+    };
     (async () => {
       try {
-        const data = await api.get<HistoryItem[]>(path);
+        const data = await (kind === 'event' ? loadEvent() : loadMemo());
         // The API returns newest-first; reverse for the oldest-to-newest timeline.
         if (!cancelled) setItems([...data].reverse());
       } catch (e) {

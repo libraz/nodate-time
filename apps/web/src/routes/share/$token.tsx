@@ -1,7 +1,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useCallback, useEffect, useState } from 'react';
+import type { DateTime } from 'luxon';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatSheetDay, PublicDaySheet } from '@/components/public-day-sheet';
 import { useT } from '@/i18n';
-import { api, errorMessage, hasToken } from '@/lib/api';
+import { errorMessage, hasToken } from '@/lib/api';
+import { client } from '@/lib/client';
 import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import {
   type PublicCalendar,
@@ -9,10 +12,19 @@ import {
   type ShareFailure,
   shareFailureOf,
 } from '@/lib/public-calendar';
+import { toast } from '@/lib/toast';
 import { usePublicEvents, usePublicMonth, usePublicMonthGrid } from '@/lib/use-public-events';
 import { useUiStore } from '@/stores/ui-store';
 
+/** `join=1` marks a return from sign-in with the intent to accept the invite. */
+export interface ShareSearch {
+  join?: string | undefined;
+}
+
 export const Route = createFileRoute('/share/$token')({
+  validateSearch: (search: Record<string, unknown>): ShareSearch => ({
+    join: search.join === '1' || search.join === 1 ? '1' : undefined,
+  }),
   component: SharedCalendarView,
 });
 
@@ -22,6 +34,7 @@ export function SharedCalendarView() {
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
   const { token } = Route.useParams();
+  const { join } = Route.useSearch();
   const navigate = useNavigate();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   // Whether the calendar could be read at all, kept apart from why. The words
@@ -33,16 +46,22 @@ export function SharedCalendarView() {
   const { month: currentMonth, shiftMonth } = usePublicMonth(timezone);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [openDay, setOpenDay] = useState<DateTime | null>(null);
+  const autoJoined = useRef(false);
 
   const handleJoin = useCallback(async () => {
     if (!hasToken()) {
-      navigate({ to: '/login', search: { redirect: `/share/${token}` } });
+      navigate({
+        to: '/login',
+        search: { mode: 'register', redirect: `/share/${token}?join=1` },
+      });
       return;
     }
     setJoining(true);
     setJoinError(null);
     try {
-      await api.post<{ calendarId: string; role: string }>(`/invites/${token}/accept`);
+      await client.POST('/invites/{token}/accept', { params: { path: { token } } });
+      toast.success(t('invite.joined', { name: calendar?.name ?? '' }));
       navigate({ to: '/' });
     } catch (e) {
       // Every refusal the server can give here carries a code, and the code is
@@ -52,20 +71,20 @@ export function SharedCalendarView() {
       // instead left that last one showing the server's English, and answered a
       // 409 the server does not send -- an existing member is readmitted
       // silently rather than refused.
-      setJoinError(errorMessage(e, t('share.joinFailed')));
+      setJoinError(errorMessage(e, t('invite.joinFailed')));
     } finally {
       setJoining(false);
     }
-  }, [token, navigate, t]);
+  }, [token, navigate, t, calendar?.name]);
 
   // Depends on the token and nothing else. Every response is a fresh object,
   // so a load that re-created itself on each render asked again for what it
   // had just been given, and went on asking.
   const loadCalendar = useCallback(() => {
-    api
-      .get<PublicCalendar>(`/share/${token}`, true)
-      .then((cal) => {
-        setCalendar(cal);
+    client
+      .GET('/share/{token}', { params: { path: { token } } })
+      .then(({ data }) => {
+        setCalendar(data ?? null);
         setFailed(false);
         setFailure(null);
       })
@@ -79,9 +98,16 @@ export function SharedCalendarView() {
     loadCalendar();
   }, [loadCalendar]);
 
+  // Coming back from sign-in with join=1 accepts once, without another tap.
+  useEffect(() => {
+    if (join !== '1' || !calendar?.joinable || autoJoined.current || !hasToken()) return;
+    autoJoined.current = true;
+    void handleJoin();
+  }, [join, calendar, handleJoin]);
+
   const {
     events,
-    truncated,
+    hasMore,
     failure: eventsFailure,
     retry: retryEvents,
   } = usePublicEvents(token, !!calendar && publishesEvents(calendar), currentMonth, timezone);
@@ -218,7 +244,7 @@ export function SharedCalendarView() {
               </button>
             </div>
 
-            {truncated && (
+            {hasMore && (
               <output className="block bg-[var(--color-surface-inset)] px-4 py-2 text-footnote text-[var(--color-text-secondary)] sm:px-6">
                 {t('calendar.eventsTruncated')}
               </output>
@@ -267,13 +293,19 @@ export function SharedCalendarView() {
                     return (
                       <div
                         key={day.toISO()}
-                        className="min-h-[70px] p-1 last:border-r-0 sm:min-h-[90px] sm:p-2"
+                        className="relative min-h-[70px] p-1 last:border-r-0 sm:min-h-[90px] sm:p-2"
                         style={{
                           opacity: isCurrentMonth ? 1 : 0.35,
                           borderRight:
                             '1px solid color-mix(in srgb, var(--color-border) 30%, transparent)',
                         }}
                       >
+                        <button
+                          type="button"
+                          aria-label={formatSheetDay(day, locale)}
+                          onClick={() => setOpenDay(day)}
+                          className="absolute inset-0"
+                        />
                         <div className="mb-1 flex items-center justify-center">
                           <span
                             className="flex h-6 w-6 items-center justify-center rounded-full text-footnote tabular-nums sm:text-body"
@@ -301,7 +333,7 @@ export function SharedCalendarView() {
                             className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white sm:text-caption"
                             style={{ backgroundColor: evt.color || calendar.color }}
                           >
-                            {evt.private ? t('event.privateBusy') : evt.title}
+                            {evt.detailsHidden ? t('share.busy') : evt.title}
                           </div>
                         ))}
                         {dayEvents.length > 3 && (
@@ -315,6 +347,17 @@ export function SharedCalendarView() {
                 </div>
               ))}
             </div>
+
+            {openDay && (
+              <PublicDaySheet
+                day={openDay}
+                events={eventsOn(openDay)}
+                timezone={timezone}
+                locale={locale}
+                fallbackColor={calendar.color}
+                onClose={() => setOpenDay(null)}
+              />
+            )}
           </>
         )}
 

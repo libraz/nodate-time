@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 
 interface Page<T> {
-  items: T[];
-  nextCursor?: string;
+  items: T[] | null;
+  nextCursor?: string | undefined;
 }
+
+/** The cursor-paged listings under a calendar this hook can read. */
+type PagedPath = '/calendars/{calendarId}/activity' | '/calendars/{calendarId}/albums';
 
 interface Loaded<T> {
   calendarId: string;
@@ -52,12 +56,18 @@ export function useCalendarPages<T>(
   // Bumped by every reload and on unmount; a response from an older one is dropped.
   const generation = useRef(0);
 
-  const url = useCallback(
-    (cursor: string) => {
-      const query = cursor
-        ? `${path.includes('?') ? '&' : '?'}cursor=${encodeURIComponent(cursor)}`
-        : '';
-      return `/calendars/${calendarId}/${path}${query}`;
+  // `path` names the listing and may carry fixed query parameters, e.g. `activity?limit=50`.
+  const fetchPage = useCallback(
+    async (cursor: string): Promise<Page<T>> => {
+      const [route = '', search = ''] = path.split('?');
+      const query = {
+        ...Object.fromEntries(new URLSearchParams(search)),
+        ...(cursor ? { cursor } : {}),
+      };
+      const { data } = await client.GET(`/calendars/{calendarId}/${route}` as PagedPath, {
+        params: { path: { calendarId }, query },
+      });
+      return (data ?? { items: [] }) as unknown as Page<T>;
     },
     [calendarId, path],
   );
@@ -72,7 +82,7 @@ export function useCalendarPages<T>(
     }
     setLoading(true);
     try {
-      const data = await api.get<Page<T>>(url(''));
+      const data = await fetchPage('');
       if (run !== generation.current) return;
       setLoaded({
         calendarId,
@@ -85,7 +95,7 @@ export function useCalendarPages<T>(
     } finally {
       if (run === generation.current) setLoading(false);
     }
-  }, [calendarId, url]);
+  }, [calendarId, fetchPage]);
 
   const current = loaded.calendarId === calendarId;
   const nextCursor = current ? loaded.nextCursor : '';
@@ -96,7 +106,7 @@ export function useCalendarPages<T>(
     setLoadingMore(true);
     setError(null);
     try {
-      const data = await api.get<Page<T>>(url(nextCursor));
+      const data = await fetchPage(nextCursor);
       if (run !== generation.current) return;
       setLoaded((prev) =>
         prev.calendarId === calendarId
@@ -113,7 +123,7 @@ export function useCalendarPages<T>(
     } finally {
       setLoadingMore(false);
     }
-  }, [calendarId, nextCursor, loadingMore, url]);
+  }, [calendarId, nextCursor, loadingMore, fetchPage]);
 
   const updateItems = useCallback((forCalendarId: string, update: (items: T[]) => T[]) => {
     setLoaded((prev) =>

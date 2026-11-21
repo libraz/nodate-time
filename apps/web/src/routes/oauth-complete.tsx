@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
 import { setToken } from '@/lib/api';
-import { safeRedirect } from '@/lib/safe-redirect';
+import { resolveSignInTarget } from '@/lib/invite-join';
 import { useAuthStore } from '@/stores/auth-store';
 
 export interface OAuthSearch {
@@ -54,7 +54,9 @@ function OAuthCompletePage() {
         navigate({ to: '/login', search: { error: 'oauth_failed' } });
         return;
       }
-      navigate({ href: safeRedirect(redirect), replace: true });
+      const href = await resolveSignInTarget(redirect);
+      if (cancelled) return;
+      navigate({ href, replace: true });
     })();
     return () => {
       cancelled = true;

@@ -10,8 +10,9 @@ import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
-import { api, errorMessage, isAbortError } from '@/lib/api';
+import { ApiError, errorMessage, filenameFromDisposition, isAbortError } from '@/lib/api';
 import { useAuthConfig } from '@/lib/auth-config';
+import { client } from '@/lib/client';
 import { copyText } from '@/lib/clipboard';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
@@ -420,7 +421,7 @@ export function ProfileSection() {
   const handleResendVerification = async () => {
     setResendingVerification(true);
     try {
-      await api.post('/user/verify-email/resend', {});
+      await client.POST('/user/verify-email/resend');
       toast.success(t('profile.verificationSent'));
     } catch (e) {
       toast.error(errorMessage(e));
@@ -616,7 +617,8 @@ function SessionsSection() {
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      setSessions(await api.get<SessionData[]>('/user/sessions', false, signal));
+      const { data } = await client.GET('/user/sessions', signal ? { signal } : {});
+      setSessions(data ?? []);
     } catch (e) {
       // A request the screen itself called off is not a failure to report.
       if (isAbortError(e)) return;
@@ -638,7 +640,7 @@ function SessionsSection() {
   const revoke = async (id: string) => {
     setRevoking(true);
     try {
-      await api.delete(`/user/sessions/${id}`);
+      await client.DELETE('/user/sessions/{sessionId}', { params: { path: { sessionId: id } } });
       setSessions((cur) => cur.filter((s) => s.id !== id));
       toast.success(t('sessions.revoked'));
     } catch (e) {
@@ -1441,16 +1443,14 @@ export function ExportSection() {
   const downloadFile = async (format: 'ics' | 'csv') => {
     setExporting(format);
     try {
-      const {
-        blob,
-        filename,
-        truncated,
-        window: coverage,
-      } = await api.getBlob(
+      const { data: blob, response } = await client.GET('/calendars/{calendarId}/export', {
         // The same zone the grid reads days in, so the export's window and times match it.
-        `/calendars/${selectedId}/export?format=${format}&tz=${encodeURIComponent(timezone)}`,
-      );
-      const url = URL.createObjectURL(blob);
+        params: { path: { calendarId: selectedId }, query: { format, tz: timezone } },
+        parseAs: 'blob',
+      });
+      const filename = filenameFromDisposition(response.headers.get('Content-Disposition'));
+      const coverage = response.headers.get('X-Export-Window') ?? '';
+      const url = URL.createObjectURL(blob ?? new Blob());
       const a = document.createElement('a');
       a.href = url;
       // The server names the export after the calendar it came from. Naming it
@@ -1461,9 +1461,7 @@ export function ExportSection() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      // A backup that stops at the server's cap, or covers only a window, looks
-      // whole once downloaded unless it is said.
-      if (truncated) toast.error(t('settings.exportTruncated'));
+      // A backup that covers only a window looks whole once downloaded unless it is said.
       const range = exportWindowLabel(coverage);
       if (range) toast.info(t('settings.exportWindow', { range }));
     } catch (e) {
@@ -1485,9 +1483,12 @@ export function ExportSection() {
     if (!icsText.trim() || !selectedId) return;
     setImporting(true);
     try {
-      const res = await api.post<ImportResult>(`/calendars/${selectedId}/import`, {
-        ics: icsText,
+      const { data } = await client.POST('/calendars/{calendarId}/import', {
+        params: { path: { calendarId: selectedId } },
+        body: { ics: icsText },
       });
+      if (!data) return;
+      const res: ImportResult = data;
       if (res.unreadable) {
         // Nothing was read, so nothing was written -- and every counter
         // sitting at zero cannot tell that apart from a calendar that
@@ -1644,7 +1645,8 @@ function AdminSection() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      setProviders(await api.get<OAuthProviderInfo[]>('/admin/oauth-providers', false, signal));
+      const { data } = await client.GET('/admin/oauth-providers', signal ? { signal } : {});
+      setProviders((data ?? []) as OAuthProviderInfo[]);
     } catch (e) {
       if (isAbortError(e)) return;
       toast.error(errorMessage(e));
@@ -1675,22 +1677,143 @@ function AdminSection() {
         providers.map((p) => <ProviderCard key={p.provider} info={p} onChange={refresh} />)
       )}
 
+      <InstanceAdminsSection />
+
       <AllowedEmailsSection />
     </>
   );
 }
 
-interface AllowedEmail {
-  id: string;
+interface InstanceAdminRow {
+  userId: string;
+  name: string;
   email: string;
-  reason: string;
-  createdAt: string;
+  grantedAt: string;
+}
+
+/** Lists the instance administrators and grants or revokes the right by email. */
+export function InstanceAdminsSection() {
+  const t = useT();
+  const locale = useUiStore((s) => s.locale);
+  const timezone = useUiStore((s) => s.timezone);
+  const [admins, setAdmins] = useState<InstanceAdminRow[] | null>(null);
+  const [email, setEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [pendingRevoke, setPendingRevoke] = useState<InstanceAdminRow | null>(null);
+  const [revoking, setRevoking] = useState(false);
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const { data } = await client.GET('/admin/instance-admins', signal ? { signal } : {});
+      setAdmins(data ?? []);
+    } catch (e) {
+      if (isAbortError(e)) return;
+      toast.error(errorMessage(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
+  }, [refresh]);
+
+  const grant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSaving(true);
+    try {
+      await client.POST('/admin/instance-admins', { body: { email: email.trim() } });
+      setEmail('');
+      await refresh();
+      toast.success(t('panel.updated'));
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError && err.code === 'ADMIN.USER_NOT_FOUND'
+          ? t('admin.userNotFound')
+          : errorMessage(err),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const revoke = async (row: InstanceAdminRow) => {
+    setRevoking(true);
+    try {
+      await client.DELETE('/admin/instance-admins/{userId}', {
+        params: { path: { userId: row.userId } },
+      });
+      await refresh();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setRevoking(false);
+      setPendingRevoke(null);
+    }
+  };
+
+  if (!admins) return null;
+
+  return (
+    <Section title={t('admin.instanceAdmins')}>
+      <form onSubmit={grant} className="mb-4 flex flex-wrap items-end gap-2">
+        <input
+          data-1p-ignore
+          autoComplete="off"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          aria-label={t('auth.email')}
+          placeholder={t('settings.adminAllowedEmailsEmailPlaceholder')}
+          className="input-modern min-w-[220px] flex-1"
+        />
+        <button type="submit" disabled={saving} className="btn-primary px-4">
+          {t('admin.grant')}
+        </button>
+      </form>
+
+      <ul className="divide-y divide-[var(--color-separator)]">
+        {admins.map((row) => (
+          <li key={row.userId} className="flex items-center justify-between gap-2 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-default text-[var(--color-text-primary)]">{row.name}</p>
+              <p className="truncate text-footnote text-[var(--color-text-tertiary)]">
+                {row.email} · {formatDateTime(row.grantedAt, timezone, locale)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPendingRevoke(row)}
+              className="shrink-0 text-body text-[var(--color-danger)] hover:underline"
+            >
+              {t('admin.revoke')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <ConfirmSheet
+        open={pendingRevoke !== null}
+        title={t('admin.revoke')}
+        confirmLabel={t('confirm.remove')}
+        busy={revoking}
+        onConfirm={() => pendingRevoke && revoke(pendingRevoke)}
+        onCancel={() => setPendingRevoke(null)}
+      />
+    </Section>
+  );
 }
 
 interface AllowedEmailsResponse {
   allowedDomains: string[];
   restricted: boolean;
-  emails: AllowedEmail[];
+  emails: {
+    id: string;
+    email: string;
+    reason: string;
+    createdAt: string;
+  }[];
 }
 
 export function AllowedEmailsSection() {
@@ -1704,7 +1827,13 @@ export function AllowedEmailsSection() {
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
-      setData(await api.get<AllowedEmailsResponse>('/admin/allowed-emails', false, signal));
+      const { data: list } = await client.GET('/admin/allowed-emails', signal ? { signal } : {});
+      if (!list) return;
+      setData({
+        allowedDomains: list.allowedDomains ?? [],
+        restricted: list.restricted,
+        emails: list.emails ?? [],
+      });
     } catch (e) {
       if (isAbortError(e)) return;
       toast.error(errorMessage(e));
@@ -1723,7 +1852,9 @@ export function AllowedEmailsSection() {
     if (!email.trim()) return;
     setSaving(true);
     try {
-      await api.post('/admin/allowed-emails', { email: email.trim(), reason: reason.trim() });
+      await client.POST('/admin/allowed-emails', {
+        body: { email: email.trim(), reason: reason.trim() },
+      });
       setEmail('');
       setReason('');
       await refresh();
@@ -1738,7 +1869,9 @@ export function AllowedEmailsSection() {
   const remove = async (id: string) => {
     setRemoving(true);
     try {
-      await api.delete(`/admin/allowed-emails/${id}`);
+      await client.DELETE('/admin/allowed-emails/{emailId}', {
+        params: { path: { emailId: id } },
+      });
       await refresh();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -1826,7 +1959,8 @@ export function AllowedEmailsSection() {
   );
 }
 
-function ProviderCard({
+/** Exported for testing: a save sends only what changed. */
+export function ProviderCard({
   info,
   onChange,
 }: {
@@ -1853,10 +1987,10 @@ function ProviderCard({
   const save = async () => {
     setSaving(true);
     try {
-      await api.put(`/admin/oauth-providers/${info.provider}`, {
-        clientId,
-        clientSecret: editingSecret ? secret : '',
-        enabled,
+      // Omitting the secret keeps the stored one; only a typed value replaces it.
+      await client.PATCH('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: info.provider } },
+        body: { clientId, enabled, ...(editingSecret && secret ? { clientSecret: secret } : {}) },
       });
       toast.success(t('panel.updated'));
       setSecret('');
@@ -1871,7 +2005,9 @@ function ProviderCard({
   const remove = async () => {
     setRemoving(true);
     try {
-      await api.delete(`/admin/oauth-providers/${info.provider}`);
+      await client.DELETE('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: info.provider } },
+      });
       toast.success(t('panel.updated'));
       await onChange();
     } catch (e) {

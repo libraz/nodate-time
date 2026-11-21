@@ -1,35 +1,13 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { makeEvent as makeSharedEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 import { layoutTimedEventsForDay, resizedEndForDaySegment } from './timed-layout';
 
 const ZONE = 'Asia/Tokyo';
 
 function makeEvent(id: string, startAt: string, endAt: string): CalendarEvent {
-  return {
-    id,
-    calendarId: 'cal',
-    title: id,
-    allDay: false,
-    startAt,
-    endAt,
-    timezone: ZONE,
-    color: '#47B2F7',
-    ownerId: null,
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    location: '',
-    memo: '',
-    url: '',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
-    createdAt: '',
-    updatedAt: '',
-  };
+  return makeSharedEvent({ id, calendarId: 'cal', title: id, startAt, endAt, timezone: ZONE });
 }
 
 describe('layoutTimedEventsForDay', () => {

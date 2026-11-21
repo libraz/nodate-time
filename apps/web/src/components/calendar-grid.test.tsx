@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -46,29 +47,15 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 function event(id: string, hour: number): CalendarEvent {
-  return {
+  return makeEvent({
     id,
-    calendarId: 'cal-1',
     title: `Event ${id}`,
-    allDay: false,
     startAt: `2026-08-05T0${hour}:00:00+09:00`,
     endAt: `2026-08-05T0${hour}:30:00+09:00`,
-    color: '#47B2F7',
     ownerId: 'u1',
-    location: '',
-    memo: '',
-    url: '',
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
     createdAt: '2026-08-01T00:00:00+09:00',
     updatedAt: '2026-08-01T00:00:00+09:00',
-  };
+  });
 }
 
 /** A bar running from the start of one day through the end of another (exclusive end). */
@@ -82,8 +69,10 @@ function spanEvent(
     ...event(id, 1),
     title,
     allDay: true,
-    startAt: `${from}T00:00:00+09:00`,
-    endAt: `${throughExclusive}T00:00:00+09:00`,
+    startAt: `${from}T00:00:00Z`,
+    endAt: `${throughExclusive}T00:00:00Z`,
+    startDate: from,
+    endDate: throughExclusive,
   };
 }
 
@@ -268,9 +257,10 @@ const birthday: CalendarEvent = {
   ...event('bd', 1),
   title: 'Birthday',
   allDay: true,
-  startAt: '2026-03-06T00:00:00+09:00',
-  endAt: '2026-03-07T00:00:00+09:00',
-  timezone: 'Asia/Tokyo',
+  startAt: '2026-03-06T00:00:00Z',
+  endAt: '2026-03-07T00:00:00Z',
+  startDate: '2026-03-06',
+  endDate: '2026-03-07',
 };
 
 describe('CalendarGrid drag to move', () => {
@@ -282,7 +272,7 @@ describe('CalendarGrid drag to move', () => {
     uiState.currentMonth = DateTime.fromISO('2026-08-01', { zone: 'Asia/Tokyo' });
   });
 
-  it('keeps an all-day event at midnight in its own zone across a DST change', async () => {
+  it('moves an all-day event by whole dates across a DST change', async () => {
     uiState.timezone = 'America/New_York';
     uiState.currentMonth = DateTime.fromISO('2026-03-01', { zone: 'America/New_York' });
     calendarState.events = [birthday];
@@ -295,13 +285,11 @@ describe('CalendarGrid drag to move', () => {
     fireEvent.pointerUp(window, press('mouse', 150));
 
     await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
-    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as {
-      startAt: string;
-      endAt: string;
-    };
-    // Days added on the viewer's clock land at 23:00 the day before in Tokyo.
-    expect(payload.startAt).toBe('2026-03-10T00:00:00.000+09:00');
-    expect(payload.endAt).toBe('2026-03-11T00:00:00.000+09:00');
+    // Dates carry no zone: nothing the viewer's DST change does can move them.
+    expect(calendarState.updateEvent.mock.calls[0]?.[2]).toEqual({
+      startDate: '2026-03-10',
+      endDate: '2026-03-11',
+    });
   });
 
   // The touchend that ends a long-press drag carries the drag's whole travel,

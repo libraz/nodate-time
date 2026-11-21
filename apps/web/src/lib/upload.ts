@@ -1,6 +1,8 @@
 import { getT } from '@/i18n';
-import { ApiError, api } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { client } from '@/lib/client';
 import { Sha256, toHex } from '@/lib/sha256';
+import type { Calendar } from '@/types/calendar';
 
 /**
  * Server-side upload limits, mirrored on the client to fail fast before
@@ -19,6 +21,7 @@ export const UPLOAD_LIMITS = {
     types: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   },
   attachment: { maxBytes: 100 * 1024 * 1024, types: [] as string[] },
+  cover: { maxBytes: 5 * 1024 * 1024, types: ['image/jpeg', 'image/png', 'image/webp'] },
 } as const;
 
 export type UploadKind = keyof typeof UPLOAD_LIMITS;
@@ -66,7 +69,8 @@ export function validateUpload(kind: UploadKind, contentType: string, byteSize: 
 }
 
 interface PresignResult {
-  uploadUrl: string;
+  /** Absent when the bytes are already stored and in use; the reservation then goes straight to confirm. */
+  uploadUrl?: string | undefined;
 }
 
 /**
@@ -104,13 +108,9 @@ export async function sha256Hex(body: ArrayBuffer | Blob): Promise<string> {
   return toHex(hash.digest());
 }
 
-interface UploadViaPresignArgs {
+interface UploadViaPresignArgs<P extends PresignResult> {
   /** Logical upload kind, used to enforce client-side size/type limits. */
   kind: UploadKind;
-  /** Presign request path. */
-  presignPath: string;
-  /** Presign request body (must declare matching contentType/byteSize to the server). */
-  presignBody: Record<string, unknown>;
   /** Content type sent on the signed PUT — must match what the server signed. */
   contentType: string;
   /** Raw bytes to upload. */
@@ -118,42 +118,83 @@ interface UploadViaPresignArgs {
   /** Declared byte size for client-side validation. */
   byteSize: number;
   /**
-   * When true, the digest of `body` is computed and sent as `sha256` in the
-   * presign request. Set for endpoints backed by content-addressed storage
-   * (avatars, event attachments); album photos keep their own key and do not
-   * take one.
+   * Reserves the upload. Receives the lowercase-hex SHA-256 of `body`, which
+   * every presign request declares, and returns the server's reservation.
    */
-  contentAddressed?: boolean;
+  presign: (sha256: string) => Promise<P>;
+}
+
+/** Unwraps a response body the client has already checked for failure. */
+export function present<T>(data: T | undefined): T {
+  if (data === undefined) throw new ApiError(502, 'Empty response');
+  return data;
+}
+
+/** PUTs `body` to a signed URL, failing with the localized upload error. */
+export async function putToSignedUrl(
+  url: string,
+  contentType: string,
+  body: ArrayBuffer | Blob,
+): Promise<void> {
+  const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': contentType }, body });
+  if (!res.ok) throw new ApiError(res.status, getT()('error.uploadFailed'));
 }
 
 /**
  * Runs the shared presign -> PUT -> (caller confirms) upload flow:
- * validates the file client-side, requests a signed upload URL, uploads the
- * bytes with the matching `Content-Type`, and verifies the PUT succeeded.
- * Returns the presign response so callers can run their own confirm step.
+ * validates the file client-side, declares its digest to the presign call,
+ * uploads the bytes with the matching `Content-Type`, and verifies the PUT
+ * succeeded. Returns the presign response so callers can run their own
+ * confirm step.
  *
  * @throws ApiError when validation, presigning, or the PUT fails.
  */
 export async function uploadViaPresign<P extends PresignResult>(
-  args: UploadViaPresignArgs,
+  args: UploadViaPresignArgs<P>,
 ): Promise<P> {
   validateUpload(args.kind, args.contentType, args.byteSize);
-  const presignBody = args.contentAddressed
-    ? { ...args.presignBody, sha256: await sha256Hex(args.body) }
-    : args.presignBody;
-  const presign = await api.post<P>(args.presignPath, presignBody);
+  const presign = await args.presign(await sha256Hex(args.body));
   // Content-addressed storage answers with no upload URL when the bytes are
   // already there and something is already using them. Re-uploading would only
   // be a chance to replace a file other people's attachments point at, so the
   // reservation goes straight to its confirm step.
   if (!presign.uploadUrl) return presign;
-  const putRes = await fetch(presign.uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': args.contentType },
-    body: args.body,
-  });
-  if (!putRes.ok) {
-    throw new ApiError(putRes.status, getT()('error.uploadFailed'));
-  }
+  await putToSignedUrl(presign.uploadUrl, args.contentType, args.body);
   return presign;
+}
+
+/**
+ * Sets a calendar's cover: presign, PUT, then confirm. Resolves to the
+ * updated calendar.
+ *
+ * @throws ApiError when validation, presigning, the PUT or the confirm fails.
+ */
+export async function uploadCalendarCover(
+  calendarId: string,
+  bytes: ArrayBuffer,
+  contentType: string,
+): Promise<Calendar> {
+  const { coverId } = await uploadViaPresign({
+    kind: 'cover',
+    contentType,
+    body: bytes,
+    byteSize: bytes.byteLength,
+    presign: async (sha256) => {
+      const { data } = await client.POST('/calendars/{calendarId}/cover/presign', {
+        params: { path: { calendarId } },
+        // validateUpload has narrowed the type to the three the endpoint takes.
+        body: {
+          contentType: contentType as 'image/jpeg' | 'image/png' | 'image/webp',
+          byteSize: bytes.byteLength,
+          sha256,
+        },
+      });
+      return present(data);
+    },
+  });
+  const { data } = await client.PUT('/calendars/{calendarId}/cover', {
+    params: { path: { calendarId } },
+    body: { coverId },
+  });
+  return present(data);
 }

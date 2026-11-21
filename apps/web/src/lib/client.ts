@@ -8,6 +8,7 @@ import {
   SESSION_EXPIRED_EVENT,
   setToken,
 } from '@/lib/api';
+import type { paths } from '@/lib/api-schema';
 import { isSafeRedirect } from '@/lib/safe-redirect';
 import { toast } from '@/lib/toast';
 
@@ -191,3 +192,6 @@ export function createApiClient<Paths extends {}>(baseUrl: string = API_BASE): C
   client.use(sessionMiddleware());
   return client;
 }
+
+/** The application's client over the generated API document. */
+export const client = createApiClient<paths>();

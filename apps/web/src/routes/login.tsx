@@ -1,10 +1,10 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { LoadFailure } from '@/components/load-failure';
 import { type TranslationKey, useT } from '@/i18n';
 import { useAuthConfig } from '@/lib/auth-config';
-import { safeRedirect } from '@/lib/safe-redirect';
+import { resolveSignInTarget } from '@/lib/invite-join';
 import { useAuthStore } from '@/stores/auth-store';
 
 /**
@@ -96,20 +96,22 @@ function EyeOffIcon() {
 export interface LoginSearch {
   redirect?: string | undefined;
   error?: string | undefined;
+  mode?: 'register' | undefined;
 }
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>): LoginSearch => ({
     redirect: typeof search.redirect === 'string' ? search.redirect : undefined,
     error: typeof search.error === 'string' ? search.error : undefined,
+    mode: search.mode === 'register' ? 'register' : undefined,
   }),
   component: LoginPage,
 });
 
 function LoginPage() {
   const t = useT();
-  const { redirect, error: oauthError } = Route.useSearch();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const { redirect, error: oauthError, mode: initialMode } = Route.useSearch();
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode ?? 'login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -132,10 +134,13 @@ function LoginPage() {
   const ready = authConfig.status === 'ready';
   const [oauthShown, setOauthShown] = useState(false);
 
+  // Resolved once per sign-in: a return path that joins an invite accepts it,
+  // and a second run would accept it again and repeat the toast.
+  const resolvedRef = useRef(false);
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate({ href: safeRedirect(redirect), replace: true });
-    }
+    if (!isAuthenticated || resolvedRef.current) return;
+    resolvedRef.current = true;
+    void resolveSignInTarget(redirect).then((href) => navigate({ href, replace: true }));
   }, [isAuthenticated, navigate, redirect]);
 
   useEffect(() => {

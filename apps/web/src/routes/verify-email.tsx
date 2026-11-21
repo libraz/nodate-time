@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 
 export interface VerifyEmailSearch {
   token?: string | undefined;
@@ -30,8 +30,8 @@ function VerifyEmailPage() {
     if (!token || redeemed.current) return;
     redeemed.current = true;
     let active = true;
-    api
-      .post('/auth/verify-email/confirm', { token })
+    client
+      .POST('/auth/verify-email/confirm', { body: { token } })
       .then(() => {
         if (active) setStatus('done');
       })

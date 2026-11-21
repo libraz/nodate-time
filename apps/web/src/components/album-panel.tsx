@@ -6,30 +6,20 @@ import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { type AlbumPhoto, formatAlbumDay, groupByDay } from '@/lib/album';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { startDownload } from '@/lib/download';
 import { readCaptureTime } from '@/lib/exif';
 import { prepareAlbumThumbnail, prepareImageForAlbum } from '@/lib/image-resize';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
-import { uploadViaPresign } from '@/lib/upload';
+import { present, putToSignedUrl, sha256Hex, uploadViaPresign } from '@/lib/upload';
 import { useCalendarPages } from '@/lib/use-calendar-pages';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-
-interface AlbumListResponse {
-  items: AlbumPhoto[];
-  nextCursor?: string;
-}
-
-interface PresignResponse {
-  photoId: string;
-  uploadUrl: string;
-  /** Only issued when the presign request declared a thumbnail. */
-  thumbnailUploadUrl?: string;
-}
 
 /** How far below the visible grid the next page starts loading. */
 const LOAD_AHEAD_MARGIN = '600px';
@@ -126,11 +116,13 @@ export function AlbumPanel() {
     try {
       const refreshed: AlbumPhoto[] = [];
       for (const cursor of loadedCursors) {
-        const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-        const data = await api.get<AlbumListResponse>(
-          `/calendars/${activeCalendarId}/albums${query}`,
-        );
-        refreshed.push(...(data.items ?? []));
+        const { data } = await client.GET('/calendars/{calendarId}/albums', {
+          params: {
+            path: { calendarId: activeCalendarId },
+            ...(cursor ? { query: { cursor } } : {}),
+          },
+        });
+        refreshed.push(...((data?.items ?? []) as AlbumPhoto[]));
       }
       updateItems(calendarId, () => refreshed);
     } catch {
@@ -159,44 +151,54 @@ export function AlbumPanel() {
       // The grid draws the photo itself when there is no thumbnail, so
       // failing to make one is not a reason to fail the upload.
       const thumbnail = await prepareAlbumThumbnail(file, resized).catch(() => null);
-      const presign = await uploadViaPresign<PresignResponse>({
+      const thumbnailSha256 = thumbnail ? await sha256Hex(thumbnail.bytes) : null;
+      const presign = await uploadViaPresign({
         kind: 'album',
-        presignPath: `/calendars/${activeCalendarId}/albums/presign`,
-        presignBody: {
-          contentType: resized.contentType,
-          byteSize: resized.bytes.byteLength,
-          width: resized.width,
-          height: resized.height,
-          // Omitted rather than sent as now: the server treats an absent
-          // capture time as the upload time, and saying "taken now" for a
-          // photo with no metadata would be a claim rather than a default.
-          ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
-          // Declaring nothing is how the server is told this photo has no
-          // thumbnail, which is a normal outcome rather than an error.
-          ...(thumbnail
-            ? {
-                thumbnailContentType: thumbnail.contentType,
-                thumbnailByteSize: thumbnail.bytes.byteLength,
-              }
-            : {}),
-        },
         contentType: resized.contentType,
         body: resized.bytes,
         byteSize: resized.bytes.byteLength,
+        presign: async (sha256) => {
+          const { data } = await client.POST('/calendars/{calendarId}/albums/presign', {
+            params: { path: { calendarId: activeCalendarId } },
+            body: {
+              contentType: resized.contentType,
+              byteSize: resized.bytes.byteLength,
+              sha256,
+              width: resized.width,
+              height: resized.height,
+              // Omitted rather than sent as now: the server treats an absent
+              // capture time as the upload time, and saying "taken now" for a
+              // photo with no metadata would be a claim rather than a default.
+              ...(takenAt ? { takenAt: takenAt.toISOString() } : {}),
+              // Declaring nothing is how the server is told this photo has no
+              // thumbnail, which is a normal outcome rather than an error.
+              ...(thumbnail && thumbnailSha256
+                ? {
+                    thumbnailContentType: thumbnail.contentType,
+                    thumbnailByteSize: thumbnail.bytes.byteLength,
+                    thumbnailSha256,
+                  }
+                : {}),
+            },
+          });
+          return present(data);
+        },
       });
       if (thumbnail && presign.thumbnailUploadUrl) {
-        // Neither a rejection nor a non-ok response is acted on: the photo
-        // is already stored, confirm does not need the thumbnail, and the
-        // grid falls back to the photo. Losing it costs bandwidth, not the
-        // picture, so it must not surface as a failed upload.
-        await fetch(presign.thumbnailUploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': thumbnail.contentType },
-          body: thumbnail.bytes,
-        }).catch(() => undefined);
+        // A failed thumbnail PUT is not acted on: the photo is already stored,
+        // confirm does not need the thumbnail, and the grid falls back to the
+        // photo. Losing it costs bandwidth, not the picture, so it must not
+        // surface as a failed upload.
+        await putToSignedUrl(
+          presign.thumbnailUploadUrl,
+          thumbnail.contentType,
+          thumbnail.bytes,
+        ).catch(() => undefined);
       }
       // The row is created disabled; confirm enables it once the object is stored.
-      await api.post(`/calendars/${activeCalendarId}/albums/${presign.photoId}/confirm`);
+      await client.POST('/calendars/{calendarId}/albums/{photoId}/confirm', {
+        params: { path: { calendarId: activeCalendarId, photoId: presign.photoId } },
+      });
     },
     [activeCalendarId, timezone],
   );
@@ -224,6 +226,19 @@ export function AlbumPanel() {
     [activeCalendarId, uploadOne, reload, setError],
   );
 
+  /** A stale write is never retried with a newer tag; the album is read again. */
+  const failWrite = useCallback(
+    (e: unknown) => {
+      if (isStaleError(e)) {
+        toast.error(t('conflict.stale'));
+        void reload();
+        return;
+      }
+      toast.error(errorMessage(e));
+    },
+    [t, reload],
+  );
+
   /** Deletes photos one by one; returns the ids that are gone. */
   const deletePhotos = useCallback(
     async (ids: string[]) => {
@@ -232,7 +247,12 @@ export function AlbumPanel() {
       let failure: unknown = null;
       for (const id of ids) {
         try {
-          await api.delete(`/calendars/${activeCalendarId}/albums/${id}`);
+          await client.DELETE('/calendars/{calendarId}/albums/{photoId}', {
+            params: {
+              path: { calendarId: activeCalendarId, photoId: id },
+              header: { 'If-Match': photos.find((p) => p.id === id)?.etag ?? '' },
+            },
+          });
           removed.add(id);
         } catch (e) {
           failure = e;
@@ -241,10 +261,10 @@ export function AlbumPanel() {
       if (removed.size > 0) {
         updateItems(activeCalendarId, (cur) => cur.filter((p) => !removed.has(p.id)));
       }
-      if (failure) toast.error(errorMessage(failure));
+      if (failure) failWrite(failure);
       return removed;
     },
-    [activeCalendarId, updateItems],
+    [activeCalendarId, photos, updateItems, failWrite],
   );
 
   const handleViewerDelete = useCallback(
@@ -262,22 +282,29 @@ export function AlbumPanel() {
   };
 
   const savePhoto = useCallback(
-    async (photoId: string, body: { caption: string; eventId?: string }) => {
+    async (photoId: string, body: { caption?: string; eventId?: string | null }) => {
       if (!activeCalendarId) return;
       try {
-        const updated = await api.put<AlbumPhoto>(
-          `/calendars/${activeCalendarId}/albums/${photoId}`,
+        const { data: updated } = await client.PATCH('/calendars/{calendarId}/albums/{photoId}', {
+          params: {
+            path: { calendarId: activeCalendarId, photoId },
+            header: { 'If-Match': photos.find((p) => p.id === photoId)?.etag ?? '' },
+          },
           body,
-        );
+        });
         updateItems(activeCalendarId, (cur) =>
-          cur.map((p) => (p.id === photoId ? { ...p, ...updated } : p)),
+          cur.map((p) =>
+            p.id === photoId
+              ? ({ ...p, ...updated, eventId: updated?.eventId ?? '' } as AlbumPhoto)
+              : p,
+          ),
         );
       } catch (e) {
-        toast.error(errorMessage(e));
+        failWrite(e);
         throw e;
       }
     },
-    [activeCalendarId, updateItems],
+    [activeCalendarId, photos, updateItems, failWrite],
   );
 
   const handleSaveCaption = useCallback(
@@ -286,23 +313,21 @@ export function AlbumPanel() {
   );
 
   const handleLinkEvent = useCallback(
-    (photoId: string, eventId: string) => {
-      const caption = photos.find((p) => p.id === photoId)?.caption ?? '';
-      // An empty string is how the API is told to clear the link, so a photo
-      // can be detached from an event without being deleted and re-uploaded.
-      return savePhoto(photoId, { caption, eventId });
-    },
-    [photos, savePhoto],
+    (photoId: string, eventId: string) =>
+      // null is how the API is told to clear the link, so a photo can be
+      // detached from an event without being deleted and re-uploaded.
+      savePhoto(photoId, { eventId: eventId === '' ? null : eventId }),
+    [savePhoto],
   );
 
   const handleDownload = useCallback(
     async (photo: AlbumPhoto) => {
       if (!activeCalendarId) return;
       try {
-        const { downloadUrl } = await api.get<{ downloadUrl: string }>(
-          `/calendars/${activeCalendarId}/albums/${photo.id}/download`,
-        );
-        startDownload(downloadUrl);
+        const { data } = await client.GET('/calendars/{calendarId}/albums/{photoId}/download', {
+          params: { path: { calendarId: activeCalendarId, photoId: photo.id } },
+        });
+        startDownload(present(data).downloadUrl);
       } catch (e) {
         toast.error(errorMessage(e));
       }

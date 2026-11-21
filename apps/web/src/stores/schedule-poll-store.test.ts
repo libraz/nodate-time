@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SchedulePollAction } from '@/lib/schedule-polls';
 
+// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
+
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
   errorMessage: (error: unknown) => String(error),
   isAbortError: (error: unknown) => error instanceof Error && error.name === 'AbortError',
 }));
 
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 import { useSchedulePollStore } from './schedule-poll-store';
 
 const action = (title: string): SchedulePollAction => ({
@@ -26,13 +28,13 @@ beforeEach(() => {
 describe('schedule poll action cache', () => {
   it('does not publish a late response from the previous account', async () => {
     let finishAlice: ((value: SchedulePollAction[]) => void) | undefined;
-    vi.mocked(api.get)
+    vi.mocked(client.GET)
       .mockReturnValueOnce(
         new Promise((resolve) => {
-          finishAlice = resolve;
+          finishAlice = (items) => resolve({ data: items });
         }) as never,
       )
-      .mockResolvedValueOnce([action('Bob action')] as never);
+      .mockResolvedValueOnce({ data: [action('Bob action')] } as never);
 
     const aliceRequest = useSchedulePollStore.getState().fetchActions('alice');
     const bobRequest = useSchedulePollStore.getState().fetchActions('bob');
@@ -40,6 +42,7 @@ describe('schedule poll action cache', () => {
     finishAlice?.([action('Alice action')]);
     await aliceRequest;
 
+    expect(client.GET).toHaveBeenCalledWith('/user/schedule-poll-actions', {});
     expect(useSchedulePollStore.getState()).toMatchObject({
       accountId: 'bob',
       actions: [action('Bob action')],
@@ -49,9 +52,9 @@ describe('schedule poll action cache', () => {
 
   it('keeps a reset clear when a request completes after logout', async () => {
     let finishRequest: ((value: SchedulePollAction[]) => void) | undefined;
-    vi.mocked(api.get).mockReturnValueOnce(
+    vi.mocked(client.GET).mockReturnValueOnce(
       new Promise((resolve) => {
-        finishRequest = resolve;
+        finishRequest = (items) => resolve({ data: items });
       }) as never,
     );
 

@@ -2,8 +2,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ja, type TranslationKey } from '@/i18n/ja';
 
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn() },
+}));
+
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
 }));
 
@@ -16,14 +20,14 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: { locale: string }) => string) => selector({ locale: 'en' }),
 }));
 
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 import { HistoryTimeline } from './history-timeline';
 
-const mockApi = vi.mocked(api);
+const mockGet = vi.mocked(client.GET) as unknown as ReturnType<typeof vi.fn>;
 
 /**
  * One row as the server serialises it: `audit.HistoryItem` in the Go API, and
- * a bare array rather than an `{items}` envelope for the history endpoints.
+ * an `{items, nextCursor}` envelope for events and a bare array for memos.
  *
  * The fixture is declared here in the server's own terms instead of being
  * typed as the component's `HistoryItem`, so a client type that drifts away
@@ -90,31 +94,51 @@ const ACTIONS: { action: string; label: TranslationKey }[] = [
 ];
 
 beforeEach(() => {
-  mockApi.get.mockReset();
+  mockGet.mockReset();
 });
 
 afterEach(cleanup);
 
 describe('HistoryTimeline', () => {
   it('reads the event history endpoint for an event and the memo one for a memo', async () => {
-    mockApi.get.mockResolvedValue([]);
+    mockGet.mockResolvedValue({ data: { items: [] } });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
     await waitFor(() =>
-      expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/events/evt-1/history'),
+      expect(mockGet).toHaveBeenCalledWith('/calendars/{calendarId}/events/{eventId}/history', {
+        params: { path: { calendarId: 'cal-1', eventId: 'evt-1' }, query: {} },
+      }),
     );
 
     cleanup();
-    mockApi.get.mockClear();
+    mockGet.mockClear();
 
     render(<HistoryTimeline kind="memo" calendarId="cal-1" entityId="memo-1" />);
     await waitFor(() =>
-      expect(mockApi.get).toHaveBeenCalledWith('/calendars/cal-1/memos/memo-1/history'),
+      expect(mockGet).toHaveBeenCalledWith('/calendars/{calendarId}/memos/{memoId}/history', {
+        params: { path: { calendarId: 'cal-1', memoId: 'memo-1' } },
+      }),
     );
   });
 
+  it('follows nextCursor until the event history is complete', async () => {
+    mockGet
+      .mockResolvedValueOnce({
+        data: { items: [item({ id: 'id-2', summary: 'newer' })], nextCursor: 'c1' },
+      })
+      .mockResolvedValueOnce({ data: { items: [item({ id: 'id-1', summary: 'older' })] } });
+
+    render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
+
+    expect(await screen.findByText('older')).toBeInTheDocument();
+    expect(screen.getByText('newer')).toBeInTheDocument();
+    expect(mockGet).toHaveBeenLastCalledWith('/calendars/{calendarId}/events/{eventId}/history', {
+      params: { path: { calendarId: 'cal-1', eventId: 'evt-1' }, query: { cursor: 'c1' } },
+    });
+  });
+
   it('says it is loading until the history arrives', async () => {
-    mockApi.get.mockReturnValue(new Promise(() => {}));
+    mockGet.mockReturnValue(new Promise(() => {}));
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -123,11 +147,15 @@ describe('HistoryTimeline', () => {
 
   it('renders a newest-first API response as an oldest-to-newest timeline', async () => {
     // The endpoint answers with a bare array, newest first.
-    mockApi.get.mockResolvedValue([
-      item({ id: 'id-3', summary: 'newest', createdAt: '2026-04-22T10:00:00+09:00' }),
-      item({ id: 'id-2', summary: 'middle', createdAt: '2026-04-21T10:00:00+09:00' }),
-      item({ id: 'id-1', summary: 'oldest', createdAt: '2026-04-20T10:00:00+09:00' }),
-    ]);
+    mockGet.mockResolvedValue({
+      data: {
+        items: [
+          item({ id: 'id-3', summary: 'newest', createdAt: '2026-04-22T10:00:00+09:00' }),
+          item({ id: 'id-2', summary: 'middle', createdAt: '2026-04-21T10:00:00+09:00' }),
+          item({ id: 'id-1', summary: 'oldest', createdAt: '2026-04-20T10:00:00+09:00' }),
+        ],
+      },
+    });
 
     const { container } = render(
       <HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />,
@@ -145,7 +173,7 @@ describe('HistoryTimeline', () => {
   // label a person sees -- rather than that the row exists at all -- is what
   // makes that visible.
   it.each(ACTIONS)('shows $label for $action', async ({ action, label }) => {
-    mockApi.get.mockResolvedValue([item({ action, summary: 'Dinner' })]);
+    mockGet.mockResolvedValue({ data: { items: [item({ action, summary: 'Dinner' })] } });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -161,10 +189,14 @@ describe('HistoryTimeline', () => {
   });
 
   it('names the actor, and stands in for one the server no longer knows', async () => {
-    mockApi.get.mockResolvedValue([
-      item({ id: 'id-1', actorId: 'u1', actorName: 'Rin' }),
-      item({ id: 'id-2', actorId: undefined, actorName: undefined }),
-    ]);
+    mockGet.mockResolvedValue({
+      data: {
+        items: [
+          item({ id: 'id-1', actorId: 'u1', actorName: 'Rin' }),
+          item({ id: 'id-2', actorId: undefined, actorName: undefined }),
+        ],
+      },
+    });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -174,9 +206,11 @@ describe('HistoryTimeline', () => {
   });
 
   it('labels a marked system entry as the system', async () => {
-    mockApi.get.mockResolvedValue([
-      item({ actorId: undefined, actorName: undefined, systemActor: true }),
-    ]);
+    mockGet.mockResolvedValue({
+      data: {
+        items: [item({ actorId: undefined, actorName: undefined, systemActor: true })],
+      },
+    });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -188,7 +222,7 @@ describe('HistoryTimeline', () => {
   // the writer recorded a line for it -- so an entry without one still has to
   // read as a row rather than collapse to a bare bullet.
   it('still renders an entry whose log payload carries no summary', async () => {
-    mockApi.get.mockResolvedValue([item({ summary: '' })]);
+    mockGet.mockResolvedValue({ data: { items: [item({ summary: '' })] } });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -197,7 +231,7 @@ describe('HistoryTimeline', () => {
   });
 
   it('shows the empty state for a history with no entries', async () => {
-    mockApi.get.mockResolvedValue([]);
+    mockGet.mockResolvedValue({ data: { items: [] } });
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 
@@ -209,7 +243,7 @@ describe('HistoryTimeline', () => {
   // history is asking who changed their event; "there is no history" is a
   // different and wrong answer to that.
   it('says the history could not be read rather than that there is none', async () => {
-    mockApi.get.mockRejectedValue(new Error('network down'));
+    mockGet.mockRejectedValue(new Error('network down'));
 
     render(<HistoryTimeline kind="event" calendarId="cal-1" entityId="evt-1" />);
 

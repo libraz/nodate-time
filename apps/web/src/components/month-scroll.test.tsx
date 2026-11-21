@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@/i18n', async (importOriginal) => ({
@@ -37,38 +38,28 @@ vi.mock('@/stores/ui-store', () => ({
 
 /** A bar running from the start of one day through the end of another (exclusive end). */
 function spanEvent(id: string, title: string, from: string, throughExclusive: string) {
-  return {
+  return makeEvent({
     id,
-    calendarId: 'cal-1',
     title,
     allDay: true,
-    startAt: `${from}T00:00:00+09:00`,
-    endAt: `${throughExclusive}T00:00:00+09:00`,
-    color: '#47B2F7',
+    startAt: `${from}T00:00:00Z`,
+    endAt: `${throughExclusive}T00:00:00Z`,
+    startDate: from,
+    endDate: throughExclusive,
     ownerId: 'u1',
-    location: '',
-    memo: '',
-    url: '',
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
     createdAt: '2026-08-01T00:00:00+09:00',
     updatedAt: '2026-08-01T00:00:00+09:00',
-  } as CalendarEvent;
+  });
 }
 
 function timedEvent(id: string, title: string, day: string, hour: number) {
+  const { startDate: _s, endDate: _e, ...span } = spanEvent(id, title, day, day);
   return {
-    ...spanEvent(id, title, day, day),
+    ...span,
     allDay: false,
     startAt: `${day}T0${hour}:00:00+09:00`,
     endAt: `${day}T0${hour}:30:00+09:00`,
-  } as CalendarEvent;
+  };
 }
 
 const calendarState = {

@@ -8,10 +8,70 @@ vi.mock('@tanstack/react-router', () => ({
   ),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  errorMessage: (e: unknown) => String(e),
-}));
+vi.mock('@/lib/api', () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      public detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  return {
+    // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+    ApiError,
+    errorMessage: (e: unknown) => String(e),
+  };
+});
+
+/**
+ * The typed client, answered through plain functions keyed by the concrete
+ * URL, so a test names a request the way a reader would. Writes receive the
+ * `If-Match` header as their last argument.
+ */
+const mockApi = vi.hoisted(() => {
+  interface Init {
+    params?: {
+      path?: Record<string, string>;
+      query?: Record<string, string>;
+      header?: Record<string, string>;
+    };
+    body?: unknown;
+  }
+  const urlOf = (path: string, init?: Init) => {
+    const url = path.replace(/\{(\w+)\}/g, (_, key: string) => init?.params?.path?.[key] ?? '');
+    const search = new URLSearchParams(init?.params?.query).toString();
+    const query = search ? `?${search}` : '';
+    return url + query;
+  };
+  const api = { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() };
+  const client = {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    GET: async (path: string, init?: Init) => ({ data: await api.get(urlOf(path, init)) }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    POST: async (path: string, init?: Init) => ({
+      data:
+        init?.body === undefined
+          ? await api.post(urlOf(path, init))
+          : await api.post(urlOf(path, init), init.body),
+    }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    PATCH: async (path: string, init?: Init) => ({
+      data: await api.patch(urlOf(path, init), init?.body, init?.params?.header),
+    }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    DELETE: async (path: string, init?: Init) => {
+      await api.delete(urlOf(path, init), init?.params?.header);
+      return {};
+    },
+  };
+  return Object.assign(api, { client });
+});
+
+vi.mock('@/lib/client', () => ({ client: mockApi.client }));
+
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
 // getT is what the upload helper reaches for when it refuses a file, so the
 // upload path only runs with it mocked too.
@@ -55,10 +115,9 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: { user: null }) => unknown) => selector({ user: null }),
 }));
 
-import { api } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { toast } from '@/lib/toast';
 import { AlbumPanel } from './album-panel';
-
-const mockApi = vi.mocked(api);
 
 function photo(imageUrl: string, id = 'photo-1') {
   return {
@@ -69,6 +128,7 @@ function photo(imageUrl: string, id = 'photo-1') {
     takenAt: '2026-04-20T10:00:00+09:00',
     uploaderId: 'u1',
     uploaderName: 'User 1',
+    etag: `etag-${id}`,
   };
 }
 
@@ -267,8 +327,12 @@ describe('AlbumPanel event link', () => {
         id: 'evt-2',
         calendarId: 'cal-1',
         title: 'Field trip',
-        startAt: '2026-04-20T00:00:00+09:00',
+        startAt: '2026-04-20T00:00:00Z',
         allDay: true,
+        // An all-day event is a calendar date, not an instant, so it sits on
+        // the same day for a viewer in any zone.
+        startDate: '2026-04-20',
+        endDate: '2026-04-21',
         timezone: 'Asia/Tokyo',
       } as (typeof events)[number],
     ];
@@ -292,7 +356,7 @@ describe('AlbumPanel event link', () => {
   it('attaches the photo to the event that was chosen', async () => {
     mockApi.get.mockReset();
     mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
-    mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: 'evt-1' });
+    mockApi.patch.mockResolvedValue({ ...photo('https://storage/one'), eventId: 'evt-1' });
 
     render(<AlbumPanel />);
     await openDetails();
@@ -300,10 +364,11 @@ describe('AlbumPanel event link', () => {
     fireEvent.click(await screen.findByText('Sports day'));
 
     await waitFor(() =>
-      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
-        caption: 'a photo',
-        eventId: 'evt-1',
-      }),
+      expect(mockApi.patch).toHaveBeenCalledWith(
+        '/calendars/cal-1/albums/photo-1',
+        { eventId: 'evt-1' },
+        { 'If-Match': 'etag-photo-1' },
+      ),
     );
   });
 
@@ -324,7 +389,7 @@ describe('AlbumPanel event link', () => {
     try {
       mockApi.get.mockReset();
       mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
-      mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: series });
+      mockApi.patch.mockResolvedValue({ ...photo('https://storage/one'), eventId: series });
 
       render(<AlbumPanel />);
       await openDetails();
@@ -332,10 +397,11 @@ describe('AlbumPanel event link', () => {
       fireEvent.click(await screen.findByText('Practice'));
 
       await waitFor(() =>
-        expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
-          caption: 'a photo',
-          eventId: series,
-        }),
+        expect(mockApi.patch).toHaveBeenCalledWith(
+          '/calendars/cal-1/albums/photo-1',
+          { eventId: series },
+          { 'If-Match': 'etag-photo-1' },
+        ),
       );
       expect(await screen.findByText('Practice')).toBeInTheDocument();
       expect(screen.queryByText('album.noEvent')).toBeNull();
@@ -349,21 +415,67 @@ describe('AlbumPanel event link', () => {
     mockApi.get.mockResolvedValue({
       items: [{ ...photo('https://storage/one'), eventId: 'evt-1' }],
     });
-    mockApi.put.mockResolvedValue({ ...photo('https://storage/one'), eventId: '' });
+    mockApi.patch.mockResolvedValue({ ...photo('https://storage/one'), eventId: '' });
 
     render(<AlbumPanel />);
     await openDetails();
     fireEvent.click(await screen.findByText('Sports day'));
     fireEvent.click(await screen.findByText('album.noEvent'));
 
-    // An empty string is how the API is told to clear the link; omitting the
-    // field would leave the photo attached.
+    // null is how the API is told to clear the link; omitting the field would
+    // leave the photo attached.
     await waitFor(() =>
-      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-1', {
-        caption: 'a photo',
-        eventId: '',
-      }),
+      expect(mockApi.patch).toHaveBeenCalledWith(
+        '/calendars/cal-1/albums/photo-1',
+        { eventId: null },
+        { 'If-Match': 'etag-photo-1' },
+      ),
     );
+  });
+});
+
+// A write quotes the tag the photo was listed with. If it changed meanwhile the
+// server refuses, and the album is read again rather than the write retried.
+describe('AlbumPanel stale photo', () => {
+  beforeEach(() => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'owner', name: 'Family' }];
+  });
+
+  afterEach(() => {
+    calendarState.calendars = [{ id: 'cal-1' }];
+  });
+
+  it('reports a stale edit and lists the album again', async () => {
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({ items: [photo('https://storage/one')] });
+    mockApi.patch.mockRejectedValue(new ApiError(412, 'stale', 'ALBUM.STALE'));
+
+    render(<AlbumPanel />);
+    await openDetails();
+    fireEvent.click(await screen.findByText('album.noEvent'));
+    fireEvent.click(await screen.findByText('Sports day'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('conflict.stale'));
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(2));
+    expect(mockApi.patch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a stale delete and lists the album again', async () => {
+    mockApi.get.mockReset();
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21') });
+    mockApi.delete.mockRejectedValue(new ApiError(412, 'stale', 'ALBUM.STALE'));
+
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('photo 0'));
+    const viewer = await screen.findByRole('dialog', { name: 'album.photo' });
+    fireEvent.click(within(viewer).getByLabelText('common.delete'));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'common.delete' }),
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('conflict.stale'));
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(2));
+    expect(mockApi.delete).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -674,6 +786,24 @@ describe('AlbumPanel thumbnail upload', () => {
     expect(presignBody().thumbnailByteSize).toBe(400 * 100);
   });
 
+  it('declares the lowercase hex digest of the photo and of its thumbnail', async () => {
+    stubImagePipeline(3000, (width) => width * 100);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200 } as unknown as Response),
+    );
+
+    render(<AlbumPanel />);
+    await screen.findByText('empty.photosTitle');
+    pickFile(new File([new Uint8Array(9000)], 'photo.png', { type: 'image/png' }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
+    const body = presignBody();
+    expect(body.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.thumbnailSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.thumbnailSha256).not.toBe(body.sha256);
+  });
+
   it('declares no thumbnail for a GIF', async () => {
     // Canvas draws one frame. The grid animates a GIF today because it shows
     // the stored photo, and a still thumbnail would quietly take that away.
@@ -688,6 +818,8 @@ describe('AlbumPanel thumbnail upload', () => {
     await waitFor(() => expect(mockApi.post).toHaveBeenCalled());
     expect(presignBody()).not.toHaveProperty('thumbnailContentType');
     expect(presignBody()).not.toHaveProperty('thumbnailByteSize');
+    expect(presignBody()).not.toHaveProperty('thumbnailSha256');
+    expect(presignBody().sha256).toMatch(/^[0-9a-f]{64}$/);
     // Only the photo is uploaded, however willing the server was to sign a
     // second URL.
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -851,7 +983,9 @@ describe('AlbumPanel camera roll', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() =>
-      expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0'),
+      expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0', {
+        'If-Match': 'etag-photo-0',
+      }),
     );
     expect(await within(viewer).findByAltText('photo 1')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'album.photo' })).toBeInTheDocument();
@@ -878,8 +1012,12 @@ describe('AlbumPanel camera roll', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() => expect(mockApi.delete).toHaveBeenCalledTimes(2));
-    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0');
-    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-2');
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-0', {
+      'If-Match': 'etag-photo-0',
+    });
+    expect(mockApi.delete).toHaveBeenCalledWith('/calendars/cal-1/albums/photo-2', {
+      'If-Match': 'etag-photo-2',
+    });
     await waitFor(() => expect(screen.queryByAltText('photo 0')).not.toBeInTheDocument());
     expect(screen.getByAltText('photo 1')).toBeInTheDocument();
   });

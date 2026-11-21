@@ -22,17 +22,16 @@ vi.mock('@/components/auth-shell', () => ({
   ),
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
-  errorMessage: () => 'error',
-}));
+vi.mock('@/lib/api', () => ({ errorMessage: () => 'error' }));
+// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+vi.mock('@/lib/client', () => ({ client: { GET: vi.fn(), POST: vi.fn() } }));
 
-import { api } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
+import { client } from '@/lib/client';
 import { Route as ForgotRoute } from './forgot-password';
 import { Route as ResetRoute } from './reset-password';
 
-const apiGet = vi.mocked(api.get);
+const apiGet = vi.mocked(client.GET);
 
 function pageOf(route: unknown): () => React.ReactNode {
   return (route as { options: { component: () => React.ReactNode } }).options.component;
@@ -61,20 +60,20 @@ describe.each([
   });
 
   it('is shown once mail and password sign-in are known to be on', async () => {
-    apiGet.mockResolvedValue(config({}));
+    apiGet.mockResolvedValue({ data: config({}) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByTestId('shell')).toBeTruthy());
     expect(screen.queryByTestId('navigate')).toBeNull();
   });
 
   it('redirects to the login screen once mail is known to be off', async () => {
-    apiGet.mockResolvedValue(config({ mailEnabled: false }));
+    apiGet.mockResolvedValue({ data: config({ mailEnabled: false }) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByTestId('navigate').textContent).toBe('/login'));
   });
 
   it('redirects to the login screen once password sign-in is known to be off', async () => {
-    apiGet.mockResolvedValue(config({ passwordEnabled: false }));
+    apiGet.mockResolvedValue({ data: config({ passwordEnabled: false }) } as never);
     render(<Page />);
     await waitFor(() => expect(screen.getByTestId('navigate').textContent).toBe('/login'));
   });
@@ -85,7 +84,7 @@ describe.each([
     await waitFor(() => expect(screen.getByText('error.authConfigUnavailable')).toBeTruthy());
     expect(screen.queryByTestId('navigate')).toBeNull();
 
-    apiGet.mockResolvedValue(config({}));
+    apiGet.mockResolvedValue({ data: config({}) } as never);
     fireEvent.click(screen.getByText('error.retry'));
     await waitFor(() => expect(screen.queryByText('error.authConfigUnavailable')).toBeNull());
     expect(screen.getByTestId('shell')).toBeTruthy();

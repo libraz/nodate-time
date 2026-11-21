@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api';
-import { sha256Hex, validateUpload } from './upload';
+import { client } from './client';
+import { sha256Hex, uploadCalendarCover, uploadViaPresign, validateUpload } from './upload';
+
+// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+vi.mock('./client', () => ({ client: { POST: vi.fn(), PUT: vi.fn() } }));
 
 /** The rejection `validateUpload` threw, so the assertions can read its status
  *  rather than a message that changes with the interface language. */
@@ -106,5 +110,93 @@ describe('sha256Hex', () => {
       for (let i = 0; i < size; i++) bytes[i] = (i * 31 + 7) % 256;
       expect(await sha256Hex(new Blob([bytes]))).toBe(await subtleDigest(bytes));
     }
+  });
+});
+
+describe('presigned upload', () => {
+  const bytes = new TextEncoder().encode('abc').buffer as ArrayBuffer;
+  // sha256('abc'), lowercase hex
+  const digest = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(client.POST).mockReset();
+    vi.mocked(client.PUT).mockReset();
+  });
+
+  it('declares the lowercase hex digest to the presign call, then PUTs the bytes', async () => {
+    const put = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', put);
+    const presign = vi.fn().mockResolvedValue({ uploadUrl: 'https://blob.test/put' });
+
+    await uploadViaPresign({
+      kind: 'avatar',
+      contentType: 'image/png',
+      body: bytes,
+      byteSize: 3,
+      presign,
+    });
+
+    expect(presign).toHaveBeenCalledWith(digest);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(put).toHaveBeenCalledWith('https://blob.test/put', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/png' },
+      body: bytes,
+    });
+  });
+
+  it('skips the PUT when the server already holds the bytes', async () => {
+    const put = vi.fn();
+    vi.stubGlobal('fetch', put);
+
+    await uploadViaPresign({
+      kind: 'avatar',
+      contentType: 'image/png',
+      body: bytes,
+      byteSize: 3,
+      presign: async () => ({}),
+    });
+
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('fails with the PUT status when the signed upload is refused', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+
+    await expect(
+      uploadViaPresign({
+        kind: 'avatar',
+        contentType: 'image/png',
+        body: bytes,
+        byteSize: 3,
+        presign: async () => ({ uploadUrl: 'https://blob.test/put' }),
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('sets a calendar cover through presign, PUT and confirm', async () => {
+    const put = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', put);
+    vi.mocked(client.POST).mockResolvedValue({
+      data: { coverId: 'cv-1', uploadUrl: 'https://blob.test/cover' },
+    } as never);
+    vi.mocked(client.PUT).mockResolvedValue({ data: { id: 'cal-1', name: 'Family' } } as never);
+
+    const calendar = await uploadCalendarCover('cal-1', bytes, 'image/jpeg');
+
+    expect(client.POST).toHaveBeenCalledWith('/calendars/{calendarId}/cover/presign', {
+      params: { path: { calendarId: 'cal-1' } },
+      body: { contentType: 'image/jpeg', byteSize: 3, sha256: digest },
+    });
+    expect(put).toHaveBeenCalledWith(
+      'https://blob.test/cover',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(client.PUT).toHaveBeenCalledWith('/calendars/{calendarId}/cover', {
+      params: { path: { calendarId: 'cal-1' } },
+      body: { coverId: 'cv-1' },
+    });
+    expect(calendar).toMatchObject({ id: 'cal-1' });
   });
 });

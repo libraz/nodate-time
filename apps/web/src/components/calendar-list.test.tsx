@@ -7,11 +7,22 @@ vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  errorMessage: (e: unknown) => String(e),
-}));
+vi.mock('@/lib/api', () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+  return { ApiError, errorMessage: (e: unknown) => String(e) };
+});
 
 const deleteCalendar = vi.fn().mockResolvedValue(undefined);
+const fetchCalendars = vi.fn();
 
 const initialCalendars: Calendar[] = [
   {
@@ -19,6 +30,8 @@ const initialCalendars: Calendar[] = [
     name: 'Family',
     color: '#47B2F7',
     createdAt: '',
+    etag: '"e1"',
+    coverUploadAllowed: true,
     role: 'owner',
     publicShared: false,
     memberCount: 1,
@@ -29,6 +42,8 @@ const initialCalendars: Calendar[] = [
     name: 'Work',
     color: '#F7A047',
     createdAt: '',
+    etag: '"e1"',
+    coverUploadAllowed: true,
     role: 'editor',
     publicShared: false,
     memberCount: 1,
@@ -43,12 +58,14 @@ const calendarState = {
   setActiveCalendarIds: vi.fn(),
   addCalendar: vi.fn(),
   deleteCalendar,
+  fetchCalendars,
 };
 
 vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
+import { ApiError } from '@/lib/api';
 import { useUiStore } from '@/stores/ui-store';
 import { CalendarList } from './calendar-list';
 
@@ -128,6 +145,20 @@ describe('CalendarList calendar deletion', () => {
     expect(deleteCalendar).toHaveBeenCalledWith('cal-owned');
   });
 
+  // A stale delete is reported and the list read again, never retried.
+  it('reports a stale delete and refetches the calendars', async () => {
+    deleteCalendar.mockRejectedValueOnce(new ApiError(412, 'stale', 'CALENDAR.STALE'));
+    const user = userEvent.setup();
+    render(<CalendarList />);
+
+    await user.click(screen.getByRole('button', { name: 'calendar.deleteCalendar' }));
+    await user.click(screen.getByRole('button', { name: 'common.delete' }));
+
+    expect(await screen.findAllByText('conflict.stale')).not.toHaveLength(0);
+    expect(deleteCalendar).toHaveBeenCalledTimes(1);
+    expect(fetchCalendars).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves the calendar alone when the confirmation is dismissed', async () => {
     const user = userEvent.setup();
     render(<CalendarList />);
@@ -151,11 +182,13 @@ describe('CalendarList after creating a calendar', () => {
   // A new calendar is shared only once someone is invited, so the next step
   // is offered in place and lands on the calendar just made, not the first one.
   it('offers an invite that opens the share panel on the new calendar', async () => {
-    const created = {
+    const created: Calendar = {
       id: 'cal-new',
       name: 'Band',
       color: '#47B2F7',
       createdAt: '',
+      etag: '"e1"',
+      coverUploadAllowed: true,
       role: 'owner',
       publicShared: false,
       memberCount: 1,

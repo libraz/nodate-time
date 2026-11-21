@@ -26,6 +26,7 @@ import {
   type SchedulePollCandidate,
   schedulePollApi,
 } from '@/lib/schedule-polls';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
@@ -66,13 +67,11 @@ function candidateKey(slot: Pick<PollSlot, 'startAt' | 'endAt'>): string {
   return `${Date.parse(slot.startAt)}/${Date.parse(slot.endAt)}`;
 }
 
-function staleError(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.status === 409 ||
-      error.code === 'SCHEDULE_POLL.STALE' ||
-      error.code === 'SCHEDULE_POLL.CONFLICT')
-  );
+// Only recipients of an open poll have an answer to read.
+function myResponseOf(calendarId: string, target: SchedulePoll, signal?: AbortSignal) {
+  return target.status === 'open' && target.canRespond
+    ? schedulePollApi.getResponse(calendarId, target.id, signal)
+    : Promise.resolve(null);
 }
 
 function SchedulePollDetailPage() {
@@ -92,6 +91,8 @@ function SchedulePollDetailPage() {
   const [draftAnswers, setDraftAnswers] = useState<Record<string, PollAnswer>>({});
   const [savingAnswers, setSavingAnswers] = useState(false);
   const [stale, setStale] = useState(false);
+  const [answerEtag, setAnswerEtag] = useState<string | null>(null);
+  const [confirmingPending, setConfirmingPending] = useState(false);
   const [memberIdsDraft, setMemberIdsDraft] = useState<string[]>([]);
   const [savingMembers, setSavingMembers] = useState(false);
   const [keptSlotIds, setKeptSlotIds] = useState<string[]>([]);
@@ -105,6 +106,8 @@ function SchedulePollDetailPage() {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   const view: PollView = requestedView ?? (poll?.canManage ? 'manage' : 'respond');
+  const loadMyResponse = (target: SchedulePoll, signal?: AbortSignal) =>
+    myResponseOf(calendarId, target, signal);
   const reload = async (refresh = false) => {
     const current = await schedulePollApi.get(calendarId, pollId);
     let latest = current;
@@ -113,7 +116,7 @@ function SchedulePollDetailPage() {
       try {
         latest = await schedulePollApi.refresh(calendarId, pollId);
       } catch (reason) {
-        if (staleError(reason)) {
+        if (isStaleError(reason)) {
           latest = await schedulePollApi.get(calendarId, pollId);
           setRefreshWarning(t('schedulePoll.staleReloaded'));
         } else {
@@ -121,9 +124,11 @@ function SchedulePollDetailPage() {
         }
       }
     }
+    const mine = await loadMyResponse(latest);
     setPoll(latest);
+    setAnswerEtag(mine?.etag ?? null);
     setDraftAnswers(
-      Object.fromEntries(latest.myAnswers.map((answer) => [answer.slotId, answer.value])),
+      Object.fromEntries((mine?.answers ?? latest.myAnswers).map((a) => [a.slotId, a.value])),
     );
     setMemberIdsDraft((latest.members ?? []).map((member) => member.id));
     setKeptSlotIds(latest.slots.filter((slot) => slot.active).map((slot) => slot.id));
@@ -167,15 +172,17 @@ function SchedulePollDetailPage() {
           try {
             latest = await schedulePollApi.refresh(calendarId, pollId);
           } catch (reason) {
-            if (staleError(reason))
+            if (isStaleError(reason))
               latest = await schedulePollApi.get(calendarId, pollId, controller.signal);
             else if (active) setRefreshWarning(errorMessage(reason));
           }
         }
+        const mine = await myResponseOf(calendarId, latest, controller.signal);
         if (!active) return;
         setPoll(latest);
+        setAnswerEtag(mine?.etag ?? null);
         setDraftAnswers(
-          Object.fromEntries(latest.myAnswers.map((answer) => [answer.slotId, answer.value])),
+          Object.fromEntries((mine?.answers ?? latest.myAnswers).map((a) => [a.slotId, a.value])),
         );
         setMemberIdsDraft((latest.members ?? []).map((member) => member.id));
         setKeptSlotIds(latest.slots.filter((slot) => slot.active).map((slot) => slot.id));
@@ -234,7 +241,7 @@ function SchedulePollDetailPage() {
   };
 
   const saveResponse = async () => {
-    if (poll?.status !== 'open' || poll.answerVersion === undefined) return;
+    if (poll?.status !== 'open' || answerEtag === null) return;
     setSavingAnswers(true);
     setStale(false);
     const savedAnswers = new Map(poll.myAnswers.map((answer) => [answer.slotId, answer.value]));
@@ -245,21 +252,14 @@ function SchedulePollDetailPage() {
         return value && savedAnswers.get(slot.id) !== value ? [{ slotId: slot.id, value }] : [];
       });
     try {
-      const updated = await schedulePollApi.respond(calendarId, pollId, {
-        version: poll.version,
-        answerVersion: poll.answerVersion,
-        answers,
-      });
-      setPoll(updated);
-      if (updated.reviewVersion !== poll.reviewVersion) setAcknowledged(false);
-      setDraftAnswers(
-        Object.fromEntries(updated.myAnswers.map((answer) => [answer.slotId, answer.value])),
-      );
+      const saved = await schedulePollApi.respond(calendarId, pollId, answerEtag, answers);
+      // Answering moves the poll's etag, so the poll is read again.
+      await reload();
       setStale(false);
-      toast.success(t('schedulePoll.answerSaved', { count: updated.myAnswers.length }));
+      toast.success(t('schedulePoll.answerSaved', { count: saved.answers.length }));
       synchronizeActions();
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           const latest = await reload();
           setDraftAnswers((saved) => ({
@@ -290,8 +290,7 @@ function SchedulePollDetailPage() {
     const requestedMemberIds = [...memberIdsDraft];
     setSavingMembers(true);
     try {
-      const updated = await schedulePollApi.update(calendarId, pollId, {
-        version: poll.version,
+      const updated = await schedulePollApi.update(calendarId, pollId, poll.etag, {
         memberIds: memberIdsDraft,
       });
       setPoll(updated);
@@ -303,7 +302,7 @@ function SchedulePollDetailPage() {
       toast.success(t('schedulePoll.membersUpdated'));
       synchronizeActions();
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           const latest = await reload();
           // A failed refresh leaves the roster already on screen.
@@ -351,10 +350,7 @@ function SchedulePollDetailPage() {
     if (slots.length === 0) return;
     setSavingCandidates(true);
     try {
-      const updated = await schedulePollApi.update(calendarId, pollId, {
-        version: poll.version,
-        slots,
-      });
+      const updated = await schedulePollApi.update(calendarId, pollId, poll.etag, { slots });
       setPoll(updated);
       setAcknowledged(false);
       setKeptSlotIds(updated.slots.filter((slot) => slot.active).map((slot) => slot.id));
@@ -363,7 +359,7 @@ function SchedulePollDetailPage() {
       synchronizeActions();
       navigateView('manage');
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           const latest = await reload();
           const currentCandidateKeys = new Set(
@@ -404,7 +400,7 @@ function SchedulePollDetailPage() {
       );
       toast.success(t('schedulePoll.availabilityRefreshed'));
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           await reload();
           setStale(true);
@@ -419,9 +415,7 @@ function SchedulePollDetailPage() {
     if (!poll || !selectedSlotId) return;
     setFinalizing(true);
     try {
-      const finalized = await schedulePollApi.finalize(calendarId, pollId, {
-        version: poll.version,
-        reviewVersion: poll.reviewVersion,
+      const finalized = await schedulePollApi.finalize(calendarId, pollId, poll.etag, {
         slotId: selectedSlotId,
         acknowledged,
         ...(ownerId ? { ownerId } : {}),
@@ -431,7 +425,7 @@ function SchedulePollDetailPage() {
       toast.success(t('schedulePoll.finalized'));
       if (finalized.confirmedEventId) navigateView('event');
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           await reload(true);
           setStale(true);
@@ -448,12 +442,12 @@ function SchedulePollDetailPage() {
     if (!poll) return;
     setCancelling(true);
     try {
-      const cancelled = await schedulePollApi.cancel(calendarId, pollId, poll.version);
+      const cancelled = await schedulePollApi.cancel(calendarId, pollId, poll.etag);
       setPoll(cancelled);
       synchronizeActions();
       toast.success(t('schedulePoll.cancelled'));
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           await reload();
           setStale(true);
@@ -479,7 +473,8 @@ function SchedulePollDetailPage() {
       return (draftAnswers[slot.id] ?? undefined) !== saved;
     });
   const unsavedGuard = useUnsavedGuard(hasDraftChanges);
-  const allResponded = !!poll && poll.memberCount > 0 && poll.respondedCount >= poll.memberCount;
+  const pendingCount = poll ? Math.max(0, poll.memberCount - poll.respondedCount) : 0;
+  const hasRecipients = !!poll && poll.memberCount > 0;
   const responseFor = (memberId: string, slotId: string) =>
     poll?.responses
       ?.find((response) => response.memberId === memberId)
@@ -631,8 +626,7 @@ function SchedulePollDetailPage() {
   const showTabs = poll.status === 'open' && poll.canRespond && poll.canManage;
   const takeOver = async () => {
     try {
-      const updated = await schedulePollApi.update(calendarId, pollId, {
-        version: poll.version,
+      const updated = await schedulePollApi.update(calendarId, pollId, poll.etag, {
         takeOver: true,
       });
       setPoll(updated);
@@ -640,7 +634,7 @@ function SchedulePollDetailPage() {
       toast.success(t('schedulePoll.takenOver'));
       synchronizeActions();
     } catch (reason) {
-      if (staleError(reason)) {
+      if (isStaleError(reason)) {
         try {
           await reload();
           setStale(true);
@@ -704,11 +698,7 @@ function SchedulePollDetailPage() {
           {refreshWarning && (
             <SchedulePollNotice tone="warning">{refreshWarning}</SchedulePollNotice>
           )}
-          {stale && (
-            <SchedulePollNotice tone="warning">
-              {t('schedulePoll.staleReloaded')}
-            </SchedulePollNotice>
-          )}
+          {stale && <SchedulePollNotice tone="warning">{t('conflict.stale')}</SchedulePollNotice>}
         </div>
       )}
 
@@ -993,15 +983,13 @@ function SchedulePollDetailPage() {
               <SchedulePollSection
                 title={t('schedulePoll.finalize')}
                 hint={
-                  !allResponded
-                    ? t('schedulePoll.waitingForResponses', {
-                        count: poll.memberCount - poll.respondedCount,
-                      })
+                  pendingCount > 0
+                    ? t('schedulePoll.waitingForResponses', { count: pendingCount })
                     : undefined
                 }
               >
                 <div className="page-card p-4 sm:p-5">
-                  {allResponded && activeSlots.length === 0 && (
+                  {activeSlots.length === 0 && (
                     <p className="mb-3 text-footnote text-[var(--color-warning)]">
                       {t('schedulePoll.addCandidatesRequired')}
                     </p>
@@ -1022,7 +1010,7 @@ function SchedulePollDetailPage() {
                             name="final-slot"
                             value={slot.id}
                             checked={selectedSlotId === slot.id}
-                            disabled={!allResponded || blocked}
+                            disabled={blocked}
                             onChange={() => {
                               setSelectedSlotId(slot.id);
                               setAcknowledged(false);
@@ -1100,10 +1088,10 @@ function SchedulePollDetailPage() {
                   <div className="mt-5 flex justify-end">
                     <button
                       type="button"
-                      onClick={finalize}
+                      onClick={() => (pendingCount > 0 ? setConfirmingPending(true) : finalize())}
                       disabled={
                         finalizing ||
-                        !allResponded ||
+                        !hasRecipients ||
                         !selectedSlotId ||
                         slotHasNo ||
                         (requiresAcknowledgment && !acknowledged)
@@ -1113,6 +1101,18 @@ function SchedulePollDetailPage() {
                       {finalizing ? t('common.saving') : t('schedulePoll.finalizeAndCreateEvent')}
                     </button>
                   </div>
+                  <ConfirmSheet
+                    open={confirmingPending}
+                    title={t('poll.finalizeWithoutPending')}
+                    confirmLabel={t('schedulePoll.finalizeAndCreateEvent')}
+                    destructive={false}
+                    busy={finalizing}
+                    onConfirm={async () => {
+                      await finalize();
+                      setConfirmingPending(false);
+                    }}
+                    onCancel={() => setConfirmingPending(false)}
+                  />
                 </div>
               </SchedulePollSection>
             )}

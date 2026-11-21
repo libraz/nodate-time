@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/lib/api';
 import type { CalendarEvent, Member } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -21,16 +22,32 @@ vi.mock('@/lib/api', () => {
   return {
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
-    api: {
-      get: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-      getWithRevision: vi.fn(),
-    },
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
   };
 });
+
+const typed = vi.hoisted(() => ({
+  get: vi.fn(),
+  put: vi.fn(),
+  post: vi.fn(),
+  patch: vi.fn(),
+  delete: vi.fn(),
+}));
+
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+    GET: typed.get,
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+    PUT: typed.put,
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+    POST: typed.post,
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+    PATCH: typed.patch,
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+    DELETE: typed.delete,
+  },
+}));
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -67,6 +84,12 @@ const event: CalendarEvent = {
   isRecurrence: false,
   recurrenceDate: null,
   creatorId: 'u1',
+  creatorName: 'Me',
+  ownerName: 'Me',
+  kind: 'event',
+  etag: 'etag-1',
+  detailsHidden: false,
+  taskOwned: false,
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-01T00:00:00Z',
 };
@@ -119,19 +142,43 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { EventModal } from './event-modal';
 
-const mockApi = vi.mocked(api);
 const mockToast = vi.mocked(toast);
 
 /** Paths the modal's body loads, one request each. */
 const bodyPaths = ['/checklist', '/attachments', '/activities', '/history'];
 
 function callsFor(suffix: string): number {
-  return mockApi.get.mock.calls.filter(([path]) => String(path).endsWith(suffix)).length;
+  return typed.get.mock.calls.filter(([path]) => String(path).endsWith(suffix)).length;
 }
+
+/**
+ * Answers the typed client's reads by the end of the path; anything unlisted is an
+ * empty page. An Error value rejects.
+ */
+function answerGets(answers: Record<string, unknown>, cursorAnswers: Record<string, unknown> = {}) {
+  typed.get.mockImplementation(
+    async (path: string, init?: { params?: { query?: { cursor?: string } } }) => {
+      const table = init?.params?.query?.cursor ? cursorAnswers : answers;
+      const key = Object.keys(table).find((k) => path.endsWith(k));
+      const value =
+        key === undefined ? { items: [], hasMore: false, nextCursor: null } : table[key];
+      if (value instanceof Error) throw value;
+      return { data: value };
+    },
+  );
+}
+
+const someComment = {
+  id: 'c1',
+  body: 'first thing',
+  authorName: 'Someone',
+  authorId: 'u2',
+  createdAt: '2026-04-20T10:00:00Z',
+  etag: 'c-etag',
+};
 
 /** jsdom reports no layout, so focusable elements have to look painted. */
 function rectList(): DOMRectList {
@@ -156,9 +203,10 @@ beforeEach(() => {
   calendarState.activeCalendarIds = ['cal-1'];
   teamCalendar.role = 'owner';
   relativeTime.mockReturnValue('a while ago');
-  mockApi.get.mockResolvedValue([]);
-  mockApi.getWithRevision.mockResolvedValue({ data: event, revision: 'rev-1' });
-  mockApi.post.mockResolvedValue(undefined);
+  answerGets({});
+  typed.put.mockResolvedValue({ data: undefined });
+  typed.post.mockResolvedValue({ data: undefined });
+  typed.patch.mockResolvedValue({ data: undefined });
 });
 
 afterEach(() => {
@@ -179,7 +227,6 @@ describe('EventModal body', () => {
     for (const path of bodyPaths) {
       expect(callsFor(path)).toBe(1);
     }
-    expect(mockApi.getWithRevision).toHaveBeenCalledTimes(1);
     expect(screen.getAllByPlaceholderText('event.titlePlaceholder')).toHaveLength(1);
   });
 
@@ -187,21 +234,7 @@ describe('EventModal body', () => {
   // array fails silently: there is no type error and the section renders as a
   // thread with nothing in it.
   it('reads the thread out of the paged answer', async () => {
-    mockApi.get.mockImplementation((path: string) =>
-      path.endsWith('/activities')
-        ? Promise.resolve({
-            items: [
-              {
-                id: 'c1',
-                body: 'first thing',
-                authorName: 'Someone',
-                authorId: 'u2',
-                createdAt: '2026-04-20T10:00:00Z',
-              },
-            ],
-          })
-        : Promise.resolve([]),
-    );
+    answerGets({ '/activities': { items: [someComment], nextCursor: '' } });
 
     render(<EventModal />);
 
@@ -209,21 +242,11 @@ describe('EventModal body', () => {
   });
 
   it('offers the older comments the first page did not carry', async () => {
-    mockApi.get.mockImplementation((path: string) => {
-      if (!path.endsWith('/activities') && !path.includes('/activities?')) {
-        return Promise.resolve([]);
-      }
-      const comment = (id: string, body: string) => ({
-        id,
-        body,
-        authorName: 'Someone',
-        authorId: 'u2',
-        createdAt: '2026-04-20T10:00:00Z',
-      });
-      return path.includes('cursor=')
-        ? Promise.resolve({ items: [comment('c0', 'older thing')] })
-        : Promise.resolve({ items: [comment('c1', 'newer thing')], nextCursor: 'older' });
-    });
+    const comment = (id: string, body: string) => ({ ...someComment, id, body });
+    answerGets(
+      { '/activities': { items: [comment('c1', 'newer thing')], nextCursor: 'older' } },
+      { '/activities': { items: [comment('c0', 'older thing')], nextCursor: '' } },
+    );
 
     render(<EventModal />);
     const earlier = await screen.findByText('event.loadEarlierComments');
@@ -239,22 +262,9 @@ describe('EventModal body', () => {
   // put the signed link on screen as text where the face should be.
   it('draws a comment author as their picture, not as the URL of it', async () => {
     const avatar = 'https://storage.example/avatars/u2?signature=abc';
-    mockApi.get.mockImplementation((path: string) =>
-      path.endsWith('/activities')
-        ? Promise.resolve({
-            items: [
-              {
-                id: 'c1',
-                body: 'first thing',
-                authorName: 'Someone',
-                authorId: 'u2',
-                authorAvatarUrl: avatar,
-                createdAt: '2026-04-20T10:00:00Z',
-              },
-            ],
-          })
-        : Promise.resolve([]),
-    );
+    answerGets({
+      '/activities': { items: [{ ...someComment, authorAvatarUrl: avatar }], nextCursor: '' },
+    });
 
     const { container } = render(<EventModal />);
     await screen.findByText('first thing');
@@ -267,21 +277,7 @@ describe('EventModal body', () => {
   // timestamp could read one way in a comment and another in the history beside
   // it, and a fix to one of them would reach only half the screen.
   it('times a comment with the shared formatter, not a copy of its own', async () => {
-    mockApi.get.mockImplementation((path: string) =>
-      path.endsWith('/activities')
-        ? Promise.resolve({
-            items: [
-              {
-                id: 'c1',
-                body: 'first thing',
-                authorName: 'Someone',
-                authorId: 'u2',
-                createdAt: '2026-04-20T10:00:00Z',
-              },
-            ],
-          })
-        : Promise.resolve([]),
-    );
+    answerGets({ '/activities': { items: [someComment], nextCursor: '' } });
 
     render(<EventModal />);
     await screen.findByText('first thing');
@@ -466,7 +462,7 @@ describe('EventModal failures', () => {
   it('reports a comment it could not post', async () => {
     render(<EventModal />);
     await waitFor(() => expect(callsFor('/activities')).toBe(1));
-    mockApi.post.mockRejectedValueOnce(new Error('comment refused'));
+    typed.post.mockRejectedValueOnce(new Error('comment refused'));
 
     const input = screen.getByPlaceholderText('event.commentPlaceholder');
     fireEvent.change(input, { target: { value: 'hello' } });
@@ -476,11 +472,7 @@ describe('EventModal failures', () => {
   });
 
   it('reports a checklist it could not read where the list would be', async () => {
-    mockApi.get.mockImplementation((path: string) =>
-      path.endsWith('/checklist')
-        ? Promise.reject(new Error('checklist offline'))
-        : Promise.resolve([]),
-    );
+    answerGets({ '/checklist': new Error('checklist offline') });
 
     render(<EventModal />);
 
@@ -488,20 +480,18 @@ describe('EventModal failures', () => {
   });
 
   it('ticks a checklist item by sending only done', async () => {
-    mockApi.get.mockImplementation((path: string) =>
-      path.endsWith('/checklist')
-        ? Promise.resolve([
-            {
-              id: 'item-1',
-              title: 'Tent',
-              done: false,
-              sortOrder: 3,
-              createdAt: '2026-04-20T10:00:00Z',
-            },
-          ])
-        : Promise.resolve([]),
-    );
-    mockApi.put.mockResolvedValue(undefined);
+    answerGets({
+      '/checklist': [
+        {
+          id: 'item-1',
+          title: 'Tent',
+          done: false,
+          sortOrder: 3,
+          createdAt: '2026-04-20T10:00:00Z',
+          etag: 'item-etag',
+        },
+      ],
+    });
 
     render(<EventModal />);
 
@@ -511,9 +501,10 @@ describe('EventModal failures', () => {
     fireEvent.click(toggle as HTMLButtonElement);
 
     await waitFor(() =>
-      expect(mockApi.put).toHaveBeenCalledWith(expect.stringMatching(/\/checklist\/item-1$/), {
-        done: true,
-      }),
+      expect(typed.patch).toHaveBeenCalledWith(
+        '/calendars/{calendarId}/events/{eventId}/checklist/{itemId}',
+        expect.objectContaining({ body: { done: true } }),
+      ),
     );
   });
 });
@@ -638,7 +629,11 @@ describe('EventModal save payload', () => {
     await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
     const payload = calendarState.addEvent.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(payload.timezone).toBe('America/New_York');
-    expect(Object.keys(payload).sort()).toEqual(wireFields);
+    expect(Object.keys(payload).sort()).toEqual(
+      wireFields
+        .flatMap((f) => (f === 'startAt' ? ['startDate'] : f === 'endAt' ? ['endDate'] : [f]))
+        .sort(),
+    );
   });
 });
 
@@ -650,7 +645,6 @@ describe('EventModal recurrence end', () => {
 
   function openWith(evt: CalendarEvent) {
     calendarState.events = [evt];
-    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
     render(<EventModal />);
   }
 
@@ -710,21 +704,21 @@ describe('EventModal RSVP', () => {
   // copy and showed the previous answer again.
   it('reads the events back once the answer is stored', async () => {
     calendarState.events = [invited];
-    mockApi.put.mockResolvedValue(undefined);
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
     fireEvent.click(screen.getByRole('button', { name: 'event.rsvpAccepted' }));
 
     await waitFor(() => expect(calendarState.fetchEvents).toHaveBeenCalledTimes(1));
-    expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/events/ev-1/rsvp', {
-      rsvp: 'accepted',
+    expect(typed.put).toHaveBeenCalledWith('/calendars/{calendarId}/events/{eventId}/rsvp', {
+      params: { path: { calendarId: 'cal-1', eventId: 'ev-1' } },
+      body: { rsvp: 'accepted' },
     });
   });
 
   it('leaves the store alone when the answer is refused', async () => {
     calendarState.events = [invited];
-    mockApi.put.mockRejectedValue(new Error('nope'));
+    typed.put.mockRejectedValue(new Error('nope'));
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -747,7 +741,6 @@ describe('EventModal monthly weekday position', () => {
       recurrenceRule: { freq: 'monthly', interval: 2, bySetPos: [5], byDay: ['FR'] },
     };
     calendarState.events = [fifthFriday];
-    mockApi.getWithRevision.mockResolvedValue({ data: fifthFriday, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -790,7 +783,6 @@ describe('EventModal recurrence presets across zones', () => {
       timezone: 'America/New_York',
     };
     calendarState.events = [newYorkMonday];
-    mockApi.getWithRevision.mockResolvedValue({ data: newYorkMonday, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -807,7 +799,6 @@ describe('EventModal recurrence presets across zones', () => {
 describe('EventModal canonical recurrence rules', () => {
   async function openAndPick(label: string, evt: CalendarEvent = event) {
     calendarState.events = [evt];
-    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
     fireEvent.click(screen.getByRole('button', { name: 'event.recurrence' }));
@@ -848,7 +839,6 @@ describe('EventModal canonical recurrence rules', () => {
       recurrenceRule: { freq: 'monthly', interval: 2, byMonthDay: [15] },
     };
     calendarState.events = [stored];
-    mockApi.getWithRevision.mockResolvedValue({ data: stored, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -865,7 +855,6 @@ describe('EventModal canonical recurrence rules', () => {
       recurrenceRule: { freq: 'weekly', interval: 2, byDay: ['MO', 'WE'], wkst: 'MO' },
     };
     calendarState.events = [stored];
-    mockApi.getWithRevision.mockResolvedValue({ data: stored, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -881,7 +870,6 @@ describe('EventModal task-derived event', () => {
 
   async function openEvent(evt: CalendarEvent) {
     calendarState.events = [evt];
-    mockApi.getWithRevision.mockResolvedValue({ data: evt, revision: 'rev-1' });
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
   }
@@ -1065,7 +1053,6 @@ describe('EventModal for a reader who may not edit', () => {
   it('viewer can RSVP and expand more options; inputs are readOnly', async () => {
     teamCalendar.role = 'viewer';
     calendarState.events = [invited];
-    mockApi.put.mockResolvedValue(undefined);
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
@@ -1085,8 +1072,9 @@ describe('EventModal for a reader who may not edit', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'event.rsvpAccepted' }));
     await waitFor(() =>
-      expect(mockApi.put).toHaveBeenCalledWith('/calendars/cal-1/events/ev-1/rsvp', {
-        rsvp: 'accepted',
+      expect(typed.put).toHaveBeenCalledWith('/calendars/{calendarId}/events/{eventId}/rsvp', {
+        params: { path: { calendarId: 'cal-1', eventId: 'ev-1' } },
+        body: { rsvp: 'accepted' },
       }),
     );
   });
@@ -1348,7 +1336,194 @@ describe('EventModal delete', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'common.delete' }));
 
     await waitFor(() =>
-      expect(calendarState.deleteEvent).toHaveBeenCalledWith('cal-1', 'ev-1', undefined),
+      expect(calendarState.deleteEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ calendarId: 'cal-1', id: 'ev-1' }),
+        undefined,
+      ),
     );
+  });
+});
+
+describe('EventModal notification offsets', () => {
+  async function openMore() {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    const more = screen.getByRole('button', { name: 'event.moreOptions' });
+    if (more.getAttribute('aria-expanded') !== 'true') fireEvent.click(more);
+  }
+
+  it.each([
+    [45, 'notification.customMinutes'],
+    [180, 'notification.customHours'],
+    [4320, 'notification.customDays'],
+  ])(
+    'keeps an offset of %i minutes outside the presets and saves it unchanged',
+    async (minutes, key) => {
+      calendarState.events = [{ ...event, notificationOffset: minutes }];
+      await openMore();
+
+      expect(screen.getByRole('button', { name: 'event.notification' })).toHaveTextContent(key);
+      fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+      await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+      expect(calendarState.updateEvent.mock.calls[0]?.[2]).toMatchObject({
+        notificationOffset: minutes,
+      });
+    },
+  );
+
+  it('describes delivery for an all-day event instead of the export hint', async () => {
+    calendarState.events = [
+      {
+        ...event,
+        allDay: true,
+        startDate: '2026-08-07',
+        endDate: '2026-08-08',
+        notificationOffset: 0,
+      },
+    ];
+    await openMore();
+
+    expect(screen.getByText('notification.deliveryNote')).toBeInTheDocument();
+    expect(screen.queryByText('event.notification_hint')).toBeNull();
+  });
+});
+
+describe('EventModal all-day dates', () => {
+  it('sends dates with an exclusive end and shows the inclusive end', async () => {
+    calendarState.events = [
+      { ...event, allDay: true, startDate: '2026-08-07', endDate: '2026-08-09' },
+    ];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload).toMatchObject({ allDay: true, startDate: '2026-08-07', endDate: '2026-08-09' });
+    expect(payload).not.toHaveProperty('startAt');
+    expect(payload).not.toHaveProperty('endAt');
+  });
+});
+
+describe('EventModal versions', () => {
+  it('saves against the etag the editor opened on, not a newer stored one', async () => {
+    const { rerender } = render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    fireEvent.change(titleField(), { target: { value: 'Edited' } });
+
+    calendarState.events = [{ ...event, etag: 'etag-2', title: 'Someone else' }];
+    rerender(<EventModal />);
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    expect(calendarState.updateEvent.mock.calls[0]?.[4]).toBe('etag-1');
+  });
+
+  it('checks a whole-series save against the master etag', async () => {
+    calendarState.events = [
+      { ...event, id: 'ev-1_20260807', isRecurrence: true, etag: 'occ-1', seriesEtag: 'master-1' },
+    ];
+    uiState.editingEventId = 'ev-1_20260807';
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'event.scopeAll' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    expect(calendarState.updateEvent.mock.calls[0]?.[3]).toBe('all');
+    expect(calendarState.updateEvent.mock.calls[0]?.[4]).toBe('master-1');
+  });
+
+  it('reports a stale save as a conflict and reloads the events', async () => {
+    calendarState.updateEvent.mockRejectedValueOnce(new ApiError(412, 'EVENT.STALE', 'stale'));
+    calendarState.fetchEvents.mockResolvedValue(undefined);
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('conflict.stale'));
+    expect(calendarState.fetchEvents).toHaveBeenCalledTimes(1);
+    expect(calendarState.updateEvent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('EventModal hidden details', () => {
+  it('does not send the fields the server withheld', async () => {
+    calendarState.events = [{ ...event, detailsHidden: true }];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    expect(screen.getByText('event.detailsHidden')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    const payload = calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+    for (const key of ['location', 'memo', 'url', 'visibility', 'ownerId', 'participantIds']) {
+      expect(payload).not.toHaveProperty(key);
+    }
+    expect(payload).toHaveProperty('title');
+  });
+});
+
+describe('EventModal edit grants', () => {
+  const members: Member[] = [
+    { id: 'u1', name: 'Me', email: '', role: 'owner', color: '#111' },
+    { id: 'u2', name: 'Bob', email: '', role: 'editor', color: '#222' },
+    { id: 'u3', name: 'Cat', email: '', role: 'editor', color: '#333' },
+  ];
+  const shared: CalendarEvent = {
+    ...event,
+    participantIds: ['u2', 'u3'],
+    attendees: [
+      { userId: 'u2', rsvp: 'pending', canEdit: false },
+      { userId: 'u3', rsvp: 'pending', canEdit: false },
+    ],
+  };
+
+  beforeEach(() => {
+    calendarState.membersMap = { 'cal-1': members };
+  });
+
+  afterEach(() => {
+    calendarState.membersMap = { 'cal-1': [] };
+  });
+
+  it('grants a participant the right to edit through the attendee endpoint', async () => {
+    calendarState.events = [shared];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const toggles = screen.getAllByRole('button', { name: 'attendee.canEdit' });
+    expect(toggles).toHaveLength(2);
+    fireEvent.click(toggles[1] as HTMLElement);
+
+    await waitFor(() =>
+      expect(typed.put).toHaveBeenCalledWith(
+        '/calendars/{calendarId}/events/{eventId}/attendees/{userId}',
+        {
+          params: { path: { calendarId: 'cal-1', eventId: 'ev-1', userId: 'u3' } },
+          body: { canEdit: true },
+        },
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'attendee.canEdit' })[1]).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
+  it('offers the toggle only to the owner of the plan or a manager', async () => {
+    teamCalendar.role = 'editor';
+    calendarState.events = [{ ...shared, ownerId: 'u2' }];
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    expect(screen.queryByRole('button', { name: 'attendee.canEdit' })).toBeNull();
   });
 });

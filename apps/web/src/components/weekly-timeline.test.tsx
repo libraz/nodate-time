@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 // New York springs forward at 02:00 on 2026-03-08, so that day runs 23 elapsed
@@ -54,29 +55,16 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-const probe: CalendarEvent = {
+const probe: CalendarEvent = makeEvent({
   id: 'e1',
-  calendarId: 'cal-1',
   title: 'Morning run',
-  allDay: false,
+  timezone: ZONE,
   startAt: `${DAY}T05:00:00-04:00`,
   endAt: `${DAY}T06:00:00-04:00`,
-  color: '#47B2F7',
   ownerId: 'u1',
-  location: '',
-  memo: '',
-  url: '',
-  showAs: 'busy',
-  flexibility: 'fixed',
-  visibility: 'default',
-  notificationOffset: null,
-  participantIds: [],
-  recurrenceRule: null,
-  isRecurrence: false,
-  recurrenceDate: null,
   createdAt: '2026-03-01T00:00:00-05:00',
   updatedAt: '2026-03-01T00:00:00-05:00',
-};
+});
 
 const calendarState = {
   events: [probe],
@@ -329,8 +317,10 @@ describe('WeeklyTimeline week model', () => {
         id: 'a1',
         title: 'Birthday',
         allDay: true,
-        startAt: '2026-08-05T00:00:00+09:00',
-        endAt: '2026-08-06T00:00:00+09:00',
+        startAt: '2026-08-05T00:00:00Z',
+        endAt: '2026-08-06T00:00:00Z',
+        startDate: '2026-08-05',
+        endDate: '2026-08-06',
         timezone: 'Asia/Tokyo',
       },
     ];
@@ -387,7 +377,8 @@ function mouse(x: number, y: number) {
 
 function blockIn(dayKey: string, title: string): HTMLElement {
   const col = document.querySelector<HTMLElement>(`[data-daycol="${dayKey}"]`);
-  const text = col && Array.from(col.querySelectorAll('p')).find((p) => p.textContent === title);
+  const text =
+    col && Array.from(col.querySelectorAll('p')).find((p) => p.textContent?.includes(title));
   if (!text) throw new Error(`no ${title} in ${dayKey}`);
   return text;
 }

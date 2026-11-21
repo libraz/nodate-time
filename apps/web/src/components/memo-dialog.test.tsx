@@ -6,10 +6,28 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn().mockResolvedValue({ items: [] }) },
-  errorMessage: (e: unknown) => String(e),
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn().mockResolvedValue({ data: [] }) },
 }));
+
+vi.mock('@/lib/toast', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}));
+
+vi.mock('@/lib/api', async () => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+  return { ApiError, errorMessage: (e: unknown) => String(e) };
+});
 
 const calendarState = {
   calendars: [{ id: 'cal-1', role: 'reader' }],
@@ -17,13 +35,16 @@ const calendarState = {
   addMemo: vi.fn(),
   updateMemo: vi.fn(),
   deleteMemo: vi.fn(),
+  fetchMemos: vi.fn(),
 };
 
 vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
-import { api } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import { client } from '@/lib/client';
+import { toast } from '@/lib/toast';
 import { MemoDialog } from './memo-dialog';
 
 afterEach(() => {
@@ -99,10 +120,25 @@ describe('MemoDialog', () => {
   // the title focus could land on the copy CSS was hiding.
   it('renders the form once and loads its history once', async () => {
     calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
-    vi.mocked(api.get).mockClear();
+    vi.mocked(client.GET).mockClear();
     render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);
 
     expect(screen.getAllByDisplayValue('Groceries')).toHaveLength(1);
-    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(client.GET).toHaveBeenCalledTimes(1));
+  });
+
+  // A save refused as stale is not retried with a newer version: the reader is
+  // told, and the memo list is read again.
+  it('reports a stale save and refetches instead of retrying', async () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    calendarState.updateMemo.mockRejectedValueOnce(new ApiError(412, 'stale', 'MEMO.STALE'));
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);
+
+    fireEvent.change(screen.getByDisplayValue('milk'), { target: { value: 'eggs' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('conflict.stale'));
+    expect(calendarState.updateMemo).toHaveBeenCalledTimes(1);
+    expect(calendarState.fetchMemos).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,14 +2,32 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn() },
   errorMessage: (e: unknown) => String(e),
 }));
 
-import { api } from '@/lib/api';
+// The typed client is replaced by an adapter that reports the request made as
+// a path with its parameters filled in, so assertions read as URLs.
+const raw = vi.hoisted(() => ({ get: vi.fn() }));
+
+type Init = { params?: { path?: Record<string, string>; query?: Record<string, string> } };
+
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    GET: async (path: string, init?: Init) => {
+      const filled = path.replace(
+        /\{(\w+)\}/g,
+        (_, key: string) => init?.params?.path?.[key] ?? '',
+      );
+      const query = new URLSearchParams(init?.params?.query).toString();
+      return { data: await raw.get(query ? `${filled}?${query}` : filled) };
+    },
+  },
+}));
+
 import { useCalendarPages } from './use-calendar-pages';
 
-const mockGet = vi.mocked(api.get);
+const mockGet = raw.get;
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};

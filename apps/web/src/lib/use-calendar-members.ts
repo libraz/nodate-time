@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { assignableRoles, canManage, canOwn, type Role, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
@@ -82,7 +83,10 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
         return;
       }
       try {
-        await api.put(`/calendars/${calendarId}/members/${member.id}/role`, { role });
+        await client.PUT('/calendars/{calendarId}/members/{userId}/role', {
+          params: { path: { calendarId, userId: member.id } },
+          body: { role: role as Role },
+        });
         await fetchMembers(calendarId);
         toast.success(t('panel.updated'));
       } catch (e) {
@@ -104,7 +108,9 @@ export function useCalendarMembers(calendarId: string): CalendarMembers {
           toast.success(t('members.leftCalendar'));
           return true;
         }
-        await api.delete(`/calendars/${calendarId}/members/${member.id}`);
+        await client.DELETE('/calendars/{calendarId}/members/{userId}', {
+          params: { path: { calendarId, userId: member.id } },
+        });
         await fetchMembers(calendarId);
         toast.success(t('panel.updated'));
       } catch (e) {

@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon';
+import { allDayDates } from '@/lib/all-day';
 import { fromISOInZone } from '@/lib/date-utils';
 import { eventDayZone, toGridDay } from '@/lib/event-zone';
 import type { CalendarEvent } from '@/types/calendar';
@@ -16,13 +17,27 @@ export interface PositionedEvent {
 }
 
 /** What placing an event on calendar days reads; a published event carries the same. */
-export type DayEvent = Pick<CalendarEvent, 'startAt' | 'endAt' | 'allDay' | 'timezone'>;
+export type DayEvent = Pick<CalendarEvent, 'startAt' | 'endAt' | 'allDay'> &
+  Partial<Pick<CalendarEvent, 'startDate' | 'endDate'>>;
+
+/** The days an all-day event covers, as grid days; null for a timed event or one without dates. */
+function allDaySpan(evt: DayEvent, zone: string): { first: DateTime; last: DateTime } | null {
+  if (!evt.allDay) return null;
+  const dates = allDayDates(evt);
+  if (!dates) return null;
+  return {
+    first: toGridDay(DateTime.fromISO(dates.firstDate, { zone: 'UTC' }), zone),
+    last: toGridDay(DateTime.fromISO(dates.lastDate, { zone: 'UTC' }), zone),
+  };
+}
 
 /**
  * Returns the first calendar day an event occupies, expressed in the grid's
- * zone. All-day events are measured in their own zone (see `eventDayZone`).
+ * zone. All-day events are read from their dates (see `eventDayZone`).
  */
 export function eventStartDay(evt: DayEvent, zone: string): DateTime {
+  const span = allDaySpan(evt, zone);
+  if (span) return span.first;
   const own = eventDayZone(evt, zone);
   return toGridDay(fromISOInZone(evt.startAt, own), zone);
 }
@@ -37,6 +52,8 @@ export function eventStartDay(evt: DayEvent, zone: string): DateTime {
  * the previous day and must not bleed the event onto the next cell.
  */
 export function eventEndDay(evt: DayEvent, zone: string): DateTime {
+  const span = allDaySpan(evt, zone);
+  if (span) return span.last;
   const own = eventDayZone(evt, zone);
   const start = fromISOInZone(evt.startAt, own);
   const end = fromISOInZone(evt.endAt, own);

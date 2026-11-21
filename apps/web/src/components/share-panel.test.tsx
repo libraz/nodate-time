@@ -17,8 +17,30 @@ vi.mock('@/i18n', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+}));
+
+// The typed client is replaced by an adapter over three stubs that see the
+// resolved path and body, so the assertions read as the requests made.
+const raw = vi.hoisted(() => {
+  const fill = (path: string, init?: { params?: { path?: Record<string, string> } }) =>
+    path.replace(/\{(\w+)\}/g, (_, key: string) => init?.params?.path?.[key] ?? '');
+  return { fill, get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+});
+
+type Init = { params?: { path?: Record<string, string> }; body?: unknown };
+
+vi.mock('@/lib/client', () => ({
+  client: {
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    GET: async (path: string, init?: Init) => ({ data: await raw.get(raw.fill(path, init)) }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    POST: async (path: string, init?: Init) => ({
+      data: await raw.post(raw.fill(path, init), init?.body),
+    }),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    DELETE: async (path: string, init?: Init) => ({ data: await raw.delete(raw.fill(path, init)) }),
+  },
 }));
 
 vi.mock('@/lib/toast', () => ({
@@ -45,6 +67,8 @@ function calendar(id: string, name: string): Calendar {
     memberCount: 1,
     role: 'owner',
     memberColor: '#000',
+    coverUploadAllowed: false,
+    etag: 'etag-1',
   };
 }
 
@@ -57,12 +81,11 @@ vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
 }));
 
-import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { SharePanel } from './share-panel';
 
-const apiGet = vi.mocked(api.get);
-const apiPost = vi.mocked(api.post);
+const apiGet = raw.get;
+const apiPost = raw.post;
 const toastError = vi.mocked(toast.error);
 
 function invite(id: string, token: string, isPublic = false): InviteData {

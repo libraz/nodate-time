@@ -1,22 +1,30 @@
 import { useCallback, useState } from 'react';
 import { useT } from '@/i18n';
-import { api, errorMessage } from '@/lib/api';
-import { isRecurringEvent, moveSeriesRule, restoreInput } from '@/lib/event-move';
+import { errorMessage } from '@/lib/api';
+import {
+  type EventScope,
+  isRecurringEvent,
+  moveSeriesRule,
+  restoreInput,
+  scopeEtag,
+} from '@/lib/event-move';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-import { type EventInput, useCalendarStore } from '@/stores/calendar-store';
+import { type EventPatch, useCalendarStore } from '@/stores/calendar-store';
 import type { CalendarEvent } from '@/types/calendar';
 
 interface PendingUpdate {
   event: CalendarEvent;
-  payload: EventInput;
+  payload: EventPatch;
+  /** Set once `following` is picked and the user is asked to confirm it. */
+  confirmingFollowing: boolean;
 }
 
 /** The failures that mean the copy on screen is out of date rather than that the write was bad. */
 function staleOrGone(e: unknown): boolean {
-  if (typeof e !== 'object' || e === null) return false;
-  const { code, status } = e as { code?: unknown; status?: unknown };
-  return code === 'EVENT.STALE' || status === 404;
+  if (isStaleError(e)) return true;
+  return typeof e === 'object' && e !== null && (e as { status?: unknown }).status === 404;
 }
 
 /**
@@ -24,8 +32,9 @@ function staleOrGone(e: unknown): boolean {
  * immediately; a recurring one first asks whether to change this occurrence or
  * the whole series. Render the returned `dialog` somewhere in the view.
  *
- * The update replaces every field, so it is only sent when the copy it was
- * built from is still the stored one, and it names that revision.
+ * The write names the `etag` the listing carried, so a copy someone else has
+ * changed since is refused (and the view refetched) instead of overwritten.
+ * Only the changed fields are sent.
  */
 export function useScopedUpdate() {
   const t = useT();
@@ -43,22 +52,12 @@ export function useScopedUpdate() {
   const commit = useCallback(
     async (
       event: CalendarEvent,
-      payload: EventInput,
-      scope?: 'this' | 'all',
+      payload: EventPatch,
+      scope?: EventScope,
       undoable = true,
     ): Promise<boolean> => {
       try {
-        const { data: current, revision } = await api.getWithRevision<CalendarEvent>(
-          `/calendars/${event.calendarId}/events/${event.id}`,
-        );
-        // A copy someone has changed since is refused here; the If-Match below
-        // covers a change landing between this read and the write.
-        if (current.updatedAt !== event.updatedAt) {
-          toast.error(t('apiError.EVENT.STALE'));
-          refetch();
-          return false;
-        }
-        await updateEvent(event.calendarId, event.id, payload, scope, revision);
+        await updateEvent(event.calendarId, event.id, payload, scope, scopeEtag(event, scope));
         // A drag is quick to get wrong and slow to put back by hand. Only a
         // single event offers it: a series edit rewrites more than this copy.
         if (undoable && scope === undefined) {
@@ -75,7 +74,7 @@ export function useScopedUpdate() {
         }
         return true;
       } catch (e) {
-        toast.error(errorMessage(e, t('error.saveFailed')));
+        toast.error(isStaleError(e) ? t('conflict.stale') : errorMessage(e, t('error.saveFailed')));
         if (staleOrGone(e)) refetch();
         return false;
       }
@@ -85,20 +84,27 @@ export function useScopedUpdate() {
 
   /** Commit an update, prompting for scope when the event is recurring. */
   const requestUpdate = useCallback(
-    (event: CalendarEvent, payload: EventInput) => {
+    (event: CalendarEvent, payload: EventPatch) => {
       // Only an expanded occurrence (composite id) has a scope to choose.
-      if (isRecurringEvent(event) && event.id.includes('_')) setPending({ event, payload });
-      else void commit(event, payload);
+      if (isRecurringEvent(event) && event.id.includes('_')) {
+        setPending({ event, payload, confirmingFollowing: false });
+      } else void commit(event, payload);
     },
     [commit],
   );
 
   const choose = useCallback(
-    (scope: 'this' | 'all') => {
-      if (pending) {
-        const { event, payload } = pending;
-        void commit(event, scope === 'all' ? moveSeriesRule(event, payload) : payload, scope);
+    (scope: EventScope) => {
+      if (!pending) return;
+      // Moving this occurrence and the ones after it can overwrite edits made to
+      // those later occurrences, so it is confirmed before anything is sent.
+      if (scope === 'following' && !pending.confirmingFollowing) {
+        setPending({ ...pending, confirmingFollowing: true });
+        return;
       }
+      const { event, payload } = pending;
+      // `following` sends no rule: the server derives it from the moved start.
+      void commit(event, scope === 'all' ? moveSeriesRule(event, payload) : payload, scope);
       setPending(null);
     },
     [pending, commit],
@@ -122,20 +128,44 @@ export function useScopedUpdate() {
           style={{ borderRadius: 'var(--radius-lg)' }}
         >
           <p className="text-default font-semibold">{t('event.scopeEditTitle')}</p>
-          <button
-            type="button"
-            onClick={() => choose('this')}
-            className="btn-secondary py-3 text-default font-medium"
-          >
-            {t('event.scopeThis')}
-          </button>
-          <button
-            type="button"
-            onClick={() => choose('all')}
-            className="btn-secondary py-3 text-default font-medium"
-          >
-            {t('event.scopeAll')}
-          </button>
+          {pending.confirmingFollowing ? (
+            <>
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                {t('scope.followingDropsChanges')}
+              </p>
+              <button
+                type="button"
+                onClick={() => choose('following')}
+                className="btn-secondary py-3 text-default font-medium"
+              >
+                {t('scope.following')}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => choose('this')}
+                className="btn-secondary py-3 text-default font-medium"
+              >
+                {t('event.scopeThis')}
+              </button>
+              <button
+                type="button"
+                onClick={() => choose('following')}
+                className="btn-secondary py-3 text-default font-medium"
+              >
+                {t('scope.following')}
+              </button>
+              <button
+                type="button"
+                onClick={() => choose('all')}
+                className="btn-secondary py-3 text-default font-medium"
+              >
+                {t('event.scopeAll')}
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => setPending(null)}

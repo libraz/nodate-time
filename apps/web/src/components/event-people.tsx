@@ -1,6 +1,7 @@
 import { Avatar } from '@/components/avatar';
 import { LabelledButton } from '@/components/labelled-button';
 import { CustomSelect } from '@/components/pickers';
+import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { memberOption } from '@/lib/member-option';
 import { showAsLabelKey } from '@/lib/permissions';
@@ -67,12 +68,17 @@ function ParticipantChip({
   rsvp,
   removable,
   onRemove,
+  canEdit,
+  onCanEditChange,
 }: {
   member: Member;
   name: string;
   rsvp: Rsvp | undefined;
   removable: boolean;
   onRemove: () => void;
+  /** The participant's grant; the toggle shows only with a handler. */
+  canEdit: boolean;
+  onCanEditChange: ((next: boolean) => void) | undefined;
 }) {
   const t = useT();
   const declined = rsvp === 'declined';
@@ -96,6 +102,17 @@ function ParticipantChip({
       >
         {name}
       </span>
+      {onCanEditChange && (
+        <span className="flex shrink-0 items-center gap-1 text-caption text-[var(--color-text-secondary)]">
+          {t('attendee.canEdit')}
+          <Switch
+            size="sm"
+            checked={canEdit}
+            label={t('attendee.canEdit')}
+            onChange={onCanEditChange}
+          />
+        </span>
+      )}
       {removable && (
         <LabelledButton
           label={t('event.removeParticipant', { name: member.name })}
@@ -139,6 +156,8 @@ interface EventPeopleProps {
   ownerHint?: string | undefined;
   /** The saved answers and grants, absent on a new event. */
   attendees?: Attendee[] | undefined;
+  /** Grants or withdraws a participant's right to edit; absent for anyone who may not. */
+  onCanEditChange?: ((userId: string, canEdit: boolean) => void) | undefined;
   onOwnerChange: (id: string) => void;
   onParticipantsChange: (ids: string[]) => void;
 }
@@ -163,6 +182,7 @@ export function EventPeople({
   canRemoveEditors,
   ownerHint,
   attendees,
+  onCanEditChange,
   onOwnerChange,
   onParticipantsChange,
 }: EventPeopleProps) {
@@ -230,6 +250,12 @@ export function EventPeople({
                 rsvp={attendee?.rsvp}
                 removable={!readOnly && (canRemoveEditors || !attendee?.canEdit)}
                 onRemove={() => onParticipantsChange(participants.filter((id) => id !== m.id))}
+                canEdit={attendee?.canEdit ?? false}
+                onCanEditChange={
+                  !readOnly && onCanEditChange && attendee && m.id !== ownerId
+                    ? (next) => onCanEditChange(m.id, next)
+                    : undefined
+                }
               />
             );
           })}

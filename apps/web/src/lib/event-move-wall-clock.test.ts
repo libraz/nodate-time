@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { makeEvent as makeFullEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 import { buildMovedEvent } from './event-move';
 import { shiftStartKeepingDuration } from './event-times';
@@ -7,30 +8,13 @@ import { shiftStartKeepingDuration } from './event-times';
 const NEW_YORK = 'America/New_York';
 
 function makeEvent(startAt: string, endAt: string): CalendarEvent {
-  return {
-    id: 'event-1',
-    calendarId: 'cal-1',
-    title: 'Meeting',
-    allDay: false,
-    startAt,
-    endAt,
-    timezone: NEW_YORK,
-    color: '#47B2F7',
-    ownerId: null,
-    showAs: 'busy',
-    flexibility: 'fixed',
-    visibility: 'default',
-    location: '',
-    memo: '',
-    url: '',
-    notificationOffset: null,
-    participantIds: [],
-    recurrenceRule: null,
-    isRecurrence: false,
-    recurrenceDate: null,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  };
+  return makeFullEvent({ id: 'event-1', startAt, endAt, timezone: NEW_YORK });
+}
+
+/** The wire value of a field the move is known to carry. */
+function sent(value: string | undefined): string {
+  if (value === undefined) throw new Error('the move did not send this field');
+  return value;
 }
 
 describe('moving an event preserves its wall-clock span on the destination date', () => {
@@ -58,7 +42,7 @@ describe('moving an event preserves its wall-clock span on the destination date'
         NEW_YORK,
       );
 
-      expect(moved.endAt).toBe(expectedEnd);
+      expect(sent(moved.endAt)).toBe(expectedEnd);
     },
   );
 
@@ -83,9 +67,9 @@ describe('moving an event preserves its wall-clock span on the destination date'
       DateTime.fromISO(newStart, { zone: NEW_YORK }),
     );
 
-    expect(DateTime.fromISO(moved.endAt, { zone: NEW_YORK }).toFormat("yyyy-MM-dd'T'HH:mm")).toBe(
-      expectedEnd,
-    );
+    expect(
+      DateTime.fromISO(sent(moved.endAt), { zone: NEW_YORK }).toFormat("yyyy-MM-dd'T'HH:mm"),
+    ).toBe(expectedEnd);
   });
 
   it.each([
@@ -105,9 +89,9 @@ describe('moving an event preserves its wall-clock span on the destination date'
       makeEvent('2026-11-02T01:00:00-05:00', '2026-11-02T01:30:00-05:00'),
       start,
     );
-    const end = DateTime.fromISO(moved.endAt);
+    const end = DateTime.fromISO(sent(moved.endAt));
 
-    expect(moved.endAt).toBe(expectedEnd);
+    expect(sent(moved.endAt)).toBe(expectedEnd);
     expect(end.toMillis()).toBeGreaterThan(start.toMillis());
   });
 
@@ -119,8 +103,8 @@ describe('moving an event preserves its wall-clock span on the destination date'
       NEW_YORK,
     );
 
-    expect(moved.endAt).toBe('2026-11-01T01:30');
-    expect(DateTime.fromISO(moved.endAt, { zone: NEW_YORK }).toMillis()).toBeGreaterThan(
+    expect(sent(moved.endAt)).toBe('2026-11-01T01:30');
+    expect(DateTime.fromISO(sent(moved.endAt), { zone: NEW_YORK }).toMillis()).toBeGreaterThan(
       start.toMillis(),
     );
   });
@@ -138,7 +122,7 @@ describe('moving an event preserves its wall-clock span on the destination date'
 
     expect(editorMove.endAt).toBe('2026-03-03T00:30');
     expect(
-      DateTime.fromISO(dragMove.endAt, { zone: NEW_YORK }).toFormat("yyyy-MM-dd'T'HH:mm"),
+      DateTime.fromISO(sent(dragMove.endAt), { zone: NEW_YORK }).toFormat("yyyy-MM-dd'T'HH:mm"),
     ).toBe('2026-03-03T00:30');
   });
 });
@@ -153,8 +137,8 @@ describe('moving an event from a viewer in another zone', () => {
       DateTime.fromISO('2026-05-12T12:00', { zone: TOKYO }),
     );
 
-    const start = DateTime.fromISO(moved.startAt, { zone: NEW_YORK });
-    const end = DateTime.fromISO(moved.endAt, { zone: NEW_YORK });
+    const start = DateTime.fromISO(sent(moved.startAt), { zone: NEW_YORK });
+    const end = DateTime.fromISO(sent(moved.endAt), { zone: NEW_YORK });
     expect(start.toFormat('HH:mm')).toBe('23:00');
     expect(end.toFormat('HH:mm')).toBe('03:00');
   });
@@ -168,7 +152,10 @@ describe('moving an event from a viewer in another zone', () => {
       DateTime.fromISO('2026-05-12T12:00', { zone: TOKYO }),
     );
 
-    const hours = DateTime.fromISO(moved.endAt).diff(DateTime.fromISO(moved.startAt), 'hours');
+    const hours = DateTime.fromISO(sent(moved.endAt)).diff(
+      DateTime.fromISO(sent(moved.startAt)),
+      'hours',
+    );
     expect(hours.hours).toBe(3);
   });
 });

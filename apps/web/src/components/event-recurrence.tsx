@@ -200,14 +200,8 @@ export function RecurrenceEditor({
                   onChange((f) => {
                     if (!f.rule) return f;
                     // Seed defaults so the rule stays valid for its frequency.
-                    const base = {
-                      ...f.rule,
-                      freq,
-                      byDay: undefined as string[] | undefined,
-                      byMonthDay: undefined as number[] | undefined,
-                      bySetPos: undefined as number[] | undefined,
-                      wkst: undefined as RecurrenceRule['wkst'],
-                    };
+                    const { byDay, byMonthDay, bySetPos, wkst, ...kept } = f.rule;
+                    const base: RecurrenceRule = { ...kept, freq };
                     if (freq === 'weekly') {
                       base.byDay = [dayCode];
                       base.wkst = UI_WEEK_START;
@@ -286,24 +280,20 @@ export function RecurrenceEditor({
                   onChange((f) => {
                     if (!f.rule) return f;
                     if (mode === 'weekday') {
+                      const { byMonthDay, ...kept } = f.rule;
                       return {
                         ...f,
                         rule: {
-                          ...f.rule,
+                          ...kept,
                           bySetPos: [getNthWeekday(start)],
                           byDay: [WEEKDAY_CODES[start.weekday % 7] ?? 'SU'],
-                          byMonthDay: undefined,
                         },
                       };
                     }
+                    const { bySetPos, byDay, ...kept } = f.rule;
                     return {
                       ...f,
-                      rule: {
-                        ...f.rule,
-                        byMonthDay: [start.day],
-                        bySetPos: undefined,
-                        byDay: undefined,
-                      },
+                      rule: { ...kept, byMonthDay: [start.day] },
                     };
                   });
                 }}
@@ -382,10 +372,11 @@ export function RecurrenceEditor({
                   name="recEnd"
                   checked={!rule.until && !rule.count}
                   onChange={() =>
-                    onChange((f) => ({
-                      ...f,
-                      rule: f.rule ? { ...f.rule, until: undefined, count: undefined } : null,
-                    }))
+                    onChange((f) => {
+                      if (!f.rule) return { ...f, rule: null };
+                      const { until, count, ...kept } = f.rule;
+                      return { ...f, rule: kept };
+                    })
                   }
                   className="accent-[var(--color-accent)]"
                 />
@@ -400,10 +391,11 @@ export function RecurrenceEditor({
                   checked={!!rule.until}
                   onChange={() => {
                     const defaultEnd = start.plus({ months: 1 }).toFormat('yyyy-MM-dd');
-                    onChange((f) => ({
-                      ...f,
-                      rule: f.rule ? { ...f.rule, until: defaultEnd, count: undefined } : null,
-                    }));
+                    onChange((f) => {
+                      if (!f.rule) return { ...f, rule: null };
+                      const { count, ...kept } = f.rule;
+                      return { ...f, rule: { ...kept, until: defaultEnd } };
+                    });
                   }}
                   className="accent-[var(--color-accent)]"
                 />
@@ -438,10 +430,11 @@ export function RecurrenceEditor({
                   name="recEnd"
                   checked={!!rule.count}
                   onChange={() =>
-                    onChange((f) => ({
-                      ...f,
-                      rule: f.rule ? { ...f.rule, count: 10, until: undefined } : null,
-                    }))
+                    onChange((f) => {
+                      if (!f.rule) return { ...f, rule: null };
+                      const { until, ...kept } = f.rule;
+                      return { ...f, rule: { ...kept, count: 10 } };
+                    })
                   }
                   className="accent-[var(--color-accent)]"
                 />

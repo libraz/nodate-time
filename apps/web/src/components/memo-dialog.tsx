@@ -6,6 +6,7 @@ import { HistoryTimeline } from '@/components/history-timeline';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -68,6 +69,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   const addMemo = useCalendarStore((s) => s.addMemo);
   const updateMemo = useCalendarStore((s) => s.updateMemo);
   const deleteMemo = useCalendarStore((s) => s.deleteMemo);
+  const fetchMemos = useCalendarStore((s) => s.fetchMemos);
 
   const editing = memoId ? (memos.find((m) => m.id === memoId) ?? null) : null;
   // A reader may open a memo to read it; saving or deleting would only be refused.
@@ -121,11 +123,16 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       }
       onClose();
     } catch (e) {
-      toast.error(errorMessage(e, t('error.saveFailed')));
+      if (isStaleError(e)) {
+        toast.error(t('conflict.stale'));
+        void fetchMemos();
+      } else {
+        toast.error(errorMessage(e, t('error.saveFailed')));
+      }
     } finally {
       setSaving(false);
     }
-  }, [form, saving, editing, calendarId, addMemo, updateMemo, onClose, t]);
+  }, [form, saving, editing, calendarId, addMemo, updateMemo, fetchMemos, onClose, t]);
 
   const handleDelete = useCallback(async () => {
     if (!editing || saving) return;
@@ -134,12 +141,17 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
       await deleteMemo(calendarId, editing.id);
       onClose();
     } catch (e) {
-      toast.error(errorMessage(e, t('error.deleteFailed')));
+      if (isStaleError(e)) {
+        toast.error(t('conflict.stale'));
+        void fetchMemos();
+      } else {
+        toast.error(errorMessage(e, t('error.deleteFailed')));
+      }
     } finally {
       setSaving(false);
       setConfirmingDelete(false);
     }
-  }, [editing, saving, calendarId, deleteMemo, onClose, t]);
+  }, [editing, saving, calendarId, deleteMemo, fetchMemos, onClose, t]);
 
   const formContent = (
     <>

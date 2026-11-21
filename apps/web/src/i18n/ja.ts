@@ -317,8 +317,8 @@ export const ja = {
 
   // Search
   'search.searchEvents': '予定を検索',
-  'search.placeholder': '予定を検索...',
-  'search.noResults': '読み込み済みの予定（{from}〜{to}）には見つかりませんでした',
+  'search.placeholder': 'タイトル・場所・メモから検索...',
+  'search.noResults': '該当する予定が見つかりませんでした',
 
   // Password reset
   'auth.forgotPassword': 'パスワードをお忘れですか？',
@@ -933,6 +933,31 @@ export const ja = {
   'invites.closeTitle': 'コピーしていないリンクがあります',
   'invites.closeAnyway': '閉じる',
   'checklist.deleted': '項目を削除しました',
+  'restore.toast': '「{name}」を削除しました',
+  'restore.undo': '元に戻す',
+  'restore.expired': '削除から時間が経ったため、元に戻せません',
+  'search.tooBroad': '該当が多すぎます。キーワードを足して絞り込んでください',
+  'search.hasMore': '表示しきれない件数が該当しています。キーワードを足して絞り込んでください',
+  'share.daySheetTitle': '{date}の予定',
+  'share.busy': '予定あり',
+  'invite.joined': '「{name}」に参加しました',
+  'invite.joinFailed': '招待されたカレンダーに参加できませんでした',
+  'admin.instanceAdmins': 'インスタンス管理者',
+  'admin.grant': '管理者にする',
+  'admin.revoke': '管理者を外す',
+  'admin.userNotFound': '該当するユーザーが見つかりません',
+  'scope.following': 'この予定以降すべて',
+  'scope.followingDropsChanges': 'これ以降の回に個別に加えた変更は、この編集で上書きされます',
+  'scope.followingDeleteIrreversible': 'これ以降の回を削除します。この操作は元に戻せません',
+  'poll.finalizeWithoutPending': 'まだ回答していない人がいます。このまま確定しますか？',
+  'notification.customMinutes': '{n}分前',
+  'notification.customHours': '{n}時間前',
+  'notification.customDays': '{n}日前',
+  'notification.deliveryNote': '終日の予定は、予定のタイムゾーンの当日 0 時を基準に通知します',
+  'event.busy': '予定あり',
+  'event.detailsHidden': '詳細は非公開です',
+  'attendee.canEdit': '編集を許可',
+  'conflict.stale': '他の場所で変更されました。読み込み直してください',
 } as const;
 
 export type TranslationKey = keyof typeof ja;

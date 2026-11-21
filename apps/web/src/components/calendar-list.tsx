@@ -5,6 +5,7 @@ import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/api';
 import { canManage, canOwn } from '@/lib/permissions';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -22,6 +23,7 @@ export function CalendarList() {
   const setActiveCalendarIds = useCalendarStore((s) => s.setActiveCalendarIds);
   const addCalendar = useCalendarStore((s) => s.addCalendar);
   const deleteCalendar = useCalendarStore((s) => s.deleteCalendar);
+  const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
   const openPanelFor = useUiStore((s) => s.openPanelFor);
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
@@ -76,7 +78,10 @@ export function CalendarList() {
       setPendingDeleteId(null);
       toast.success(t('calendar.deleted', { name }));
     } catch (e) {
-      const message = errorMessage(e);
+      // A stale calendar is never retried with a newer version; the list is read again.
+      const stale = isStaleError(e);
+      const message = stale ? t('conflict.stale') : errorMessage(e);
+      if (stale) void fetchCalendars();
       setDeleteError(message);
       toast.error(message);
     } finally {

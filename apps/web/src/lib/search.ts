@@ -1,31 +1,74 @@
-import { DateTime } from 'luxon';
-import type { Locale } from '@/i18n';
-import { fetchWindow, formatMonthYear, formatTime } from '@/lib/date-utils';
+import type { DateTime } from 'luxon';
+import { useEffect, useState } from 'react';
+import { getT, type Locale } from '@/i18n';
+import { ApiError, errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
+import { formatTime } from '@/lib/date-utils';
 import { eventStartDay } from '@/lib/week-layout';
-import type { CalendarEvent, CalendarView } from '@/types/calendar';
+import type { CalendarEvent } from '@/types/calendar';
 
-/**
- * Events matching a free-text query, restricted to the calendars currently
- * shown.
- *
- * The store keeps every calendar's events regardless of which ones are shown,
- * so searching all of them surfaces entries from a calendar the reader has
- * switched off -- and following one lands on a day where it is not drawn. The
- * shown set is required rather than defaulted: a caller that forgot it and a
- * caller that meant every calendar must not be the same expression.
- */
-export function filterEventsForSearch(
-  events: CalendarEvent[],
-  activeCalendarIds: string[],
-  query: string,
-): CalendarEvent[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return events.filter(
-    (evt) =>
-      activeCalendarIds.includes(evt.calendarId) &&
-      [evt.title, evt.location, evt.memo].some((field) => field.toLowerCase().includes(q)),
-  );
+/** Longest query the API accepts, in code points; the box stops short of a certain 422. */
+export const SEARCH_QUERY_MAX = 100;
+
+/** Pause after the last keystroke before a query is sent. */
+const SEARCH_DEBOUNCE_MS = 250;
+
+/** One page of matches: the earliest upcoming occurrence of each, soonest first. */
+export interface SearchPage {
+  items: CalendarEvent[];
+  /** More matches exist than were returned. */
+  hasMore: boolean;
+}
+
+/** Searches every calendar the caller belongs to; a refused query rejects with ApiError. */
+export async function searchEvents(query: string, signal?: AbortSignal): Promise<SearchPage> {
+  const { data } = await client.GET('/search', {
+    params: { query: { q: query.trim() } },
+    ...(signal ? { signal } : {}),
+  });
+  return { items: (data?.items ?? []) as CalendarEvent[], hasMore: data?.hasMore ?? false };
+}
+
+export type SearchState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'done'; items: CalendarEvent[]; hasMore: boolean }
+  | { status: 'error'; message: string };
+
+/** Runs the debounced server search for `query`, dropping answers to superseded queries. */
+export function useEventSearch(query: string): SearchState {
+  const q = query.trim();
+  const [state, setState] = useState<SearchState>({ status: 'idle' });
+
+  useEffect(() => {
+    if (q === '') {
+      setState({ status: 'idle' });
+      return;
+    }
+    setState({ status: 'loading' });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      searchEvents(q, ctrl.signal).then(
+        (page) => {
+          if (!ctrl.signal.aborted) setState({ status: 'done', ...page });
+        },
+        (e: unknown) => {
+          if (ctrl.signal.aborted) return;
+          const tooBroad = e instanceof ApiError && e.code === 'SEARCH.TOO_BROAD';
+          setState({
+            status: 'error',
+            message: tooBroad ? getT()('search.tooBroad') : errorMessage(e),
+          });
+        },
+      );
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [q]);
+
+  return state;
 }
 
 /**
@@ -41,19 +84,4 @@ export function searchResultLabel(evt: CalendarEvent, zone: string, locale: Loca
   const day = searchResultDay(evt, zone).toFormat('yyyy/MM/dd (EEE)', { locale });
   if (evt.allDay) return day;
   return `${day} ${formatTime(evt.startAt, zone)} - ${formatTime(evt.endAt, zone)}`;
-}
-
-/**
- * The months a search actually covered: the window the view loaded, since the
- * search runs over loaded events only. An empty result is stated against this
- * rather than as if nothing existed anywhere.
- */
-export function searchedMonths(
-  view: CalendarView,
-  month: DateTime,
-  locale: Locale,
-): { from: string; to: string } {
-  const { start, end } = fetchWindow(view, month);
-  const label = (iso: string) => formatMonthYear(DateTime.fromISO(iso), locale);
-  return { from: label(start), to: label(end) };
 }

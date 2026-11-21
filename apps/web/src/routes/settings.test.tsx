@@ -29,6 +29,7 @@ vi.mock('@/lib/api', () => {
     constructor(
       public status: number,
       public detail: string,
+      public code = '',
     ) {
       super(detail);
     }
@@ -36,11 +37,17 @@ vi.mock('@/lib/api', () => {
   return {
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), getBlob: vi.fn() },
+    filenameFromDisposition: (header: string | null) =>
+      header?.match(/filename="([^"]+)"/)?.[1] ?? '',
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
     isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
   };
 });
+
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
+}));
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -54,9 +61,10 @@ function calendar(role: string): Calendar {
     createdAt: '',
     publicShared: false,
     memberCount: 1,
-    role,
+    role: role as Calendar['role'],
     memberColor: '#000',
     coverUploadAllowed: false,
+    etag: '',
   };
 }
 
@@ -101,9 +109,10 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-import { api } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
 import { APP_NAME } from '@/lib/brand';
+import { client } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
 import {
@@ -111,12 +120,35 @@ import {
   AppearanceSection,
   CalendarsSection,
   ExportSection,
+  InstanceAdminsSection,
   ProfileSection,
+  ProviderCard,
 } from './settings';
 
-const apiGet = vi.mocked(api.get);
-const apiPost = vi.mocked(api.post);
-const apiGetBlob = vi.mocked(api.getBlob);
+const apiGet = vi.mocked(client.GET);
+const apiPost = vi.mocked(client.POST);
+
+/** The concrete URL a typed call addresses, so a test can name it as a reader would. */
+function urlOf(path: unknown, init?: unknown): string {
+  const params = (init as { params?: { path?: Record<string, string> } } | undefined)?.params;
+  return String(path).replace(/\{(\w+)\}/g, (_, key: string) => params?.path?.[key] ?? '');
+}
+
+const askedUrls = () =>
+  (apiGet.mock.calls as unknown as [string, unknown][]).map(([path, init]) => urlOf(path, init));
+
+/** What an export answers: the file, and the headers that name and bound it. */
+function exported(filename: string, window = 'full') {
+  return {
+    data: new Blob(['x']),
+    response: new Response(null, {
+      headers: {
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'X-Export-Window': window,
+      },
+    }),
+  } as never;
+}
 const toastError = vi.mocked(toast.error);
 const toastSuccess = vi.mocked(toast.success);
 const toastInfo = vi.mocked(toast.info);
@@ -159,7 +191,7 @@ beforeEach(() => {
   toastError.mockReset();
   toastSuccess.mockReset();
   toastInfo.mockReset();
-  apiGet.mockResolvedValue([]);
+  apiGet.mockResolvedValue({ data: [] } as never);
 });
 
 afterEach(() => {
@@ -197,8 +229,7 @@ describe('CalendarsSection invites', () => {
     render(<CalendarsSection />);
 
     await waitFor(() => expect(calendarState.fetchMembers).toHaveBeenCalled());
-    const asked = apiGet.mock.calls.map((c) => String(c[0]));
-    expect(asked.filter((u) => u.includes('/invites'))).toEqual([]);
+    expect(askedUrls().filter((u) => u.includes('/invites'))).toEqual([]);
   });
 
   it('asks for invites when the caller may manage the calendar', async () => {
@@ -207,9 +238,7 @@ describe('CalendarsSection invites', () => {
 
     render(<CalendarsSection />);
 
-    await waitFor(() =>
-      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('/calendars/cal-1/invites')),
-    );
+    await waitFor(() => expect(askedUrls()).toContain('/calendars/cal-1/invites'));
   });
 
   /**
@@ -224,9 +253,7 @@ describe('CalendarsSection invites', () => {
 
     render(<CalendarsSection />);
 
-    await waitFor(() =>
-      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('/calendars/cal-1/invites')),
-    );
+    await waitFor(() => expect(askedUrls()).toContain('/calendars/cal-1/invites'));
   });
 });
 
@@ -404,17 +431,18 @@ describe('CalendarsSection invite listing', () => {
     // The first calendar answers slowly, so its listing comes back after the
     // selection has already moved on.
     let landFirst: (invites: InviteData[]) => void = () => {};
-    apiGet.mockImplementation((path) => {
-      if (String(path).startsWith('/calendars/cal-1/invites')) {
+    apiGet.mockImplementation(((path: string, init: unknown) => {
+      const url = urlOf(path, init);
+      if (url.startsWith('/calendars/cal-1/invites')) {
         return new Promise((resolve) => {
-          landFirst = resolve;
+          landFirst = (invites) => resolve({ data: invites });
         });
       }
-      if (String(path).startsWith('/calendars/cal-2/invites')) {
-        return Promise.resolve([invite('inv-b', 'token-b')]);
+      if (url.startsWith('/calendars/cal-2/invites')) {
+        return Promise.resolve({ data: [invite('inv-b', 'token-b')] });
       }
-      return Promise.resolve([]);
-    });
+      return Promise.resolve({ data: [] });
+    }) as never);
 
     render(<CalendarsSection />);
 
@@ -433,11 +461,10 @@ describe('CalendarsSection invite listing', () => {
   it('says why the listing failed in the language the reader chose', async () => {
     calendarState.calendars = [calendar('owner')];
     calendarState.membersMap = {};
-    apiGet.mockImplementation((path) =>
-      String(path).includes('/invites')
+    apiGet.mockImplementation(((path: string, init: unknown) =>
+      urlOf(path, init).includes('/invites')
         ? Promise.reject(new Error('error.serverUnavailable'))
-        : Promise.resolve([]),
-    );
+        : Promise.resolve({ data: [] })) as never);
 
     render(<CalendarsSection />);
 
@@ -528,17 +555,19 @@ describe('CalendarsSection own membership', () => {
 describe('AllowedEmailsSection', () => {
   it('shows the reason stored against an allowed address', async () => {
     apiGet.mockResolvedValue({
-      allowedDomains: ['example.com'],
-      restricted: true,
-      emails: [
-        {
-          id: '0198f0c2-0000-7000-8000-000000000001',
-          email: 'contractor@gmail.com',
-          reason: 'contractor until March',
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      ],
-    });
+      data: {
+        allowedDomains: ['example.com'],
+        restricted: true,
+        emails: [
+          {
+            id: '0198f0c2-0000-7000-8000-000000000001',
+            email: 'contractor@gmail.com',
+            reason: 'contractor until March',
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+      },
+    } as never);
 
     render(<AllowedEmailsSection />);
 
@@ -547,8 +576,10 @@ describe('AllowedEmailsSection', () => {
   });
 
   it('sends the typed reason under the name the server stores it as', async () => {
-    apiGet.mockResolvedValue({ allowedDomains: [], restricted: false, emails: [] });
-    apiPost.mockResolvedValue({});
+    apiGet.mockResolvedValue({
+      data: { allowedDomains: [], restricted: false, emails: [] },
+    } as never);
+    apiPost.mockResolvedValue({ data: {} } as never);
 
     render(<AllowedEmailsSection />);
 
@@ -563,8 +594,7 @@ describe('AllowedEmailsSection', () => {
 
     await waitFor(() =>
       expect(apiPost).toHaveBeenCalledWith('/admin/allowed-emails', {
-        email: 'contractor@gmail.com',
-        reason: 'contractor until March',
+        body: { email: 'contractor@gmail.com', reason: 'contractor until March' },
       }),
     );
   });
@@ -590,7 +620,7 @@ describe('ExportSection', () => {
     calendarState.calendars = [calendar('owner')];
     calendarState.visibleRange = vi.fn(() => fetchWindow('month', viewedMonth));
     calendarState.fetchEvents.mockReset();
-    apiPost.mockResolvedValue(importResult({ imported: 1 }));
+    apiPost.mockResolvedValue({ data: importResult({ imported: 1 }) } as never);
   });
 
   afterEach(() => {
@@ -632,12 +662,7 @@ describe('ExportSection', () => {
       createObjectURL: createObjectUrl,
       revokeObjectURL: vi.fn(),
     });
-    apiGetBlob.mockResolvedValue({
-      blob: new Blob(['BEGIN:VCALENDAR']),
-      filename: 'Family.ics',
-      truncated: false,
-      window: 'full',
-    });
+    apiGet.mockResolvedValue(exported('Family.ics'));
 
     render(<ExportSection />);
     fireEvent.click(screen.getByRole('button', { name: 'settings.exportIcal' }));
@@ -656,18 +681,21 @@ describe('ExportSection', () => {
       revokeObjectURL: vi.fn(),
     });
     uiState.timezone = 'America/New_York';
-    apiGetBlob.mockResolvedValue({
-      blob: new Blob(['a,b']),
-      filename: 'Family.csv',
-      truncated: false,
-      window: 'full',
-    });
+    apiGet.mockResolvedValue(exported('Family.csv'));
 
     render(<ExportSection />);
     fireEvent.click(screen.getByRole('button', { name: 'settings.exportCsv' }));
 
     await waitFor(() =>
-      expect(apiGetBlob).toHaveBeenCalledWith(expect.stringContaining('tz=America%2FNew_York')),
+      expect(apiGet).toHaveBeenCalledWith(
+        '/calendars/{calendarId}/export',
+        expect.objectContaining({
+          params: {
+            path: { calendarId: 'cal-1' },
+            query: { format: 'csv', tz: 'America/New_York' },
+          },
+        }),
+      ),
     );
 
     uiState.timezone = 'Asia/Tokyo';
@@ -694,27 +722,31 @@ describe('ExportSection coverage', () => {
     vi.restoreAllMocks();
   });
 
-  async function exportIcs(coverage: { truncated: boolean; window: string }) {
-    apiGetBlob.mockResolvedValue({ blob: new Blob(['x']), filename: 'F.ics', ...coverage });
+  async function exportIcs(window: string) {
+    apiGet.mockResolvedValue(exported('F.ics', window));
     render(<ExportSection />);
     fireEvent.click(screen.getByRole('button', { name: 'settings.exportIcal' }));
-    await waitFor(() => expect(apiGetBlob).toHaveBeenCalled());
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
     await act(async () => {});
   }
 
-  it('warns when the export stopped at the server cap', async () => {
-    await exportIcs({ truncated: true, window: 'full' });
-    expect(toastError).toHaveBeenCalledWith('settings.exportTruncated');
+  // A range holding too many events is refused outright rather than cut short.
+  it('reports an export the server refused for being too large', async () => {
+    apiGet.mockRejectedValue(new Error('apiError.EXPORT.RANGE_TOO_LARGE'));
+    render(<ExportSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'settings.exportIcal' }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('apiError.EXPORT.RANGE_TOO_LARGE'));
   });
 
   it('says which window a bounded export covers', async () => {
-    await exportIcs({ truncated: false, window: '2026-01-01/2026-03-31' });
+    await exportIcs('2026-01-01/2026-03-31');
     expect(toastInfo).toHaveBeenCalledWith('settings.exportWindow:2026-01-01 – 2026-03-31');
     expect(toastError).not.toHaveBeenCalled();
   });
 
   it('says nothing extra for a whole export', async () => {
-    await exportIcs({ truncated: false, window: 'full' });
+    await exportIcs('full');
     expect(toastInfo).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
   });
@@ -750,7 +782,7 @@ describe('ExportSection without a calendar', () => {
  */
 describe('ExportSection import outcomes', () => {
   async function importFile(outcome: Record<string, number | boolean>) {
-    apiPost.mockResolvedValue(importResult(outcome));
+    apiPost.mockResolvedValue({ data: importResult(outcome) } as never);
     render(<ExportSection />);
     fireEvent.change(screen.getByPlaceholderText('settings.importPlaceholder'), {
       target: { value: 'BEGIN:VCALENDAR\nEND:VCALENDAR' },
@@ -830,10 +862,10 @@ describe('ExportSection import outcomes', () => {
 describe('AllowedEmailsSection cancellation', () => {
   it('calls the request off when the section goes', async () => {
     let signal: AbortSignal | undefined;
-    apiGet.mockImplementation((_path, _skipRedirect, s) => {
-      signal = s;
+    apiGet.mockImplementation(((_path: string, init: { signal?: AbortSignal }) => {
+      signal = init.signal;
       return new Promise(() => {});
-    });
+    }) as never);
 
     const { unmount } = render(<AllowedEmailsSection />);
     await waitFor(() => expect(apiGet).toHaveBeenCalled());
@@ -912,9 +944,9 @@ describe('ProfileSection auth-config dependent parts', () => {
   /** Answers the providers request with `answer` and every other read with an empty list. */
   function answerProvidersWith(answer: Record<string, unknown> | Error) {
     apiGet.mockImplementation((async (path: string) => {
-      if (path !== '/auth/oauth/providers') return [];
+      if (path !== '/auth/oauth/providers') return { data: [] };
       if (answer instanceof Error) throw answer;
-      return answer;
+      return { data: answer };
     }) as never);
   }
   const config = (over: Record<string, unknown>) => ({
@@ -971,5 +1003,129 @@ describe('ProfileSection auth-config dependent parts', () => {
     fireEvent.click(screen.getByText('error.retry'));
     await waitFor(() => expect(screen.getByText('profile.resendVerification')).toBeTruthy());
     expect(screen.queryByText('error.authConfigUnavailable')).toBeNull();
+  });
+});
+
+describe('InstanceAdminsSection', () => {
+  const alice = {
+    userId: 'u-alice',
+    name: 'Alice',
+    email: 'alice@example.com',
+    grantedAt: '2026-01-01T00:00:00Z',
+  };
+  const typeEmail = (value: string) => {
+    fireEvent.change(screen.getByPlaceholderText('settings.adminAllowedEmailsEmailPlaceholder'), {
+      target: { value },
+    });
+    fireEvent.submit(
+      screen.getByRole('button', { name: 'admin.grant' }).closest('form') as HTMLElement,
+    );
+  };
+
+  beforeEach(() => {
+    apiGet.mockResolvedValue({ data: [alice] } as never);
+  });
+
+  it('lists the administrators', async () => {
+    render(<InstanceAdminsSection />);
+
+    expect(await screen.findByText('Alice')).toBeTruthy();
+    expect(apiGet).toHaveBeenCalledWith('/admin/instance-admins', expect.anything());
+  });
+
+  it('grants the right by email and lists the new administrator', async () => {
+    const bob = {
+      userId: 'u-bob',
+      name: 'Bob',
+      email: 'bob@example.com',
+      grantedAt: alice.grantedAt,
+    };
+    apiPost.mockResolvedValue({ data: bob } as never);
+    render(<InstanceAdminsSection />);
+    await screen.findByText('Alice');
+    apiGet.mockResolvedValue({ data: [alice, bob] } as never);
+
+    typeEmail('bob@example.com');
+
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith('/admin/instance-admins', {
+        body: { email: 'bob@example.com' },
+      }),
+    );
+    expect(await screen.findByText('Bob')).toBeTruthy();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('says no user matched when the address is unknown', async () => {
+    apiPost.mockRejectedValue(new ApiError(404, 'not found', 'ADMIN.USER_NOT_FOUND'));
+    render(<InstanceAdminsSection />);
+    await screen.findByText('Alice');
+
+    typeEmail('nobody@example.com');
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('admin.userNotFound'));
+  });
+
+  it('revokes the right after confirmation', async () => {
+    vi.mocked(client.DELETE).mockResolvedValue({} as never);
+    render(<InstanceAdminsSection />);
+    await screen.findByText('Alice');
+
+    fireEvent.click(screen.getByRole('button', { name: 'admin.revoke' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'confirm.remove' }));
+
+    await waitFor(() =>
+      expect(client.DELETE).toHaveBeenCalledWith('/admin/instance-admins/{userId}', {
+        params: { path: { userId: 'u-alice' } },
+      }),
+    );
+  });
+});
+
+/**
+ * The provider update is a merge patch: leaving the secret out keeps the
+ * stored one, so saving other fields must not mention it.
+ */
+describe('ProviderCard', () => {
+  const info = {
+    provider: 'google' as const,
+    clientId: 'client-1',
+    hasSecret: true,
+    enabled: true,
+    source: 'db' as const,
+  };
+
+  it('leaves the stored secret out of a save that did not touch it', async () => {
+    vi.mocked(client.PATCH).mockResolvedValue({ data: info } as never);
+    render(<ProviderCard info={info} onChange={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('xxxxxxxx.apps.googleusercontent.com'), {
+      target: { value: 'client-2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() =>
+      expect(client.PATCH).toHaveBeenCalledWith('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: 'google' } },
+        body: { clientId: 'client-2', enabled: true },
+      }),
+    );
+  });
+
+  it('sends a replacement secret when one is typed', async () => {
+    vi.mocked(client.PATCH).mockResolvedValue({ data: info } as never);
+    render(<ProviderCard info={info} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('settings.adminProviderReplaceSecret'));
+    const secret = document.querySelector('input[type="password"]') as HTMLInputElement;
+    fireEvent.change(secret, { target: { value: 'new-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() =>
+      expect(client.PATCH).toHaveBeenCalledWith('/admin/oauth-providers/{provider}', {
+        params: { path: { provider: 'google' } },
+        body: { clientId: 'client-1', enabled: true, clientSecret: 'new-secret' },
+      }),
+    );
   });
 });

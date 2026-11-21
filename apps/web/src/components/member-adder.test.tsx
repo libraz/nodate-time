@@ -6,8 +6,12 @@ vi.mock('@/i18n', () => ({
     vars ? `${key}:${Object.values(vars).join(',')}` : key,
 }));
 
+vi.mock('@/lib/client', () => ({
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn() },
+}));
+
 vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
   isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
 }));
@@ -22,12 +26,12 @@ vi.mock('@/stores/calendar-store', () => ({
     selector({ fetchMembers }),
 }));
 
-import { api } from '@/lib/api';
+import { client } from '@/lib/client';
 import { toast } from '@/lib/toast';
 import { MemberAdder } from './member-adder';
 
-const apiGet = vi.mocked(api.get);
-const apiPost = vi.mocked(api.post);
+const apiGet = vi.mocked(client.GET) as unknown as ReturnType<typeof vi.fn>;
+const apiPost = vi.mocked(client.POST) as unknown as ReturnType<typeof vi.fn>;
 
 const hanako = { id: 'u-1', name: 'Hanako', email: 'hanako@example.com' };
 const taro = { id: 'u-2', name: 'Taro', email: 'taro@example.com' };
@@ -62,8 +66,8 @@ async function settle(ms = 0) {
 
 describe('MemberAdder', () => {
   it('adds everyone chosen with the role beside the button, then hands back who was added', async () => {
-    apiGet.mockResolvedValue({ items: [hanako, taro], hasMore: false });
-    apiPost.mockResolvedValue({});
+    apiGet.mockResolvedValue({ data: { items: [hanako, taro], hasMore: false } });
+    apiPost.mockResolvedValue({ data: {} });
     renderAdder();
     await settle();
 
@@ -77,16 +81,22 @@ describe('MemberAdder', () => {
     await settle();
 
     expect(apiPost.mock.calls).toEqual([
-      ['/calendars/cal-1/members', { userId: 'u-1', role: 'viewer' }],
-      ['/calendars/cal-1/members', { userId: 'u-2', role: 'viewer' }],
+      [
+        '/calendars/{calendarId}/members',
+        { params: { path: { calendarId: 'cal-1' } }, body: { userId: 'u-1', role: 'viewer' } },
+      ],
+      [
+        '/calendars/{calendarId}/members',
+        { params: { path: { calendarId: 'cal-1' } }, body: { userId: 'u-2', role: 'viewer' } },
+      ],
     ]);
     expect(fetchMembers).toHaveBeenCalledWith('cal-1');
     expect(onDone).toHaveBeenCalledWith(['u-1', 'u-2']);
   });
 
   it('keeps a choice when a search hides the person', async () => {
-    apiGet.mockResolvedValueOnce({ items: [hanako, taro], hasMore: false });
-    apiGet.mockResolvedValue({ items: [taro], hasMore: false });
+    apiGet.mockResolvedValueOnce({ data: { items: [hanako, taro], hasMore: false } });
+    apiGet.mockResolvedValue({ data: { items: [taro], hasMore: false } });
     renderAdder();
     await settle();
 
@@ -100,7 +110,7 @@ describe('MemberAdder', () => {
   });
 
   it('waits for typing to pause before searching, and searches only the last text', async () => {
-    apiGet.mockResolvedValue({ items: [], hasMore: false });
+    apiGet.mockResolvedValue({ data: { items: [], hasMore: false } });
     renderAdder();
     await settle();
     apiGet.mockClear();
@@ -112,13 +122,18 @@ describe('MemberAdder', () => {
     await settle(300);
 
     expect(apiGet).toHaveBeenCalledTimes(1);
-    expect(apiGet.mock.calls[0]?.[0]).toBe('/calendars/cal-1/member-candidates?q=han');
+    expect(apiGet.mock.calls[0]?.[0]).toBe('/calendars/{calendarId}/member-candidates');
+    expect(apiGet.mock.calls[0]?.[1]).toMatchObject({
+      params: { path: { calendarId: 'cal-1' }, query: { q: 'han' } },
+    });
     expect(screen.getByText('members.addNoMatch')).toBeTruthy();
   });
 
   it('stays open with only the people still missing when some additions are refused', async () => {
-    apiGet.mockResolvedValue({ items: [hanako, taro], hasMore: false });
-    apiPost.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('already a member'));
+    apiGet.mockResolvedValue({ data: { items: [hanako, taro], hasMore: false } });
+    apiPost
+      .mockResolvedValueOnce({ data: {} })
+      .mockRejectedValueOnce(new Error('already a member'));
     renderAdder();
     await settle();
 
@@ -135,7 +150,7 @@ describe('MemberAdder', () => {
   });
 
   it('says when the page is not everyone, and points outsiders to a link', async () => {
-    apiGet.mockResolvedValue({ items: [hanako], hasMore: true });
+    apiGet.mockResolvedValue({ data: { items: [hanako], hasMore: true } });
     renderAdder();
     await settle();
 

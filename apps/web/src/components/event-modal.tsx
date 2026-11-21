@@ -14,7 +14,8 @@ import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
-import { ApiError, api, errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/api';
+import { client } from '@/lib/client';
 import { writableVisibleCalendars } from '@/lib/create-event';
 import { seriesId } from '@/lib/event-move';
 import {
@@ -30,6 +31,7 @@ import {
   visibilityLabelKey,
 } from '@/lib/permissions';
 import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
+import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -47,12 +49,7 @@ import type {
   ShowAs,
   Visibility,
 } from '@/types/calendar';
-import {
-  FALLBACK_LABEL_COLOR,
-  NOTIFICATION_OFFSETS,
-  normalizeNotificationOffset,
-  VISIBILITY_OPTIONS,
-} from '@/types/calendar';
+import { FALLBACK_LABEL_COLOR, NOTIFICATION_OFFSETS, VISIBILITY_OPTIONS } from '@/types/calendar';
 
 /** Renders a stored UTC instant as a `yyyy-MM-ddTHH:mm` string in the given zone. */
 function toLocalDatetime(iso: string, zone: string): string {
@@ -69,13 +66,22 @@ function normalizeRuleForApi(rule: RecurrenceRule | null, zone: string): Recurre
   if (!rule) return null;
   const next: RecurrenceRule = { ...rule };
   if (next.freq === 'monthly' && next.byDay && !next.bySetPos?.length) {
-    next.byDay = undefined;
+    delete next.byDay;
   }
   if (next.until && next.until.length === 10) {
     const end = DateTime.fromISO(next.until, { zone }).endOf('day');
     next.until = end.toISO() ?? next.until;
   }
   return next;
+}
+
+/** The i18n key and count naming an offset that is not one of the presets. */
+function customOffsetLabel(minutes: number): { key: TranslationKey; n: number } {
+  if (minutes > 0 && minutes % 1440 === 0)
+    return { key: 'notification.customDays', n: minutes / 1440 };
+  if (minutes > 0 && minutes % 60 === 0)
+    return { key: 'notification.customHours', n: minutes / 60 };
+  return { key: 'notification.customMinutes', n: minutes };
 }
 
 interface FormState {
@@ -133,10 +139,14 @@ function eventToForm(ev: CalendarEvent, timezone: string): FormState {
     title: ev.title,
     allDay: ev.allDay,
     startAt: ev.allDay
-      ? toLocalDatetime(ev.startAt, anchorZone)
+      ? ev.startDate
+        ? `${ev.startDate}T00:00`
+        : toLocalDatetime(ev.startAt, anchorZone)
       : toLocalDatetime(ev.startAt, timezone),
     endAt: ev.allDay
-      ? toAllDayInclusiveEndInput(ev.endAt, anchorZone)
+      ? ev.endDate
+        ? DateTime.fromISO(ev.endDate).minus({ days: 1 }).toFormat("yyyy-MM-dd'T'00:00")
+        : toAllDayInclusiveEndInput(ev.endAt, anchorZone)
       : toLocalDatetime(ev.endAt, timezone),
     color: ev.color,
     calendarId: ev.calendarId,
@@ -274,8 +284,11 @@ export function EventModal() {
   // Optional fields (location/url/memo/reminder/visibility) collapse on create and
   // auto-expand when an existing event already uses any of them.
   const [showMore, setShowMore] = useState(false);
-  // The revision this editor was opened on, as the server named it.
-  const [revision, setRevision] = useState<string | null>(null);
+  // The versions this editor was opened on. A refetch replaces the stored event
+  // but not these, so a save made after someone else's is refused, not merged.
+  const openedEtags = useRef<{ etag: string; seriesEtag: string | undefined } | null>(null);
+  // Grants changed in this session, shown until the stored copy catches up.
+  const [grants, setGrants] = useState<Record<string, boolean>>({});
 
   // The current user's role for the event's calendar gates all mutating UI,
   // and for an existing event so does whose layer it sits on: a shared
@@ -286,6 +299,9 @@ export function EventModal() {
   // A task projects this event's title, dates and recurrence; the server refuses
   // changes to them, so the form shows them without offering to edit.
   const taskOwned = editingEvent?.taskOwned === true;
+  // The server withheld location, memo, url and the like; the form has nothing
+  // true to show for them and must not send them back.
+  const detailsHidden = editingEvent?.detailsHidden === true;
   // An end before the start is refused; an end equal to it is a zero-length
   // event, which the API accepts.
   const endError =
@@ -319,6 +335,18 @@ export function EventModal() {
       : undefined;
   const ownerHint = otherOwner ? t('event.ownerOtherHint', { name: otherOwner.name }) : undefined;
 
+  // An offset outside the presets stays selectable, so opening and saving never resets it.
+  const notificationOptions = useMemo(() => {
+    const options = NOTIFICATION_OFFSETS.map(({ label, value }) => ({
+      value: String(value ?? 'none'),
+      label: t(`event.notification_${label}` as TranslationKey),
+    }));
+    const current = form.notificationOffset;
+    if (current == null || NOTIFICATION_OFFSETS.some((o) => o.value === current)) return options;
+    const { key, n } = customOffsetLabel(current);
+    return [...options, { value: String(current), label: t(key, { n }) }];
+  }, [form.notificationOffset, t]);
+
   // Calendars a new event can be created in: active in the sidebar and writable.
   const postableCalendars = useMemo(
     () => writableVisibleCalendars(calendars, activeCalendarIds),
@@ -350,8 +378,9 @@ export function EventModal() {
     const previous = rsvp;
     setRsvp(next);
     try {
-      await api.put(`/calendars/${editingEvent.calendarId}/events/${editingEvent.id}/rsvp`, {
-        rsvp: next,
+      await client.PUT('/calendars/{calendarId}/events/{eventId}/rsvp', {
+        params: { path: { calendarId: editingEvent.calendarId, eventId: editingEvent.id } },
+        body: { rsvp: next },
       });
     } catch (e) {
       setRsvp(previous);
@@ -361,6 +390,30 @@ export function EventModal() {
     // The answer lands on the series row, or on an edited occurrence's own, so
     // reading the range back is what puts it on every copy the store holds;
     // without it the modal reopens on the old answer.
+    const { start, end } = visibleRange();
+    void fetchEvents(start, end);
+  };
+
+  // A grant is its own request, made on the spot rather than with the save.
+  const setCanEdit = async (userId: string, next: boolean) => {
+    if (!editingEvent) return;
+    const previous = grants[userId];
+    setGrants((g) => ({ ...g, [userId]: next }));
+    try {
+      await client.PUT('/calendars/{calendarId}/events/{eventId}/attendees/{userId}', {
+        params: {
+          path: { calendarId: editingEvent.calendarId, eventId: editingEvent.id, userId },
+        },
+        body: { canEdit: next },
+      });
+    } catch (e) {
+      setGrants((g) => {
+        const { [userId]: _dropped, ...rest } = g;
+        return previous === undefined ? rest : { ...rest, [userId]: previous };
+      });
+      toast.error(errorMessage(e));
+      return;
+    }
     const { start, end } = visibleRange();
     void fetchEvents(start, end);
   };
@@ -380,6 +433,8 @@ export function EventModal() {
     if (editingEventId) {
       if (!editingEvent) return;
       populatedFor.current = key;
+      openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
+      setGrants({});
       const opened = eventToForm(editingEvent, timezone);
       setForm(opened);
       initialForm.current = opened;
@@ -473,6 +528,7 @@ export function EventModal() {
     }
     setForm(fresh);
     initialForm.current = fresh;
+    openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
   }, [showEventModal, editingEvent, timezone]);
 
   const reloadRemote = () => {
@@ -480,33 +536,9 @@ export function EventModal() {
     const fresh = eventToForm(editingEvent, timezone);
     setForm(fresh);
     initialForm.current = fresh;
+    openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
     setRemoteChanged(false);
   };
-
-  // Ask the server which revision this edit starts from. Saving is a full
-  // replace, so without it two people with the editor open overwrite each
-  // other and neither is told. A revision we could not read is left null,
-  // which saves unconditionally -- the behaviour before this existed.
-  useEffect(() => {
-    if (!showEventModal || !editingEvent) {
-      setRevision(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .getWithRevision<CalendarEvent>(
-        `/calendars/${editingEvent.calendarId}/events/${editingEvent.id}`,
-      )
-      .then(({ revision: rev }) => {
-        if (!cancelled) setRevision(rev);
-      })
-      .catch(() => {
-        if (!cancelled) setRevision(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [showEventModal, editingEvent]);
 
   // Recurring events are always opened as an expanded instance (composite id),
   // so editing or deleting one must ask whether it applies to just this
@@ -530,16 +562,25 @@ export function EventModal() {
       const data: EventInput = {
         title: form.title.trim(),
         allDay: form.allDay,
-        startAt: startIso,
-        endAt: endIso,
+        ...(form.allDay
+          ? {
+              startDate: DateTime.fromISO(startIso, { zone: anchorZone }).toISODate() ?? startIso,
+              endDate: DateTime.fromISO(endIso, { zone: anchorZone }).toISODate() ?? endIso,
+            }
+          : { startAt: startIso, endAt: endIso }),
         timezone: anchorZone,
-        location: form.location,
-        memo: form.memo,
-        url: form.url,
-        notificationOffset: normalizeNotificationOffset(form.notificationOffset),
-        participantIds: form.participantIds,
-        ownerId: form.ownerId,
-        visibility: form.visibility,
+        // What the server withheld from this reader is not theirs to write back.
+        ...(detailsHidden
+          ? {}
+          : {
+              location: form.location,
+              memo: form.memo,
+              url: form.url,
+              participantIds: form.participantIds,
+              ownerId: form.ownerId,
+              visibility: form.visibility,
+            }),
+        notificationOffset: form.notificationOffset,
         showAs: form.showAs,
         flexibility: form.flexibility,
         recurrenceRule: normalizeRuleForApi(form.recurrenceRule, anchorZone),
@@ -547,7 +588,10 @@ export function EventModal() {
       setSaving(true);
       try {
         if (editingEvent) {
-          await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope, revision);
+          const opened = openedEtags.current;
+          // A scope over the whole series is checked against the master's version.
+          const etag = scope === 'all' ? (opened?.seriesEtag ?? opened?.etag) : opened?.etag;
+          await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope, etag);
         } else {
           await addEvent(form.calendarId, data);
         }
@@ -559,8 +603,8 @@ export function EventModal() {
         // Leaving the editor open with the rejected text in it would invite
         // the same save again, so the event is reloaded and the form is
         // rebuilt from what is actually stored.
-        if (e instanceof ApiError && e.code === 'EVENT.STALE') {
-          toast.error(errorMessage(e));
+        if (isStaleError(e)) {
+          toast.error(t('conflict.stale'));
           setScopePrompt(null);
           const { start, end } = visibleRange();
           // The refusal has already been reported; a reload that also fails
@@ -585,7 +629,7 @@ export function EventModal() {
       endError,
       timezone,
       anchorZone,
-      revision,
+      detailsHidden,
       fetchEvents,
       visibleRange,
       t,
@@ -601,7 +645,7 @@ export function EventModal() {
       }
       setSaving(true);
       try {
-        await deleteEvent(editingEvent.calendarId, editingEvent.id, scope);
+        await deleteEvent(editingEvent, scope);
         setScopePrompt(null);
         requestClose();
       } catch (e) {
@@ -827,7 +871,7 @@ export function EventModal() {
 
       {/* Who: whose plan it is and who takes part. Left out on a calendar
           nobody else is on, where both answers are the author. */}
-      {(membersMap[formCalendarId]?.length ?? 0) > 1 && (
+      {!detailsHidden && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
         <div className="px-6 pb-3">
           {/* No "learn more" link: the help page is another route, and
               leaving for it would throw away the plan being written. */}
@@ -845,11 +889,20 @@ export function EventModal() {
             canChangeOwner={canChangeOwner}
             canRemoveEditors={canChangeOwner}
             ownerHint={ownerHint}
-            attendees={editingEvent?.attendees}
+            attendees={editingEvent?.attendees?.map((a) =>
+              a.userId in grants ? { ...a, canEdit: grants[a.userId] ?? a.canEdit } : a,
+            )}
+            onCanEditChange={editingEvent && canChangeOwner ? setCanEdit : undefined}
             onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
             onParticipantsChange={(ids) => setForm((f) => ({ ...f, participantIds: ids }))}
           />
         </div>
+      )}
+
+      {detailsHidden && (
+        <p className="px-6 pb-3 text-footnote text-[var(--color-text-tertiary)]">
+          {t('event.detailsHidden')}
+        </p>
       )}
 
       {/* Date & Time card */}
@@ -986,82 +1039,84 @@ export function EventModal() {
       {showMore && (
         <>
           {/* Details card (location + memo) */}
-          <div className="mt-1 px-6">
-            <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-              <div className="flex items-center gap-3 py-1">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="shrink-0"
-                >
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
-                  <circle cx="12" cy="10" r="3" />
-                </svg>
-                <input
-                  data-1p-ignore
-                  type="text"
-                  value={form.location}
-                  onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                  readOnly={!editable}
-                  placeholder={t('event.location')}
-                  className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                />
-              </div>
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-              <div className="flex items-center gap-3 py-1">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="shrink-0"
-                >
-                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-                </svg>
-                <input
-                  data-1p-ignore
-                  type="url"
-                  value={form.url}
-                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                  readOnly={!editable}
-                  placeholder={t('event.urlPlaceholder')}
-                  className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                />
-              </div>
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-              <div className="flex items-start gap-3 py-1">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="mt-0.5 shrink-0"
-                >
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-                </svg>
-                <textarea
-                  data-1p-ignore
-                  value={form.memo}
-                  onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
-                  readOnly={!editable}
-                  placeholder={t('event.memo')}
-                  maxLength={16000}
-                  rows={2}
-                  className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                />
+          {!detailsHidden && (
+            <div className="mt-1 px-6">
+              <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+                <div className="flex items-center gap-3 py-1">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--color-text-tertiary)"
+                    strokeWidth="2"
+                    className="shrink-0"
+                  >
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                    <circle cx="12" cy="10" r="3" />
+                  </svg>
+                  <input
+                    data-1p-ignore
+                    type="text"
+                    value={form.location}
+                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                    readOnly={!editable}
+                    placeholder={t('event.location')}
+                    className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                  />
+                </div>
+                <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                <div className="flex items-center gap-3 py-1">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--color-text-tertiary)"
+                    strokeWidth="2"
+                    className="shrink-0"
+                  >
+                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                  </svg>
+                  <input
+                    data-1p-ignore
+                    type="url"
+                    value={form.url}
+                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                    readOnly={!editable}
+                    placeholder={t('event.urlPlaceholder')}
+                    className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                  />
+                </div>
+                <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                <div className="flex items-start gap-3 py-1">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="var(--color-text-tertiary)"
+                    strokeWidth="2"
+                    className="mt-0.5 shrink-0"
+                  >
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+                  </svg>
+                  <textarea
+                    data-1p-ignore
+                    value={form.memo}
+                    onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
+                    readOnly={!editable}
+                    placeholder={t('event.memo')}
+                    maxLength={16000}
+                    rows={2}
+                    className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Reminder, visibility and flexibility card */}
           <div className="mt-3 px-6">
@@ -1087,10 +1142,7 @@ export function EventModal() {
                     value={String(form.notificationOffset ?? 'none')}
                     ariaLabel={t('event.notification')}
                     disabled={!editable}
-                    options={NOTIFICATION_OFFSETS.map(({ label, value }) => ({
-                      value: String(value ?? 'none'),
-                      label: t(`event.notification_${label}` as TranslationKey),
-                    }))}
+                    options={notificationOptions}
                     onChange={(v) => {
                       setForm((f) => ({
                         ...f,
@@ -1102,39 +1154,43 @@ export function EventModal() {
                 </div>
                 {form.notificationOffset != null && (
                   <p className="mt-1 pl-[30px] text-footnote text-[var(--color-text-tertiary)]">
-                    {t('event.notification_hint')}
+                    {form.allDay ? t('notification.deliveryNote') : t('event.notification_hint')}
                   </p>
                 )}
               </div>
 
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+              {!detailsHidden && (
+                <>
+                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
-              {/* Visibility on a shared link */}
-              <div className="flex items-center gap-3 py-1.5">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="var(--color-text-tertiary)"
-                  strokeWidth="2"
-                  className="shrink-0"
-                >
-                  <rect x="3" y="11" width="18" height="11" rx="2" />
-                  <path d="M7 11V7a5 5 0 0110 0v4" />
-                </svg>
-                <CustomSelect
-                  value={form.visibility}
-                  ariaLabel={t('event.visibility')}
-                  disabled={!editable}
-                  options={VISIBILITY_OPTIONS.map((v) => ({
-                    value: v,
-                    label: t(visibilityLabelKey(v)),
-                  }))}
-                  onChange={(v) => setForm((f) => ({ ...f, visibility: v as Visibility }))}
-                  className="flex-1"
-                />
-              </div>
+                  {/* Visibility on a shared link */}
+                  <div className="flex items-center gap-3 py-1.5">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--color-text-tertiary)"
+                      strokeWidth="2"
+                      className="shrink-0"
+                    >
+                      <rect x="3" y="11" width="18" height="11" rx="2" />
+                      <path d="M7 11V7a5 5 0 0110 0v4" />
+                    </svg>
+                    <CustomSelect
+                      value={form.visibility}
+                      ariaLabel={t('event.visibility')}
+                      disabled={!editable}
+                      options={VISIBILITY_OPTIONS.map((v) => ({
+                        value: v,
+                        label: t(visibilityLabelKey(v)),
+                      }))}
+                      onChange={(v) => setForm((f) => ({ ...f, visibility: v as Visibility }))}
+                      className="flex-1"
+                    />
+                  </div>
+                </>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-2 py-1.5">
                 <span className="text-body text-[var(--color-text-secondary)]">
                   {t('event.flexibility')}

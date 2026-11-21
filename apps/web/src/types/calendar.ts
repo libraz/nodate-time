@@ -1,49 +1,19 @@
-export interface Calendar {
-  id: string;
-  name: string;
-  color: string;
-  /** Short lived signed URL for a cover image uploaded to configured storage. */
-  coverImageUrl?: string;
-  /** Whether the server allows uploading a cover for this calendar. */
-  coverUploadAllowed?: boolean;
-  createdAt: string;
-  /** True when an active public (read-only embed) link exposes this calendar externally. */
-  publicShared: boolean;
-  /** Members including the signed-in user; 1 means only they see it. */
-  memberCount: number;
-  /** The signed-in user's own role on this calendar, as the server resolved
-   *  it to answer the request. */
-  role: string;
-  /** The colour the signed-in user's own layer is drawn in here. Carried by
-   *  the membership rather than by the calendar. */
-  memberColor: string;
-}
+import type { components } from '@/lib/api-schema';
 
-export interface Member {
-  id: string;
-  name: string;
-  /** Absent on rows the caller may not see an address for. */
-  email?: string;
-  role: string;
-  /** The colour this member is identified by on the calendar. Agreed by the
-   *  calendar rather than chosen per viewer, and what an event on their
-   *  layer is drawn in. */
-  color: string;
-  avatarUrl?: string;
-}
+type Schemas = components['schemas'];
 
-export interface RecurrenceRule {
+/** A response schema without the JSON Schema pointer the server adds. */
+type Wire<K extends keyof Schemas> = Omit<Schemas[K], '$schema'>;
+
+export type Calendar = Wire<'CalendarResponse'>;
+
+export type Member = Wire<'MemberResponse'>;
+
+export type RecurrenceRule = Omit<Wire<'RecurrenceRuleResponse'>, 'freq' | 'wkst'> & {
   freq: 'daily' | 'weekly' | 'monthly' | 'yearly';
-  interval: number;
-  /** Uppercase weekday codes, MO..SU. */
-  byDay?: string[] | undefined;
-  byMonthDay?: number[] | undefined;
-  bySetPos?: number[] | undefined;
   /** First day of the week; absent reads as MO. Matters for weekly rules with interval > 1. */
   wkst?: 'MO' | 'SU' | undefined;
-  until?: string | undefined;
-  count?: number | undefined;
-}
+};
 
 export type RecurrencePreset =
   | 'none'
@@ -55,31 +25,12 @@ export type RecurrencePreset =
   | 'yearly'
   | 'custom';
 
-export interface ChecklistItem {
-  id: string;
-  title: string;
-  done: boolean;
-  sortOrder: number;
-  createdAt: string;
-}
+export type ChecklistItem = Wire<'ChecklistItemResponse'>;
 
-export interface EventAttachment {
-  id: string;
-  filename: string;
-  contentType: string;
-  byteSize: number;
-  createdAt: string;
-}
+export type EventAttachment = Wire<'AttachmentResponse'>;
 
 /** Comment response returned by the event activities API. */
-export interface EventComment {
-  id: string;
-  body: string;
-  authorName: string;
-  authorAvatarUrl?: string;
-  authorId: string;
-  createdAt: string;
-}
+export type EventComment = Wire<'CommentResponse'>;
 
 export const NOTIFICATION_OFFSETS = [
   { label: 'none', value: null },
@@ -107,84 +58,50 @@ export function normalizeNotificationOffset(offset: number | null | undefined): 
 
 /** Whether the time reads as taken. The iCalendar TRANSP axis, and what an
  *  external free/busy consumer sees. */
-export type ShowAs = 'busy' | 'free' | 'tentative' | 'oof';
+export type ShowAs = Schemas['EventResponse']['showAs'];
 
 /** Whether the commitment could move. A separate question from whether the
  *  time is taken: a meeting its owner would gladly reschedule and one that
  *  cannot move are both busy, which is why this is its own axis. */
-export type Flexibility = 'fixed' | 'negotiable' | 'conditional';
+export type Flexibility = Schemas['EventResponse']['flexibility'];
 
 /**
  * Who may see an event's details. `default` follows the calendar, `private`
  * publishes the time with no details, and `confidential` is not published at
  * all.
  */
-export type Visibility = 'default' | 'public' | 'private' | 'confidential';
+export type Visibility = Schemas['EventResponse']['visibility'];
+
+/** What an event row is: a normal event, a labelled block, a free window, or a point in time. */
+export type EventKind = Schemas['EventResponse']['kind'];
 
 /** The option sets shown in pickers, in the order they read best. */
 export const VISIBILITY_OPTIONS: Visibility[] = ['default', 'public', 'private', 'confidential'];
 export const SHOW_AS_OPTIONS: ShowAs[] = ['busy', 'tentative', 'free', 'oof'];
 
-export type Rsvp = 'pending' | 'accepted' | 'declined' | 'tentative';
+export type Rsvp = Schemas['AttendeeResponse']['rsvp'];
 
-export interface Attendee {
-  userId: string;
-  rsvp: Rsvp;
-  /** Granted per person by the event's owner; not implied by attending. */
-  canEdit: boolean;
-}
+/** Per-participant state: their answer, and whether the owner has trusted them to change the event. */
+export type Attendee = Wire<'AttendeeResponse'>;
 
-export interface CalendarEvent {
-  id: string;
-  calendarId: string;
-  title: string;
-  allDay: boolean;
-  startAt: string;
-  endAt: string;
-  timezone?: string;
-  /** Read-only. Derived from the owner's colour on the calendar; an event
-   *  sits on a person's layer and the layer carries the colour. */
-  color: string;
-  /** The member whose layer this event sits on. */
-  ownerId: string | null;
-  /** Read-only. The owner's name and picture, so a chip can say whose it is
-   *  without the member list. Empty once the owner has left the calendar. */
-  ownerName?: string;
-  ownerAvatarUrl?: string;
-  location: string;
-  memo: string;
-  url: string;
-  showAs: ShowAs;
-  flexibility: Flexibility;
-  visibility: Visibility;
-  notificationOffset: number | null;
-  participantIds: string[];
-  /** Per-participant state: their answer, and whether the owner has trusted
-   *  them to change the event. Absent on events read from a public share. */
-  attendees?: Attendee[];
+/**
+ * An event as the list and detail endpoints return it. An all-day event
+ * carries `startDate`/`endDate` (`YYYY-MM-DD`, `endDate` exclusive) alongside
+ * `startAt`/`endAt`. `etag` is the version of the row `id` points at and
+ * `seriesEtag` the master's, both sent as If-Match on a write. When
+ * `detailsHidden` is set the server has withheld the details.
+ */
+export type CalendarEvent = Omit<
+  Wire<'EventResponse'>,
+  'recurrenceRule' | 'recurrenceDate' | 'attendees'
+> & {
+  /** Absent on events read from a public share. */
+  attendees?: Attendee[] | null;
   recurrenceRule: RecurrenceRule | null;
-  /** True when a task projects this event; its title, dates and recurrence
-   *  then belong to the task and the server refuses to change them here. */
-  taskOwned?: boolean;
-  isRecurrence: boolean;
-  recurrenceDate: string | null;
-  creatorId?: string;
-  creatorName?: string;
-  creatorAvatarUrl?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+  recurrenceDate?: string | null;
+};
 
-export interface Memo {
-  id: string;
-  calendarId: string;
-  title: string;
-  body: string;
-  done: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
+export type Memo = Wire<'MemoResponse'>;
 
 export type CalendarView = 'month' | 'week' | 'list' | 'year';
 
