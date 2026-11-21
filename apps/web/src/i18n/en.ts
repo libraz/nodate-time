@@ -15,6 +15,8 @@ export const en: Record<TranslationKey, string> = {
   'common.close': 'Close',
   'common.undo': 'Undo',
   'common.notifications': 'Notifications',
+  'common.newVersionAvailable': 'A new version is available.',
+  'common.reload': 'Reload',
   'common.loading': 'Loading...',
   'common.copy': 'Copy',
   'common.copyFailed': 'Could not copy to the clipboard',

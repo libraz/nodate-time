@@ -1,12 +1,15 @@
+import { NewBuildBanner } from '@/components/new-build-banner';
 import { useT } from '@/i18n';
+import { useBuildStore } from '@/lib/build-check';
 import { useToastStore } from '@/lib/toast';
 
 export function Toaster() {
   const toasts = useToastStore((s) => s.toasts);
   const dismiss = useToastStore((s) => s.dismiss);
+  const hasNewBuild = useBuildStore((s) => s.hasNewBuild);
   const t = useT();
 
-  if (toasts.length === 0) return null;
+  if (toasts.length === 0 && !hasNewBuild) return null;
 
   return (
     <section
@@ -80,6 +83,7 @@ export function Toaster() {
           )}
         </div>
       ))}
+      <NewBuildBanner />
     </section>
   );
 }

@@ -15,6 +15,8 @@ export const ja = {
   'common.close': '閉じる',
   'common.undo': '元に戻す',
   'common.notifications': '通知',
+  'common.newVersionAvailable': '新しいバージョンがあります。',
+  'common.reload': '再読み込み',
   'common.loading': '読み込み中...',
   'common.copy': 'コピー',
   'common.copyFailed': 'クリップボードにコピーできませんでした',
