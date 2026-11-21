@@ -43,7 +43,7 @@ func TestReconfirmingTheSameAvatarHoldsOneReference(t *testing.T) {
 	require.Equal(t, 1, storageObjectRefCount(t, key), "the same picture again is not a second reference")
 
 	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/user/avatar", tt.AccessToken, nil)
-	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, http.StatusNoContent, status)
 	// A sweep running alongside may already have collected the released
 	// object; a confirmed object nothing points at needs no age to go.
 	var refs int

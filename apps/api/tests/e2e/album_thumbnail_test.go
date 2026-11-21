@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,8 +45,10 @@ func uploadPhotoWithThumbnail(t *testing.T, tt *helpers.TestTenant, calendarID, 
 			"caption":              "with a thumbnail",
 			"contentType":          "image/png",
 			"byteSize":             len(photo),
+			"sha256":               helpers.SHA256Hex(photo),
 			"thumbnailContentType": "image/png",
 			"thumbnailByteSize":    len(thumbnail),
+			"thumbnailSha256":      helpers.SHA256Hex(thumbnail),
 		}, &pres)
 	require.NotEmpty(t, pres.ThumbnailUploadURL, "a declared thumbnail must be answered with a URL to put it at")
 	require.NotEqual(t, pres.UploadURL, pres.ThumbnailUploadURL, "the two uploads must not land on one key")
@@ -113,7 +116,9 @@ func TestAPhotoWithoutAThumbnailHasNone(t *testing.T) {
 
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
-		tt.AccessToken, map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres)
+		tt.AccessToken, map[string]any{
+			"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png),
+		}, &pres)
 	require.Empty(t, pres.ThumbnailUploadURL, "nothing was declared, so there is nothing to sign")
 
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
@@ -142,8 +147,9 @@ func TestAThumbnailThatNeverArrivesDoesNotCostThePhoto(t *testing.T) {
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
 		tt.AccessToken, map[string]any{
-			"contentType": "image/png", "byteSize": len(png),
+			"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png),
 			"thumbnailContentType": "image/png", "thumbnailByteSize": 64,
+			"thumbnailSha256": strings.Repeat("b", 64),
 		}, &pres)
 	require.NotEmpty(t, pres.ThumbnailUploadURL)
 
@@ -263,7 +269,10 @@ func TestPresignRefusesAThumbnailThatIsNotOne(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := map[string]any{"contentType": "image/png", "byteSize": 1024}
+			body := map[string]any{
+				"contentType": "image/png", "byteSize": 1024, "sha256": strings.Repeat("a", 64),
+				"thumbnailSha256": strings.Repeat("b", 64),
+			}
 			for k, v := range tc.body {
 				body[k] = v
 			}

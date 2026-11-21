@@ -203,8 +203,10 @@ func TestAvatarDeleteLeavesTheAccountIntact(t *testing.T) {
 		map[string]any{"avatarId": pres.AvatarID}, &confirmed)
 	require.NotEmpty(t, confirmed.AvatarURL)
 
+	status, raw := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/user/avatar", tt.AccessToken, nil)
+	require.Equal(t, http.StatusNoContent, status, string(raw))
 	var deleted userResp
-	helpers.DoJSON(t, http.MethodDelete, testServerURL+"/user/avatar", tt.AccessToken, nil, &deleted)
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &deleted)
 	assert.Empty(t, deleted.AvatarURL)
 	// Removing a picture removes the picture, not the account: the name is
 	// still there, and so is the reference count on the blob, which the

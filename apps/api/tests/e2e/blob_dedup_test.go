@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	"testing"
@@ -75,11 +74,10 @@ func TestAttachingBytesAlreadyInTheAlbumReusesThePhotosObject(t *testing.T) {
 }
 
 // An attachment reservation creates its object before any bytes exist. A photo
-// of the same digest confirmed meanwhile must not point at that unverified
-// row -- whose key here holds bytes that are not the photo at all -- and it
-// cannot move the row onto its own bytes either: an object's key is fixed
-// when it is created (PROTOCOL.md section Storage). The photo stays on its own
-// key until the reservation is gone.
+// of the same digest reserved meanwhile waits on that object's key, which here
+// holds bytes that are not the photo at all. The key is fixed when the object
+// is created (PROTOCOL.md section Storage) and never written twice, so the
+// photo cannot be confirmed onto the impostor and is never served from it.
 func TestAPhotoDoesNotReuseAnUnverifiedAttachmentReservation(t *testing.T) {
 	bootstrap(t)
 	requireStorage(t)
@@ -97,23 +95,34 @@ func TestAPhotoDoesNotReuseAnUnverifiedAttachmentReservation(t *testing.T) {
 	helpers.PutRawObject(t, getTestBucket(), attachmentKey, "application/pdf", impostor)
 	require.False(t, storageObjectByDigest(t, picture).Verified, "the reservation vouches for nothing yet")
 
-	photoID := uploadPhotoBytes(t, tt, tt.CalendarID, picture, "the real one")
-	var attached sql.NullInt32
-	require.NoError(t, testDB.QueryRow(
-		"SELECT storage_object_id FROM album_photos WHERE public_id = UUID_TO_BIN(?)", photoID).Scan(&attached))
-	require.False(t, attached.Valid, "the photo must not resolve to the unverified upload")
+	// The photo reserves the same object, so it waits on the key the impostor
+	// sits at -- and a key is never written twice.
+	var photo albumPresignResp
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
+		tt.AccessToken, map[string]any{
+			"caption": "the real one", "contentType": "image/png", "byteSize": len(picture),
+			"sha256": helpers.SHA256Hex(picture),
+		}, &photo)
+	putStatus, _ := helpers.UploadToSignedURLStatus(t, photo.UploadURL, "image/png", picture)
+	require.Equal(t, http.StatusConflict, putStatus)
 	object := storageObjectByDigest(t, picture)
 	require.Equal(t, attachmentKey, object.Key, "the reservation keeps its key")
 	require.False(t, object.Verified, "and still vouches for nothing")
-	require.Equal(t, 1, object.RefCount, "only the reservation holds it")
-	require.Equal(t, picture, helpers.FetchURL(t, photoImageURL(t, tt, tt.CalendarID, photoID)),
-		"the photo is served from its own key")
+	require.Equal(t, 2, object.RefCount, "the reservation and the photo hold it")
+
+	// The photo is never confirmed onto bytes that are not its own.
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+photo.PhotoID+"/confirm", tt.AccessToken, nil)
+	require.Equal(t, http.StatusUnprocessableEntity, status, "photo confirm: %s", string(raw))
+	var list albumListResp
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/albums", tt.AccessToken, nil, &list)
+	require.Empty(t, list.Items, "the impostor is never served as the photo")
 
 	// The pending attachment checks the bytes at its object's key, finds the
 	// impostor, and is discarded along with them.
-	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
+	status, raw = helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusBadRequest, status, "confirm: %s", string(raw))
+	require.Equal(t, http.StatusUnprocessableEntity, status, "confirm: %s", string(raw))
 	// The request queues the bytes; the drainer removes them. This test's
 	// bucket is not the one the shared database records, so the request path
 	// leaves them queued and the pass here stands in for the drainer.
@@ -164,7 +173,7 @@ func TestMismatchedAttachmentBytesDoNotBlockTheRealFile(t *testing.T) {
 	helpers.UploadToSignedURL(t, pres.UploadURL, "application/pdf", substituted)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusBadRequest, status)
+	require.Equal(t, http.StatusUnprocessableEntity, status)
 	// As above: the pass stands in for the drainer the bytes were queued for.
 	cleanup.RunOnce(testCtx(), testDB, getTestStorage())
 

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -21,7 +22,8 @@ func TestAPhotoStopsNamingItsEventOnceTheEventIsDeleted(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 	var evt struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		ETag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 		map[string]any{
@@ -32,13 +34,15 @@ func TestAPhotoStopsNamingItsEventOnceTheEventIsDeleted(t *testing.T) {
 	body := distinctPNG(fmt.Sprintf("event-link-%d", time.Now().UnixNano()))
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, calURL+"/albums/presign", tt.AccessToken,
-		map[string]any{"caption": "linked", "contentType": "image/png", "byteSize": len(body), "eventId": evt.ID}, &pres)
+		map[string]any{"caption": "linked", "contentType": "image/png", "byteSize": len(body),
+			"sha256": helpers.SHA256Hex(body), "eventId": evt.ID}, &pres)
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
 	var confirmed albumPhotoResp
 	helpers.DoJSON(t, http.MethodPost, calURL+"/albums/"+pres.PhotoID+"/confirm", tt.AccessToken, nil, &confirmed)
 	require.Equal(t, evt.ID, confirmed.EventID)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken, nil)
+	status, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, calURL+"/events/"+evt.ID,
+		tt.AccessToken, nil, ifMatch(evt.ETag))
 	require.Equal(t, http.StatusNoContent, status)
 
 	var list albumListResp
@@ -52,8 +56,10 @@ func TestAPhotoStopsNamingItsEventOnceTheEventIsDeleted(t *testing.T) {
 	require.NotNil(t, listed)
 	require.Empty(t, listed.EventID, "the listing must not link a deleted event")
 
+	status, raw := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/albums/"+pres.PhotoID,
+		tt.AccessToken, map[string]any{"caption": "still here"}, ifMatch(listed.ETag))
+	require.Equal(t, http.StatusOK, status, string(raw))
 	var updated albumPhotoResp
-	helpers.DoJSON(t, http.MethodPut, calURL+"/albums/"+pres.PhotoID, tt.AccessToken,
-		map[string]any{"caption": "still here"}, &updated)
+	require.NoError(t, json.Unmarshal(raw, &updated))
 	require.Empty(t, updated.EventID, "and neither does a single-photo response")
 }

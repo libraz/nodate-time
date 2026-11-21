@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -69,6 +70,7 @@ func TestMemoUpdateDelete(t *testing.T) {
 	var memo struct {
 		ID   string `json:"id"`
 		Done bool   `json:"done"`
+		ETag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/memos", tt.AccessToken,
 		map[string]any{"title": "備品発注", "sortOrder": 0}, &memo)
@@ -79,9 +81,12 @@ func TestMemoUpdateDelete(t *testing.T) {
 	var updated struct {
 		Title string `json:"title"`
 		Done  bool   `json:"done"`
+		ETag  string `json:"etag"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/memos/"+memo.ID, tt.AccessToken,
-		map[string]any{"title": "備品発注（完了）", "done": true, "sortOrder": 0}, &updated)
+	status, raw := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/memos/"+memo.ID,
+		tt.AccessToken, map[string]any{"title": "備品発注（完了）", "done": true}, ifMatch(memo.ETag))
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &updated))
 	require.Equal(t, "備品発注（完了）", updated.Title)
 	require.True(t, updated.Done)
 
@@ -98,8 +103,9 @@ func TestMemoUpdateDelete(t *testing.T) {
 	require.True(t, memos.Items[0].Done)
 
 	// Delete memo
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/memos/"+memo.ID, tt.AccessToken, nil)
-	require.True(t, status >= 200 && status < 300)
+	status, _ = helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, calURL+"/memos/"+memo.ID,
+		tt.AccessToken, nil, ifMatch(updated.ETag))
+	require.Equal(t, http.StatusNoContent, status)
 
 	// List is now empty
 	var after struct {

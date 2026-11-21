@@ -25,8 +25,9 @@ func TestSweepLeavesAnObjectARetiredAttachmentStillNames(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	eventID := attachEvent(t, tt, "Names an object", body)
 
-	status, raw := helpers.DoJSONStatus(t, "DELETE",
-		testServerURL+"/calendars/"+tt.CalendarID+"/events/"+eventID, tt.AccessToken, nil)
+	eventURL := testServerURL + "/calendars/" + tt.CalendarID + "/events/" + eventID
+	status, raw := helpers.DoJSONStatusWithHeaders(t, "DELETE", eventURL, tt.AccessToken, nil,
+		ifMatch(currentEventETag(t, tt.AccessToken, eventURL)))
 	require.Equal(t, 204, status, "delete event: %s", string(raw))
 	requireRefCountIsReferrers(t, storageKey, 1, "the retired row keeps its reference")
 
@@ -65,8 +66,9 @@ func TestSweepReclaimsAnObjectOnceItsRetiredAttachmentAges(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 	eventID := attachEvent(t, tt, "Names an object", body)
-	status, _ := helpers.DoJSONStatus(t, "DELETE",
-		testServerURL+"/calendars/"+tt.CalendarID+"/events/"+eventID, tt.AccessToken, nil)
+	eventURL := testServerURL + "/calendars/" + tt.CalendarID + "/events/" + eventID
+	status, _ := helpers.DoJSONStatusWithHeaders(t, "DELETE", eventURL, tt.AccessToken, nil,
+		ifMatch(currentEventETag(t, tt.AccessToken, eventURL)))
 	require.Equal(t, 204, status)
 
 	old := time.Now().Add(-400 * 24 * time.Hour)

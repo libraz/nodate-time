@@ -1,8 +1,10 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +32,9 @@ type albumPresignResp struct {
 	// Bytes is what the helper uploaded, so a test reading the photo back
 	// compares against what it sent rather than against a shared constant.
 	Bytes []byte `json:"-"`
+	// ETag is the confirmed photo's entity tag, the If-Match value its next
+	// write needs.
+	ETag string `json:"-"`
 }
 
 type albumPhotoResp struct {
@@ -38,6 +43,7 @@ type albumPhotoResp struct {
 	Caption           string `json:"caption"`
 	ContentType       string `json:"contentType"`
 	EventID           string `json:"eventId"`
+	ETag              string `json:"etag"`
 	ByteSize          int64  `json:"byteSize"`
 	ImageURL          string `json:"imageUrl"`
 	ThumbnailURL      string `json:"thumbnailUrl"`
@@ -65,15 +71,18 @@ func uploadOnePhoto(t *testing.T, tt *helpers.TestTenant, body map[string]any) a
 	png := append(helpers.TinyPNG(), fmt.Appendf(nil, "%d-%d", photoRunID, uniquePhotoSuffix.Add(1))...)
 	body["contentType"] = "image/png"
 	body["byteSize"] = len(png)
+	body["sha256"] = helpers.SHA256Hex(png)
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
 		tt.AccessToken, body, &pres)
 	pres.Bytes = png
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)
 	// Presign creates the row disabled; confirm makes it visible.
+	var confirmed albumPhotoResp
 	helpers.DoJSON(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID+"/confirm",
-		tt.AccessToken, nil, nil)
+		tt.AccessToken, nil, &confirmed)
+	pres.ETag = confirmed.ETag
 	return pres
 }
 
@@ -104,14 +113,17 @@ func TestAlbumPhotoLifecycle(t *testing.T) {
 	// Update caption
 	var updated albumPhotoResp
 	newCaption := "updated"
-	helpers.DoJSON(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
-		tt.AccessToken, map[string]any{"caption": newCaption}, &updated)
+	status, raw := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
+		tt.AccessToken, map[string]any{"caption": newCaption}, ifMatch(got.ETag))
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &updated))
 	assert.Equal(t, newCaption, updated.Caption)
 
 	// Delete
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, _ = helpers.DoJSONStatusWithHeaders(t, http.MethodDelete,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
-		tt.AccessToken, nil)
+		tt.AccessToken, nil, ifMatch(updated.ETag))
 	assert.Equal(t, 204, status)
 
 	// List should now be empty.
@@ -131,10 +143,15 @@ func TestAlbumPhotoChangesAppearInActivity(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	pres := uploadOnePhoto(t, tt, map[string]any{"caption": "hello"})
 
-	helpers.DoJSON(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
-		tt.AccessToken, map[string]any{"caption": "updated"}, nil)
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete,
-		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID, tt.AccessToken, nil)
+	status, raw := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID,
+		tt.AccessToken, map[string]any{"caption": "updated"}, ifMatch(pres.ETag))
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var updated albumPhotoResp
+	require.NoError(t, json.Unmarshal(raw, &updated))
+	status, _ = helpers.DoJSONStatusWithHeaders(t, http.MethodDelete,
+		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+pres.PhotoID, tt.AccessToken, nil,
+		ifMatch(updated.ETag))
 	require.Equal(t, 204, status)
 
 	type activityFeedItem struct {
@@ -184,10 +201,11 @@ func TestAlbumPhotoEventLink(t *testing.T) {
 	assert.Equal(t, evt.ID, list.Items[0].EventID)
 
 	// Clear the link.
-	empty := ""
+	status, raw := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/albums/"+pres.PhotoID,
+		tt.AccessToken, map[string]any{"eventId": nil}, ifMatch(pres.ETag))
+	require.Equal(t, http.StatusOK, status, string(raw))
 	var updated albumPhotoResp
-	helpers.DoJSON(t, http.MethodPut, calURL+"/albums/"+pres.PhotoID, tt.AccessToken,
-		map[string]any{"eventId": empty}, &updated)
+	require.NoError(t, json.Unmarshal(raw, &updated))
 	assert.Empty(t, updated.EventID)
 }
 
@@ -207,7 +225,7 @@ func TestAlbumNonMemberForbidden(t *testing.T) {
 
 	status2, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+owner.CalendarID+"/albums/presign", stranger.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 64})
+		map[string]any{"contentType": "image/png", "byteSize": 64, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, 403, status2)
 }
 
@@ -219,7 +237,7 @@ func TestAlbumPhotoNonImage(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
-		map[string]any{"contentType": "application/zip", "byteSize": 100})
+		map[string]any{"contentType": "application/zip", "byteSize": 100, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, 400, status)
 }
 
@@ -231,7 +249,7 @@ func TestAlbumPhotoTooLarge(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/jpeg", "byteSize": 21 * 1024 * 1024})
+		map[string]any{"contentType": "image/jpeg", "byteSize": 21 * 1024 * 1024, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, http.StatusRequestEntityTooLarge, status)
 }
 
@@ -305,7 +323,7 @@ func TestStorageAbsentAlbumPresign(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, _ := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/png", "byteSize": 64})
+		map[string]any{"contentType": "image/png", "byteSize": 64, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, 503, status)
 
 	// List should still return empty.
@@ -322,7 +340,7 @@ func TestAlbumPresignRejectsSVG(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/svg+xml", "byteSize": 128})
+		map[string]any{"contentType": "image/svg+xml", "byteSize": 128, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Contains(t, string(raw), "ALBUM.INVALID_CONTENT_TYPE")
 }
@@ -337,7 +355,7 @@ func TestAlbumPresignRejectsMismatchedContentTypeParams(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign", tt.AccessToken,
-		map[string]any{"contentType": "image/svg+xml; charset=utf-8", "byteSize": 128})
+		map[string]any{"contentType": "image/svg+xml; charset=utf-8", "byteSize": 128, "sha256": strings.Repeat("a", 64)})
 	assert.Equal(t, http.StatusBadRequest, status)
 	assert.Contains(t, string(raw), "ALBUM.INVALID_CONTENT_TYPE")
 }
@@ -357,7 +375,7 @@ func TestAlbumConfirmRejectsMismatchedObjectAndQueuesItsRemoval(t *testing.T) {
 
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tt.CalendarID+"/albums/presign",
-		tt.AccessToken, map[string]any{"contentType": "image/png", "byteSize": len(png) - 1}, &pres)
+		tt.AccessToken, map[string]any{"contentType": "image/png", "byteSize": len(png) - 1, "sha256": helpers.SHA256Hex(png)}, &pres)
 	storageKey := helpers.AlbumPhotoStorageKey(tt.CalendarID, pres.PhotoID)
 	// Bypass the presigned URL, which now enforces the declared size, to place
 	// a mismatched object directly.

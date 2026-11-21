@@ -10,6 +10,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// currentCalendarETag reads the entity tag a write to the calendar must carry.
+func currentCalendarETag(t *testing.T, token, calendarID string) string {
+	t.Helper()
+	var cal struct {
+		ETag string `json:"etag"`
+	}
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+calendarID, token, nil, &cal)
+	return cal.ETag
+}
+
+// deleteCalendarWithETag deletes a calendar against the entity tag a fresh read
+// of it returns.
+func deleteCalendarWithETag(t *testing.T, tt *helpers.TestTenant, calendarID string) (int, []byte) {
+	t.Helper()
+	return helpers.DoJSONStatusWithHeaders(t, http.MethodDelete,
+		testServerURL+"/calendars/"+calendarID, tt.AccessToken, nil,
+		ifMatch(currentCalendarETag(t, tt.AccessToken, calendarID)))
+}
+
 func photoStorageKey(t *testing.T, photoID string) string {
 	t.Helper()
 	var key string
@@ -30,8 +49,7 @@ func TestDeletingACalendarRetiresItsAlbumPhotos(t *testing.T) {
 	pres := uploadOnePhoto(t, tt, map[string]any{"caption": "goes with the calendar"})
 	storageKey := photoStorageKey(t, pres.PhotoID)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
-		testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken, nil)
+	status, raw := deleteCalendarWithETag(t, tt, tt.CalendarID)
 	require.Equal(t, http.StatusNoContent, status, "delete calendar: %s", string(raw))
 
 	var enabled bool
@@ -71,8 +89,7 @@ func TestRetiredPhotoKeepsItsBytesUntilTheWindowPasses(t *testing.T) {
 		time.Now().Add(-365*24*time.Hour), pres.PhotoID)
 	require.NoError(t, err)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
-		testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken, nil)
+	status, raw := deleteCalendarWithETag(t, tt, tt.CalendarID)
 	require.Equal(t, http.StatusNoContent, status, "delete calendar: %s", string(raw))
 
 	cleanup.RunOnce(testCtx(), testDB, getTestStorage())

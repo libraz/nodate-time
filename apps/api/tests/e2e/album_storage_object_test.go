@@ -37,12 +37,23 @@ func uploadPhotoBytes(t *testing.T, tt *helpers.TestTenant, calendarID string, b
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+calendarID+"/albums/presign",
 		tt.AccessToken, map[string]any{
 			"caption": caption, "contentType": "image/png", "byteSize": len(body),
+			"sha256": helpers.SHA256Hex(body),
 		}, &pres)
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
 	helpers.DoJSON(t, http.MethodPost,
 		testServerURL+"/calendars/"+calendarID+"/albums/"+pres.PhotoID+"/confirm",
 		tt.AccessToken, nil, nil)
 	return pres.PhotoID
+}
+
+// deletePhoto deletes a photo with the entity tag its listing entry carries and
+// returns the status.
+func deletePhoto(t *testing.T, tt *helpers.TestTenant, calendarID, photoID string) int {
+	t.Helper()
+	etag := albumPhotoByID(t, tt, calendarID, photoID).ETag
+	status, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodDelete,
+		testServerURL+"/calendars/"+calendarID+"/albums/"+photoID, tt.AccessToken, nil, ifMatch(etag))
+	return status
 }
 
 // photoObjectRef reads the reference a photo holds, which is only visible in
@@ -113,9 +124,7 @@ func TestTwoCalendarsHoldingTheSamePictureShareItSafely(t *testing.T) {
 	require.Equal(t, firstObject, secondObject, "identical bytes are one object")
 	require.Equal(t, 2, refCount, "held by both photos")
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete,
-		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+first, tt.AccessToken, nil)
-	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, http.StatusNoContent, deletePhoto(t, tt, tt.CalendarID, first))
 
 	require.Equal(t, shared, helpers.FetchURL(t, photoImageURL(t, tt, other, second)),
 		"deleting one photo must not blank the other one's picture")
@@ -136,9 +145,7 @@ func TestADeletedPhotoGivesItsBytesBackInOneSweep(t *testing.T) {
 	photoID := uploadPhotoBytes(t, tt, tt.CalendarID, png, "not for long")
 	objectID, _, objectKey := photoObjectRef(t, photoID)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete,
-		testServerURL+"/calendars/"+tt.CalendarID+"/albums/"+photoID, tt.AccessToken, nil)
-	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, http.StatusNoContent, deletePhoto(t, tt, tt.CalendarID, photoID))
 
 	_, exists, err := getTestStorage().StatObject(testCtx(), objectKey)
 	require.NoError(t, err)

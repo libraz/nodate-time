@@ -20,6 +20,13 @@ import (
 // concurrently fires n identical requests at once and returns their statuses.
 func concurrently(t *testing.T, n int, method, url, token string) []int {
 	t.Helper()
+	return concurrentlyWith(t, n, method, url, token, nil)
+}
+
+// concurrentlyWith is concurrently with request headers, for writes that carry
+// an If-Match.
+func concurrentlyWith(t *testing.T, n int, method, url, token string, headers map[string]string) []int {
+	t.Helper()
 	statuses := make([]int, n)
 	var start, done sync.WaitGroup
 	start.Add(1)
@@ -28,12 +35,22 @@ func concurrently(t *testing.T, n int, method, url, token string) []int {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			statuses[i], _ = helpers.DoJSONStatus(t, method, url, token, nil)
+			statuses[i], _ = helpers.DoJSONStatusWithHeaders(t, method, url, token, nil, headers)
 		}()
 	}
 	start.Done()
 	done.Wait()
 	return statuses
+}
+
+// currentEventETag reads the entity tag a write to the event must carry.
+func currentEventETag(t *testing.T, token, eventURL string) string {
+	t.Helper()
+	var evt struct {
+		ETag string `json:"etag"`
+	}
+	helpers.DoJSON(t, http.MethodGet, eventURL, token, nil, &evt)
+	return evt.ETag
 }
 
 // The same file is attached in four calendars, so its object is shared at four
@@ -63,12 +80,14 @@ func TestConcurrentDeletesReleaseEachAttachmentOnce(t *testing.T) {
 	require.Contains(t, statuses, http.StatusNoContent)
 	requireRefCountIsReferrers(t, storageKey, 4, "an attachment deleted eight times is retired, not released")
 
-	statuses = concurrently(t, 8, http.MethodDelete,
-		testServerURL+"/calendars/"+b.CalendarID+"/events/"+bEvent, b.AccessToken)
+	bEventURL := testServerURL + "/calendars/" + b.CalendarID + "/events/" + bEvent
+	statuses = concurrentlyWith(t, 8, http.MethodDelete, bEventURL, b.AccessToken,
+		ifMatch(currentEventETag(t, b.AccessToken, bEventURL)))
 	require.Contains(t, statuses, http.StatusNoContent)
 	requireRefCountIsReferrers(t, storageKey, 4, "an event deleted eight times retires its attachment")
 
-	statuses = concurrently(t, 8, http.MethodDelete, testServerURL+"/calendars/"+d.CalendarID, d.AccessToken)
+	statuses = concurrentlyWith(t, 8, http.MethodDelete, testServerURL+"/calendars/"+d.CalendarID, d.AccessToken,
+		ifMatch(currentCalendarETag(t, d.AccessToken, d.CalendarID)))
 	require.Contains(t, statuses, http.StatusNoContent)
 	requireRefCountIsReferrers(t, storageKey, 4, "a calendar deleted eight times retires its attachment")
 
@@ -109,6 +128,7 @@ func TestDeletingAnEventWhileAnUploadOnItConfirms(t *testing.T) {
 				"byteSize": len(body), "sha256": helpers.SHA256Hex(body),
 			}, &pres)
 
+		eventETag := currentEventETag(t, tt.AccessToken, eventURL)
 		var deleted, confirmed int
 		var start, done sync.WaitGroup
 		start.Add(1)
@@ -116,7 +136,7 @@ func TestDeletingAnEventWhileAnUploadOnItConfirms(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			deleted, _ = helpers.DoJSONStatus(t, http.MethodDelete, eventURL, tt.AccessToken, nil)
+			deleted, _ = helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, eventURL, tt.AccessToken, nil, ifMatch(eventETag))
 		}()
 		go func() {
 			defer done.Done()
@@ -150,9 +170,13 @@ func TestDeletingACalendarWhileAPhotoInItConfirms(t *testing.T) {
 		body := distinctPNG("raced-" + stamp)
 		var pres albumPresignResp
 		helpers.DoJSON(t, http.MethodPost, calURL+"/albums/presign", tt.AccessToken,
-			map[string]any{"caption": "raced", "contentType": "image/png", "byteSize": len(body)}, &pres)
+			map[string]any{
+				"caption": "raced", "contentType": "image/png", "byteSize": len(body),
+				"sha256": helpers.SHA256Hex(body),
+			}, &pres)
 		helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
 
+		calendarETag := currentCalendarETag(t, tt.AccessToken, calendarID)
 		var deleted, confirmed int
 		var start, done sync.WaitGroup
 		start.Add(1)
@@ -160,7 +184,7 @@ func TestDeletingACalendarWhileAPhotoInItConfirms(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			deleted, _ = helpers.DoJSONStatus(t, http.MethodDelete, calURL, tt.AccessToken, nil)
+			deleted, _ = helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, calURL, tt.AccessToken, nil, ifMatch(calendarETag))
 		}()
 		go func() {
 			defer done.Done()
@@ -258,7 +282,8 @@ func TestConfirmingAfterTheEventIsDeletedTakesNoReference(t *testing.T) {
 	calURL, eventID, pres := reserveAttachment(t, tt, body)
 	helpers.UploadToSignedURL(t, pres.UploadURL, "application/pdf", body)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+eventID, tt.AccessToken, nil)
+	status, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, calURL+"/events/"+eventID, tt.AccessToken, nil,
+		ifMatch(currentEventETag(t, tt.AccessToken, calURL+"/events/"+eventID)))
 	require.Equal(t, http.StatusNoContent, status)
 
 	// The handler resolves the event first and would already refuse; the
@@ -293,7 +318,9 @@ func TestConfirmingAPhotoAfterItsCalendarIsDeletedFails(t *testing.T) {
 	body := distinctPNG("calendar-gone-" + time.Now().Format(time.RFC3339Nano))
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+calendarID+"/albums/presign",
-		tt.AccessToken, map[string]any{"caption": "late", "contentType": "image/png", "byteSize": len(body)}, &pres)
+		tt.AccessToken, map[string]any{
+			"caption": "late", "contentType": "image/png", "byteSize": len(body), "sha256": helpers.SHA256Hex(body),
+		}, &pres)
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", body)
 
 	var photoRowID, userID uint32
@@ -301,7 +328,7 @@ func TestConfirmingAPhotoAfterItsCalendarIsDeletedFails(t *testing.T) {
 		"SELECT id, uploaded_by_user_id FROM album_photos WHERE public_id = UUID_TO_BIN(?)", pres.PhotoID,
 	).Scan(&photoRowID, &userID))
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/calendars/"+calendarID, tt.AccessToken, nil)
+	status, _ := deleteCalendarWithETag(t, tt, calendarID)
 	require.Equal(t, http.StatusNoContent, status)
 
 	res, err := generated.New(testDB).ConfirmAlbumPhoto(testCtx(), generated.ConfirmAlbumPhotoParams{
@@ -325,10 +352,9 @@ func TestConfirmAfterDeleteDoesNotRestoreThePhoto(t *testing.T) {
 	photoID := uploadPhotoBytes(t, tt, tt.CalendarID, distinctPNG("deleted-photo-"+time.Now().Format(time.RFC3339Nano)), "moderated")
 	photoURL := testServerURL + "/calendars/" + tt.CalendarID + "/albums/" + photoID
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, photoURL, tt.AccessToken, nil)
-	require.Equal(t, http.StatusNoContent, status)
+	require.Equal(t, http.StatusNoContent, deletePhoto(t, tt, tt.CalendarID, photoID))
 
-	status, _ = helpers.DoJSONStatus(t, http.MethodPost, photoURL+"/confirm", tt.AccessToken, nil)
+	status, _ := helpers.DoJSONStatus(t, http.MethodPost, photoURL+"/confirm", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNotFound, status)
 
 	var list albumListResp

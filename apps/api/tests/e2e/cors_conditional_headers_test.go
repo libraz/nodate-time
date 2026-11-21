@@ -22,7 +22,7 @@ func TestCORSAllowsIfMatchOnAnEventSave(t *testing.T) {
 	})
 	resp := stackRequest(t, http.MethodOptions, srv.BaseURL+"/calendars/c/events/e", map[string]string{
 		"Origin":                         corsAllowedOrigin,
-		"Access-Control-Request-Method":  http.MethodPut,
+		"Access-Control-Request-Method":  http.MethodPatch,
 		"Access-Control-Request-Headers": "authorization, content-type, if-match",
 	})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -43,7 +43,8 @@ func TestCORSExposesTheHeadersTheSPAReads(t *testing.T) {
 		"Origin": corsAllowedOrigin,
 	})
 	exposed := strings.ToLower(resp.Header.Get("Access-Control-Expose-Headers"))
-	for _, h := range []string{"etag", "content-disposition", "x-result-truncated"} {
+	for _, h := range []string{"etag", "content-disposition"} {
 		require.Contains(t, exposed, h)
 	}
+	require.NotContains(t, exposed, "x-result-truncated", "listings report truncation in the body now")
 }

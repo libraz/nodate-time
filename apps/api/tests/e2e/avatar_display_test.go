@@ -202,6 +202,7 @@ func uploadOnePhotoAs(t *testing.T, calURL string, tt *helpers.TestTenant, body 
 	png := helpers.TinyPNG()
 	body["contentType"] = "image/png"
 	body["byteSize"] = len(png)
+	body["sha256"] = helpers.SHA256Hex(png)
 	var pres albumPresignResp
 	helpers.DoJSON(t, http.MethodPost, calURL+"/albums/presign", tt.AccessToken, body, &pres)
 	helpers.UploadToSignedURL(t, pres.UploadURL, "image/png", png)

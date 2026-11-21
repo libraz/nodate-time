@@ -99,10 +99,9 @@ func TestAlbumImageURLsOutlastABrowsingSession(t *testing.T) {
 		"a thumbnail loaded lazily must still resolve an hour after the listing")
 }
 
-// The reminder offsets are a fixed set: the picker offers those and nothing
-// else, and an event carrying anything else reads back in the modal as having
-// no reminder at all. Only the client enforced that, so an offset stored
-// through the API directly was one nobody could see or clear.
+// The reminder offset is a whole number of minutes in a fixed range. A value
+// outside it is refused as a malformed request on create and on update alike,
+// rather than stored for a client that cannot show or clear it.
 func TestEventRejectsAReminderNoClientCanShow(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -111,23 +110,22 @@ func TestEventRejectsAReminderNoClientCanShow(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	create := spaCreateBody()
-	create["notificationOffset"] = 7
+	create["notificationOffset"] = -1
 	status, body := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, create)
-	require.Equal(t, http.StatusBadRequest, status, "create: %s", string(body))
-	require.Contains(t, string(body), "EVENT.NOTIFICATION_OFFSET_INVALID")
+	require.Equal(t, http.StatusUnprocessableEntity, status, "create: %s", string(body))
+	require.Contains(t, string(body), "REQUEST.VALIDATION")
 
-	// One the picker does offer is still accepted, and the update path is
-	// guarded as well -- a full replace can set the field just as a create can.
+	// One inside the range is still accepted, and the update path is guarded as
+	// well.
 	create["notificationOffset"] = 30
 	var created struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		ETag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken, create, &created)
 
-	update := spaCreateBody()
-	update["notificationOffset"] = 7
-	status, body = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+created.ID,
-		tt.AccessToken, update)
-	require.Equal(t, http.StatusBadRequest, status, "update: %s", string(body))
-	require.Contains(t, string(body), "EVENT.NOTIFICATION_OFFSET_INVALID")
+	status, body = helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/events/"+created.ID,
+		tt.AccessToken, map[string]any{"notificationOffset": 10081}, ifMatch(created.ETag))
+	require.Equal(t, http.StatusUnprocessableEntity, status, "update: %s", string(body))
+	require.Contains(t, string(body), "REQUEST.VALIDATION")
 }
