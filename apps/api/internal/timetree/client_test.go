@@ -165,3 +165,10 @@ func TestFetchStopsBeforeAnyWriteWhenLoginFails(t *testing.T) {
 	_, err := fetch(context.Background(), Options{BaseURL: srv.URL, Email: "e", Password: "p"})
 	assert.ErrorContains(t, err, "-702")
 }
+
+func TestLatestByIDKeepsTheLastCopyInTheFirstPlace(t *testing.T) {
+	in := []ttEvent{{ID: "a", Title: "a1"}, {ID: "b"}, {ID: "a", Title: "a2"}, {ID: ""}, {ID: ""}, {ID: "a", Title: "a3"}}
+	out, repeated := latestByID(in)
+	assert.Equal(t, 2, repeated)
+	assert.Equal(t, []ttEvent{{ID: "a", Title: "a3"}, {ID: "b"}, {ID: ""}, {ID: ""}}, out, "an empty ID is never folded")
+}

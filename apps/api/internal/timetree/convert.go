@@ -161,11 +161,11 @@ func (cv *converter) convert(e ttEvent) converted {
 	}
 
 	if e.AllDay {
-		// The date TimeTree shows, re-anchored at midnight in the workspace zone.
+		// The dates TimeTree shows, as UTC midnights with the end exclusive.
 		ev.Timezone = cv.wsTZ
-		ev.Start = cv.midnight(time.UnixMilli(e.StartAt).In(startLoc), 0)
+		ev.Start = utcMidnight(time.UnixMilli(e.StartAt).In(startLoc), 0)
 		if hasEnd {
-			ev.End = cv.midnight(time.UnixMilli(e.EndAt).In(startLoc), 1)
+			ev.End = utcMidnight(time.UnixMilli(e.EndAt).In(startLoc), 1)
 		}
 	} else {
 		ev.Timezone = cv.wsTZ
@@ -182,7 +182,8 @@ func (cv *converter) convert(e ttEvent) converted {
 		if e.AllDay {
 			rrule = dateUntil(rrule, startLoc)
 		}
-		if _, ok := recurrence.ParseRRule(rrule, ev.Start.In(recurrence.LoadLocation(ev.Timezone))); !ok {
+		zone := recurrence.ExpansionZone(ev.AllDay, ev.Timezone)
+		if _, ok := recurrence.ParseRRule(rrule, ev.Start.In(recurrence.LoadLocation(zone))); !ok {
 			return skip(skipUnsupported)
 		}
 		ev.RRule = rrule
@@ -205,10 +206,9 @@ func (cv *converter) convert(e ttEvent) converted {
 	return out
 }
 
-// midnight is the start of d's calendar day plus days, in the workspace zone,
-// as a UTC instant.
-func (cv *converter) midnight(d time.Time, days int) time.Time {
-	return time.Date(d.Year(), d.Month(), d.Day()+days, 0, 0, 0, 0, cv.wsLoc).UTC()
+// utcMidnight is 00:00 UTC of d's calendar day plus days.
+func utcMidnight(d time.Time, days int) time.Time {
+	return time.Date(d.Year(), d.Month(), d.Day()+days, 0, 0, 0, 0, time.UTC)
 }
 
 // exdate is one EXDATE value with the zone its row named, if any.
@@ -310,9 +310,9 @@ func (cv *converter) exdates(rows []exdate, ev calimport.Event, startLoc *time.L
 
 		switch {
 		case ev.AllDay && day:
-			t = cv.midnight(t, 0)
+			t = utcMidnight(t, 0)
 		case ev.AllDay:
-			t = cv.midnight(t.In(startLoc), 0)
+			t = utcMidnight(t.In(startLoc), 0)
 		case day:
 			// A date alone on a timed series names the occurrence at the start's clock time.
 			s := ev.Start.In(evLoc)
@@ -363,10 +363,10 @@ func doubleDisplayCandidates(events []ttEvent, conv []converted) int {
 }
 
 // seriesOccursOnDayOf reports whether series has a live occurrence on the day
-// (in the changed event's zone) that changed starts.
+// (in the changed event's expansion zone) that changed starts.
 func seriesOccursOnDayOf(series, changed calimport.Event) bool {
-	loc := recurrence.LoadLocation(changed.Timezone)
-	start := series.Start.In(recurrence.LoadLocation(series.Timezone))
+	zone := recurrence.ExpansionZone(series.AllDay, series.Timezone)
+	start := series.Start.In(recurrence.LoadLocation(zone))
 	rule, ok := recurrence.ParseRRule(series.RRule, start)
 	if !ok {
 		return false
@@ -378,12 +378,16 @@ func seriesOccursOnDayOf(series, changed calimport.Event) bool {
 			end = start.AddDate(0, 0, 1)
 		}
 	}
+	loc := recurrence.LoadLocation(recurrence.ExpansionZone(changed.AllDay, changed.Timezone))
 	s := changed.Start.In(loc)
 	from := time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, loc)
 	to := from.AddDate(0, 0, 1)
-	skipped := recurrence.Exceptions(series.Exdates)
-	for _, o := range recurrence.ExpandInZone(rule, start, end, from, to, series.Timezone) {
-		if !o.StartAt.Before(from) && o.StartAt.Before(to) && !skipped.Contains(o.StartAt) {
+	var skipped recurrence.ExceptionList
+	for _, t := range series.Exdates {
+		skipped = skipped.With(t, series.AllDay, series.Timezone)
+	}
+	for _, o := range recurrence.ExpandInZone(rule, start, end, from, to, zone) {
+		if !o.StartAt.Before(from) && o.StartAt.Before(to) && !skipped.Cancels(o.StartAt, series.AllDay, series.Timezone) {
 			return true
 		}
 	}

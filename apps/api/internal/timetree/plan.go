@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
+	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 )
@@ -191,6 +193,135 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		}
 	}
 	return res, nil
+}
+
+// maxUnguardedDeletes is how many deletions one calendar may take regardless
+// of its size: small losses are accepted, as a soft delete can be undone.
+const maxUnguardedDeletes = 10
+
+// calendarSync is what a sync knows about one mapped calendar before writing.
+type calendarSync struct {
+	// present is every event ID TimeTree still has, deleted ones excluded.
+	present map[string]bool
+	plan    calimport.SyncPlan
+	// moved is the deletions whose ID another mapped calendar now has.
+	moved int
+}
+
+// presentIDs is the IDs of a calendar's events that TimeTree has not deleted.
+func presentIDs(a *analysis) map[string]bool {
+	present := map[string]bool{}
+	for i, e := range a.data.events {
+		if a.conv[i].Skip != skipDeleted {
+			present[e.ID] = true
+		}
+	}
+	return present
+}
+
+// importable turns a calendar's converted events into calimport events filed
+// under users. force collects the IDs naming someone users does not hold.
+func importable(a *analysis, users map[string]generated.User) (events []calimport.Event, force map[string]bool) {
+	force = map[string]bool{}
+	for _, cv := range a.conv {
+		if !cv.ok() {
+			continue
+		}
+		ev := cv.Event
+		owner, ok := users[cv.Owner]
+		if !ok {
+			force[ev.SourceUID] = true
+		}
+		ev.OwnerUserID = owner.ID
+		for _, email := range cv.Attendees {
+			u, ok := users[email]
+			if !ok {
+				force[ev.SourceUID] = true
+				continue
+			}
+			ev.Attendees = append(ev.Attendees, attendees.Person{
+				UserID: u.ID, PublicID: calresolve.PublicIDString(u.PublicID), Name: u.DisplayName,
+			})
+		}
+		events = append(events, ev)
+	}
+	return events, force
+}
+
+// planSync reads what a sync would do to every mapped calendar. A calendar
+// that does not exist yet would receive every importable event.
+func planSync(
+	ctx context.Context, q *generated.Queries, m *Mapping, res resolution, analyses []*analysis, lk lookup,
+) (map[flexID]*calendarSync, error) {
+	users := map[string]generated.User{}
+	for _, r := range m.refs() {
+		u, exists, err := lk.user(ctx, r.email)
+		if err != nil {
+			return nil, fmt.Errorf("look up %s: %w", r.email, err)
+		}
+		if exists {
+			users[norm(r.email)] = u
+		}
+	}
+	analysisOf := map[flexID]*analysis{}
+	for _, a := range analyses {
+		analysisOf[a.data.cal.ID] = a
+	}
+
+	syncs := map[flexID]*calendarSync{}
+	for _, p := range res.Plans {
+		a := analysisOf[p.TT.ID]
+		s := &calendarSync{present: presentIDs(a)}
+		syncs[p.TT.ID] = s
+		events, force := importable(a, users)
+		if p.ExistingID == 0 {
+			s.plan.Create = len(events)
+			continue
+		}
+		cal, err := q.GetCalendarByID(ctx, p.ExistingID)
+		if err != nil {
+			return nil, fmt.Errorf("calendar %q: %w", p.Name, err)
+		}
+		s.plan, err = calimport.PlanSync(ctx, q, cal, users[norm(m.Importer)].ID, events, s.present, force, sourceTimeTree)
+		if err != nil {
+			return nil, fmt.Errorf("calendar %q: plan sync: %w", p.Name, err)
+		}
+	}
+	countMoved(res.Plans, syncs)
+	return syncs, nil
+}
+
+// countMoved marks each calendar's deletions that another mapped calendar
+// still has: the event moved rather than disappeared.
+func countMoved(plans []calendarPlan, syncs map[flexID]*calendarSync) {
+	for _, p := range plans {
+		s := syncs[p.TT.ID]
+		for _, uid := range s.plan.DeleteUIDs {
+			for _, other := range plans {
+				if other.TT.ID != p.TT.ID && syncs[other.TT.ID].present[uid] {
+					s.moved++
+					break
+				}
+			}
+		}
+	}
+}
+
+// refusals lists the calendars a sync would empty or mostly empty. A fetch
+// that came back partial, or from another account, looks exactly like that.
+func refusals(plans []calendarPlan, syncs map[flexID]*calendarSync) []string {
+	var out []string
+	for _, p := range plans {
+		s := syncs[p.TT.ID]
+		lost := len(s.plan.Delete) - s.moved
+		switch {
+		case len(s.present) == 0 && s.plan.Synced > 0 && lost > 0:
+			out = append(out, fmt.Sprintf("TimeTree returned no events for calendar %q but %d are synced", p.Name, s.plan.Synced))
+		case lost > maxUnguardedDeletes && lost*2 > s.plan.Synced:
+			out = append(out, fmt.Sprintf("calendar %q would delete %d of %d synced events", p.Name, lost, s.plan.Synced))
+		}
+	}
+	return out
 }
 
 func sortedKeys[V any](m map[string]V) []string {

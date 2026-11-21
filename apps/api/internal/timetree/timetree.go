@@ -7,6 +7,10 @@
 // problem found before the first write ends the run with exit code 2 and
 // leaves the database as it was.
 //
+// With Sync, events this importer wrote earlier follow TimeTree: changed ones
+// are rewritten and ones TimeTree no longer has are soft-deleted. A sync that
+// would delete most of a calendar is refused before anything is written.
+//
 // Exit codes: 0 success, 1 at least one write failed, 2 nothing was written.
 // A dry run performs every step up to the first write and prints a report.
 package timetree
@@ -19,7 +23,6 @@ import (
 	"io"
 
 	"github.com/libraz/nodate-time/apps/api/internal/accounts"
-	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -47,8 +50,11 @@ type Options struct {
 	// Mapping is the YAML mapping file.
 	Mapping io.Reader
 	DryRun  bool
-	DB      *sql.DB
-	Config  *config.Config
+	// Sync rewrites and deletes the events earlier imports wrote so they
+	// match TimeTree, instead of leaving them as they are.
+	Sync   bool
+	DB     *sql.DB
+	Config *config.Config
 	// Out receives the report.
 	Out io.Writer
 }
@@ -118,16 +124,33 @@ func Run(ctx context.Context, o Options) (int, error) {
 
 	if o.DryRun {
 		writeReport(out, analyses, res)
-		if len(res.Errors) > 0 {
-			return exitNoWrites, fmt.Errorf("mapping has %d error(s) against TimeTree and the database", len(res.Errors))
-		}
-		return exitOK, nil
+	} else if len(res.Errors) > 0 {
+		writeErrors(out, res.Errors)
 	}
 	if len(res.Errors) > 0 {
-		writeErrors(out, res.Errors)
 		return exitNoWrites, fmt.Errorf("mapping has %d error(s) against TimeTree and the database", len(res.Errors))
 	}
-	return write(ctx, o, ws, m, res, analyses)
+
+	var syncs map[flexID]*calendarSync
+	if o.Sync {
+		syncs, err = planSync(ctx, q, m, res, analyses, lk)
+		if err != nil {
+			return exitNoWrites, err
+		}
+		if o.DryRun {
+			writeSyncPlans(out, analyses, res, syncs)
+		}
+		if refused := refusals(res.Plans, syncs); len(refused) > 0 {
+			for _, r := range refused {
+				fmt.Fprintf(out, "refusing: %s\n", r)
+			}
+			return exitNoWrites, fmt.Errorf("sync refused for %d calendar(s); nothing was written", len(refused))
+		}
+	}
+	if o.DryRun {
+		return exitOK, nil
+	}
+	return write(ctx, o, ws, m, res, analyses, syncs)
 }
 
 // resolveWorkspace finds the workspace. A real run creates it when missing;
@@ -174,26 +197,36 @@ func fetch(ctx context.Context, o Options) ([]calData, error) {
 		if err != nil {
 			return nil, err
 		}
-		data = append(data, calData{cal: cal, labels: labels, events: events})
+		events, repeated := latestByID(events)
+		data = append(data, calData{cal: cal, labels: labels, events: events, repeated: repeated})
 	}
 	return data, nil
 }
 
-// counts are the per-calendar results of a real run.
+// counts are the per-calendar results of a real run. Duplicates are the
+// events left as they were; under a sync, the unchanged ones.
 type counts struct {
-	imported, duplicates, skipped, failed, rejected int
+	imported, updated, duplicates, deleted, kept, moved, skipped, failed, rejected int
 }
 
 func (c *counts) add(o counts) {
 	c.imported += o.imported
+	c.updated += o.updated
 	c.duplicates += o.duplicates
+	c.deleted += o.deleted
+	c.kept += o.kept
+	c.moved += o.moved
 	c.skipped += o.skipped
 	c.failed += o.failed
 	c.rejected += o.rejected
 }
 
-// write performs the mutations in dependency order.
-func write(ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res resolution, analyses []*analysis) (int, error) {
+// write performs the mutations in dependency order. syncs is nil unless the
+// run syncs.
+func write(
+	ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res resolution, analyses []*analysis,
+	syncs map[flexID]*calendarSync,
+) (int, error) {
 	q := generated.New(o.DB)
 	out := o.Out
 	if out == nil {
@@ -268,43 +301,73 @@ func write(ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res r
 		}
 
 		a := analysisOf[p.TT.ID]
-		var events []calimport.Event
+		events, _ := importable(a, users)
 		var c counts
-		for _, cv := range a.conv {
-			switch {
-			case cv.Skip != "":
+		for i, cv := range a.conv {
+			if cv.ok() {
+				continue
+			}
+			// A sync keeps the row of an event that no longer converts, and
+			// counts it as kept rather than as skipped or failed.
+			if syncs != nil && cv.Skip != skipDeleted {
+				held, err := holdsUID(ctx, q, cal.ID, a.data.events[i].ID)
+				if err != nil {
+					return exitFailed, fmt.Errorf("calendar %q: %w", p.Name, err)
+				}
+				if held {
+					continue
+				}
+			}
+			if cv.Skip != "" {
 				c.skipped++
-			case cv.Reject != "":
+			} else {
 				c.failed++
 				c.rejected++
-			default:
-				ev := cv.Event
-				ev.OwnerUserID = users[cv.Owner].ID
-				for _, email := range cv.Attendees {
-					u := users[email]
-					ev.Attendees = append(ev.Attendees, attendees.Person{
-						UserID: u.ID, PublicID: calresolve.PublicIDString(u.PublicID), Name: u.DisplayName,
-					})
-				}
-				events = append(events, ev)
 			}
 		}
-		r := calimport.Run(ctx, o.DB, ws.ID, cal, importer.ID, events, sourceTimeTree)
-		c.add(counts{r.Imported, r.Duplicates, r.Skipped, r.Failed, r.Rejected})
+		if s := syncs[p.TT.ID]; s != nil {
+			r := calimport.Sync(ctx, o.DB, ws.ID, cal, importer.ID, events, s.present, s.plan.Delete, sourceTimeTree)
+			c.add(counts{
+				imported: r.Imported, updated: r.Updated, duplicates: r.Duplicates, deleted: r.Deleted, kept: r.Kept,
+				moved: s.moved, skipped: r.Skipped, failed: r.Failed, rejected: r.Rejected,
+			})
+		} else {
+			r := calimport.Run(ctx, o.DB, ws.ID, cal, importer.ID, events, sourceTimeTree)
+			c.add(counts{
+				imported: r.Imported, duplicates: r.Duplicates, skipped: r.Skipped, failed: r.Failed, rejected: r.Rejected,
+			})
+		}
 		total.add(c)
 
 		state := "reused"
 		if p.ExistingID == 0 {
 			state = "created"
 		}
-		fmt.Fprintf(out, "calendar %q (%s): members added=%d existing=%d; events imported=%d duplicates=%d skipped=%d failed=%d rejected=%d\n",
-			p.Name, state, added, existing, c.imported, c.duplicates, c.skipped, c.failed, c.rejected)
+		fmt.Fprintf(out, "calendar %q (%s): members added=%d existing=%d; events imported=%d updated=%d duplicates=%d deleted=%d kept=%d moved=%d skipped=%d failed=%d rejected=%d\n",
+			p.Name, state, added, existing,
+			c.imported, c.updated, c.duplicates, c.deleted, c.kept, c.moved, c.skipped, c.failed, c.rejected)
 	}
-	fmt.Fprintf(out, "total: imported=%d duplicates=%d skipped=%d failed=%d rejected=%d calendars_created=%d users_created=%d\n",
-		total.imported, total.duplicates, total.skipped, total.failed, total.rejected, calendarsCreated, created)
+	fmt.Fprintf(out, "total: imported=%d updated=%d duplicates=%d deleted=%d kept=%d moved=%d skipped=%d failed=%d rejected=%d calendars_created=%d users_created=%d\n",
+		total.imported, total.updated, total.duplicates, total.deleted, total.kept, total.moved,
+		total.skipped, total.failed, total.rejected, calendarsCreated, created)
 
 	if total.failed > 0 {
 		return exitFailed, fmt.Errorf("%d event(s) failed to import", total.failed)
 	}
 	return exitOK, nil
+}
+
+// holdsUID reports whether the calendar has a live row carrying the event ID.
+func holdsUID(ctx context.Context, q *generated.Queries, calendarID uint32, id string) (bool, error) {
+	_, err := q.FindCalendarEventBySourceUID(ctx, generated.FindCalendarEventBySourceUIDParams{
+		CalendarID: calendarID, SourceUid: sql.NullString{String: id, Valid: id != ""},
+	})
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, err
+	}
 }

@@ -7,13 +7,19 @@
 //	TIMETREE_EMAIL=... TIMETREE_PASSWORD=... \
 //	  go run ./cmd/importtimetree -mapping mapping.yaml -dry-run
 //	... go run ./cmd/importtimetree -mapping - < mapping.yaml
+//	... go run ./cmd/importtimetree -mapping mapping.yaml -sync -dry-run
 //
 // The TimeTree credentials come from the environment so they never appear in
 // the process list. The database connection comes from TC_DB_DSN (same as the
 // API server).
 //
+// -sync makes earlier imports follow TimeTree: changed events are rewritten,
+// events TimeTree no longer has are soft-deleted, and events created here are
+// left alone. Run it with -dry-run first to read the plan.
+//
 // Exit codes: 0 success; 1 one or more events failed while writing; 2 nothing
-// was written (bad input, credentials, validation, login or fetch).
+// was written (bad input, credentials, validation, login, fetch or a refused
+// sync).
 package main
 
 import (
@@ -38,6 +44,7 @@ func main() {
 func run() int {
 	mappingPath := flag.String("mapping", "", `mapping file path, or "-" for stdin (required)`)
 	dryRun := flag.Bool("dry-run", false, "fetch and validate, print the report, write nothing")
+	syncMode := flag.Bool("sync", false, "rewrite and delete earlier imports to match TimeTree")
 	flag.Parse()
 
 	if *mappingPath == "" {
@@ -86,6 +93,7 @@ func run() int {
 		Password: os.Getenv("TIMETREE_PASSWORD"),
 		Mapping:  mapping,
 		DryRun:   *dryRun,
+		Sync:     *syncMode,
 		DB:       db,
 		Config:   cfg,
 		Out:      os.Stdout,

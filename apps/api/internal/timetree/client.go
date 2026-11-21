@@ -262,3 +262,20 @@ func (c *client) events(ctx context.Context, calendarID flexID) ([]ttEvent, erro
 		path = next
 	}
 }
+
+// latestByID folds repeated IDs into the last copy, which on a cursor feed is
+// the newest, keeping the first copy's position. repeated counts the folds.
+func latestByID(events []ttEvent) (out []ttEvent, repeated int) {
+	at := make(map[string]int, len(events))
+	out = make([]ttEvent, 0, len(events))
+	for _, e := range events {
+		if i, ok := at[e.ID]; ok && e.ID != "" {
+			out[i] = e
+			repeated++
+			continue
+		}
+		at[e.ID] = len(out)
+		out = append(out, e)
+	}
+	return out, repeated
+}

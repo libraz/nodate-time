@@ -19,6 +19,8 @@ var tokyo = func() *time.Location { l, _ := time.LoadLocation(testWSZone); retur
 
 func jst(y int, m time.Month, d, h int) time.Time { return time.Date(y, m, d, h, 0, 0, 0, tokyo) }
 
+func utcDay(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+
 func ms(t time.Time) int64 { return t.UnixMilli() }
 
 func testConverter(m *MappingCalendar) *converter {
@@ -34,33 +36,42 @@ func allDay(start, end time.Time, tz string) ttEvent {
 	return ttEvent{ID: "e1", Title: "t", AllDay: true, StartAt: ms(start), EndAt: ms(end), StartTimezone: tz}
 }
 
-func TestConvertAllDaySingleDayIsWorkspaceMidnightExclusive(t *testing.T) {
+func TestConvertAllDaySingleDayIsUTCMidnightExclusive(t *testing.T) {
 	d := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
-	c := testConverter(nil).convert(allDay(d, d, "UTC"))
-	require.True(t, c.ok())
-	assert.True(t, c.Event.AllDay)
-	assert.Equal(t, testWSZone, c.Event.Timezone)
-	assert.True(t, jst(2026, 4, 10, 0).Equal(c.Event.Start), "start %s", c.Event.Start)
-	assert.True(t, jst(2026, 4, 11, 0).Equal(c.Event.End), "end %s", c.Event.End)
+	for _, tz := range []string{"UTC", "Etc/UTC"} {
+		c := testConverter(nil).convert(allDay(d, d, tz))
+		require.True(t, c.ok(), tz)
+		assert.True(t, c.Event.AllDay)
+		assert.Equal(t, testWSZone, c.Event.Timezone)
+		assert.Equal(t, utcDay(2026, 4, 10), c.Event.Start, tz)
+		assert.Equal(t, utcDay(2026, 4, 11), c.Event.End, tz)
+	}
 }
 
 func TestConvertAllDayMultiDayIncludesTheLastDay(t *testing.T) {
 	s := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	e := time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC)
 	c := testConverter(nil).convert(allDay(s, e, "UTC"))
-	assert.True(t, jst(2026, 4, 10, 0).Equal(c.Event.Start))
-	assert.True(t, jst(2026, 4, 13, 0).Equal(c.Event.End))
+	assert.Equal(t, utcDay(2026, 4, 10), c.Event.Start)
+	assert.Equal(t, utcDay(2026, 4, 13), c.Event.End)
+}
+
+func TestConvertAllDayInJSTKeepsTheTokyoDates(t *testing.T) {
+	c := testConverter(nil).convert(allDay(jst(2026, 4, 10, 0), jst(2026, 4, 11, 0), "Asia/Tokyo"))
+	require.True(t, c.ok())
+	assert.Equal(t, utcDay(2026, 4, 10), c.Event.Start)
+	assert.Equal(t, utcDay(2026, 4, 12), c.Event.End)
 }
 
 func TestConvertAllDayReadsTheDateInTheStartTimezone(t *testing.T) {
 	// 2026-04-09T15:00Z is 04-10 in Tokyo but 04-09 in UTC.
 	d := time.Date(2026, 4, 9, 15, 0, 0, 0, time.UTC)
 	c := testConverter(nil).convert(allDay(d, d, "Asia/Tokyo"))
-	assert.True(t, jst(2026, 4, 10, 0).Equal(c.Event.Start))
+	assert.Equal(t, utcDay(2026, 4, 10), c.Event.Start)
 	u := testConverter(nil).convert(allDay(d, d, "Not/AZone"))
-	assert.True(t, jst(2026, 4, 9, 0).Equal(u.Event.Start), "an unreadable zone reads as UTC")
+	assert.Equal(t, utcDay(2026, 4, 9), u.Event.Start, "an unreadable zone reads as UTC")
 	e := testConverter(nil).convert(allDay(d, d, ""))
-	assert.True(t, jst(2026, 4, 9, 0).Equal(e.Event.Start), "an empty zone reads as UTC")
+	assert.Equal(t, utcDay(2026, 4, 9), e.Event.Start, "an empty zone reads as UTC")
 }
 
 func TestConvertAllDayWithoutEndLeavesTheDefaultToTheStore(t *testing.T) {
@@ -213,22 +224,26 @@ func TestConvertLabelNamesAreMatchedExactly(t *testing.T) {
 	assert.Equal(t, "a@example.com", cv.convert(ev).Owner)
 }
 
-// occurrenceStarts expands a converted series over April-May 2026 and returns
-// its live occurrence starts in the workspace zone.
+// occurrenceStarts expands a converted series over March-May 2026 in its
+// expansion zone and returns its live occurrence starts in UTC.
 func occurrenceStarts(t *testing.T, ev calimport.Event) []time.Time {
 	t.Helper()
-	start := ev.Start.In(recurrence.LoadLocation(ev.Timezone))
+	zone := recurrence.ExpansionZone(ev.AllDay, ev.Timezone)
+	start := ev.Start.In(recurrence.LoadLocation(zone))
 	rule, ok := recurrence.ParseRRule(ev.RRule, start)
 	require.True(t, ok, "rule %q", ev.RRule)
 	end := ev.End
 	if end.IsZero() {
 		end = start.AddDate(0, 0, 1)
 	}
-	skipped := recurrence.Exceptions(ev.Exdates)
+	var skipped recurrence.ExceptionList
+	for _, x := range ev.Exdates {
+		skipped = skipped.With(x, ev.AllDay, ev.Timezone)
+	}
 	var out []time.Time
-	for _, o := range recurrence.ExpandInZone(rule, start, end, jst(2026, 4, 1, 0), jst(2026, 6, 1, 0), ev.Timezone) {
-		if !skipped.Contains(o.StartAt) {
-			out = append(out, o.StartAt.In(tokyo))
+	for _, o := range recurrence.ExpandInZone(rule, start, end, jst(2026, 3, 1, 0), jst(2026, 6, 1, 0), zone) {
+		if !skipped.Cancels(o.StartAt, ev.AllDay, ev.Timezone) {
+			out = append(out, o.StartAt.UTC())
 		}
 	}
 	return out
@@ -236,19 +251,34 @@ func occurrenceStarts(t *testing.T, ev calimport.Event) []time.Time {
 
 func TestConvertAllDayRecurrenceKeepsTheUntilDayAndDropsTheExdate(t *testing.T) {
 	// Auckland midnight 04-06; the UNTIL instant is Auckland 04-27 00:00, which
-	// is before the Tokyo-midnight occurrence of that day unless it is a date.
+	// is before the UTC-midnight occurrence of that day unless it is a date.
 	s := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
 	ev := allDay(s, s, "Pacific/Auckland")
 	ev.Recurrences = []string{"RRULE:FREQ=WEEKLY;UNTIL=20260426T120000Z", "EXDATE:20260413"}
 	c := testConverter(nil).convert(ev)
 	require.True(t, c.ok(), "%+v", c)
 	assert.Equal(t, "FREQ=WEEKLY;UNTIL=20260427", c.Event.RRule)
-	assert.Equal(t, []time.Time{jst(2026, 4, 13, 0).UTC()}, c.Event.Exdates)
+	assert.Equal(t, []time.Time{utcDay(2026, 4, 13)}, c.Event.Exdates)
 	got := occurrenceStarts(t, c.Event)
-	require.Len(t, got, 3)
-	assert.True(t, got[0].Equal(jst(2026, 4, 6, 0)))
-	assert.True(t, got[1].Equal(jst(2026, 4, 20, 0)), "the cancelled week is gone")
-	assert.True(t, got[2].Equal(jst(2026, 4, 27, 0)), "the UNTIL day is kept")
+	assert.Equal(t, []time.Time{utcDay(2026, 4, 6), utcDay(2026, 4, 20), utcDay(2026, 4, 27)}, got,
+		"the cancelled week is gone and the UNTIL day is kept")
+}
+
+func TestConvertAllDaySeriesAcrossDSTStaysAtUTCMidnight(t *testing.T) {
+	// Los Angeles midnight 03-02 (PST); DST starts 03-08, so the zone's own
+	// midnight moves an hour while the dates do not.
+	la, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	s := time.Date(2026, 3, 2, 0, 0, 0, 0, la)
+	ev := allDay(s, s, "America/Los_Angeles")
+	ev.Recurrences = []string{"RRULE:FREQ=WEEKLY;COUNT=4", "EXDATE;TZID=America/Los_Angeles:20260316T000000"}
+	c := testConverter(nil).convert(ev)
+	require.True(t, c.ok(), "%+v", c)
+	assert.Equal(t, utcDay(2026, 3, 2), c.Event.Start)
+	assert.Equal(t, utcDay(2026, 3, 3), c.Event.End)
+	assert.Equal(t, []time.Time{utcDay(2026, 3, 16)}, c.Event.Exdates)
+	assert.Equal(t, []time.Time{utcDay(2026, 3, 2), utcDay(2026, 3, 9), utcDay(2026, 3, 23)},
+		occurrenceStarts(t, c.Event))
 }
 
 func TestConvertUntilRewrite(t *testing.T) {
@@ -283,7 +313,7 @@ func TestConvertRRulePrefixIsStripped(t *testing.T) {
 func TestConvertExdateForms(t *testing.T) {
 	// All-day Tokyo series: every form below names the 04-13 occurrence.
 	s := time.Date(2026, 4, 5, 15, 0, 0, 0, time.UTC)
-	want := []time.Time{jst(2026, 4, 13, 0).UTC()}
+	want := []time.Time{utcDay(2026, 4, 13)}
 	rows := map[string]string{
 		"date":            "EXDATE:20260413",
 		"utc datetime":    "EXDATE:20260412T150000Z",
@@ -302,7 +332,7 @@ func TestConvertExdateForms(t *testing.T) {
 
 	multi := allDay(s, s, "Asia/Tokyo")
 	multi.Recurrences = []string{"RRULE:FREQ=WEEKLY", "EXDATE:20260420,20260413", "EXDATE:20260413"}
-	assert.Equal(t, []time.Time{jst(2026, 4, 13, 0).UTC(), jst(2026, 4, 20, 0).UTC()},
+	assert.Equal(t, []time.Time{utcDay(2026, 4, 13), utcDay(2026, 4, 20)},
 		testConverter(nil).convert(multi).Event.Exdates, "comma lists merge, deduplicate and sort")
 }
 

@@ -214,18 +214,58 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 
 Export `TIMETREE_EMAIL` and `TIMETREE_PASSWORD` in the shell first; `-e` passes them into the container without putting them on the command line. The mapping file reaches the container on standard input.
 
-| Exit code | Meaning                                                                                                                 |
-| --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 0         | Success.                                                                                                                |
-| 1         | One or more events failed while writing. Others were imported.                                                          |
-| 2         | Nothing was written: bad input, missing credentials, a validation error, or a failed login or fetch. Safe to run again. |
+| Exit code | Meaning                                                                                                                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0         | Success.                                                                                                                                                   |
+| 1         | One or more events failed while writing. Others were imported.                                                                                             |
+| 2         | Nothing was written: bad input, missing credentials, a validation error, a failed login or fetch, or a sync the deletion guard refused. Safe to run again. |
 
-Events are identified by their TimeTree id, so running the same import again imports nothing new and reports the already-imported events as duplicates.
+Each calendar gets a line, followed by the totals:
+
+```text
+calendar "Band" (reused): members added=0 existing=9; events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0
+total: imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0 calendars_created=0 users_created=0
+```
+
+Events are identified by their TimeTree id, so running the same import again without `-sync` imports nothing new and reports the already-imported events as duplicates. `updated`, `deleted`, `kept` and `moved` stay 0 without `-sync`.
+
+### Following TimeTree with `-sync`
+
+While people still edit in TimeTree, `-sync` makes the events this command imported follow it. TimeTree wins:
+
+- An imported event that changed in TimeTree is rewritten here: title, times, repeat rule, cancelled dates, location, memo, URL, owner and participants. Edits made here to those fields are overwritten, and occurrences edited one at a time here are dropped.
+- An imported event that TimeTree deleted, or no longer returns, is deleted here the same way deleting it in the app does.
+- Visibility, busy/free and reminders have no TimeTree counterpart and keep what they were set to here.
+- Events created here and events imported from an iCal file are never touched.
+- An imported event deleted here comes back if TimeTree still has it.
+- Members are only added. Someone removed here who is still in the mapping is added again; take them out of the mapping to keep them out.
+
+Always read the plan first, and on the first sync check `update=` in particular: a changed mapping or workspace time zone shows up as a large number of updates.
+
+```sh
+docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PASSWORD \
+  --entrypoint /importtimetree api -mapping - -sync -dry-run < mapping.yaml
+```
+
+With `-sync`, the dry run adds one line per mapped calendar:
+
+```text
+calendar "Band": sync plan create=1 update=3 unchanged=120 delete=2 moved=0 kept=0 synced=125 orphaned=0 repeated=0
+```
+
+- `delete` counts the imported events TimeTree no longer has; `moved` is the part of them that is now in another mapped calendar, where it is created again.
+- `kept` counts events TimeTree still has that will be left as they are: ones that no longer convert, and ones with the same id that this command did not import.
+- `synced` is the imported events found; `orphaned` is events carrying an id with no record of having been imported by this command. Those are never updated or deleted.
+- `repeated` counts events TimeTree returned more than once; the last copy is used.
+
+Before writing anything, the sync checks each calendar. If it would delete more than 10 events and more than half of the calendar's synced events (moves not counted), or TimeTree returned no events for a calendar that has synced ones, it prints `refusing: ...` and exits with 2, dry run included. A partial fetch or a login to the wrong TimeTree account looks exactly like that. Find the cause and run again.
+
+Then run it without `-dry-run`. In the report, `duplicates` counts the events that were already up to date.
 
 ### What is not migrated
 
 Attendees, comments, attachments, reminders, memos, birthdays, public calendars and deactivated calendars are not imported; the report counts what it skips. Calendar colors take the default. Events keep only the owner the label gives them.
 
-### Run it before cutover only
+### Re-running without `-sync`
 
-The importer does not update what it has already imported. Run it again after people have started using the app and it brings back events they deleted and members they removed, and creates a second calendar for each one they renamed. Re-running is for redoing the migration before cutover, not for catching up afterwards.
+Without `-sync` the importer does not update what it has already imported. Run it again after people have started using the app and it brings back events they deleted and members they removed. Either way, a calendar renamed here is created again under the mapped name, and the old one is no longer synced.

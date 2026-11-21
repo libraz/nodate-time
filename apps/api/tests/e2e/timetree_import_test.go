@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,25 @@ type ttScenario struct {
 	token    string
 	server   *httptest.Server
 	mapping  string
+
+	mu sync.Mutex
+	// feeds is each TimeTree calendar's events by id; extraCals are live
+	// calendars served after the first.
+	feeds     map[int][]map[string]any
+	extraCals []map[string]any
+}
+
+// setFeed replaces what the fake TimeTree serves for one calendar.
+func (s *ttScenario) setFeed(calendarID int, events []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.feeds[calendarID] = events
+}
+
+func (s *ttScenario) feed(calendarID int) []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.feeds[calendarID]
 }
 
 var tokyoLoc = func() *time.Location {
@@ -103,6 +123,7 @@ func newTTScenario(t *testing.T, events []map[string]any) *ttScenario {
 		hanako:   "hanako-" + sfx + "@test.local",
 		mgr:      "mgr-" + sfx + "@test.local",
 		token:    tenant.AccessToken,
+		feeds:    map[int][]map[string]any{9001: events},
 	}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reply := func(v any) {
@@ -114,15 +135,20 @@ func newTTScenario(t *testing.T, events []map[string]any) *ttScenario {
 			http.SetCookie(w, &http.Cookie{Name: "_session_id", Value: "s", Path: "/"})
 			reply(map[string]any{})
 		case r.URL.Path == "/api/v1/calendars":
-			reply(map[string]any{"calendars": []map[string]any{
+			s.mu.Lock()
+			cals := append([]map[string]any{
 				{"id": 9001, "name": s.calName, "alias_code": "al-" + sfx, "deactivated_at": nil},
-				{"id": 9002, "name": "stopped-" + sfx, "alias_code": "st-" + sfx, "deactivated_at": 1700000000000},
-			}})
+			}, s.extraCals...)
+			s.mu.Unlock()
+			reply(map[string]any{"calendars": append(cals,
+				map[string]any{"id": 9002, "name": "stopped-" + sfx, "alias_code": "st-" + sfx, "deactivated_at": 1700000000000})})
 		case strings.HasSuffix(r.URL.Path, "/labels"):
 			reply(map[string]any{"calendar_labels": []map[string]any{
 				{"id": 11, "name": "hana"}, {"id": 12, "name": "mgr"},
 			}})
 		case strings.HasSuffix(r.URL.Path, "/events/sync"):
+			id, _ := strconv.Atoi(strings.Split(r.URL.Path, "/")[4])
+			events := s.feed(id)
 			// Two chunks, so the cursor is exercised.
 			half := len(events) / 2
 			if r.URL.Query().Get("since") == "" {
@@ -183,7 +209,7 @@ func (s *ttScenario) run(t *testing.T, dryRun bool) (int, string, error) {
 
 type ttTotals struct{ imported, duplicates, skipped, failed, rejected, calendars, users int }
 
-var ttTotalLine = regexp.MustCompile(`total: imported=(\d+) duplicates=(\d+) skipped=(\d+) failed=(\d+) rejected=(\d+) calendars_created=(\d+) users_created=(\d+)`)
+var ttTotalLine = regexp.MustCompile(`total: imported=(\d+) updated=\d+ duplicates=(\d+) deleted=\d+ kept=\d+ moved=\d+ skipped=(\d+) failed=(\d+) rejected=(\d+) calendars_created=(\d+) users_created=(\d+)`)
 
 func parseTotals(t *testing.T, out string) ttTotals {
 	t.Helper()
@@ -333,7 +359,7 @@ func TestTimeTreeImportCreatesUsersMembersAndOwners(t *testing.T) {
 		 WHERE c.name = ? AND e.source_uid = 'e-rec'`, s.calName).Scan(&rule, &exceptions))
 	require.Contains(t, rule, `"freq": "weekly"`)
 	require.Contains(t, rule, `"until": "2026-04-27"`)
-	require.Contains(t, exceptions, "2026-04-12T15:00:00Z")
+	require.Contains(t, exceptions, "2026-04-13")
 }
 
 func TestTimeTreeImportSecondRunAddsNothing(t *testing.T) {
@@ -389,13 +415,13 @@ func TestTimeTreeImportAllDayRecurrenceHonoursTheExdateAndTheUntilDay(t *testing
 		require.NoError(t, err)
 		starts[e.Title] = append(starts[e.Title], at)
 	}
-	midnight := func(d int) time.Time { return time.Date(2026, 4, d, 0, 0, 0, 0, tokyoLoc) }
+	midnight := func(d int) time.Time { return time.Date(2026, 4, d, 0, 0, 0, 0, time.UTC) }
 	require.Len(t, starts["rec"], 3, "%v", starts["rec"])
 	for i, day := range []int{6, 20, 27} {
 		require.True(t, starts["rec"][i].Equal(midnight(day)), "occurrence %d: %s", i, starts["rec"][i])
 	}
 	require.Len(t, starts["allday"], 1)
-	require.True(t, starts["allday"][0].Equal(midnight(10)), "all-day event starts at workspace midnight: %s", starts["allday"][0])
+	require.True(t, starts["allday"][0].Equal(midnight(10)), "all-day event starts at UTC midnight: %s", starts["allday"][0])
 }
 
 func TestTimeTreeImportUnreadableExdateFailsTheRunButKeepsTheRest(t *testing.T) {

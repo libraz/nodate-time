@@ -11,6 +11,8 @@ type calData struct {
 	cal    ttCalendar
 	labels []ttLabel
 	events []ttEvent
+	// repeated is how many copies of an already-seen ID the feed sent.
+	repeated int
 }
 
 // analysis is what the dry-run report says about one TimeTree calendar.
@@ -72,7 +74,7 @@ func analyze(d calData, cv *converter) *analysis {
 		if e.AllDay && c.ok() && len(a.allDay) < maxAllDaySamples {
 			a.allDay = append(a.allDay, fmt.Sprintf("%s start_at=%d end_at=%d tz=%q -> %s .. %s",
 				e.ID, e.StartAt, e.EndAt, e.StartTimezone,
-				c.Event.Start.In(cv.wsLoc).Format(time.RFC3339), endText(c.Event.End, cv.wsLoc)))
+				c.Event.Start.UTC().Format(time.RFC3339), endText(c.Event.End, time.UTC)))
 		}
 	}
 	a.doubleDisplay = doubleDisplayCandidates(d.events, a.conv)
@@ -144,6 +146,20 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 	}
 	fmt.Fprintf(w, "users to create: %s\n", listOrNone(res.NewUsers))
 	writeErrors(w, res.Errors)
+}
+
+// writeSyncPlans prints what a sync would do to each mapped calendar.
+func writeSyncPlans(w io.Writer, all []*analysis, res resolution, syncs map[flexID]*calendarSync) {
+	repeated := map[flexID]int{}
+	for _, a := range all {
+		repeated[a.data.cal.ID] = a.data.repeated
+	}
+	for _, p := range res.Plans {
+		s := syncs[p.TT.ID]
+		fmt.Fprintf(w, "calendar %q: sync plan create=%d update=%d unchanged=%d delete=%d moved=%d kept=%d synced=%d orphaned=%d repeated=%d\n",
+			p.Name, s.plan.Create, s.plan.Update, s.plan.Unchanged, len(s.plan.Delete), s.moved, s.plan.Kept,
+			s.plan.Synced, s.plan.Orphaned, repeated[p.TT.ID])
+	}
 }
 
 func listOrNone(items []string) string {

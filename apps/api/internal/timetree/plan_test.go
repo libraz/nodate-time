@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
@@ -208,4 +209,72 @@ func TestResolveRefusesAddressesHeldByADisabledAccount(t *testing.T) {
 		assert.Contains(t, res.Errors[0], "belongs to a disabled account")
 		assert.Empty(t, res.NewUsers, "a disabled holder is not an absent address")
 	}
+}
+
+func ids(list ...string) map[string]bool {
+	out := map[string]bool{}
+	for _, id := range list {
+		out[id] = true
+	}
+	return out
+}
+
+func TestCountMovedFindsDeletionsAnotherMappedCalendarHas(t *testing.T) {
+	plans := []calendarPlan{{TT: ttCalendar{ID: "1"}}, {TT: ttCalendar{ID: "2"}}}
+	syncs := map[flexID]*calendarSync{
+		"1": {present: ids("x"), plan: calimport.SyncPlan{Delete: []uint32{1, 2, 3}, DeleteUIDs: []string{"m1", "m2", "gone"}}},
+		"2": {present: ids("m1", "m2")},
+	}
+	countMoved(plans, syncs)
+	assert.Equal(t, 2, syncs["1"].moved)
+	assert.Equal(t, 0, syncs["2"].moved)
+}
+
+func TestRefusals(t *testing.T) {
+	sync := func(present map[string]bool, synced, deletes, moved int) *calendarSync {
+		return &calendarSync{
+			present: present, moved: moved,
+			plan: calimport.SyncPlan{Synced: synced, Delete: make([]uint32, deletes)},
+		}
+	}
+	plans := []calendarPlan{{TT: ttCalendar{ID: "1"}, Name: "A"}}
+	cases := map[string]struct {
+		s    *calendarSync
+		want string
+	}{
+		"11 of 12":           {sync(ids("a"), 12, 11, 0), `calendar "A" would delete 11 of 12 synced events`},
+		"11 of 22":           {sync(ids("a"), 22, 11, 0), ""},
+		"10 of 10":           {sync(ids("a"), 11, 10, 0), ""},
+		"11 of 12, 1 moved":  {sync(ids("a"), 12, 11, 1), ""},
+		"empty feed":         {sync(ids(), 3, 3, 0), `TimeTree returned no events for calendar "A" but 3 are synced`},
+		"empty, all moved":   {sync(ids(), 11, 11, 11), ""},
+		"empty, none synced": {sync(ids(), 0, 0, 0), ""},
+	}
+	for name, tc := range cases {
+		got := refusals(plans, map[flexID]*calendarSync{"1": tc.s})
+		if tc.want == "" {
+			assert.Empty(t, got, name)
+		} else {
+			assert.Equal(t, []string{tc.want}, got, name)
+		}
+	}
+}
+
+func TestImportableForcesEventsNamingSomeoneNotYetCreated(t *testing.T) {
+	cv := testConverter(&MappingCalendar{
+		DefaultOwner: "mgr@example.com", DefaultAttendees: []string{"new@example.com"},
+		Labels: map[string]string{"花子": "h@example.com"},
+	})
+	labelled := timed(jst(2026, 5, 1, 10), jst(2026, 5, 1, 11))
+	labelled.ID, labelled.LabelID = "labelled", "1"
+	plain := timed(jst(2026, 5, 1, 10), jst(2026, 5, 1, 11))
+	plain.ID = "plain"
+	a := analyze(calData{events: []ttEvent{labelled, plain}}, cv)
+	users := map[string]generated.User{"h@example.com": {ID: 5}, "mgr@example.com": {ID: 6}}
+	events, force := importable(a, users)
+	require.Len(t, events, 2)
+	assert.Equal(t, uint32(5), events[0].OwnerUserID)
+	assert.Equal(t, uint32(6), events[1].OwnerUserID)
+	assert.Empty(t, events[1].Attendees)
+	assert.Equal(t, ids("plain"), force)
 }
