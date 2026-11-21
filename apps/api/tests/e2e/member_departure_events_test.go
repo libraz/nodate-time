@@ -42,7 +42,7 @@ func getEvent(t *testing.T, calURL, token, id string) (readEvent, string) {
 func occurrenceInApril(t *testing.T, calURL, token, id string) readEvent {
 	t.Helper()
 	var evts []readEvent
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", token, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", token, nil, &evts)
 	for _, e := range evts {
 		if e.ID == id {
 			return e
@@ -71,7 +71,7 @@ func TestRemovedMemberNoLongerHoldsTheirEvents(t *testing.T) {
 	// goes first: the helper counts what the month holds.
 	occurrences := createWeeklyFriday(t, calURL, leaver.AccessToken)
 	occurrence := occurrences[1].ID
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occurrence+"?scope=this", leaver.AccessToken,
+	patchNowOK(t, calURL+"/events/"+occurrence+"?scope=this", leaver.AccessToken,
 		eventBody("Their occurrence", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00", leaver.UserID), nil)
 
 	// One event the leaver owns and attends with somebody staying.
@@ -116,19 +116,18 @@ func TestRemovedMemberNoLongerHoldsTheirEvents(t *testing.T) {
 	require.Empty(t, occAfter.Participants)
 
 	// A copy read before the departure is refused as stale, not as invalid.
-	staleStatus, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodPut, calURL+"/events/"+theirs.ID, owner.AccessToken,
-		echoMove(stale, "2026-04-07T12:00:00+09:00", "2026-04-07T13:00:00+09:00"),
-		map[string]string{"If-Match": staleTag})
-	require.Equal(t, 409, staleStatus)
+	staleStatus, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/events/"+theirs.ID, owner.AccessToken,
+		echoMove(stale, "2026-04-07T12:00:00+09:00", "2026-04-07T13:00:00+09:00"), ifMatch(staleTag))
+	require.Equal(t, 412, staleStatus)
 
 	// Every event echoed back as now read saves.
-	moved, body := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+theirs.ID, owner.AccessToken,
+	moved, body := patchNow(t, calURL+"/events/"+theirs.ID, owner.AccessToken,
 		echoMove(after, "2026-04-07T12:00:00+09:00", "2026-04-07T13:00:00+09:00"))
 	require.Equal(t, 200, moved, string(body))
-	moved, body = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+shared.ID, owner.AccessToken,
+	moved, body = patchNow(t, calURL+"/events/"+shared.ID, owner.AccessToken,
 		echoMove(sharedAfter, "2026-04-08T12:00:00+09:00", "2026-04-08T13:00:00+09:00"))
 	require.Equal(t, 200, moved, string(body))
-	moved, body = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occurrence+"?scope=this", owner.AccessToken,
+	moved, body = patchNow(t, calURL+"/events/"+occurrence+"?scope=this", owner.AccessToken,
 		echoMove(occAfter, "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00"))
 	require.Equal(t, 200, moved, string(body))
 
@@ -137,7 +136,7 @@ func TestRemovedMemberNoLongerHoldsTheirEvents(t *testing.T) {
 	rejoined, _ := getEvent(t, calURL, owner.AccessToken, shared.ID)
 	require.Empty(t, rejoined.Participants, "rejoining does not put somebody back on events")
 	var readded readEvent
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+shared.ID, owner.AccessToken,
+	patchNowOK(t, calURL+"/events/"+shared.ID, owner.AccessToken,
 		eventBody("Shared plan", "2026-04-08T12:00:00+09:00", "2026-04-08T13:00:00+09:00", leaver.UserID), &readded)
 	require.Len(t, readded.Attendees, 1)
 	require.False(t, readded.Attendees[0].CanEdit, "a revived attendee row must not carry the grant it lost")
@@ -170,7 +169,7 @@ func TestMemberWhoLeavesNoLongerBlocksTheirEvents(t *testing.T) {
 	require.Equal(t, owner.UserID, after.OwnerID)
 	require.Equal(t, []string{owner.UserID}, after.Participants)
 
-	moved, body := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
+	moved, body := patchNow(t, calURL+"/events/"+evt.ID, owner.AccessToken,
 		echoMove(after, "2026-04-14T12:00:00+09:00", "2026-04-14T13:00:00+09:00"))
 	require.Equal(t, 200, moved, string(body))
 }

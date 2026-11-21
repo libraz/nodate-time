@@ -54,7 +54,7 @@ func TestAcceptingALinkToADeletedCalendarSaysTheCalendarIsGone(t *testing.T) {
 
 	inv := createInvite(t, calURL, owner.AccessToken, map[string]any{"role": "editor"})
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, owner.AccessToken, nil)
+	status := taggedStatus(t, http.MethodDelete, calURL, owner.AccessToken, currentTag(t, calURL, owner.AccessToken), nil)
 	require.Equal(t, http.StatusNoContent, status)
 
 	status, raw := acceptInvite(t, inv.Token, joiner.AccessToken)

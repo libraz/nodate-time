@@ -42,7 +42,7 @@ func createTimedEvent(t *testing.T, calURL, token, title, startAt, endAt, tz str
 func listDay(t *testing.T, calURL, token, day, tz string) []listedEvent {
 	t.Helper()
 	var out []listedEvent
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start="+day+"&end="+day+"&tz="+tz, token, nil, &out)
 	return out
 }

@@ -104,7 +104,7 @@ func TestEventSideChangesReachTheHistory(t *testing.T) {
 		ID     string `json:"id"`
 		Action string `json:"action"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &history)
+	getItems(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &history)
 
 	actions := map[string]bool{}
 	for _, h := range history {

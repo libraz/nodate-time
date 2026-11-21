@@ -146,12 +146,12 @@ func TestCommentThreadIsBoundedAndPagesIntoTheHistory(t *testing.T) {
 	require.Len(t, bodies, total, "paging must reach every comment exactly once")
 }
 
-// TestCappedListsHoldTheirCeiling covers the three lists that take a cap
-// rather than a cursor. Each is read as a whole by the client -- a participant
-// picker that cannot offer a member, or a checklist split across pages, would
-// be a worse answer than a ceiling -- so the bound only has to keep one
-// response from being unbounded.
-func TestCappedListsHoldTheirCeiling(t *testing.T) {
+// TestCappedListsReturnRowsPastTheirCeiling covers the three lists that take a
+// cap rather than a cursor. Each is read as a whole by the client -- a
+// participant picker that cannot offer a member, or a checklist split across
+// pages, would be a worse answer than a ceiling -- so the ceiling is enforced
+// when a row is added, and rows that predate it are never hidden by the read.
+func TestCappedListsReturnRowsPastTheirCeiling(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -180,19 +180,19 @@ func TestCappedListsHoldTheirCeiling(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/checklist",
 		tenant.AccessToken, nil, &checklist)
-	require.Len(t, checklist, 500, "a checklist answer must stop at its ceiling")
+	require.Len(t, checklist, over, "a checklist already past its ceiling is returned whole")
 
 	var invites []struct {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/invites", tenant.AccessToken, nil, &invites)
-	require.Len(t, invites, 500, "an invite answer must stop at its ceiling")
+	require.Len(t, invites, over, "an invite list already past its ceiling is returned whole")
 
 	var members []struct {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodGet, calURL+"/members", tenant.AccessToken, nil, &members)
-	require.Len(t, members, 500, "a membership answer must stop at its ceiling")
+	require.Len(t, members, over+1, "a membership list already past its ceiling is returned whole, owner included")
 }
 
 // TestActivityFeedDefaultIsDeclared covers the other half of the paging
@@ -246,9 +246,19 @@ func TestActivityFeedDefaultIsDeclared(t *testing.T) {
 
 	// More entries than the default page holds, so a handler that applied no
 	// default, or a larger one, answers differently from the declared 50.
+	// The entries belong to a real event: a log row whose event is gone is
+	// left out of the feed.
 	const total = 60
-	seedSubjectHistory(t, helpers.TestWorkspace(generated.New(testDB)).ID,
-		internalCalendarID(t, tenant.CalendarID), uuid.NewString(), total)
+	var subject struct {
+		ID string `json:"id"`
+	}
+	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+tenant.CalendarID+"/events", tenant.AccessToken,
+		map[string]any{
+			"title": "履歴", "allDay": false,
+			"startAt": "2026-12-03T10:00:00+09:00", "endAt": "2026-12-03T11:00:00+09:00",
+		}, &subject)
+	seedEventHistory(t, helpers.TestWorkspace(generated.New(testDB)).ID,
+		internalCalendarID(t, tenant.CalendarID), subject.ID, total)
 
 	type feedPage struct {
 		Items []struct {
@@ -287,6 +297,20 @@ func bulkInsert(t *testing.T, into, row string, rows [][]any) {
 	}
 	_, err := testDB.Exec(into+" VALUES "+strings.Join(values, ","), args...)
 	require.NoError(t, err)
+}
+
+// seedEventHistory logs total updates against one existing event.
+func seedEventHistory(t *testing.T, workspaceID, calendarID uint32, eventPublicID string, total int) {
+	t.Helper()
+	subject := uuid.MustParse(eventPublicID)
+	rows := make([][]any, 0, total)
+	for range total {
+		pub := uuid.New()
+		rows = append(rows, []any{pub[:], workspaceID, calendarID, subject[:], eventPublicID})
+	}
+	bulkInsert(t,
+		`INSERT INTO events (public_id, workspace_id, calendar_id, subject_public_id, type, payload_json, occurred_at)`,
+		"(?, ?, ?, ?, 'calendar.event.updated', JSON_OBJECT('eventId', ?, 'title', 'seed'), NOW(3))", rows)
 }
 
 // seedMemos writes memos straight to the table. Going through the API would

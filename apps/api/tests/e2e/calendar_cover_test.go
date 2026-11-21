@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"io"
 	"net/http"
 	"testing"
 
@@ -34,18 +33,25 @@ func newCalendarCoverPNG(t *testing.T) []byte {
 	return body.Bytes()
 }
 
+// putCalendarCover reserves, uploads and confirms a cover, and answers with
+// the status and body of the last step it reached.
 func putCalendarCover(t *testing.T, calURL, token string, image []byte) (int, []byte) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, calURL+"/cover", bytes.NewReader(image))
-	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	return resp.StatusCode, body
+	status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/cover/presign", token, map[string]any{
+		"sha256": helpers.SHA256Hex(image), "contentType": "image/png", "byteSize": len(image),
+	})
+	if status != http.StatusCreated {
+		return status, raw
+	}
+	var reserved struct {
+		CoverID   string `json:"coverId"`
+		UploadURL string `json:"uploadUrl"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &reserved))
+	if reserved.UploadURL != "" {
+		helpers.UploadToSignedURL(t, reserved.UploadURL, "image/png", image)
+	}
+	return helpers.DoJSONStatus(t, http.MethodPut, calURL+"/cover", token, map[string]any{"coverId": reserved.CoverID})
 }
 
 func TestCalendarCoverUpload(t *testing.T) {
@@ -83,7 +89,7 @@ func TestCalendarCoverUpload(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "%s", body)
 	require.NotContains(t, string(body), "coverImageUrl")
 	var edited calendarCoverBody
-	helpers.DoJSON(t, http.MethodPut, calURL, owner.AccessToken, map[string]any{"name": "New name"}, &edited)
+	patchNowOK(t, calURL, owner.AccessToken, map[string]any{"name": "New name"}, &edited)
 	require.Equal(t, image, helpers.FetchURL(t, edited.CoverImage))
 
 	status, body = putCalendarCover(t, calURL, member.AccessToken, image)
@@ -94,7 +100,7 @@ func TestCalendarCoverUpload(t *testing.T) {
 	status, body = putCalendarCover(t, calURL, owner.AccessToken, make([]byte, 5<<20))
 	require.Equal(t, http.StatusBadRequest, status, "a 5 MiB body reaches image validation: %s", body)
 	status, body = putCalendarCover(t, calURL, owner.AccessToken, make([]byte, (5<<20)+1))
-	require.Equal(t, http.StatusRequestEntityTooLarge, status, "%s", body)
+	require.Equal(t, http.StatusUnprocessableEntity, status, "a declaration over 5 MiB is refused at presign: %s", body)
 
 	var listed []calendarCoverBody
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars", member.AccessToken, nil, &listed)
@@ -148,7 +154,9 @@ func TestCalendarCoverUpload(t *testing.T) {
 	require.EqualValues(t, 1, refCount(replacement))
 
 	var removed, stillShared calendarCoverBody
-	helpers.DoJSON(t, http.MethodDelete, calURL+"/cover", owner.AccessToken, nil, &removed)
+	status, body = helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/cover", owner.AccessToken, nil)
+	require.Equal(t, http.StatusNoContent, status, "%s", body)
+	helpers.DoJSON(t, http.MethodGet, calURL, owner.AccessToken, nil, &removed)
 	require.Empty(t, removed.CoverImage)
 	require.True(t, removed.Public)
 	require.EqualValues(t, 0, refCount(replacement), "removing a cover releases its object")
@@ -156,7 +164,8 @@ func TestCalendarCoverUpload(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, secondURL, owner.AccessToken, nil, &stillShared)
 	require.Equal(t, image, helpers.FetchURL(t, stillShared.CoverImage))
 
-	helpers.DoJSON(t, http.MethodDelete, secondURL, owner.AccessToken, nil, nil)
+	status = taggedStatus(t, http.MethodDelete, secondURL, owner.AccessToken, currentTag(t, secondURL, owner.AccessToken), nil)
+	require.Equal(t, http.StatusNoContent, status)
 	require.EqualValues(t, 0, refCount(image), "deleting a calendar releases its uploaded cover")
 }
 

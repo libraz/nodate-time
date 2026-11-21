@@ -148,7 +148,7 @@ func TestEventTakesItsOwnerColour(t *testing.T) {
 		ID    string `json:"id"`
 		Color string `json:"color"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-09-01&end=2026-09-30",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-09-01&end=2026-09-30",
 		owner.AccessToken, nil, &after)
 	require.Len(t, after, 1)
 	require.Equal(t, "#FDC02D", after[0].Color)

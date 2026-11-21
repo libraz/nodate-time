@@ -346,7 +346,7 @@ func TestICalExportImportRoundTrip(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, srcCalURL+"/events", src.AccessToken,
 		map[string]any{
 			"title": "Holiday", "allDay": true,
-			"startAt": "2026-06-05T00:00:00Z", "endAt": "2026-06-06T00:00:00Z",
+			"startDate": "2026-06-05", "endDate": "2026-06-06",
 		}, nil)
 
 	// Export src as iCal
@@ -395,7 +395,7 @@ func TestICalExportImportRoundTrip(t *testing.T) {
 	var listed []struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet, dstCalURL+"/events?start=2026-05-01&end=2026-07-01", dst.AccessToken, nil, &listed)
+	getItems(t, http.MethodGet, dstCalURL+"/events?start=2026-05-01&end=2026-07-01", dst.AccessToken, nil, &listed)
 	titles := map[string]bool{}
 	for _, e := range listed {
 		titles[e.Title] = true

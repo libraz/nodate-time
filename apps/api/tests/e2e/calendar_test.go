@@ -37,7 +37,7 @@ func TestCalendarLifecycle(t *testing.T) {
 		Name  string `json:"name"`
 		Color string `json:"color"`
 	}
-	helpers.DoJSON(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
+	patchNowOK(t, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
 		map[string]any{"name": "更新後", "color": "#F35F8C"},
 		&updated)
 	require.Equal(t, "更新後", updated.Name)
@@ -58,7 +58,8 @@ func TestCalendarLifecycle(t *testing.T) {
 	require.Len(t, cals2, 3)
 
 	// Delete second calendar
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/calendars/"+cal2.ID, tt.AccessToken, nil)
+	status := taggedStatus(t, http.MethodDelete, testServerURL+"/calendars/"+cal2.ID, tt.AccessToken,
+		currentTag(t, testServerURL+"/calendars/"+cal2.ID, tt.AccessToken), nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Back to the personal calendar and the first one
@@ -168,7 +169,7 @@ func TestCalendarReportsHowManyPeopleShareIt(t *testing.T) {
 	require.Equal(t, 2, single.MemberCount)
 
 	var renamed calendarBody
-	helpers.DoJSON(t, http.MethodPut, calURL, owner.AccessToken,
+	patchNowOK(t, calURL, owner.AccessToken,
 		map[string]any{"name": "改名", "color": "#F35F8C"}, &renamed)
 	require.Equal(t, 2, renamed.MemberCount, "a rename must not read as the calendar being unshared")
 
@@ -199,7 +200,7 @@ func TestRenamingAPubliclySharedCalendarKeepsItShared(t *testing.T) {
 	// A rename says nothing about who the calendar is shared with, so the
 	// response must not report it as no longer shared.
 	var renamed calendarBody
-	helpers.DoJSON(t, http.MethodPut, calURL, tt.AccessToken,
+	patchNowOK(t, calURL, tt.AccessToken,
 		map[string]any{"name": "改名後"}, &renamed)
 	require.Equal(t, "改名後", renamed.Name)
 	require.True(t, renamed.PublicShared, "renaming must not take the calendar off the internet")
@@ -281,7 +282,7 @@ func TestCalendarColorMustBeHex(t *testing.T) {
 		map[string]any{"name": "bad color", "color": "nothex"})
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 
-	status, _ = helpers.DoJSONStatus(t, http.MethodPut, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
+	status, _ = patchNow(t, testServerURL+"/calendars/"+tt.CalendarID, tt.AccessToken,
 		map[string]any{"name": "bad color", "color": "#12345g"})
 	require.Equal(t, http.StatusUnprocessableEntity, status)
 }

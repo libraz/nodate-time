@@ -67,7 +67,7 @@ func TestShareLifecycle(t *testing.T) {
 		Title string `json:"title"`
 		Color string `json:"color"`
 	}
-	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
+	getItems(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
 	require.Len(t, pubEvents, 1)
 	require.Equal(t, "公開イベント", pubEvents[0].Title)
 
@@ -296,10 +296,11 @@ func TestShareRecurringEventsHonorExceptions(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, calURL+"/invites", tt.AccessToken,
 		map[string]any{"role": "viewer", "isPublic": true}, &invite)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
+	status := taggedStatus(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken,
+		currentTag(t, calURL+"/events/"+evts[1].ID, tt.AccessToken), nil)
 	require.True(t, status >= 200 && status < 300)
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Public moved",
 			"allDay":             false,
@@ -319,7 +320,7 @@ func TestShareRecurringEventsHonorExceptions(t *testing.T) {
 		Title   string `json:"title"`
 		StartAt string `json:"startAt"`
 	}
-	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
+	getItems(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-04-01&end=2026-04-30", "", nil, &pubEvents)
 	require.Len(t, pubEvents, 3)
 
 	moved := 0
@@ -364,7 +365,7 @@ func TestShareRecurringEventsExpandInEventTimezone(t *testing.T) {
 	var pubEvents []struct {
 		StartAt string `json:"startAt"`
 	}
-	helpers.DoJSON(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-03-01&end=2026-03-15", "", nil, &pubEvents)
+	getItems(t, http.MethodGet, testServerURL+"/share/"+invite.Token+"/events?start=2026-03-01&end=2026-03-15", "", nil, &pubEvents)
 	require.Len(t, pubEvents, 3)
 	require.True(t, strings.Contains(pubEvents[0].StartAt, "2026-03-01T14:00:00Z"), pubEvents[0].StartAt)
 	require.True(t, strings.Contains(pubEvents[1].StartAt, "2026-03-08T13:00:00Z"), pubEvents[1].StartAt)

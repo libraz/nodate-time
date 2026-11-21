@@ -1,10 +1,8 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -62,7 +60,16 @@ const (
 	mxPending    mxChild = "unconfirmed photo"
 	mxInvite     mxChild = "invite"
 	mxMember     mxChild = "member"
+	// mxTrashed is a deleted event, which the restore path names.
+	mxTrashed mxChild = "deleted event"
+	// mxSeries is a recurring event with one cancelled occurrence.
+	mxSeries mxChild = "series"
+	// mxCover is a cover reserved and uploaded but not yet confirmed.
+	mxCover mxChild = "unconfirmed cover"
 )
+
+// mxCancelledDate is the occurrence of the mxSeries fixture that is cancelled.
+const mxCancelledDate = "2026-06-17"
 
 // mxRow is one operation's authorization contract.
 //
@@ -124,7 +131,8 @@ func mxRows() []mxRow {
 		}
 	}
 	photoPresign := func(*mxWorld) any {
-		return map[string]any{"contentType": "image/png", "byteSize": 128}
+		png := append(helpers.TinyPNG(), fmt.Appendf(nil, "matrix-%d-%d", photoRunID, uniquePhotoSuffix.Add(1))...)
+		return map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}
 	}
 	availabilityRequest := func(w *mxWorld) map[string]any {
 		start := time.Now().UTC().AddDate(0, 0, 7).Truncate(time.Hour)
@@ -162,7 +170,7 @@ func mxRows() []mxRow {
 
 		// Protected, scoped to the caller rather than a calendar.
 		{method: "GET", path: "/user", group: mxProtected},
-		{method: "PUT", path: "/user", group: mxProtected},
+		{method: "PATCH", path: "/user", group: mxProtected},
 		{method: "POST", path: "/user/verify-email/resend", group: mxProtected},
 		{method: "POST", path: "/auth/logout", group: mxProtected},
 		{method: "GET", path: "/user/sessions", group: mxProtected},
@@ -174,11 +182,12 @@ func mxRows() []mxRow {
 		{method: "GET", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/invites/{token}/accept", group: mxProtected},
-		{method: "GET", path: "/me/schedule-poll-actions", group: mxProtected},
+		{method: "GET", path: "/user/schedule-poll-actions", group: mxProtected},
+		{method: "GET", path: "/search", group: mxProtected},
 
 		// Calendar-scoped.
 		{method: "GET", path: cal, group: mxProtected, allow: mxRead},
-		{method: "PUT", path: cal, group: mxProtected, allow: mxManage, body: mxJSON(map[string]any{"name": "Renamed"})},
+		{method: "PATCH", path: cal, group: mxProtected, allow: mxManage, body: mxJSON(map[string]any{"name": "Renamed"})},
 		{method: "DELETE", path: cal, group: mxProtected, allow: mxOwn},
 		{method: "GET", path: cal + "/members", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/members", group: mxProtected, allow: mxManage, body: func(w *mxWorld) any {
@@ -194,8 +203,13 @@ func mxRows() []mxRow {
 		{method: "GET", path: cal + "/export", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/import", group: mxProtected, allow: mxWrite, body: mxJSON(map[string]any{"ics": mxICS})},
 		{method: "GET", path: cal + "/activity", group: mxProtected, allow: mxRead},
+		{method: "POST", path: cal + "/cover/presign", group: mxProtected, allow: mxManage, storage: true,
+			body: func(w *mxWorld) any {
+				image := newCalendarCoverPNG(w.t)
+				return map[string]any{"sha256": helpers.SHA256Hex(image), "contentType": "image/png", "byteSize": len(image)}
+			}},
 		{method: "PUT", path: cal + "/cover", group: mxProtected, allow: mxManage, storage: true,
-			body: func(w *mxWorld) any { return mxBytes(newCalendarCoverPNG(w.t)) }},
+			body: func(w *mxWorld) any { return map[string]any{"coverId": w.child(mxCover)} }},
 		{method: "DELETE", path: cal + "/cover", group: mxProtected, allow: mxManage, storage: true},
 
 		{method: "GET", path: polls, group: mxProtected, allow: mxRead},
@@ -206,6 +220,7 @@ func mxRows() []mxRow {
 		{method: "GET", path: poll, group: mxProtected, pollScoped: true},
 		{method: "PATCH", path: poll, group: mxProtected, pollScoped: true},
 		{method: "POST", path: poll + "/refresh-availability", group: mxProtected, pollScoped: true},
+		{method: "GET", path: poll + "/response", group: mxProtected, pollScoped: true},
 		{method: "PUT", path: poll + "/response", group: mxProtected, pollScoped: true},
 		{method: "POST", path: poll + "/finalize", group: mxProtected, pollScoped: true},
 		{method: "POST", path: poll + "/cancel", group: mxProtected, pollScoped: true},
@@ -214,8 +229,10 @@ func mxRows() []mxRow {
 		{method: "POST", path: cal + "/events", group: mxProtected, allow: mxWrite,
 			body: mxJSON(map[string]any{"title": "Created", "allDay": false, "startAt": mxEventStart, "endAt": mxEventEnd})},
 		{method: "GET", path: evt, group: mxProtected, allow: mxRead, child: mxEvent},
-		{method: "PUT", path: evt, group: mxProtected, allow: mxManage, child: mxEvent, body: eventUpdate},
+		{method: "PATCH", path: evt, group: mxProtected, allow: mxManage, child: mxEvent, body: eventUpdate},
 		{method: "DELETE", path: evt, group: mxProtected, allow: mxManage, child: mxEvent},
+		{method: "POST", path: evt + "/restore", group: mxProtected, allow: mxManage, child: mxTrashed},
+		{method: "DELETE", path: evt + "/exceptions/{occurrenceDate}", group: mxProtected, allow: mxManage, child: mxSeries},
 		{method: "PUT", path: evt + "/rsvp", group: mxProtected, allow: mxRead, child: mxEvent,
 			body: mxJSON(map[string]any{"rsvp": "accepted"})},
 		{method: "PUT", path: evt + "/attendees/{userId}", group: mxProtected, allow: mxManage, child: mxEvent,
@@ -226,14 +243,14 @@ func mxRows() []mxRow {
 		{method: "POST", path: evt + "/activities", group: mxProtected, allow: mxWrite, child: mxEvent,
 			body: mxJSON(map[string]any{"body": "Added"})},
 		// Only the author edits a comment; the fixture's author is the owner.
-		{method: "PUT", path: evt + "/activities/{commentId}", group: mxProtected, allow: mxOwn, child: mxComment,
+		{method: "PATCH", path: evt + "/activities/{commentId}", group: mxProtected, allow: mxOwn, child: mxComment,
 			body: mxJSON(map[string]any{"body": "Edited"})},
 		{method: "DELETE", path: evt + "/activities/{commentId}", group: mxProtected, allow: mxManage, child: mxComment},
 
 		{method: "GET", path: evt + "/checklist", group: mxProtected, allow: mxRead, child: mxEvent},
 		{method: "POST", path: evt + "/checklist", group: mxProtected, allow: mxManage, child: mxEvent,
 			body: mxJSON(map[string]any{"title": "Added"})},
-		{method: "PUT", path: evt + "/checklist/{itemId}", group: mxProtected, allow: mxManage, child: mxItem,
+		{method: "PATCH", path: evt + "/checklist/{itemId}", group: mxProtected, allow: mxManage, child: mxItem,
 			body: mxJSON(map[string]any{"done": true})},
 		{method: "DELETE", path: evt + "/checklist/{itemId}", group: mxProtected, allow: mxManage, child: mxItem},
 
@@ -250,14 +267,14 @@ func mxRows() []mxRow {
 		{method: "GET", path: cal + "/albums", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/albums/presign", group: mxProtected, allow: mxWrite, storage: true, body: photoPresign},
 		{method: "POST", path: cal + "/albums/{photoId}/confirm", group: mxProtected, allow: mxWrite, child: mxPending, storage: true},
-		{method: "PUT", path: cal + "/albums/{photoId}", group: mxProtected, allow: mxWrite, child: mxPhoto, storage: true,
+		{method: "PATCH", path: cal + "/albums/{photoId}", group: mxProtected, allow: mxWrite, child: mxPhoto, storage: true,
 			body: mxJSON(map[string]any{"caption": "Captioned"})},
 		{method: "DELETE", path: cal + "/albums/{photoId}", group: mxProtected, allow: mxWrite, child: mxPhoto, storage: true},
 		{method: "GET", path: cal + "/albums/{photoId}/download", group: mxProtected, allow: mxRead, child: mxPhoto, storage: true},
 
 		{method: "GET", path: cal + "/memos", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/memos", group: mxProtected, allow: mxWrite, body: mxJSON(map[string]any{"title": "Added"})},
-		{method: "PUT", path: cal + "/memos/{memoId}", group: mxProtected, allow: mxWrite, child: mxMemo,
+		{method: "PATCH", path: cal + "/memos/{memoId}", group: mxProtected, allow: mxWrite, child: mxMemo,
 			body: mxJSON(map[string]any{"title": "Edited"})},
 		{method: "DELETE", path: cal + "/memos/{memoId}", group: mxProtected, allow: mxWrite, child: mxMemo},
 		{method: "GET", path: cal + "/memos/{memoId}/history", group: mxProtected, allow: mxRead, child: mxMemo, logScoped: true},
@@ -268,9 +285,10 @@ func mxRows() []mxRow {
 
 		// Admin.
 		{method: "GET", path: "/admin/oauth-providers", group: mxAdmin},
-		{method: "PUT", path: "/admin/oauth-providers/{provider}", group: mxAdmin},
+		{method: "PATCH", path: "/admin/oauth-providers/{provider}", group: mxAdmin},
 		{method: "DELETE", path: "/admin/oauth-providers/{provider}", group: mxAdmin},
 		{method: "GET", path: "/admin/instance-admins", group: mxAdmin},
+		{method: "POST", path: "/admin/instance-admins", group: mxAdmin},
 		{method: "DELETE", path: "/admin/instance-admins/{userId}", group: mxAdmin},
 		{method: "GET", path: "/admin/allowed-emails", group: mxAdmin},
 		{method: "POST", path: "/admin/allowed-emails", group: mxAdmin},
@@ -380,6 +398,34 @@ func (w *mxWorld) child(kind mxChild) string {
 		}
 		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/events/"+w.event+"/activities", w.owner(), map[string]any{"body": "Matrix comment"}, &c)
 		id = c.ID
+	case mxTrashed:
+		id = w.createEvent("Matrix deleted", nil)
+		status, raw := w.do(http.MethodDelete, w.calURL+"/events/"+id, w.owner(), nil)
+		require.Equal(w.t, http.StatusNoContent, status, raw)
+	case mxSeries:
+		var e struct {
+			ID string `json:"id"`
+		}
+		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/events", w.owner(), map[string]any{
+			"title": "Matrix series", "allDay": false, "startAt": mxEventStart, "endAt": mxEventEnd,
+			"recurrenceRule": map[string]any{"freq": "weekly", "interval": 1, "count": 4},
+		}, &e)
+		id = e.ID
+		status, raw := w.do(http.MethodDelete, w.calURL+"/events/"+id+"_"+strings.ReplaceAll(mxCancelledDate, "-", "")+"?scope=this", w.owner(), nil)
+		require.Equal(w.t, http.StatusNoContent, status, raw)
+	case mxCover:
+		// Only a manager may reserve a cover, and the row confirms it as one.
+		image := newCalendarCoverPNG(w.t)
+		var pres struct {
+			CoverID   string `json:"coverId"`
+			UploadURL string `json:"uploadUrl"`
+		}
+		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/cover/presign", w.users[mxManager].AccessToken, map[string]any{
+			"sha256": helpers.SHA256Hex(image), "contentType": "image/png", "byteSize": len(image),
+		}, &pres)
+		require.NotEmpty(w.t, pres.UploadURL)
+		helpers.UploadToSignedURL(w.t, pres.UploadURL, "image/png", image)
+		id = pres.CoverID
 	case mxInvite:
 		var inv struct {
 			ID string `json:"id"`
@@ -415,7 +461,7 @@ func (w *mxWorld) child(kind mxChild) string {
 		png := append(helpers.TinyPNG(), fmt.Appendf(nil, "matrix-%d-%d", photoRunID, uniquePhotoSuffix.Add(1))...)
 		var pres albumPresignResp
 		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/albums/presign", uploader,
-			map[string]any{"contentType": "image/png", "byteSize": len(png)}, &pres)
+			map[string]any{"contentType": "image/png", "byteSize": len(png), "sha256": helpers.SHA256Hex(png)}, &pres)
 		helpers.UploadToSignedURL(w.t, pres.UploadURL, "image/png", png)
 		if kind == mxPhoto {
 			helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/albums/"+pres.PhotoID+"/confirm", w.owner(), nil, nil)
@@ -445,10 +491,20 @@ func (w *mxWorld) url(r mxRow, calendarID, eventID string, childID string) strin
 		case "calendarId":
 			return calendarID
 		case "eventId":
-			if r.child == mxEvent && childID != "" {
-				return childID
+			switch r.child {
+			case mxTrashed, mxSeries:
+				if childID != "" {
+					return childID
+				}
+				return w.child(r.child)
+			case mxEvent:
+				if childID != "" {
+					return childID
+				}
 			}
 			return eventID
+		case "occurrenceDate":
+			return mxCancelledDate
 		case "userId":
 			if r.child == mxMember && childID != "" {
 				return childID
@@ -517,24 +573,15 @@ func mxBlankURLs(v any) any {
 	return v
 }
 
-// mxBytes is a request body sent as raw bytes rather than JSON.
-type mxBytes []byte
-
+// do sends a request. Every write names "any version", so a refusal under
+// test is the authorization one rather than a missing precondition.
 func (w *mxWorld) do(method, url, token string, body any) (int, string) {
 	w.t.Helper()
-	if b, ok := body.(mxBytes); ok {
-		req, err := http.NewRequestWithContext(w.t.Context(), method, url, bytes.NewReader(b))
-		require.NoError(w.t, err)
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", "application/octet-stream")
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(w.t, err)
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(resp.Body)
-		require.NoError(w.t, err)
-		return resp.StatusCode, string(raw)
+	var headers map[string]string
+	if method != http.MethodGet {
+		headers = ifMatch("*")
 	}
-	status, raw := helpers.DoJSONStatus(w.t, method, url, token, body)
+	status, raw := helpers.DoJSONStatusWithHeaders(w.t, method, url, token, body, headers)
 	return status, string(raw)
 }
 
@@ -576,13 +623,17 @@ func runCalendarRow(t *testing.T, a *mxActors, r mxRow) {
 		status, body := w.do(r.method, foreign, a.stranger.AccessToken, r.bodyFor(w))
 		if r.logScoped {
 			require.Equal(t, http.StatusOK, status, body)
-			require.JSONEq(t, "[]", body, "%s must not read the log of a %s of another calendar", r.key(), r.child)
+			empty := `{"items":[]}`
+			if r.child == mxMemo {
+				empty = "[]"
+			}
+			require.JSONEq(t, empty, body, "%s must not read the log of a %s of another calendar", r.key(), r.child)
 		} else {
 			require.Equal(t, http.StatusNotFound, status, "%s must not reach a %s of another calendar: %s", r.key(), r.child, body)
 		}
 
 		// A child of one event sent under a sibling event on the same calendar.
-		if strings.Contains(r.path, "{eventId}/") && r.child != mxEvent {
+		if strings.Contains(r.path, "{eventId}/") && r.child != mxEvent && r.child != mxTrashed && r.child != mxSeries {
 			sibling := w.url(r, "", w.sibling, "")
 			status, body := w.do(r.method, sibling, w.owner(), r.bodyFor(w))
 			require.Equal(t, http.StatusNotFound, status, "%s must not reach a %s of another event: %s", r.key(), r.child, body)
@@ -757,7 +808,7 @@ func runPollRow(t *testing.T, actors *mxActors, row mxRow) {
 	require.Len(t, poll.Slots, 1)
 	target := testServerURL + strings.NewReplacer("{calendarId}", w.calID, "{pollId}", poll.ID).Replace(row.path)
 	foreign := testServerURL + strings.NewReplacer("{calendarId}", actors.stranger.CalendarID, "{pollId}", poll.ID).Replace(row.path)
-	body := map[string]any{"version": poll.Version}
+	body := map[string]any{}
 	answers := []map[string]string{{"slotId": poll.Slots[0].ID, "value": "yes"}}
 	organizerOnly := true
 	switch {
@@ -767,19 +818,11 @@ func runPollRow(t *testing.T, actors *mxActors, row mxRow) {
 	case row.method == http.MethodPatch:
 		body["title"] = "Updated matrix poll"
 	case strings.HasSuffix(row.path, "/response"):
-		var ballot schedulePollBody
-		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
-		body["answerVersion"] = *ballot.AnswerVersion
 		body["answers"] = answers
 		organizerOnly = false
 	case strings.HasSuffix(row.path, "/finalize"):
-		var ballot schedulePollBody
-		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, respondent.AccessToken, nil, &ballot)
-		helpers.DoJSON(t, http.MethodPut, base+"/"+poll.ID+"/response", respondent.AccessToken, map[string]any{
-			"version": poll.Version, "answerVersion": *ballot.AnswerVersion, "answers": answers,
-		}, nil)
-		helpers.DoJSON(t, http.MethodGet, base+"/"+poll.ID, w.owner(), nil, &poll)
-		body["reviewVersion"] = poll.ReviewVersion
+		doAnyVersion(t, http.MethodPut, base+"/"+poll.ID+"/response", respondent.AccessToken,
+			map[string]any{"answers": answers}, nil)
 		body["slotId"] = poll.Slots[0].ID
 		body["ownerId"] = respondent.UserID
 	}

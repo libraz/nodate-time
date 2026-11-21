@@ -44,7 +44,7 @@ func TestMemberCanManageEvents(t *testing.T) {
 	var updated struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, member.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evt.ID, member.AccessToken,
 		map[string]any{
 			"title":              "Member-edited event",
 			"allDay":             false,
@@ -65,16 +65,17 @@ func TestMemberCanManageEvents(t *testing.T) {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31", owner.AccessToken, nil, &ownerView)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31", owner.AccessToken, nil, &ownerView)
 	require.Len(t, ownerView, 1)
 	require.Equal(t, "Member-edited event", ownerView[0].Title)
 
 	// Member deletes the event.
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, member.AccessToken, nil)
+	status := taggedStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, member.AccessToken,
+		currentTag(t, calURL+"/events/"+evt.ID, member.AccessToken), nil)
 	require.True(t, status >= 200 && status < 300)
 
 	var after []struct{ ID string }
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31", owner.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31", owner.AccessToken, nil, &after)
 	require.Len(t, after, 0)
 }
 

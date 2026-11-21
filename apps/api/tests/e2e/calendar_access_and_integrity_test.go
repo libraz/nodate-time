@@ -29,12 +29,12 @@ func TestUpdateCalendarIsAdminOnly(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+inv.Token+"/accept", member.AccessToken, nil, nil)
 
 	// Member (non-admin) cannot rename the calendar.
-	memberStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, member.AccessToken,
+	memberStatus, _ := patchNow(t, calURL, member.AccessToken,
 		map[string]any{"name": "Hijacked", "color": "#000000"})
 	require.Equal(t, 403, memberStatus)
 
 	// Owner (admin) can.
-	ownerStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, owner.AccessToken,
+	ownerStatus, _ := patchNow(t, calURL, owner.AccessToken,
 		map[string]any{"name": "Renamed", "color": "#123456"})
 	require.True(t, ownerStatus >= 200 && ownerStatus < 300)
 }
@@ -262,7 +262,7 @@ func TestUpdateEventRejectsInvalidDates(t *testing.T) {
 			"endAt":   "2026-05-12T10:00:00+09:00",
 		}, &evt)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
+	status, _ := patchNow(t, calURL+"/events/"+evt.ID, owner.AccessToken,
 		map[string]any{
 			"title":              "Broken",
 			"allDay":             false,
@@ -359,13 +359,15 @@ func TestEventHistoryIsCalendarScoped(t *testing.T) {
 	require.NotEmpty(t, victimEvent.ID)
 
 	attackerCal := testServerURL + "/calendars/" + attacker.CalendarID
-	var history []struct {
-		ID      uint64 `json:"id"`
-		Summary string `json:"summary"`
+	var history struct {
+		Items []struct {
+			ID      uint64 `json:"id"`
+			Summary string `json:"summary"`
+		} `json:"items"`
 	}
 	helpers.DoJSON(t, http.MethodGet,
 		attackerCal+"/events/"+victimEvent.ID+"/history", attacker.AccessToken, nil, &history)
-	require.Empty(t, history, "foreign event audit history must not be returned through another calendar")
+	require.Empty(t, history.Items, "foreign event audit history must not be returned through another calendar")
 }
 
 // TestEventHistoryIsNewestFirst verifies the per-entity history endpoint
@@ -389,7 +391,7 @@ func TestEventHistoryIsNewestFirst(t *testing.T) {
 			"startAt": "2026-05-12T09:00:00+09:00",
 			"endAt":   "2026-05-12T10:00:00+09:00",
 		}, &evt)
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evt.ID, owner.AccessToken,
 		map[string]any{
 			"title":              "History order v2",
 			"allDay":             false,
@@ -404,11 +406,14 @@ func TestEventHistoryIsNewestFirst(t *testing.T) {
 			"recurrenceRule":     nil,
 		}, nil)
 
-	var history []struct {
-		Action  string `json:"action"`
-		Summary string `json:"summary"`
+	var page struct {
+		Items []struct {
+			Action  string `json:"action"`
+			Summary string `json:"summary"`
+		} `json:"items"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &history)
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+evt.ID+"/history", owner.AccessToken, nil, &page)
+	history := page.Items
 	require.Len(t, history, 2)
 	require.Equal(t, "calendar.event.updated", history[0].Action, "the most recent change must come first")
 	require.Contains(t, history[0].Summary, "v2")
@@ -456,7 +461,7 @@ func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
 	require.Contains(t, target.ID, "_")
 	parentID, _, _ := strings.Cut(target.ID, "_")
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken,
+	patchNowOK(t, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken,
 		map[string]any{
 			"title":              "Composite history edit",
 			"allDay":             false,
@@ -471,24 +476,24 @@ func TestEventHistoryAcceptsCompositeRecurrenceID(t *testing.T) {
 			"recurrenceRule":     nil,
 		}, nil)
 
-	var byComposite []struct {
+	type historyEntry struct {
 		Action  string `json:"action"`
 		Summary string `json:"summary"`
 	}
+	var compositePage, parentPage struct {
+		Items []historyEntry `json:"items"`
+	}
 	status, _ := helpers.DoJSONStatus(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil)
 	require.Equal(t, 200, status)
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil, &byComposite)
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+target.ID+"/history", owner.AccessToken, nil, &compositePage)
+	byComposite := compositePage.Items
 	require.NotEmpty(t, byComposite)
 	require.Equal(t, "calendar.event.updated", byComposite[0].Action)
 
 	// The composite id resolves to the same parent series, so its history
 	// must match fetching by the plain parent id.
-	var byParent []struct {
-		Action  string `json:"action"`
-		Summary string `json:"summary"`
-	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+parentID+"/history", owner.AccessToken, nil, &byParent)
-	require.Equal(t, byParent, byComposite)
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+parentID+"/history", owner.AccessToken, nil, &parentPage)
+	require.Equal(t, parentPage.Items, byComposite)
 }
 
 func TestAttachmentPresignRejectsSVG(t *testing.T) {

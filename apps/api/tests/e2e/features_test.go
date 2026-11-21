@@ -1,13 +1,60 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/libraz/nodate-time/apps/api/tests/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// currentTag reads the entity tag a conditional write to url must name.
+func currentTag(t *testing.T, url, token string) string {
+	t.Helper()
+	status, raw, header := helpers.DoJSONFull(t, http.MethodGet, url, token, nil, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.NotEmpty(t, header.Get("ETag"), "GET %s carries no ETag", url)
+	return header.Get("ETag")
+}
+
+// patchNow merges body into the resource at url against its current version.
+func patchNow(t *testing.T, url, token string, body any) (int, []byte) {
+	t.Helper()
+	tagged, _, _ := strings.Cut(url, "?")
+	return helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, url, token, body,
+		ifMatch(currentTag(t, tagged, token)))
+}
+
+// doTagged sends a write naming tag as the version it replaces, requires a
+// 2xx answer and decodes it into out when out is set.
+func doTagged(t *testing.T, method, url, token, tag string, body, out any) {
+	t.Helper()
+	status, raw := helpers.DoJSONStatusWithHeaders(t, method, url, token, body, ifMatch(tag))
+	require.True(t, status >= 200 && status < 300, "%s %s: %d %s", method, url, status, raw)
+	if out != nil && len(raw) > 0 {
+		require.NoError(t, json.Unmarshal(raw, out))
+	}
+}
+
+// taggedStatus is doTagged that hands back the status instead of requiring success.
+func taggedStatus(t *testing.T, method, url, token, tag string, body any) int {
+	t.Helper()
+	status, _ := helpers.DoJSONStatusWithHeaders(t, method, url, token, body, ifMatch(tag))
+	return status
+}
+
+// patchNowOK is patchNow that requires success and decodes the answer into out.
+func patchNowOK(t *testing.T, url, token string, body, out any) {
+	t.Helper()
+	status, raw := patchNow(t, url, token, body)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	if out != nil {
+		require.NoError(t, json.Unmarshal(raw, out))
+	}
+}
 
 func TestEventURLField(t *testing.T) {
 	bootstrap(t)
@@ -43,7 +90,7 @@ func TestEventURLField(t *testing.T) {
 	var updated struct {
 		URL string `json:"url"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evt.ID, tt.AccessToken,
 		map[string]any{
 			"title":              "Meeting with link",
 			"allDay":             false,
@@ -103,7 +150,7 @@ func TestEventNotificationOffset(t *testing.T) {
 	var updated struct {
 		NotificationOffset *int `json:"notificationOffset"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evt.ID, tt.AccessToken,
 		map[string]any{
 			"title":              "Reminder event",
 			"allDay":             false,
@@ -175,7 +222,7 @@ func TestEventParticipants(t *testing.T) {
 	var updated struct {
 		Participants []string `json:"participantIds"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt1.AccessToken,
+	patchNowOK(t, calURL+"/events/"+evt.ID, tt1.AccessToken,
 		map[string]any{
 			"title":              "Team lunch",
 			"allDay":             false,
@@ -226,7 +273,7 @@ func TestInvalidEventParticipantDoesNotPartiallyMutateEvent(t *testing.T) {
 			"participantIds": []string{guest.UserID},
 		}, &event)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+event.ID, owner.AccessToken,
+	status, _ := patchNow(t, calURL+"/events/"+event.ID, owner.AccessToken,
 		map[string]any{
 			"title":              "Must not persist",
 			"allDay":             false,
@@ -286,6 +333,7 @@ func TestChecklistCRUD(t *testing.T) {
 	// Create first checklist item
 	var item1 struct {
 		ID    string `json:"id"`
+		Etag  string `json:"etag"`
 		Title string `json:"title"`
 		Done  bool   `json:"done"`
 	}
@@ -306,7 +354,8 @@ func TestChecklistCRUD(t *testing.T) {
 
 	// Create second checklist item
 	var item2 struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Etag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, checklistURL, tt.AccessToken,
 		map[string]any{"title": "Send invitations"}, &item2)
@@ -325,7 +374,8 @@ func TestChecklistCRUD(t *testing.T) {
 		ID   string `json:"id"`
 		Done bool   `json:"done"`
 	}
-	helpers.DoJSON(t, http.MethodPut, checklistURL+"/"+item1.ID, tt.AccessToken,
+	require.NotEmpty(t, item1.Etag)
+	doTagged(t, http.MethodPatch, checklistURL+"/"+item1.ID, tt.AccessToken, item1.Etag,
 		map[string]any{"title": "Buy supplies", "done": true}, &updatedItem)
 	assert.True(t, updatedItem.Done)
 
@@ -342,7 +392,8 @@ func TestChecklistCRUD(t *testing.T) {
 	}
 
 	// Delete second item
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, checklistURL+"/"+item2.ID, tt.AccessToken, nil)
+	status, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, checklistURL+"/"+item2.ID, tt.AccessToken, nil,
+		ifMatch(item2.Etag))
 	require.True(t, status >= 200 && status < 300)
 
 	// List, verify 1 item remains
@@ -379,6 +430,7 @@ func TestCommentEditDelete(t *testing.T) {
 	// Create a comment
 	var comment struct {
 		ID   string `json:"id"`
+		Etag string `json:"etag"`
 		Body string `json:"body"`
 	}
 	helpers.DoJSON(t, http.MethodPost, activityURL, tt.AccessToken,
@@ -400,8 +452,10 @@ func TestCommentEditDelete(t *testing.T) {
 	// Update the comment
 	var updated struct {
 		Body string `json:"body"`
+		Etag string `json:"etag"`
 	}
-	helpers.DoJSON(t, http.MethodPut, activityURL+"/"+comment.ID, tt.AccessToken,
+	require.NotEmpty(t, comment.Etag)
+	doTagged(t, http.MethodPatch, activityURL+"/"+comment.ID, tt.AccessToken, comment.Etag,
 		map[string]any{"body": "Edited comment"}, &updated)
 	assert.Equal(t, "Edited comment", updated.Body)
 
@@ -416,7 +470,8 @@ func TestCommentEditDelete(t *testing.T) {
 	assert.Equal(t, "Edited comment", comments2.Items[0].Body)
 
 	// Delete the comment
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, activityURL+"/"+comment.ID, tt.AccessToken, nil)
+	status, _ := helpers.DoJSONStatusWithHeaders(t, http.MethodDelete, activityURL+"/"+comment.ID, tt.AccessToken, nil,
+		ifMatch(updated.Etag))
 	require.True(t, status >= 200 && status < 300)
 
 	// List comments, verify 0 comments
@@ -456,18 +511,20 @@ func TestCommentEditDenied(t *testing.T) {
 		}, &evt)
 
 	var comment struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Etag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+evt.ID+"/activities", tt1.AccessToken,
 		map[string]any{"body": "tt1 comment"}, &comment)
 
 	// tt2 tries to edit tt1's comment — should get 403
-	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID+"/activities/"+comment.ID, tt2.AccessToken,
-		map[string]any{"body": "hacked"})
+	status := taggedStatus(t, http.MethodPatch, calURL+"/events/"+evt.ID+"/activities/"+comment.ID, tt2.AccessToken,
+		comment.Etag, map[string]any{"body": "hacked"})
 	assert.Equal(t, 403, status)
 
 	// tt2 tries to delete tt1's comment — should get 403
-	status2, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID+"/activities/"+comment.ID, tt2.AccessToken, nil)
+	status2 := taggedStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID+"/activities/"+comment.ID, tt2.AccessToken,
+		comment.Etag, nil)
 	assert.Equal(t, 403, status2)
 }
 
@@ -497,17 +554,18 @@ func TestCommentEditDeleteMustMatchEventPath(t *testing.T) {
 		}, &second)
 
 	var comment struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Etag string `json:"etag"`
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events/"+first.ID+"/activities", tt.AccessToken,
 		map[string]any{"body": "first comment"}, &comment)
 
 	wrongPath := calURL + "/events/" + second.ID + "/activities/" + comment.ID
-	status, _ := helpers.DoJSONStatus(t, http.MethodPut, wrongPath, tt.AccessToken,
+	status := taggedStatus(t, http.MethodPatch, wrongPath, tt.AccessToken, comment.Etag,
 		map[string]any{"body": "wrong event"})
 	require.Equal(t, http.StatusNotFound, status)
 
-	status, _ = helpers.DoJSONStatus(t, http.MethodDelete, wrongPath, tt.AccessToken, nil)
+	status = taggedStatus(t, http.MethodDelete, wrongPath, tt.AccessToken, comment.Etag, nil)
 	require.Equal(t, http.StatusNotFound, status)
 }
 
@@ -533,8 +591,11 @@ func TestChecklistOnRecurringEvent(t *testing.T) {
 	type eventItem struct {
 		ID string `json:"id"`
 	}
-	var evts []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
+	var listed struct {
+		Items []eventItem `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &listed)
+	evts := listed.Items
 	require.True(t, len(evts) >= 2)
 	instanceID := evts[1].ID
 	require.Contains(t, instanceID, "_")
@@ -589,7 +650,8 @@ func TestEventDeleteCascade(t *testing.T) {
 		map[string]any{"body": "Some comment"}, nil)
 
 	// Delete the event
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken, nil)
+	status := taggedStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken,
+		currentTag(t, calURL+"/events/"+evt.ID, tt.AccessToken), nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Get event should 404
@@ -629,8 +691,11 @@ func TestNewFieldsInListEvents(t *testing.T) {
 		NotificationOffset *int     `json:"notificationOffset"`
 		Participants       []string `json:"participantIds"`
 	}
-	var evts []listEvent
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt1.AccessToken, nil, &evts)
+	var listed struct {
+		Items []listEvent `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt1.AccessToken, nil, &listed)
+	evts := listed.Items
 	require.Len(t, evts, 1)
 	assert.Equal(t, "https://example.com/meet", evts[0].URL)
 	require.NotNil(t, evts[0].NotificationOffset)

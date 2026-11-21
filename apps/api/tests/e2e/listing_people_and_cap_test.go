@@ -40,7 +40,7 @@ func TestListingCostDoesNotFollowTheNumberOfPeople(t *testing.T) {
 			Color     string `json:"color"`
 		}
 		counter.Reset()
-		helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-10-01&end=2026-10-31&tz=Asia/Tokyo",
+		getItems(t, http.MethodGet, calURL+"/events?start=2026-10-01&end=2026-10-31&tz=Asia/Tokyo",
 			owner.AccessToken, nil, &listed)
 		people := map[string]bool{}
 		for _, e := range listed {
@@ -118,10 +118,15 @@ WHERE n < ?`, workspaceID, calID, userID, userID, oneOffs)
 	status, raw, headers := helpers.DoJSONFull(t, http.MethodGet,
 		calURL+"/events?start=2026-07-01&end=2026-07-31&tz=UTC", owner.AccessToken, nil, nil)
 	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "true", headers.Get("X-Result-Truncated"))
+	require.Empty(t, headers.Get("X-Result-Truncated"), "truncation is reported in the body")
 
-	var listed []recInstance
-	require.NoError(t, json.Unmarshal(raw, &listed))
+	var page struct {
+		Items   []recInstance `json:"items"`
+		HasMore bool          `json:"hasMore"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &page))
+	require.True(t, page.HasMore)
+	listed := page.Items
 	require.Len(t, listed, daterange.MaxInstances)
 	series := 0
 	for _, e := range listed {
@@ -139,11 +144,16 @@ WHERE n < ?`, workspaceID, calID, userID, userID, oneOffs)
 	status, raw, headers = helpers.DoJSONFull(t, http.MethodGet,
 		testServerURL+"/share/"+token+"/events?start=2026-07-01&end=2026-07-31&tz=UTC", "", nil, nil)
 	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "true", headers.Get("X-Result-Truncated"))
-	var shared []struct {
-		Title string `json:"title"`
+	require.Empty(t, headers.Get("X-Result-Truncated"), "truncation is reported in the body")
+	var sharedPage struct {
+		Items []struct {
+			Title string `json:"title"`
+		} `json:"items"`
+		HasMore bool `json:"hasMore"`
 	}
-	require.NoError(t, json.Unmarshal(raw, &shared))
+	require.NoError(t, json.Unmarshal(raw, &sharedPage))
+	require.True(t, sharedPage.HasMore)
+	shared := sharedPage.Items
 	require.Len(t, shared, daterange.MaxInstances)
 	series = 0
 	for _, e := range shared {

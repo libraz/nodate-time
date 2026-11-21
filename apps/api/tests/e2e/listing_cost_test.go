@@ -58,7 +58,7 @@ func TestListingCostDoesNotFollowTheNumberOfEvents(t *testing.T) {
 			ID           string   `json:"id"`
 			Participants []string `json:"participantIds"`
 		}
-		helpers.DoJSON(t, http.MethodGet,
+		getItems(t, http.MethodGet,
 			calURL+"/events?start=2026-10-01&end=2026-10-31&tz=Asia/Tokyo",
 			owner.AccessToken, nil, &listed)
 		// Every event carries its participants, so an answer that lost them
