@@ -187,6 +187,8 @@ func BuildResult(deps Deps) (http.Handler, *huma.OpenAPI) {
 	registerUsers(g, deps)
 	registerCalendars(g, deps)
 	registerEvents(g, deps)
+	registerEventRestore(g, deps)
+	registerSearch(g, deps)
 	registerAudit(g, deps)
 	registerEventDetails(g, deps)
 	registerAlbums(g, deps)

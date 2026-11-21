@@ -44,6 +44,8 @@ const (
 	TypeEventCreated = "calendar.event.created"
 	TypeEventUpdated = "calendar.event.updated"
 	TypeEventDeleted = "calendar.event.deleted"
+	// TypeEventRestored is a soft-deleted event coming back.
+	TypeEventRestored = "calendar.event.restored"
 
 	// What people do to an event after it exists is most of what happens on a
 	// shared calendar. Without these the history of an event reads as though
@@ -118,6 +120,7 @@ var kinds = map[string]string{
 	TypeEventCreated:                subjectEvent,
 	TypeEventUpdated:                subjectEvent,
 	TypeEventDeleted:                subjectEvent,
+	TypeEventRestored:               subjectEvent,
 	TypeCommentCreated:              subjectEvent,
 	TypeCommentUpdated:              subjectEvent,
 	TypeCommentDeleted:              subjectEvent,
