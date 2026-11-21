@@ -58,7 +58,7 @@ func TestEventAcceptsBrowserClientPayload(t *testing.T) {
 		Color       string `json:"color"`
 		Flexibility string `json:"flexibility"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+created.ID, tt.AccessToken, update, &updated)
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+created.ID, tt.AccessToken, update, &updated)
 	require.Equal(t, "定例MTG（移動）", updated.Title)
 	require.Equal(t, "negotiable", updated.Flexibility)
 	// Colour comes from the owner's membership on both responses; it is not a
@@ -105,6 +105,6 @@ func TestEventMemoIsBoundedOnCreateAndUpdate(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken, body, &created)
 
 	body["memo"] = overLimit
-	status, raw = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+created.ID, tt.AccessToken, body)
+	status, raw = sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+created.ID, tt.AccessToken, body)
 	require.Equal(t, http.StatusUnprocessableEntity, status, "update: %s", raw)
 }

@@ -45,7 +45,7 @@ func TestEventLifecycle(t *testing.T) {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
 	require.Len(t, evts, 1)
 	require.Equal(t, evt.ID, evts[0].ID)
 
@@ -63,7 +63,7 @@ func TestEventLifecycle(t *testing.T) {
 		Title string `json:"title"`
 		Color string `json:"color"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, tt.AccessToken,
 		map[string]any{
 			"title":              "定例MTG（更新）",
 			"allDay":             false,
@@ -81,12 +81,12 @@ func TestEventLifecycle(t *testing.T) {
 	require.Equal(t, "#2ECC87", updated.Color)
 
 	// Delete event
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evt.ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// List should be empty
 	var evts2 []struct{ ID string }
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
 	require.Len(t, evts2, 0)
 }
 
@@ -103,10 +103,10 @@ func TestEventAllDay(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", tt.AccessToken,
 		map[string]any{
-			"title":   "旅行",
-			"allDay":  true,
-			"startAt": "2026-04-25T00:00:00+09:00",
-			"endAt":   "2026-04-27T00:00:00+09:00",
+			"title":     "旅行",
+			"allDay":    true,
+			"startDate": "2026-04-25",
+			"endDate":   "2026-04-27",
 		}, &evt)
 	require.True(t, evt.AllDay)
 }
@@ -194,7 +194,7 @@ func TestRecurringEventWeekly(t *testing.T) {
 		IsRecurrence bool   `json:"isRecurrence"`
 	}
 	var evts []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
 	require.Len(t, evts, 4)
 
 	for _, e := range evts {
@@ -212,12 +212,12 @@ func TestRecurringEventWeekly(t *testing.T) {
 	assert.Equal(t, "Weekly meeting", instance.Title)
 
 	// Delete the recurring event (deletes all instances)
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[0].ID, tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evts[0].ID, tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// List should be empty
 	var evts2 []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
 	require.Len(t, evts2, 0)
 }
 
@@ -250,7 +250,7 @@ func TestRecurringEventWithCount(t *testing.T) {
 		ID string `json:"id"`
 	}
 	var evts []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
 	require.Len(t, evts, 3)
 }
 
@@ -284,14 +284,14 @@ func TestRecurringEventUpdate(t *testing.T) {
 		Title string `json:"title"`
 	}
 	var evts []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts)
 	require.True(t, len(evts) >= 3)
 
 	// Update via an instance ID — should update the parent
 	var updated struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[0].ID, tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evts[0].ID, tt.AccessToken,
 		map[string]any{
 			"title":              "Team sync v2",
 			"allDay":             false,
@@ -313,7 +313,7 @@ func TestRecurringEventUpdate(t *testing.T) {
 
 	// Re-list — all instances should have the new title
 	var evts2 []eventItem
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &evts2)
 	for _, e := range evts2 {
 		assert.Equal(t, "Team sync v2", e.Title)
 	}

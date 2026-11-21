@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The update keeps the stored value of an optional field the body omits, and
-// clients rely on it: a drag sends no showAs or flexibility. The published
-// schema is what a client is written against, so it has to say so rather than
-// describe the create defaults.
+// The update keeps the stored value of a field the body omits, and clients
+// rely on it: a drag sends no showAs or flexibility. The published schema is
+// what a client is written against, so it has to make every field optional
+// rather than describe the create defaults.
 func TestEventUpdateSchemaSaysOmittedOptionalFieldsAreKept(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -31,6 +31,7 @@ func TestEventUpdateSchemaSaysOmittedOptionalFieldsAreKept(t *testing.T) {
 		} `json:"paths"`
 		Components struct {
 			Schemas map[string]struct {
+				Required   []string `json:"required"`
 				Properties map[string]struct {
 					Description string `json:"description"`
 				} `json:"properties"`
@@ -39,15 +40,16 @@ func TestEventUpdateSchemaSaysOmittedOptionalFieldsAreKept(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(body), &doc))
 
-	put := doc.Paths["/calendars/{calendarId}/events/{eventId}"]["put"]
-	ref := put.RequestBody.Content["application/json"].Schema.Ref
+	patch := doc.Paths["/calendars/{calendarId}/events/{eventId}"]["patch"]
+	ref := patch.RequestBody.Content["application/json"].Schema.Ref
 	require.NotEmpty(t, ref)
 	schema, ok := doc.Components.Schemas[strings.TrimPrefix(ref, "#/components/schemas/")]
 	require.True(t, ok, "schema %s", ref)
 
 	for _, field := range []string{"showAs", "flexibility", "visibility"} {
-		desc := schema.Properties[field].Description
-		require.Contains(t, desc, "omitted keeps the current value", "%s: %q", field, desc)
-		require.NotContains(t, desc, "defaults to", "%s: %q", field, desc)
+		prop, ok := schema.Properties[field]
+		require.True(t, ok, "%s is patchable", field)
+		require.NotContains(t, prop.Description, "defaults to", "%s: %q", field, prop.Description)
 	}
+	require.Empty(t, schema.Required, "an update body omits whatever it leaves alone")
 }

@@ -92,7 +92,7 @@ func TestManagerCannotDeleteCalendar(t *testing.T) {
 	joinAs(t, calURL, owner.AccessToken, manager, "editor")
 	require.Equal(t, 200, promote(t, calURL, owner.AccessToken, manager, "manager"))
 
-	deleteStatus, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, manager.AccessToken, nil)
+	deleteStatus, _ := sendAnyVersion(t, http.MethodDelete, calURL, manager.AccessToken, nil)
 	require.Equal(t, 403, deleteStatus)
 
 	// The calendar is still there for everyone on it.
@@ -100,11 +100,11 @@ func TestManagerCannotDeleteCalendar(t *testing.T) {
 	require.Equal(t, 200, stillThere)
 
 	// A manager keeps the settings it is meant to have.
-	updateStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, manager.AccessToken,
+	updateStatus, _ := sendAnyVersion(t, http.MethodPatch, calURL, manager.AccessToken,
 		map[string]any{"name": "Renamed by the manager"})
 	require.Equal(t, 200, updateStatus)
 
 	// The owner can still delete it.
-	ownerDelete, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, owner.AccessToken, nil)
+	ownerDelete, _ := sendAnyVersion(t, http.MethodDelete, calURL, owner.AccessToken, nil)
 	require.True(t, ownerDelete >= 200 && ownerDelete < 300)
 }

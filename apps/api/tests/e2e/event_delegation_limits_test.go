@@ -29,7 +29,7 @@ func TestDelegateChangesFieldsButNotWhoHoldsTheEvent(t *testing.T) {
 	everyone := []string{delegate.UserID, peer.UserID}
 	put := func(id string, body map[string]any) int {
 		t.Helper()
-		status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+id, delegate.AccessToken, body)
+		status, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+id, delegate.AccessToken, body)
 		return status
 	}
 	withRule := func(body map[string]any) map[string]any {
@@ -37,7 +37,7 @@ func TestDelegateChangesFieldsButNotWhoHoldsTheEvent(t *testing.T) {
 		return body
 	}
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+series, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+series, owner.AccessToken,
 		withRule(eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00", everyone...)), nil)
 	for _, who := range everyone {
 		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+series+"/attendees/"+who, owner.AccessToken,
@@ -79,10 +79,10 @@ func TestDelegateChangesFieldsButNotWhoHoldsTheEvent(t *testing.T) {
 
 	// A participant removed by the owner loses the grant with the row, so a
 	// delegate re-adding them cannot hand it back.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+series, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+series, owner.AccessToken,
 		withRule(eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00", delegate.UserID)), nil)
 	var readded readEvent
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+series, delegate.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+series, delegate.AccessToken,
 		withRule(eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00", everyone...)), &readded)
 	for _, a := range readded.Attendees {
 		require.Equal(t, a.UserID == delegate.UserID, a.CanEdit, "only the grant never taken away survives")

@@ -99,7 +99,7 @@ func TestAGrantRacingTheAttendeesRemovalIsOrderedOrRefused(t *testing.T) {
 
 		statuses := runTogether(2, func(i int) int {
 			if i == 0 {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, eventURL, owner.AccessToken,
+				status, _ := sendAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 					eventBody("Check-up", "2026-06-21T10:00:00+09:00", "2026-06-21T11:00:00+09:00"))
 				return status
 			}
@@ -230,7 +230,7 @@ func TestReplacingParticipantsLogsWhoArrivedAndWhoLeft(t *testing.T) {
 	require.Empty(t, participantLogRows(t, evt.ID, eventlog.TypeAttendeeAdded))
 	require.Empty(t, participantLogRows(t, evt.ID, eventlog.TypeAttendeeRemoved))
 
-	helpers.DoJSON(t, http.MethodPut, eventURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 		eventBody("Lunch", "2026-06-20T12:00:00+09:00", "2026-06-20T13:00:00+09:00", b.UserID, c.UserID), nil)
 
 	added := participantLogRows(t, evt.ID, eventlog.TypeAttendeeAdded)
@@ -248,7 +248,7 @@ func TestReplacingParticipantsLogsWhoArrivedAndWhoLeft(t *testing.T) {
 	// Two arrive at once: one row, naming both.
 	d := helpers.NewTenant(t, testServerURL)
 	joinAs(t, calURL, owner.AccessToken, d, "editor")
-	helpers.DoJSON(t, http.MethodPut, eventURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 		eventBody("Lunch", "2026-06-20T12:00:00+09:00", "2026-06-20T13:00:00+09:00", b.UserID, c.UserID, a.UserID, d.UserID), nil)
 	added = participantLogRows(t, evt.ID, eventlog.TypeAttendeeAdded)
 	require.Len(t, added, 2)
@@ -257,7 +257,7 @@ func TestReplacingParticipantsLogsWhoArrivedAndWhoLeft(t *testing.T) {
 	require.Len(t, strings.Split(added[1]["summary"].(string), ", "), 2)
 
 	// Saving the same list again changes nobody and logs nothing.
-	helpers.DoJSON(t, http.MethodPut, eventURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 		eventBody("Lunch", "2026-06-20T12:00:00+09:00", "2026-06-20T13:00:00+09:00", b.UserID, c.UserID, a.UserID, d.UserID), nil)
 	require.Len(t, participantLogRows(t, evt.ID, eventlog.TypeAttendeeAdded), 2)
 	require.Len(t, participantLogRows(t, evt.ID, eventlog.TypeAttendeeRemoved), 1)
@@ -295,7 +295,7 @@ func TestDepartedAttendeeIsHiddenAndItsDisableIsNotLogged(t *testing.T) {
 			require.Equal(t, []string{stay.UserID}, participantsOfEvent(t, eventURL, owner.AccessToken),
 				"a user who no longer qualifies is not listed")
 
-			helpers.DoJSON(t, http.MethodPut, eventURL, owner.AccessToken,
+			doAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 				eventBody("Dinner", "2026-06-22T19:00:00+09:00", "2026-06-22T20:00:00+09:00", stay.UserID, fresh.UserID), nil)
 			require.False(t, attendeeRowEnabled(t, evt.ID, gone.UserID))
 
@@ -330,11 +330,11 @@ func TestOccurrenceEditsLogParticipantChanges(t *testing.T) {
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken, body, &series)
 	var occ []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &occ)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &occ)
 	require.Len(t, occ, 4)
 	occURL := calURL + "/events/" + occ[1].ID + "?scope=this"
 
-	helpers.DoJSON(t, http.MethodPut, occURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, occURL, owner.AccessToken,
 		eventBody("Weekly sync", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00"), nil)
 	removed := participantLogRows(t, series.ID, eventlog.TypeAttendeeRemoved)
 	require.Len(t, removed, 1)
@@ -344,7 +344,7 @@ func TestOccurrenceEditsLogParticipantChanges(t *testing.T) {
 	require.NotEmpty(t, removed[0]["originalStart"])
 	require.Empty(t, participantLogRows(t, series.ID, eventlog.TypeAttendeeAdded))
 
-	helpers.DoJSON(t, http.MethodPut, occURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, occURL, owner.AccessToken,
 		eventBody("Weekly sync", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00", b.UserID), nil)
 	added := participantLogRows(t, series.ID, eventlog.TypeAttendeeAdded)
 	require.Len(t, added, 1)

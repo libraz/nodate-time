@@ -37,7 +37,7 @@ func createDailyAcrossSpringForward(t *testing.T, calURL, token string) []recIns
 	// days anywhere else the window covers a different set of instants and
 	// clips an occurrence off the end.
 	var evts []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-03-05&end=2026-03-12&tz=America/New_York", token, nil, &evts)
 	require.Len(t, evts, 8)
 	return evts
@@ -114,12 +114,12 @@ func TestCancellingTheTransitionDayOccurrenceLeavesItsNeighbours(t *testing.T) {
 	}
 	require.NotEmpty(t, target.ID, "the transition day must have an occurrence of its own")
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		calURL+"/events/"+target.ID+"?scope=this", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "cancel occurrence: %s", string(raw))
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-03-05&end=2026-03-12&tz=America/New_York", tt.AccessToken, nil, &after)
 	require.Len(t, after, 7)
 	for _, e := range after {

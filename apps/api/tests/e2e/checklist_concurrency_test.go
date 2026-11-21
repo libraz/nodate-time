@@ -43,7 +43,7 @@ func TestConcurrentRemovalsOfOneChecklistItemRecordOne(t *testing.T) {
 	var item checklistItemResp
 	helpers.DoJSON(t, http.MethodPost, checklistURL, tt.AccessToken, map[string]any{"title": "Tent"}, &item)
 
-	statuses := concurrently(t, 6, http.MethodDelete, checklistURL+"/"+item.ID, tt.AccessToken)
+	statuses := concurrentlyWith(t, 6, http.MethodDelete, checklistURL+"/"+item.ID, tt.AccessToken, ifMatch("*"))
 	require.Equal(t, 1, countStatus(statuses, http.StatusNoContent), "statuses %v", statuses)
 	require.Equal(t, len(statuses)-1, countStatus(statuses, http.StatusNotFound), "statuses %v", statuses)
 	require.Equal(t, 1, checklistLogRows(t, "calendar.event.checklist.deleted", item.ID))
@@ -71,7 +71,7 @@ func TestConcurrentPartialUpdatesOfAChecklistItemKeepBothFields(t *testing.T) {
 			if i == 1 {
 				body = map[string]any{"title": renamed}
 			}
-			status, _ := helpers.DoJSONStatus(t, http.MethodPut, itemURL, tt.AccessToken, body)
+			status, _ := sendAnyVersion(t, http.MethodPatch, itemURL, tt.AccessToken, body)
 			return status
 		})
 		require.Equal(t, []int{http.StatusOK, http.StatusOK}, statuses)
@@ -106,10 +106,10 @@ func TestAChecklistUpdateRacingARemovalNeverLandsAfterIt(t *testing.T) {
 
 		statuses := runTogether(2, func(i int) int {
 			if i == 0 {
-				status, _ := helpers.DoJSONStatus(t, http.MethodDelete, itemURL, tt.AccessToken, nil)
+				status, _ := sendAnyVersion(t, http.MethodDelete, itemURL, tt.AccessToken, nil)
 				return status
 			}
-			status, _ := helpers.DoJSONStatus(t, http.MethodPut, itemURL, tt.AccessToken, map[string]any{"done": true})
+			status, _ := sendAnyVersion(t, http.MethodPatch, itemURL, tt.AccessToken, map[string]any{"done": true})
 			return status
 		})
 		require.Equal(t, http.StatusNoContent, statuses[0])

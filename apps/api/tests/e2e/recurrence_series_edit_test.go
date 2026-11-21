@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// concurrentPuts sends the same If-Match with every body at once and returns
-// the statuses.
-func concurrentPuts(t *testing.T, url, token, etag string, bodies []map[string]any) []int {
+// concurrentEdits PATCHes with the same If-Match and every body at once and
+// returns the statuses.
+func concurrentEdits(t *testing.T, url, token, etag string, bodies []map[string]any) []int {
 	t.Helper()
 	var start, done sync.WaitGroup
 	start.Add(1)
@@ -24,8 +24,8 @@ func concurrentPuts(t *testing.T, url, token, etag string, bodies []map[string]a
 		go func(i int, body map[string]any) {
 			defer done.Done()
 			start.Wait()
-			statuses[i], _ = helpers.DoJSONStatusWithHeaders(t, http.MethodPut, url, token, body,
-				map[string]string{"If-Match": etag})
+			statuses[i], _ = helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, url, token, body,
+				ifMatch(etag))
 		}(i, body)
 	}
 	start.Done()
@@ -72,9 +72,9 @@ func TestConcurrentSavesOfOneRevisionLetExactlyOneThrough(t *testing.T) {
 		for i := range bodies {
 			bodies[i] = eventBody(fmt.Sprintf("writer %d", i), "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00")
 		}
-		statuses := concurrentPuts(t, url, owner.AccessToken, etag, bodies)
+		statuses := concurrentEdits(t, url, owner.AccessToken, etag, bodies)
 		require.Equal(t, 1, countStatus(statuses, http.StatusOK), "%s: statuses %v", name, statuses)
-		require.Equal(t, len(bodies)-1, countStatus(statuses, http.StatusConflict), "%s: statuses %v", name, statuses)
+		require.Equal(t, len(bodies)-1, countStatus(statuses, http.StatusPreconditionFailed), "%s: statuses %v", name, statuses)
 	}
 }
 
@@ -94,11 +94,11 @@ func TestSecondOccurrenceEditKeepsTheOccurrencesOwnFields(t *testing.T) {
 	first["showAs"] = "oof"
 	first["flexibility"] = "negotiable"
 	first["timezone"] = "America/New_York"
-	helpers.DoJSON(t, http.MethodPut, url+"?scope=this", owner.AccessToken, first, nil)
+	doAnyVersion(t, http.MethodPatch, url+"?scope=this", owner.AccessToken, first, nil)
 
 	// A drag: only the times and the full-replace fields, none of the
 	// omittable ones.
-	helpers.DoJSON(t, http.MethodPut, url+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, url+"?scope=this", owner.AccessToken,
 		eventBody("Private this week", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00"), nil)
 
 	var got struct {
@@ -142,7 +142,7 @@ func TestSeriesEditFromAnOccurrenceKeepsWallClockAcrossDST(t *testing.T) {
 	// 7 March is still EST; dragged to 9 March, which is EDT, same 10:00.
 	body := eventBody("Morning call", "2026-03-09T10:00:00-04:00", "2026-03-09T10:30:00-04:00")
 	body["recurrenceRule"] = map[string]any{"freq": "daily", "interval": 1}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+series.ID+"_20260307?scope=all", owner.AccessToken, body, nil)
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+series.ID+"_20260307?scope=all", owner.AccessToken, body, nil)
 
 	var master struct {
 		StartAt string `json:"startAt"`
@@ -151,7 +151,7 @@ func TestSeriesEditFromAnOccurrenceKeepsWallClockAcrossDST(t *testing.T) {
 	require.Equal(t, "2026-01-07T15:00:00Z", master.StartAt, "the anchor moves two days and keeps 10:00 EST")
 
 	var later []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-03-20&end=2026-03-21&tz=America/New_York",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-03-20&end=2026-03-21&tz=America/New_York",
 		owner.AccessToken, nil, &later)
 	require.Len(t, later, 2)
 	ny, err := time.LoadLocation("America/New_York")
@@ -173,7 +173,7 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 	listApril := func(calURL string) []recInstance {
 		t.Helper()
 		var evts []recInstance
-		helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
+		getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
 			owner.AccessToken, nil, &evts)
 		return evts
 	}
@@ -182,12 +182,12 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 	t.Run("count shortened", func(t *testing.T) {
 		calURL := testServerURL + "/calendars/" + newCalendar(t, owner, "count")
 		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken,
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken,
 			eventBody("edited", "2026-04-17T15:00:00+09:00", "2026-04-17T16:00:00+09:00"), nil)
 
 		body := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
 		body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "count": 2}
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
 
 		after := listApril(calURL)
 		require.Len(t, after, 2, "only the two occurrences the rule still produces: %+v", after)
@@ -199,13 +199,13 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 	t.Run("weekday changed", func(t *testing.T) {
 		calURL := testServerURL + "/calendars/" + newCalendar(t, owner, "weekday")
 		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this", owner.AccessToken,
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[1].ID+"?scope=this", owner.AccessToken,
 			eventBody("edited", "2026-04-11T15:00:00+09:00", "2026-04-11T16:00:00+09:00"), nil)
-		helpers.DoJSON(t, http.MethodDelete, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken, nil, nil)
+		doAnyVersion(t, http.MethodDelete, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken, nil, nil)
 
 		body := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
 		body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"TH"}}
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
 
 		after := listApril(calURL)
 		require.Len(t, after, 5, "the start (Friday 3), then Thursdays 9, 16, 23 and 30: %+v", after)
@@ -223,7 +223,7 @@ func TestRuleChangeDropsOccurrencesTheNewRuleDoesNotProduce(t *testing.T) {
 		// Back to Fridays: the dropped edit and cancellation stay dropped
 		// rather than resurfacing once their dates are on the grid again.
 		body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}}
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+seriesID(occ[0].ID), owner.AccessToken, body, nil)
 		back := listApril(calURL)
 		require.Len(t, back, 4, "Fridays 3, 10, 17 and 24: %+v", back)
 		for _, e := range back {
@@ -257,7 +257,7 @@ func TestSavingAMovedOccurrenceUnchangedToTheWholeSeriesMovesNothing(t *testing.
 	occ := createWeeklyFriday(t, calURL, owner.AccessToken)
 	moved := calURL + "/events/" + occ[1].ID
 
-	helpers.DoJSON(t, http.MethodPut, moved+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, moved+"?scope=this", owner.AccessToken,
 		eventBody("Weekly meeting", "2026-04-10T19:00:00+09:00", "2026-04-10T20:30:00+09:00"), nil)
 
 	var shown struct {
@@ -269,13 +269,13 @@ func TestSavingAMovedOccurrenceUnchangedToTheWholeSeriesMovesNothing(t *testing.
 
 	body := eventBody("Renamed", shown.StartAt, shown.EndAt)
 	body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}}
-	helpers.DoJSON(t, http.MethodPut, moved+"?scope=all", owner.AccessToken, body, nil)
+	doAnyVersion(t, http.MethodPatch, moved+"?scope=all", owner.AccessToken, body, nil)
 
 	var after []struct {
 		StartAt string `json:"startAt"`
 		EndAt   string `json:"endAt"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &after)
 	got := make([]string, 0, len(after))
 	for _, e := range after {
@@ -301,12 +301,12 @@ func TestEditingACancelledOccurrenceIsNotFound(t *testing.T) {
 	occ := createWeeklyFriday(t, calURL, owner.AccessToken)
 	seriesID := strings.Split(occ[0].ID, "_")[0]
 
-	helpers.DoJSON(t, http.MethodDelete, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken, nil, nil)
 	_, _, headers := helpers.DoJSONFull(t, http.MethodGet, calURL+"/events/"+seriesID, owner.AccessToken, nil, nil)
 	etag := headers.Get("ETag")
 	require.NotEmpty(t, etag)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken,
+	status, raw := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[2].ID+"?scope=this", owner.AccessToken,
 		eventBody("Moved after all", "2026-04-17T18:00:00+09:00", "2026-04-17T19:00:00+09:00"))
 	require.Equal(t, http.StatusNotFound, status, "%s", raw)
 
@@ -329,13 +329,13 @@ func TestScopeThisNeverRewritesOrDeletesTheWholeEvent(t *testing.T) {
 		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
 		seriesURL := calURL + "/events/" + strings.Split(occ[0].ID, "_")[0]
 
-		helpers.DoJSON(t, http.MethodPut, seriesURL, owner.AccessToken,
+		doAnyVersion(t, http.MethodPatch, seriesURL, owner.AccessToken,
 			eventBody("Just once", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00"), nil)
 
-		status, raw := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+occ[1].ID+"?scope=this",
+		status, raw := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+occ[1].ID+"?scope=this",
 			owner.AccessToken, nil)
 		require.Equal(t, http.StatusNotFound, status, "%s", raw)
-		status, raw = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this",
+		status, raw = sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[1].ID+"?scope=this",
 			owner.AccessToken, eventBody("Stale", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00"))
 		require.Equal(t, http.StatusNotFound, status, "%s", raw)
 
@@ -353,14 +353,14 @@ func TestScopeThisNeverRewritesOrDeletesTheWholeEvent(t *testing.T) {
 		occ := createWeeklyFriday(t, calURL, owner.AccessToken)
 		seriesURL := calURL + "/events/" + strings.Split(occ[0].ID, "_")[0]
 
-		status, raw := helpers.DoJSONStatus(t, http.MethodPut, seriesURL+"?scope=this", owner.AccessToken,
+		status, raw := sendAnyVersion(t, http.MethodPatch, seriesURL+"?scope=this", owner.AccessToken,
 			eventBody("Rewritten", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00"))
 		require.Equal(t, http.StatusBadRequest, status, "%s", raw)
-		status, raw = helpers.DoJSONStatus(t, http.MethodDelete, seriesURL+"?scope=this", owner.AccessToken, nil)
+		status, raw = sendAnyVersion(t, http.MethodDelete, seriesURL+"?scope=this", owner.AccessToken, nil)
 		require.Equal(t, http.StatusBadRequest, status, "%s", raw)
 
 		var after []recInstance
-		helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &after)
+		getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &after)
 		require.Len(t, after, 4)
 		for _, e := range after {
 			require.Equal(t, "Weekly meeting", e.Title)
@@ -383,7 +383,7 @@ func TestTheOwnerOfAnEditedOccurrenceMayEditItAndNoSibling(t *testing.T) {
 
 	handed := eventBody("Your turn", "2026-04-10T15:00:00+09:00", "2026-04-10T16:00:00+09:00")
 	handed["ownerId"] = member.UserID
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this", owner.AccessToken, handed, nil)
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[1].ID+"?scope=this", owner.AccessToken, handed, nil)
 
 	var got struct {
 		OwnerID string `json:"ownerId"`
@@ -391,16 +391,16 @@ func TestTheOwnerOfAnEditedOccurrenceMayEditItAndNoSibling(t *testing.T) {
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+occ[1].ID, owner.AccessToken, nil, &got)
 	require.Equal(t, member.UserID, got.OwnerID)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=this", member.AccessToken,
+	status, raw := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[1].ID+"?scope=this", member.AccessToken,
 		eventBody("Moved by its owner", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00"))
 	require.Equal(t, http.StatusOK, status, "the owner GET reports may edit the occurrence: %s", raw)
 
-	status, _ = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[2].ID+"?scope=this", member.AccessToken,
+	status, _ = sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[2].ID+"?scope=this", member.AccessToken,
 		eventBody("Not mine", "2026-04-17T17:00:00+09:00", "2026-04-17T18:00:00+09:00"))
 	require.Equal(t, http.StatusForbidden, status, "a sibling occurrence is not theirs")
 
 	all := eventBody("Not mine either", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00")
 	all["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}}
-	status, _ = helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+occ[1].ID+"?scope=all", member.AccessToken, all)
+	status, _ = sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[1].ID+"?scope=all", member.AccessToken, all)
 	require.Equal(t, http.StatusForbidden, status, "nor is the series")
 }

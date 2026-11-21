@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -8,25 +9,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// eventBody is a full-replace update payload for an event, which the contract
-// requires to carry every content field.
+// eventBody is an event payload carrying every content field the tests care
+// about. ownerId and notificationOffset are left out: a create takes neither as
+// null, and on an edit an omitted field keeps its stored value.
 func eventBody(title, startAt, endAt string, participants ...string) map[string]any {
 	if participants == nil {
 		participants = []string{}
 	}
 	return map[string]any{
-		"title":              title,
-		"allDay":             false,
-		"startAt":            startAt,
-		"endAt":              endAt,
-		"location":           "",
-		"memo":               "",
-		"url":                "",
-		"notificationOffset": nil,
-		"participantIds":     participants,
-		"ownerId":            nil,
-		"recurrenceRule":     nil,
+		"title":          title,
+		"allDay":         false,
+		"startAt":        startAt,
+		"endAt":          endAt,
+		"location":       "",
+		"memo":           "",
+		"url":            "",
+		"participantIds": participants,
+		"recurrenceRule": nil,
 	}
+}
+
+// sendAnyVersion makes a conditional write against whatever version is stored
+// and returns the status and raw body.
+func sendAnyVersion(t *testing.T, method, url, token string, body any) (int, []byte) {
+	t.Helper()
+	return helpers.DoJSONStatusWithHeaders(t, method, url, token, body, ifMatch("*"))
+}
+
+// doAnyVersion is sendAnyVersion that requires a 2xx and decodes the answer
+// into out when it is non-nil.
+func doAnyVersion(t *testing.T, method, url, token string, body, out any) {
+	t.Helper()
+	status, raw := sendAnyVersion(t, method, url, token, body)
+	require.True(t, status >= 200 && status < 300, "%s %s: %d %s", method, url, status, raw)
+	if out != nil && len(raw) > 0 {
+		require.NoError(t, json.Unmarshal(raw, out), string(raw))
+	}
+}
+
+// getItems reads a {items,...} listing into out.
+func getItems[T any](t *testing.T, method, url, token string, body any, out *[]T) {
+	t.Helper()
+	var page struct {
+		Items []T `json:"items"`
+	}
+	helpers.DoJSON(t, method, url, token, body, &page)
+	*out = page.Items
+}
+
+// listedItems reads a {items,...} listing and returns its items.
+func listedItems[T any](t *testing.T, url, token string) []T {
+	t.Helper()
+	var page struct {
+		Items []T `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, url, token, nil, &page)
+	return page.Items
 }
 
 // TestEditorCannotRewriteAnotherMembersEvent verifies that sharing a calendar
@@ -57,11 +95,11 @@ func TestEditorCannotRewriteAnotherMembersEvent(t *testing.T) {
 	require.Equal(t, 200, getStatus)
 
 	// But not rewrite it.
-	updateStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, editor.AccessToken,
+	updateStatus, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, editor.AccessToken,
 		eventBody("Rewritten", "2026-06-10T15:00:00+09:00", "2026-06-10T16:00:00+09:00"))
 	require.Equal(t, 403, updateStatus)
 
-	deleteStatus, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evt.ID, editor.AccessToken, nil)
+	deleteStatus, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evt.ID, editor.AccessToken, nil)
 	require.Equal(t, 403, deleteStatus)
 
 	// Nor reach it through the things that hang off it.
@@ -80,12 +118,12 @@ func TestEditorCannotRewriteAnotherMembersEvent(t *testing.T) {
 			"startAt": "2026-06-11T10:00:00+09:00",
 			"endAt":   "2026-06-11T11:00:00+09:00",
 		}, &mine)
-	ownStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+mine.ID, editor.AccessToken,
+	ownStatus, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+mine.ID, editor.AccessToken,
 		eventBody("Moved my own plan", "2026-06-11T15:00:00+09:00", "2026-06-11T16:00:00+09:00"))
 	require.Equal(t, 200, ownStatus)
 
 	// And whoever runs the calendar still can.
-	adminStatus, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+mine.ID, owner.AccessToken,
+	adminStatus, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+mine.ID, owner.AccessToken,
 		eventBody("Moved by the owner", "2026-06-11T17:00:00+09:00", "2026-06-11T18:00:00+09:00"))
 	require.Equal(t, 200, adminStatus)
 
@@ -135,7 +173,7 @@ func TestDelegatedAttendeeCanEdit(t *testing.T) {
 	}
 
 	// Being a participant is not yet permission to edit.
-	before, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, delegate.AccessToken,
+	before, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, delegate.AccessToken,
 		eventBody("Moved by a participant", "2026-06-20T14:00:00+09:00", "2026-06-20T15:00:00+09:00", delegate.UserID, bystander.UserID))
 	require.Equal(t, 403, before)
 
@@ -151,12 +189,12 @@ func TestDelegatedAttendeeCanEdit(t *testing.T) {
 		map[string]any{"canEdit": true})
 	require.Equal(t, 200, grant)
 
-	after, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, delegate.AccessToken,
+	after, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, delegate.AccessToken,
 		eventBody("Moved by the delegate", "2026-06-20T14:00:00+09:00", "2026-06-20T15:00:00+09:00", delegate.UserID, bystander.UserID))
 	require.Equal(t, 200, after)
 
 	// The grant is one person's, not the participant list's.
-	other, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, bystander.AccessToken,
+	other, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, bystander.AccessToken,
 		eventBody("Moved by a bystander", "2026-06-20T18:00:00+09:00", "2026-06-20T19:00:00+09:00", delegate.UserID, bystander.UserID))
 	require.Equal(t, 403, other)
 
@@ -165,7 +203,7 @@ func TestDelegatedAttendeeCanEdit(t *testing.T) {
 		calURL+"/events/"+evt.ID+"/attendees/"+delegate.UserID, owner.AccessToken,
 		map[string]any{"canEdit": false})
 	require.Equal(t, 200, revoke)
-	afterRevoke, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, delegate.AccessToken,
+	afterRevoke, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, delegate.AccessToken,
 		eventBody("Moved again", "2026-06-20T20:00:00+09:00", "2026-06-20T21:00:00+09:00", delegate.UserID, bystander.UserID))
 	require.Equal(t, 403, afterRevoke)
 }

@@ -26,7 +26,7 @@ func createDailySeries(t *testing.T, calURL, token string, rule map[string]any) 
 			"recurrenceRule": rule,
 		}, nil)
 	var evts []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo", token, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo", token, nil, &evts)
 	return evts
 }
 
@@ -52,7 +52,7 @@ func TestConcurrentCancellationsAllStick(t *testing.T) {
 		go func(i int, id string) {
 			defer done.Done()
 			start.Wait()
-			statuses[i], _ = helpers.DoJSONStatus(t, http.MethodDelete,
+			statuses[i], _ = sendAnyVersion(t, http.MethodDelete,
 				calURL+"/events/"+id+"?scope=this", owner.AccessToken, nil)
 		}(i, occ.ID)
 	}
@@ -64,7 +64,7 @@ func TestConcurrentCancellationsAllStick(t *testing.T) {
 	}
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &after)
 	remaining := map[string]bool{}
 	for _, e := range after {

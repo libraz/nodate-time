@@ -100,7 +100,7 @@ func TestDeletingOneEventLeavesAnotherCalendarsCopyReferenced(t *testing.T) {
 	require.Equal(t, 2, objectRefCount(t, storageKey))
 
 	deleterCal := testServerURL + "/calendars/" + deleter.CalendarID
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		deleterCal+"/events/"+victimEvent, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
 
@@ -138,7 +138,7 @@ func TestDeletingAnAttachmentThenItsEventReleasesOneReference(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, status, "delete attachment: %s", string(raw))
 	requireRefCountIsReferrers(t, storageKey, 2, "a soft delete leaves the count alone")
 
-	status, raw = helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw = sendAnyVersion(t, http.MethodDelete,
 		deleterCal+"/events/"+victimEvent, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
 	requireRefCountIsReferrers(t, storageKey, 2, "deleting the event retires nothing a second time")
@@ -183,7 +183,7 @@ func TestDeletingAnEventWithAnUnconfirmedReservationReleasesOnlyItsOwn(t *testin
 		}, &pres)
 	requireRefCountIsReferrers(t, storageKey, 2, "the reservation counts from the moment it exists")
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		reserverCal+"/events/"+evt.ID, reserver.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete event: %s", string(raw))
 	requireRefCountIsReferrers(t, storageKey, 2, "deleting the event leaves the reservation in place")
@@ -214,7 +214,7 @@ func TestDeletingACalendarLeavesSharedBlobsAlone(t *testing.T) {
 	attachEvent(t, deleter, "Goes away with the calendar", body)
 	require.Equal(t, 2, objectRefCount(t, storageKey))
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		testServerURL+"/calendars/"+deleter.CalendarID, deleter.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "delete calendar: %s", string(raw))
 	requireRefCountIsReferrers(t, storageKey, 2, "the retired attachment still points at the object")

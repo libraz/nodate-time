@@ -60,21 +60,21 @@ func TestMovingASeriesAcrossDSTKeepsItsCancellations(t *testing.T) {
 	require.NotEmpty(t, evt.ID)
 
 	// Cancel the occurrence on 19 March, which is already on summer time.
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		calURL+"/events/"+evt.ID+"_20260319?scope=this", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "cancel occurrence: %s", string(raw))
 
 	var march []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-03-01&end=2026-03-31", tt.AccessToken, nil, &march)
 	require.Len(t, march, 3, "March has five Thursdays; one is cancelled and one is April's window")
 
 	// Move the whole series seven weeks later, keeping 09:00 local.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID+"?scope=all", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID+"?scope=all", tt.AccessToken,
 		seriesBody("Weekly review", "2026-04-09T09:00:00-04:00", "2026-04-09T10:00:00-04:00"), nil)
 
 	var may []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-04-09&end=2026-05-14", tt.AccessToken, nil, &may)
 
 	starts := startsOf(may)
@@ -107,7 +107,7 @@ func TestMovingASeriesAcrossDSTKeepsItsEditedOccurrenceAttached(t *testing.T) {
 
 	// Edit the 19 March occurrence, giving it a title and a later hour.
 	var override recInstance
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID+"_20260319?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID+"_20260319?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Quarterly review",
 			"allDay":             false,
@@ -124,11 +124,11 @@ func TestMovingASeriesAcrossDSTKeepsItsEditedOccurrenceAttached(t *testing.T) {
 		}, &override)
 	require.Equal(t, "Quarterly review", override.Title)
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID+"?scope=all", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID+"?scope=all", tt.AccessToken,
 		seriesBody("Weekly review", "2026-04-09T09:00:00-04:00", "2026-04-09T10:00:00-04:00"), nil)
 
 	var may []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-04-09&end=2026-05-14", tt.AccessToken, nil, &may)
 
 	edited := 0

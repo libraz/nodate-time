@@ -79,7 +79,7 @@ func TestMemoUpdateKeepsOmittedFields(t *testing.T) {
 
 	// Ticking it off names only the flag. Everything else has to survive.
 	var toggled memoBody
-	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+	doAnyVersion(t, http.MethodPatch, memosURL+"/"+created.ID, tenant.AccessToken,
 		map[string]any{"done": true}, &toggled)
 	require.True(t, toggled.Done)
 	require.Equal(t, "打ち合わせ資料", toggled.Title, "an omitted title should keep the stored one")
@@ -89,7 +89,7 @@ func TestMemoUpdateKeepsOmittedFields(t *testing.T) {
 	// Editing the text leaves the flag alone: an omitted done must not read as
 	// false and reopen a memo that was finished.
 	var edited memoBody
-	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+	doAnyVersion(t, http.MethodPatch, memosURL+"/"+created.ID, tenant.AccessToken,
 		map[string]any{"title": "打ち合わせ資料（改訂）"}, &edited)
 	require.Equal(t, "打ち合わせ資料（改訂）", edited.Title)
 	require.True(t, edited.Done, "an omitted done should keep the memo finished")
@@ -99,7 +99,7 @@ func TestMemoUpdateKeepsOmittedFields(t *testing.T) {
 	// A field that is present still applies, including one carrying a zero
 	// value -- that is what separates omitted from explicitly set.
 	var cleared memoBody
-	helpers.DoJSON(t, http.MethodPut, memosURL+"/"+created.ID, tenant.AccessToken,
+	doAnyVersion(t, http.MethodPatch, memosURL+"/"+created.ID, tenant.AccessToken,
 		map[string]any{"body": "", "done": false, "sortOrder": 0}, &cleared)
 	require.Empty(t, cleared.Body, "an explicit empty body should clear it")
 	require.False(t, cleared.Done, "an explicit false should reopen the memo")
@@ -122,5 +122,5 @@ func TestAllowedEmailNeedsNoReason(t *testing.T) {
 	status, body := helpers.DoJSONStatus(t, http.MethodPost,
 		testServerURL+"/admin/allowed-emails", admin.AccessToken,
 		map[string]any{"email": address})
-	require.Equal(t, 200, status, "an allowed address should not require a stated reason: %s", string(body))
+	require.Equal(t, 201, status, "an allowed address should not require a stated reason: %s", string(body))
 }

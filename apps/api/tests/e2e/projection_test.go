@@ -77,11 +77,11 @@ func TestProjectionRefusesSyncedChangesAndAllowsTheRest(t *testing.T) {
 		"end":   eventBody("Write the report", start, "2026-06-01T11:00:00+09:00"),
 	} {
 		body["timezone"] = "Asia/Tokyo"
-		status, raw := helpers.DoJSONStatus(t, http.MethodPut, eventURL, tt.AccessToken, body)
+		status, raw := sendAnyVersion(t, http.MethodPatch, eventURL, tt.AccessToken, body)
 		requireTaskOwned(status, raw, what)
 	}
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete, eventURL, tt.AccessToken, nil)
+	status, raw := sendAnyVersion(t, http.MethodDelete, eventURL, tt.AccessToken, nil)
 	requireTaskOwned(status, raw, "delete")
 
 	edit := eventBody("Write the report", start, end)
@@ -93,7 +93,7 @@ func TestProjectionRefusesSyncedChangesAndAllowsTheRest(t *testing.T) {
 		Memo     string `json:"memo"`
 		Location string `json:"location"`
 	}
-	helpers.DoJSON(t, http.MethodPut, eventURL, tt.AccessToken, edit, &updated)
+	doAnyVersion(t, http.MethodPatch, eventURL, tt.AccessToken, edit, &updated)
 	require.Equal(t, "Outline first", updated.Memo)
 	require.Equal(t, "Library", updated.Location)
 	require.Equal(t, "Write the report", updated.Title)

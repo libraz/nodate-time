@@ -39,7 +39,7 @@ func createWeeklyFriday(t *testing.T, calURL, token string) []recInstance {
 	require.NotEmpty(t, evt.ID)
 
 	var evts []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", token, nil, &evts)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", token, nil, &evts)
 	require.Len(t, evts, 4)
 	return evts
 }
@@ -59,7 +59,7 @@ func TestRecurringEditSingleOccurrence(t *testing.T) {
 
 	// Edit only this occurrence: new title and a shifted time.
 	var updated recInstance
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+target.ID+"?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Moved standup",
 			"allDay":             false,
@@ -80,7 +80,7 @@ func TestRecurringEditSingleOccurrence(t *testing.T) {
 
 	// Re-list: exactly one instance changed, the other three are unchanged.
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 4)
 	moved := 0
 	original := 0
@@ -114,12 +114,12 @@ func TestRecurringDeleteSingleOccurrence(t *testing.T) {
 	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
 	target := evts[1] // 2026-04-10
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+target.ID+"?scope=this", tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+target.ID+"?scope=this", tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Three instances remain, and the deleted one is absent.
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 3)
 	for _, e := range after {
 		assert.NotEqual(t, target.ID, e.ID, "the cancelled occurrence must not reappear")
@@ -142,7 +142,7 @@ func TestRecurringDeleteAllPurgesOverrides(t *testing.T) {
 	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
 
 	// Override one occurrence first.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Special",
 			"allDay":             false,
@@ -158,11 +158,11 @@ func TestRecurringDeleteAllPurgesOverrides(t *testing.T) {
 		}, nil)
 
 	// Delete the entire series.
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[0].ID+"?scope=all", tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evts[0].ID+"?scope=all", tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 0, "series delete must also remove overrides")
 }
 
@@ -181,7 +181,7 @@ func TestRecurringEditAllFromOccurrencePreservesPastInstances(t *testing.T) {
 	require.True(t, strings.Contains(target.ID, "_"))
 
 	var updated recInstance
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=all", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+target.ID+"?scope=all", tt.AccessToken,
 		map[string]any{
 			"title":              "Weekly meeting shifted",
 			"allDay":             false,
@@ -203,7 +203,7 @@ func TestRecurringEditAllFromOccurrencePreservesPastInstances(t *testing.T) {
 	assert.Contains(t, updated.StartAt, "T09:00:00Z")
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 4)
 	for _, e := range after {
 		assert.Equal(t, "Weekly meeting shifted", e.Title)
@@ -225,11 +225,11 @@ func TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift(t *testing.T) {
 	deleted := evts[1] // 2026-04-10
 	parentID := strings.Split(evts[0].ID, "_")[0]
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+deleted.ID+"?scope=this", tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+deleted.ID+"?scope=this", tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	var updated recInstance
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+parentID+"?scope=all", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+parentID+"?scope=all", tt.AccessToken,
 		map[string]any{
 			"title":              "Weekly meeting shifted later",
 			"allDay":             false,
@@ -250,7 +250,7 @@ func TestRecurringDeletedOccurrenceStaysDeletedAfterSeriesShift(t *testing.T) {
 	assert.Equal(t, parentID, updated.ID)
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 3, "deleted occurrence must not reappear after a series time shift")
 	for _, e := range after {
 		assert.NotEqual(t, deleted.ID, e.ID)
@@ -276,11 +276,11 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 	parentID := strings.Split(evts[0].ID, "_")[0]
 
 	// Cancel the 2026-04-10 occurrence.
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
 
 	// Override the 2026-04-17 occurrence.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Special",
 			"allDay":             false,
@@ -296,7 +296,7 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 		}, nil)
 
 	// Move the whole series from Friday to Saturday (+1 day).
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+parentID+"?scope=all", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+parentID+"?scope=all", tt.AccessToken,
 		map[string]any{
 			"title":              "Weekly meeting",
 			"allDay":             false,
@@ -316,7 +316,7 @@ func TestRecurringSeriesMoveKeepsExceptionsAligned(t *testing.T) {
 		}, nil)
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	// Saturdays Apr 4, 11, 18, 25 minus the shifted cancellation on Apr 11.
 	require.Len(t, after, 3, "cancelled occurrence must stay cancelled after the series moves weekday")
 	special := 0
@@ -342,7 +342,7 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
 	parentID := strings.Split(evts[0].ID, "_")[0]
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Special",
 			"allDay":             false,
@@ -358,7 +358,7 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 		}, nil)
 
 	// Remove the recurrence rule entirely.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+parentID, tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+parentID, tt.AccessToken,
 		map[string]any{
 			"title":              "One-off meeting",
 			"allDay":             false,
@@ -374,7 +374,7 @@ func TestRecurringRuleRemovalDropsExceptions(t *testing.T) {
 		}, nil)
 
 	var after []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &after)
 	require.Len(t, after, 1, "collapsing to a single event must not leave orphaned overrides")
 	assert.Equal(t, "One-off meeting", after[0].Title)
 }
@@ -417,7 +417,7 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 		ID           string   `json:"id"`
 		Participants []string `json:"participantIds"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &instances)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-01&end=2026-04-30", owner.AccessToken, nil, &instances)
 	require.Len(t, instances, 4)
 	for _, inst := range instances {
 		require.Equal(t, []string{guest.UserID}, inst.Participants)
@@ -432,7 +432,7 @@ func TestRecurringParticipantsRoundTripOnInstances(t *testing.T) {
 	var updated struct {
 		Participants []string `json:"participantIds"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+instances[1].ID+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+instances[1].ID+"?scope=this", owner.AccessToken,
 		map[string]any{
 			"title":              "Owner-only occurrence",
 			"allDay":             false,

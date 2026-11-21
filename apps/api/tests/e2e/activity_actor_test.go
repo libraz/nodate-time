@@ -60,8 +60,6 @@ func TestActivityDistinguishesSystemAndMissingActors(t *testing.T) {
 		checkActors(t, feed.Items)
 	})
 	t.Run("history", func(t *testing.T) {
-		var history []item
-		helpers.DoJSON(t, http.MethodGet, calendarURL+"/events/"+event.ID+"/history", owner.AccessToken, nil, &history)
-		checkActors(t, history)
+		checkActors(t, listedItems[item](t, calendarURL+"/events/"+event.ID+"/history", owner.AccessToken))
 	})
 }

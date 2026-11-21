@@ -18,11 +18,11 @@ func TestMovedOccurrenceReadsBackAtItsListedID(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + owner.CalendarID
 	target := createWeeklyFriday(t, calURL, owner.AccessToken)[1]
 
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken,
 		eventBody("Moved to May", "2026-05-20T15:00:00+09:00", "2026-05-20T16:00:00+09:00"), nil)
 
 	var may []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-05-31&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &may)
 	var listed *recInstance
 	for i := range may {
@@ -44,7 +44,7 @@ func TestMovedOccurrenceReadsBackAtItsListedID(t *testing.T) {
 
 	// A cancelled occurrence is gone at its id; a date the rule does not
 	// produce never had one.
-	helpers.DoJSON(t, http.MethodDelete, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, calURL+"/events/"+target.ID+"?scope=this", owner.AccessToken, nil, nil)
 	status, _ = helpers.DoJSONStatus(t, http.MethodGet, calURL+"/events/"+target.ID, owner.AccessToken, nil)
 	require.Equal(t, http.StatusNotFound, status)
 }
@@ -60,11 +60,11 @@ func TestEditedOccurrenceSpanningIntoTheWindowIsListed(t *testing.T) {
 	occ := createDailySeries(t, calURL, owner.AccessToken, nil)
 
 	// 5 May's occurrence stretched into a block running to 8 May.
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+occ[4].ID+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+occ[4].ID+"?scope=this", owner.AccessToken,
 		eventBody("Offsite", "2026-05-05T10:00:00+09:00", "2026-05-08T18:00:00+09:00"), nil)
 
 	var day []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-07&end=2026-05-07&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-07&end=2026-05-07&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &day)
 	count := 0
 	for _, e := range day {

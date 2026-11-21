@@ -129,30 +129,30 @@ func TestEventRowsCarryTheirRegistrySubjectAndRequiredKeys(t *testing.T) {
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken,
 		eventBody("Subject check", "2026-07-02T10:00:00+09:00", "2026-07-02T11:00:00+09:00", owner.UserID), &evt)
 	eventURL := calURL + "/events/" + evt.ID
-	helpers.DoJSON(t, http.MethodPut, eventURL, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL, owner.AccessToken,
 		eventBody("Subject check, moved", "2026-07-02T12:00:00+09:00", "2026-07-02T13:00:00+09:00", owner.UserID), nil)
 	var comment struct {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, eventURL+"/activities", owner.AccessToken,
 		map[string]any{"body": "a comment"}, &comment)
-	helpers.DoJSON(t, http.MethodPut, eventURL+"/activities/"+comment.ID, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL+"/activities/"+comment.ID, owner.AccessToken,
 		map[string]any{"body": "an edited comment"}, nil)
 	var item struct {
 		ID string `json:"id"`
 	}
 	helpers.DoJSON(t, http.MethodPost, eventURL+"/checklist", owner.AccessToken,
 		map[string]any{"title": "pack"}, &item)
-	helpers.DoJSON(t, http.MethodPut, eventURL+"/checklist/"+item.ID, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL+"/checklist/"+item.ID, owner.AccessToken,
 		map[string]any{"done": true}, nil)
-	helpers.DoJSON(t, http.MethodDelete, eventURL+"/checklist/"+item.ID, owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, eventURL+"/checklist/"+item.ID, owner.AccessToken, nil, nil)
 
 	memoID := createMemo(t, calURL, owner.AccessToken, "a memo")
-	helpers.DoJSON(t, http.MethodPut, calURL+"/memos/"+memoID, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/memos/"+memoID, owner.AccessToken,
 		map[string]any{"title": "a renamed memo"}, nil)
-	helpers.DoJSON(t, http.MethodPut, calURL+"/memos/"+memoID, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/memos/"+memoID, owner.AccessToken,
 		map[string]any{"done": true}, nil)
-	helpers.DoJSON(t, http.MethodDelete, calURL+"/memos/"+memoID, owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, calURL+"/memos/"+memoID, owner.AccessToken, nil, nil)
 
 	inv := createInvite(t, calURL, owner.AccessToken, map[string]any{"role": "editor"})
 	acceptInvite(t, inv.Token, guest.AccessToken)
@@ -160,7 +160,7 @@ func TestEventRowsCarryTheirRegistrySubjectAndRequiredKeys(t *testing.T) {
 		map[string]any{"role": "manager"}, nil)
 	helpers.DoJSON(t, http.MethodDelete, calURL+"/invites/"+inv.ID, owner.AccessToken, nil, nil)
 	helpers.DoJSON(t, http.MethodDelete, calURL+"/members/"+guest.UserID, owner.AccessToken, nil, nil)
-	helpers.DoJSON(t, http.MethodDelete, eventURL, owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, eventURL, owner.AccessToken, nil, nil)
 
 	calendarPublicID, err := uuid.Parse(owner.CalendarID)
 	require.NoError(t, err)

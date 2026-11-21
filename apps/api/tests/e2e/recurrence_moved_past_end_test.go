@@ -39,13 +39,13 @@ func TestMovingTheLastOccurrencePastTheSeriesEndKeepsItVisible(t *testing.T) {
 	require.NotEmpty(t, evt.ID)
 
 	var june []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-06-01&end=2026-06-30", tt.AccessToken, nil, &june)
 	require.Len(t, june, 5)
 
 	// Drag the last occurrence six weeks out, well past the series end.
 	var moved recInstance
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID+"_20260605?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID+"_20260605?scope=this", tt.AccessToken,
 		map[string]any{
 			"title":              "Five-day standup",
 			"allDay":             false,
@@ -63,7 +63,7 @@ func TestMovingTheLastOccurrencePastTheSeriesEndKeepsItVisible(t *testing.T) {
 	require.Equal(t, "2026-07-15T01:00:00Z", moved.StartAt)
 
 	var july []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-07-01&end=2026-07-31", tt.AccessToken, nil, &july)
 	require.Len(t, july, 1, "the moved occurrence must show up where it was moved to")
 	require.Equal(t, moved.ID, july[0].ID)
@@ -71,7 +71,7 @@ func TestMovingTheLastOccurrencePastTheSeriesEndKeepsItVisible(t *testing.T) {
 
 	// And it must have left the day it came from.
 	var stillJune []recInstance
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-06-01&end=2026-06-30", tt.AccessToken, nil, &stillJune)
 	require.Len(t, stillJune, 4)
 }

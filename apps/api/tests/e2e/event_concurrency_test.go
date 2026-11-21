@@ -8,10 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestASecondSaveFromAStaleCopyIsRefused covers the shared-calendar case the
-// full-replace contract makes dangerous: an update carries every field, so a
-// save from a copy read before someone else's save does not merge with it, it
-// erases it -- and neither writer is told.
+// TestASecondSaveFromAStaleCopyIsRefused covers the shared-calendar case two
+// writers create: a save built on a copy read before someone else's save
+// would overwrite it, and neither writer would be told.
 func TestASecondSaveFromAStaleCopyIsRefused(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -43,7 +42,7 @@ func TestASecondSaveFromAStaleCopyIsRefused(t *testing.T) {
 	require.Equal(t, openedAt, partnerHeaders.Get("ETag"))
 
 	// The first save goes through and produces a new revision.
-	firstStatus, _, firstHeaders := helpers.DoJSONFull(t, http.MethodPut, eventURL, owner.AccessToken,
+	firstStatus, _, firstHeaders := helpers.DoJSONFull(t, http.MethodPatch, eventURL, owner.AccessToken,
 		eventBody("会場を変更", "2026-09-10T13:00:00+09:00", "2026-09-10T14:00:00+09:00"),
 		map[string]string{"If-Match": openedAt})
 	require.Equal(t, 200, firstStatus)
@@ -51,24 +50,24 @@ func TestASecondSaveFromAStaleCopyIsRefused(t *testing.T) {
 
 	// The second writer, still holding the copy from before, is refused rather
 	// than silently replacing what the first one stored.
-	refused, body := helpers.DoJSONStatusWithHeaders(t, http.MethodPut, eventURL, partner.AccessToken,
+	refused, body := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, eventURL, partner.AccessToken,
 		eventBody("時間を変更", "2026-09-10T16:00:00+09:00", "2026-09-10T17:00:00+09:00"),
 		map[string]string{"If-Match": openedAt})
-	require.Equal(t, 409, refused, "a stale copy must not be applied: %s", string(body))
+	require.Equal(t, http.StatusPreconditionFailed, refused, "a stale copy must not be applied: %s", string(body))
 	require.Contains(t, string(body), "EVENT.STALE")
 
 	// Re-reading gives a tag that works.
 	_, _, fresh := helpers.DoJSONFull(t, http.MethodGet, eventURL, partner.AccessToken, nil, nil)
-	accepted, retry := helpers.DoJSONStatusWithHeaders(t, http.MethodPut, eventURL, partner.AccessToken,
+	accepted, retry := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, eventURL, partner.AccessToken,
 		eventBody("時間を変更", "2026-09-10T16:00:00+09:00", "2026-09-10T17:00:00+09:00"),
 		map[string]string{"If-Match": fresh.Get("ETag")})
 	require.Equal(t, 200, accepted, "a fresh copy should save: %s", string(retry))
 }
 
-// TestAnUnconditionalSaveStillWorks pins that the precondition is opt-in. An
-// integration written before entity tags existed sends no If-Match, and
-// refusing it would break a working caller in the name of protecting it.
-func TestAnUnconditionalSaveStillWorks(t *testing.T) {
+// TestAnUnconditionalSaveIsRefused pins that a save must name the version it
+// replaces: without If-Match it is refused, and "*" stands for any stored
+// version.
+func TestAnUnconditionalSaveIsRefused(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
@@ -86,9 +85,12 @@ func TestAnUnconditionalSaveStillWorks(t *testing.T) {
 			"endAt":   "2026-09-11T11:00:00+09:00",
 		}, &evt)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
-		eventBody("健診 (再)", "2026-09-11T14:00:00+09:00", "2026-09-11T15:00:00+09:00"))
-	require.Equal(t, 200, status)
+	body := eventBody("健診 (再)", "2026-09-11T14:00:00+09:00", "2026-09-11T15:00:00+09:00")
+	status, raw := helpers.DoJSONStatus(t, http.MethodPatch, calURL+"/events/"+evt.ID, owner.AccessToken, body)
+	require.Equal(t, http.StatusPreconditionRequired, status, string(raw))
+
+	status, raw = sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, owner.AccessToken, body)
+	require.Equal(t, http.StatusOK, status, string(raw))
 }
 
 // TestChangingOneOccurrenceMovesTheSeriesRevision covers the case a per-row
@@ -120,16 +122,18 @@ func TestChangingOneOccurrenceMovesTheSeriesRevision(t *testing.T) {
 
 	// Move one occurrence only.
 	occurrenceURL := calURL + "/events/" + series.ID + "_20260915?scope=this"
-	moved, body, afterHeaders := helpers.DoJSONFull(t, http.MethodPut, occurrenceURL, owner.AccessToken,
-		eventBody("朝会 (時間変更)", "2026-09-15T10:00:00+09:00", "2026-09-15T10:30:00+09:00"), nil)
+	moved, body := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, occurrenceURL, owner.AccessToken,
+		eventBody("朝会 (時間変更)", "2026-09-15T10:00:00+09:00", "2026-09-15T10:30:00+09:00"),
+		ifMatch(before))
 	require.Equal(t, 200, moved, "move one occurrence: %s", string(body))
+	_, _, afterHeaders := helpers.DoJSONFull(t, http.MethodGet, calURL+"/events/"+series.ID, owner.AccessToken, nil, nil)
 	require.NotEqual(t, before, afterHeaders.Get("ETag"),
 		"a changed occurrence has to move the revision a caller holds for the series")
 
 	// Someone still holding the copy from before is now refused.
-	stale, staleBody := helpers.DoJSONStatusWithHeaders(t, http.MethodPut, calURL+"/events/"+series.ID,
+	stale, staleBody := helpers.DoJSONStatusWithHeaders(t, http.MethodPatch, calURL+"/events/"+series.ID,
 		owner.AccessToken,
 		eventBody("朝会 (全体変更)", "2026-09-14T11:00:00+09:00", "2026-09-14T11:30:00+09:00"),
 		map[string]string{"If-Match": before})
-	require.Equal(t, 409, stale, "%s", string(staleBody))
+	require.Equal(t, http.StatusPreconditionFailed, stale, "%s", string(staleBody))
 }

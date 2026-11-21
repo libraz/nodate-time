@@ -52,12 +52,12 @@ func TestWhoeverRunsTheCalendarCanTakeACommentDown(t *testing.T) {
 	// Another member cannot remove what someone else wrote just by being an
 	// editor: writing to the calendar is not moderating it.
 	first := post(author.AccessToken, "見学の集合は 9 時です")
-	byPeer, _ := helpers.DoJSONStatus(t, http.MethodDelete,
+	byPeer, _ := sendAnyVersion(t, http.MethodDelete,
 		eventURL+"/activities/"+first, bystander.AccessToken, nil)
 	require.Equal(t, 403, byPeer)
 
 	// Whoever runs the calendar can.
-	byOwner, _ := helpers.DoJSONStatus(t, http.MethodDelete,
+	byOwner, _ := sendAnyVersion(t, http.MethodDelete,
 		eventURL+"/activities/"+first, owner.AccessToken, nil)
 	require.True(t, byOwner >= 200 && byOwner < 300, "owner should be able to moderate, got %d", byOwner)
 
@@ -75,18 +75,18 @@ func TestWhoeverRunsTheCalendarCanTakeACommentDown(t *testing.T) {
 	// calendar, not to owning it.
 	require.Equal(t, 200, promote(t, calURL, owner.AccessToken, bystander, "manager"))
 	second := post(author.AccessToken, "やっぱり 10 時にします")
-	byManager, _ := helpers.DoJSONStatus(t, http.MethodDelete,
+	byManager, _ := sendAnyVersion(t, http.MethodDelete,
 		eventURL+"/activities/"+second, bystander.AccessToken, nil)
 	require.True(t, byManager >= 200 && byManager < 300, "manager should be able to moderate, got %d", byManager)
 
 	// Rewriting somebody else's comment stays refused for both of them.
 	third := post(author.AccessToken, "資料は当日配ります")
-	ownerEdit, _ := helpers.DoJSONStatus(t, http.MethodPut,
+	ownerEdit, _ := sendAnyVersion(t, http.MethodPatch,
 		eventURL+"/activities/"+third, owner.AccessToken, map[string]any{"body": "資料は不要です"})
 	require.Equal(t, 403, ownerEdit, "moderation is removal, not rewriting")
 
 	// And the author still governs their own comment.
-	authorEdit, _ := helpers.DoJSONStatus(t, http.MethodPut,
+	authorEdit, _ := sendAnyVersion(t, http.MethodPatch,
 		eventURL+"/activities/"+third, author.AccessToken, map[string]any{"body": "資料は前日に配ります"})
 	require.Equal(t, 200, authorEdit)
 }

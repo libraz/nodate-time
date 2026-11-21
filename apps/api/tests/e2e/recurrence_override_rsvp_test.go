@@ -60,7 +60,7 @@ func TestAttendeeStateOfAnEditedOccurrenceIsTheOneItShows(t *testing.T) {
 	// Answered on the series, then the occurrence is edited: the answer stays.
 	status, raw := rsvp(calURL+"/events/"+series.ID, guest.AccessToken, "accepted")
 	require.Equal(t, http.StatusOK, status, raw)
-	helpers.DoJSON(t, http.MethodPut, edited+"?scope=this", owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, edited+"?scope=this", owner.AccessToken,
 		eventBody("Moved this week", "2026-04-10T17:00:00+09:00", "2026-04-10T18:00:00+09:00",
 			guest.UserID, extra.UserID), nil)
 	require.Equal(t, "accepted", attendeeOf(edited, guest.UserID).Rsvp, "editing the occurrence keeps the answer")
@@ -84,11 +84,11 @@ func TestAttendeeStateOfAnEditedOccurrenceIsTheOneItShows(t *testing.T) {
 	require.True(t, attendeeOf(edited, guest.UserID).CanEdit)
 	require.False(t, attendeeOf(untouched, guest.UserID).CanEdit)
 
-	status, rawBytes := helpers.DoJSONStatus(t, http.MethodPut, edited+"?scope=this", guest.AccessToken,
+	status, rawBytes := sendAnyVersion(t, http.MethodPatch, edited+"?scope=this", guest.AccessToken,
 		eventBody("Guest moved it", "2026-04-10T18:00:00+09:00", "2026-04-10T19:00:00+09:00",
 			guest.UserID, extra.UserID))
 	require.Equal(t, http.StatusOK, status, string(rawBytes))
-	status, rawBytes = helpers.DoJSONStatus(t, http.MethodPut, untouched+"?scope=this", guest.AccessToken,
+	status, rawBytes = sendAnyVersion(t, http.MethodPatch, untouched+"?scope=this", guest.AccessToken,
 		eventBody("Not theirs", "2026-04-17T18:00:00+09:00", "2026-04-17T19:00:00+09:00", guest.UserID))
 	require.Equal(t, http.StatusForbidden, status, string(rawBytes))
 	require.True(t, strings.Contains(string(rawBytes), "EDIT"), string(rawBytes))

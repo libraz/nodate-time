@@ -80,7 +80,7 @@ func TestMorningEventOnTheFirstStaysInItsMonth(t *testing.T) {
 	var events []struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		calURL+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
 		tt.AccessToken, nil, &events)
 	require.Len(t, events, 1, "an 08:00 event on the first belongs to April")
@@ -92,7 +92,7 @@ func TestMorningEventOnTheFirstStaysInItsMonth(t *testing.T) {
 	var shared []struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		testServerURL+"/share/"+token+"/events?start=2026-04-01&end=2026-04-30&tz=Asia/Tokyo",
 		"", nil, &shared)
 	require.Len(t, shared, 1)

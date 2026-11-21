@@ -144,7 +144,8 @@ func TestConfirmRejectsBytesThatDoNotMatchTheDeclaredDigest(t *testing.T) {
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost,
 		calURL+"/events/"+eventID+"/attachments/"+pres.AttachmentID+"/confirm", tt.AccessToken, nil)
-	require.Equal(t, http.StatusBadRequest, status, "confirm: %s", string(raw))
+	require.Equal(t, http.StatusUnprocessableEntity, status, "confirm: %s", string(raw))
+	require.Contains(t, string(raw), "UPLOAD.DIGEST_MISMATCH")
 
 	var attachments []map[string]any
 	helpers.DoJSON(t, http.MethodGet, calURL+"/events/"+eventID+"/attachments", tt.AccessToken,

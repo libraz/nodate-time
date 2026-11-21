@@ -39,13 +39,13 @@ func TestTickingAChecklistItemKeepsItsTitleAndPosition(t *testing.T) {
 
 	// Somebody else renames it.
 	var renamed checklistItemResp
-	helpers.DoJSON(t, http.MethodPut, checklistURL+"/"+item.ID, tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, checklistURL+"/"+item.ID, tt.AccessToken,
 		map[string]any{"title": "Two tents"}, &renamed)
 	require.Equal(t, "Two tents", renamed.Title)
 	require.False(t, renamed.Done, "an omitted done keeps the stored value")
 
 	var ticked checklistItemResp
-	helpers.DoJSON(t, http.MethodPut, checklistURL+"/"+item.ID, tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, checklistURL+"/"+item.ID, tt.AccessToken,
 		map[string]any{"done": true}, &ticked)
 	require.True(t, ticked.Done)
 	require.Equal(t, "Two tents", ticked.Title)

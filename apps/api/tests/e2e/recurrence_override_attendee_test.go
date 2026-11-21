@@ -73,7 +73,7 @@ func TestConcurrentFirstEditsAcrossSeriesDoNotDeadlock(t *testing.T) {
 		go func(i int, tgt target) {
 			defer done.Done()
 			start.Wait()
-			status, body := helpers.DoJSONStatus(t, http.MethodPut,
+			status, body := sendAnyVersion(t, http.MethodPatch,
 				tgt.calURL+"/events/"+tgt.id+"?scope=this", owner.AccessToken,
 				map[string]any{
 					"title":              fmt.Sprintf("Moved series %d", i),
@@ -135,7 +135,7 @@ func TestSecondEditOfAnOccurrenceReplacesItsParticipants(t *testing.T) {
 	// both edits address.
 	edit := func(participant string) {
 		t.Helper()
-		helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+target+"?scope=this", owner.AccessToken,
+		doAnyVersion(t, http.MethodPatch, calURL+"/events/"+target+"?scope=this", owner.AccessToken,
 			map[string]any{
 				"title":              "Occurrence with a guest",
 				"allDay":             false,

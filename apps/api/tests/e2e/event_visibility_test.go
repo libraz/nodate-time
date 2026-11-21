@@ -23,9 +23,9 @@ func publicShareToken(t *testing.T, calURL, ownerToken string) string {
 }
 
 type publicEvent struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Private bool   `json:"private"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	DetailsHidden bool   `json:"detailsHidden"`
 }
 
 // TestVisibilityGovernsThePublicFeed verifies that an event's visibility is
@@ -66,7 +66,7 @@ func TestVisibilityGovernsThePublicFeed(t *testing.T) {
 	create("Legal consultation", "confidential", "2026-07-08")
 
 	var feed []publicEvent
-	helpers.DoJSON(t, http.MethodGet,
+	getItems(t, http.MethodGet,
 		testServerURL+"/share/"+token+"/events?start=2026-07-01&end=2026-07-31", "", nil, &feed)
 
 	byID := map[string]publicEvent{}
@@ -76,12 +76,13 @@ func TestVisibilityGovernsThePublicFeed(t *testing.T) {
 	require.Len(t, feed, 2, "the confidential event must not be published at all")
 
 	require.Equal(t, "Team lunch", byID[openID].Title)
-	require.False(t, byID[openID].Private)
+	// A public event still withholds memo and url from an anonymous reader.
+	require.True(t, byID[openID].DetailsHidden)
 
 	// Private keeps the time but nothing that says what it is.
 	require.Contains(t, byID, privateID)
 	require.Empty(t, byID[privateID].Title)
-	require.True(t, byID[privateID].Private)
+	require.True(t, byID[privateID].DetailsHidden)
 
 	// Nothing anywhere in the response names the confidential event.
 	for _, e := range feed {
@@ -93,7 +94,7 @@ func TestVisibilityGovernsThePublicFeed(t *testing.T) {
 		Title      string `json:"title"`
 		Visibility string `json:"visibility"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-07-01&end=2026-07-31",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-07-01&end=2026-07-31",
 		owner.AccessToken, nil, &mine)
 	require.Len(t, mine, 3)
 }
@@ -126,7 +127,7 @@ func TestOmittedFieldsSurviveAnEdit(t *testing.T) {
 		Flexibility string `json:"flexibility"`
 		Visibility  string `json:"visibility"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, owner.AccessToken,
 		eventBody("Out of office", "2026-07-15T10:00:00+09:00", "2026-07-15T11:00:00+09:00"), &moved)
 
 	require.Equal(t, "oof", moved.ShowAs)
@@ -141,7 +142,7 @@ func TestOmittedFieldsSurviveAnEdit(t *testing.T) {
 		ShowAs     string `json:"showAs"`
 		Visibility string `json:"visibility"`
 	}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evt.ID, owner.AccessToken, body, &changed)
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evt.ID, owner.AccessToken, body, &changed)
 	require.Equal(t, "free", changed.ShowAs)
 	require.Equal(t, "default", changed.Visibility)
 }
@@ -181,7 +182,7 @@ func TestExportCarriesTheClassification(t *testing.T) {
 		Visibility string `json:"visibility"`
 		ShowAs     string `json:"showAs"`
 	}
-	helpers.DoJSON(t, http.MethodGet, targetURL+"/events?start=2026-07-01&end=2026-07-31",
+	getItems(t, http.MethodGet, targetURL+"/events?start=2026-07-01&end=2026-07-31",
 		target.AccessToken, nil, &imported)
 	require.Len(t, imported, 1)
 	require.Equal(t, "private", imported[0].Visibility)

@@ -53,7 +53,7 @@ func TestReminderReachesSomethingThatCanRaiseIt(t *testing.T) {
 		Title              string `json:"title"`
 		NotificationOffset *int   `json:"notificationOffset"`
 	}
-	helpers.DoJSON(t, http.MethodGet, targetURL+"/events?start=2026-10-01&end=2026-10-31",
+	getItems(t, http.MethodGet, targetURL+"/events?start=2026-10-01&end=2026-10-31",
 		tt.AccessToken, nil, &imported)
 	require.Len(t, imported, 1)
 	require.NotNil(t, imported[0].NotificationOffset, "the reminder should survive the round trip")
@@ -87,7 +87,7 @@ func TestAnAlarmFromAnotherProductIsRead(t *testing.T) {
 		"END:VEVENT",
 		"BEGIN:VEVENT",
 		"UID:b@example.com",
-		"SUMMARY:Unshowable offset",
+		"SUMMARY:Odd offset",
 		"DTSTART:20261103T010000Z",
 		"DTEND:20261103T020000Z",
 		"BEGIN:VALARM",
@@ -108,7 +108,7 @@ func TestAnAlarmFromAnotherProductIsRead(t *testing.T) {
 		Title              string `json:"title"`
 		NotificationOffset *int   `json:"notificationOffset"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-11-01&end=2026-11-30",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-11-01&end=2026-11-30",
 		tt.AccessToken, nil, &events)
 	require.Len(t, events, 2)
 
@@ -116,9 +116,9 @@ func TestAnAlarmFromAnotherProductIsRead(t *testing.T) {
 	for _, e := range events {
 		byTitle[e.Title] = e.NotificationOffset
 	}
-	require.NotNil(t, byTitle["Day before"], "a day-before alarm is one the picker offers")
+	require.NotNil(t, byTitle["Day before"])
 	require.Equal(t, 1440, *byTitle["Day before"])
-	// An offset the picker cannot show is left off rather than kept where its
-	// owner can neither see it nor change it.
-	require.Nil(t, byTitle["Unshowable offset"])
+	// Any offset within the accepted range is kept as written.
+	require.NotNil(t, byTitle["Odd offset"])
+	require.Equal(t, 45, *byTitle["Odd offset"])
 }

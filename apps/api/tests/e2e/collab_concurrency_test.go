@@ -164,11 +164,11 @@ func TestConcurrentCalendarEditsOfDifferentFieldsKeepBoth(t *testing.T) {
 		name := fmt.Sprintf("Renamed %d", round)
 		statuses := race(
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, owner.AccessToken, map[string]any{"name": name})
+				status, _ := sendAnyVersion(t, http.MethodPatch, calURL, owner.AccessToken, map[string]any{"name": name})
 				return status
 			},
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, manager.AccessToken, map[string]any{"color": "#8F8F8F"})
+				status, _ := sendAnyVersion(t, http.MethodPatch, calURL, manager.AccessToken, map[string]any{"color": "#8F8F8F"})
 				return status
 			},
 		)
@@ -197,11 +197,11 @@ func TestCalendarEditRacingDeletionLogsNothingAfterIt(t *testing.T) {
 
 		statuses := race(
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL, owner.AccessToken, map[string]any{"name": "late"})
+				status, _ := sendAnyVersion(t, http.MethodPatch, calURL, owner.AccessToken, map[string]any{"name": "late"})
 				return status
 			},
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, owner.AccessToken, nil)
+				status, _ := sendAnyVersion(t, http.MethodDelete, calURL, owner.AccessToken, nil)
 				return status
 			},
 		)
@@ -237,7 +237,7 @@ func TestConcurrentDeletesOfOneMemoLogOnce(t *testing.T) {
 		memoID := createMemo(t, calURL, tt.AccessToken, fmt.Sprintf("memo %d", round))
 		before := eventCount(t, tt.CalendarID, "calendar.memo.deleted")
 
-		statuses := concurrently(t, 4, http.MethodDelete, calURL+"/memos/"+memoID, tt.AccessToken)
+		statuses := concurrentlyWith(t, 4, http.MethodDelete, calURL+"/memos/"+memoID, tt.AccessToken, ifMatch("*"))
 
 		deleted, missing := 0, 0
 		for _, s := range statuses {
@@ -268,11 +268,11 @@ func TestConcurrentMemoUpdatesKeepEachOthersFields(t *testing.T) {
 
 		statuses := race(
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"done": true})
+				status, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"done": true})
 				return status
 			},
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"title": title})
+				status, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"title": title})
 				return status
 			},
 		)
@@ -301,11 +301,11 @@ func TestConcurrentMemoUpdatesKeepEachOthersFields(t *testing.T) {
 	before := eventCount(t, tt.CalendarID, "calendar.memo.updated")
 	statuses := race(
 		func() int {
-			status, _ := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"done": true})
+			status, _ := sendAnyVersion(t, http.MethodPatch, calURL+"/memos/"+memoID, tt.AccessToken, map[string]any{"done": true})
 			return status
 		},
 		func() int {
-			status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/memos/"+memoID, tt.AccessToken, nil)
+			status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/memos/"+memoID, tt.AccessToken, nil)
 			return status
 		},
 	)
@@ -338,7 +338,7 @@ func TestMemoCursorSurvivesTheDeletionOfItsMemo(t *testing.T) {
 	require.Equal(t, first, page.Items[0].ID)
 	require.NotEmpty(t, page.NextCursor)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/memos/"+first, tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/memos/"+first, tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status)
 
 	var next struct {
@@ -368,7 +368,7 @@ func TestConcurrentDeletesOfOnePhotoLogOnce(t *testing.T) {
 		photoID := uploadPhotoBytes(t, tt, tt.CalendarID, distinctPNG(fmt.Sprintf("double-delete-%d", round)), "twice")
 		before := eventCount(t, tt.CalendarID, "calendar.photo.deleted")
 
-		statuses := concurrently(t, 4, http.MethodDelete, calURL+"/albums/"+photoID, tt.AccessToken)
+		statuses := concurrentlyWith(t, 4, http.MethodDelete, calURL+"/albums/"+photoID, tt.AccessToken, ifMatch("*"))
 
 		deleted := 0
 		for _, s := range statuses {
@@ -425,13 +425,13 @@ func TestInviteCreationRacingCalendarDeletion(t *testing.T) {
 				return status
 			},
 			func() int {
-				status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, owner.AccessToken, nil)
+				status, _ := sendAnyVersion(t, http.MethodDelete, calURL, owner.AccessToken, nil)
 				return status
 			},
 		)
 
 		require.Equal(t, 204, statuses[1], "round %d", round)
-		require.Contains(t, []int{200, 404}, statuses[0], "round %d", round)
+		require.Contains(t, []int{201, 404}, statuses[0], "round %d", round)
 		created := lastEventID(t, calendarID, "calendar.invite.created")
 		deleted := lastEventID(t, calendarID, "calendar.deleted")
 		require.Less(t, created, deleted, "round %d: a link was created after the calendar was deleted", round)

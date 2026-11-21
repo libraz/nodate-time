@@ -51,7 +51,7 @@ func TestConcurrentFirstEditsOfOccurrencesDoNotDeadlock(t *testing.T) {
 		go func(i int, id string) {
 			defer done.Done()
 			start.Wait()
-			status, body := helpers.DoJSONStatus(t, http.MethodPut,
+			status, body := sendAnyVersion(t, http.MethodPatch,
 				calURL+"/events/"+id+"?scope=this", owner.AccessToken,
 				map[string]any{
 					"title":              fmt.Sprintf("Moved occurrence %d", i),

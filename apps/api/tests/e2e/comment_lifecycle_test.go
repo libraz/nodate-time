@@ -62,9 +62,9 @@ func TestEditedAndRemovedCommentTextIsNotInHistoryOrActivity(t *testing.T) {
 	edited := fmt.Sprintf("door code withdrawn %d", nonce)
 
 	id := post(original)
-	helpers.DoJSON(t, http.MethodPut, eventURL+"/activities/"+id, owner.AccessToken,
+	doAnyVersion(t, http.MethodPatch, eventURL+"/activities/"+id, owner.AccessToken,
 		map[string]any{"body": edited}, nil)
-	helpers.DoJSON(t, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, nil, nil)
 
 	for name, url := range map[string]string{
 		"event history": eventURL + "/history",
@@ -102,7 +102,7 @@ func TestOlderCommentsStillLoadAfterTheCursorCommentIsRemoved(t *testing.T) {
 	require.Len(t, newest.Items, 2)
 	require.NotEmpty(t, newest.NextCursor)
 
-	helpers.DoJSON(t, http.MethodDelete, eventURL+"/activities/"+newest.NextCursor, owner.AccessToken, nil, nil)
+	doAnyVersion(t, http.MethodDelete, eventURL+"/activities/"+newest.NextCursor, owner.AccessToken, nil, nil)
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodGet,
 		eventURL+"/activities?limit=2&cursor="+newest.NextCursor, owner.AccessToken, nil)
@@ -121,7 +121,7 @@ func TestConcurrentRemovalsOfOneCommentRecordOne(t *testing.T) {
 	eventURL, post := commentThread(t, owner)
 	id := post("said twice")
 
-	statuses := concurrently(t, 6, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken)
+	statuses := concurrentlyWith(t, 6, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, ifMatch("*"))
 	require.Equal(t, 1, countStatus(statuses, http.StatusNoContent), "statuses %v", statuses)
 	require.Equal(t, len(statuses)-1, countStatus(statuses, http.StatusNotFound), "statuses %v", statuses)
 	require.Equal(t, 1, commentLogRows(t, "calendar.event.comment.deleted", id))
@@ -141,10 +141,10 @@ func TestAnEditRacingARemovalNeverLandsAfterIt(t *testing.T) {
 		id := post(fmt.Sprintf("round %d", round))
 		statuses := runTogether(2, func(i int) int {
 			if i == 0 {
-				status, _ := helpers.DoJSONStatus(t, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, nil)
+				status, _ := sendAnyVersion(t, http.MethodDelete, eventURL+"/activities/"+id, owner.AccessToken, nil)
 				return status
 			}
-			status, _ := helpers.DoJSONStatus(t, http.MethodPut, eventURL+"/activities/"+id, owner.AccessToken,
+			status, _ := sendAnyVersion(t, http.MethodPatch, eventURL+"/activities/"+id, owner.AccessToken,
 				map[string]any{"body": fmt.Sprintf("round %d, edited", round)})
 			return status
 		})

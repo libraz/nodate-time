@@ -28,7 +28,7 @@ func TestRulesTheExpanderWouldNotHonourAreRefused(t *testing.T) {
 		"monthly bySetPos without byDay":  {"freq": "monthly", "interval": 1, "bySetPos": []int{2}},
 		"monthly bySetPos with two days":  {"freq": "monthly", "interval": 1, "byDay": []string{"MO", "FR"}, "bySetPos": []int{2}},
 		"monthly bySetPos and byMonthDay": {"freq": "monthly", "interval": 1, "byDay": []string{"FR"}, "bySetPos": []int{1}, "byMonthDay": []int{3}},
-		"until the day before the start":  {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "until": "2026-04-02"},
+		"until the day before the start":  {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "until": "2026-04-02T15:00:00+09:00"},
 		"until earlier the same day":      {"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "until": "2026-04-03T14:00:00+09:00"},
 	}
 	for name, rule := range refused {
@@ -45,7 +45,7 @@ func TestRulesTheExpanderWouldNotHonourAreRefused(t *testing.T) {
 
 		update := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
 		update["recurrenceRule"] = rule
-		status, raw = helpers.DoJSONStatus(t, http.MethodPut, seriesURL, owner.AccessToken, update)
+		status, raw = sendAnyVersion(t, http.MethodPatch, seriesURL, owner.AccessToken, update)
 		require.Equal(t, http.StatusBadRequest, status, "update, %s: %s", name, raw)
 	}
 
@@ -56,11 +56,11 @@ func TestRulesTheExpanderWouldNotHonourAreRefused(t *testing.T) {
 		"startAt":        "2026-04-03T15:00:00+09:00",
 		"endAt":          "2026-04-03T16:00:00+09:00",
 		"timezone":       "Asia/Tokyo",
-		"recurrenceRule": map[string]any{"freq": "daily", "interval": 1, "until": "2026-04-03"},
+		"recurrenceRule": map[string]any{"freq": "daily", "interval": 1, "until": "2026-04-03T23:00:00+09:00"},
 	}
 	helpers.DoJSON(t, http.MethodPost, calURL+"/events", owner.AccessToken, accepted, nil)
 	var april []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-04-03&end=2026-04-03&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-04-03&end=2026-04-03&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &april)
 	titles := map[string]int{}
 	for _, e := range april {
@@ -89,7 +89,7 @@ func TestZeroLengthSeriesEndingAtTheWindowStartIsListed(t *testing.T) {
 		}, nil)
 
 	var day []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-03&end=2026-05-03&tz=Asia/Tokyo",
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-03&end=2026-05-03&tz=Asia/Tokyo",
 		owner.AccessToken, nil, &day)
 	require.Len(t, day, 1, "the third marker opens the day it is on")
 	require.Equal(t, "2026-05-02T15:00:00Z", day[0].StartAt)
