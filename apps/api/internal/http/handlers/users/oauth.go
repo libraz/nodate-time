@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/secrets"
 	"github.com/libraz/nodate-time/apps/api/internal/workspace"
@@ -577,22 +578,20 @@ var (
 // factor: that is refused before a link is written, so a refused sign-in
 // leaves no identity behind.
 func upsertOAuthUser(ctx context.Context, db *sql.DB, workspaceID uint32, provider, subject, email, name, picture string, emailVerified bool, defaults AccountDefaults) (uint32, error) {
-	tx, err := db.BeginTx(ctx, nil)
+	var userID uint32
+	err := dbtx.Run(ctx, db, func(q *generated.Queries) error {
+		userID = 0
+		id, err := resolveOAuthUser(ctx, q, workspaceID, provider, subject, email, name, picture, emailVerified, defaults)
+		if err != nil {
+			return err
+		}
+		if _, err := workspace.Join(ctx, q, workspaceID, id); err != nil {
+			return err
+		}
+		userID = id
+		return nil
+	})
 	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	q := generated.New(tx)
-
-	userID, err := resolveOAuthUser(ctx, q, workspaceID, provider, subject, email, name, picture, emailVerified, defaults)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := workspace.Join(ctx, q, workspaceID, userID); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return userID, nil

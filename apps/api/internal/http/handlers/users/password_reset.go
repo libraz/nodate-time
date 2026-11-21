@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/auth"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/mailer"
@@ -168,56 +169,51 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		q := generated.New(tx)
-
-		row, err := q.GetPasswordResetByTokenHash(ctx, hash)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			row, err := q.GetPasswordResetByTokenHash(ctx, hash)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.AuthResetInvalid
+				}
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Checked before anything is written: with no local identity the
-		// update below matches nothing, and the sessions and the token must
-		// survive a reset that set no password.
-		if _, err := q.GetLocalIdentityByUser(ctx, row.UserID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
+			// Checked before anything is written: with no local identity the
+			// update below matches nothing, and the sessions and the token must
+			// survive a reset that set no password.
+			if _, err := q.GetLocalIdentityByUser(ctx, row.UserID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.AuthResetInvalid
+				}
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if err := q.UpdatePasswordHash(ctx, generated.UpdatePasswordHashParams{
-			PasswordHash: sql.NullString{String: newHash, Valid: true},
-			UserID:       row.UserID,
+			if err := q.UpdatePasswordHash(ctx, generated.UpdatePasswordHashParams{
+				PasswordHash: sql.NullString{String: newHash, Valid: true},
+				UserID:       row.UserID,
+			}); err != nil {
+				return err
+			}
+			// Completing a reset ends every session opened with the old password.
+			// Whoever knew it -- which is the reason a reset was requested --
+			// must not keep the access it already bought them.
+			if err := q.RevokeAllUserSessions(ctx, row.UserID); err != nil {
+				return err
+			}
+			consumeResult, err := q.MarkPasswordResetUsed(ctx, row.ID)
+			if err != nil {
+				return err
+			}
+			consumed, err := consumeResult.RowsAffected()
+			if err != nil || consumed != 1 {
+				return apierrors.AuthResetInvalid
+			}
+			// Invalidate every other outstanding reset for this user so a second
+			// stolen/leaked token cannot be used after a successful reset.
+			if err := q.InvalidateUserPasswordResets(ctx, row.UserID); err != nil {
+				return err
+			}
+			return nil
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Completing a reset ends every session opened with the old password.
-		// Whoever knew it -- which is the reason a reset was requested --
-		// must not keep the access it already bought them.
-		if err := q.RevokeAllUserSessions(ctx, row.UserID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		consumeResult, err := q.MarkPasswordResetUsed(ctx, row.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		consumed, err := consumeResult.RowsAffected()
-		if err != nil || consumed != 1 {
-			return nil, apierrors.ToHuma(apierrors.AuthResetInvalid)
-		}
-		// Invalidate every other outstanding reset for this user so a second
-		// stolen/leaked token cannot be used after a successful reset.
-		if err := q.InvalidateUserPasswordResets(ctx, row.UserID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		out := &ConfirmResetOutput{}

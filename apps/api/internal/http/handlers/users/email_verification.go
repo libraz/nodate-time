@@ -152,51 +152,46 @@ func revokePriorCredentials(ctx context.Context, q *generated.Queries, userID ui
 // ConfirmEmailVerification redeems a confirmation link.
 func ConfirmEmailVerification(deps Deps) func(context.Context, *ConfirmVerificationInput) (*ConfirmVerificationOutput, error) {
 	return func(ctx context.Context, in *ConfirmVerificationInput) (*ConfirmVerificationOutput, error) {
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		q := generated.New(tx)
-
-		row, err := q.GetEmailVerificationByTokenHash(ctx, auth.HashResetToken(in.Body.Token))
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.AuthVerificationInvalid)
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			row, err := q.GetEmailVerificationByTokenHash(ctx, auth.HashResetToken(in.Body.Token))
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return apierrors.AuthVerificationInvalid
+				}
+				return err
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// The address is matched as well as the user: a token minted for an
-		// address the account has since moved away from proves nothing about
-		// the address it holds now.
-		verified, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{
-			ID:    row.UserID,
-			Email: row.Email,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		// Whoever registered the address may not be whoever reads it. Proof
-		// from outside the account's own sessions hands the account to the
-		// mailbox: the registrant's password and sessions end here.
-		if n, err := verified.RowsAffected(); err == nil && n == 1 &&
-			!holdsSessionOf(ctx, q, deps.JWTSecret, in.Authorization, row.UserID) {
-			if err := revokePriorCredentials(ctx, q, row.UserID); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			// The address is matched as well as the user: a token minted for an
+			// address the account has since moved away from proves nothing about
+			// the address it holds now.
+			verified, err := q.MarkUserEmailVerified(ctx, generated.MarkUserEmailVerifiedParams{
+				ID:    row.UserID,
+				Email: row.Email,
+			})
+			if err != nil {
+				return err
 			}
-		}
-		consumed, err := q.MarkEmailVerificationUsed(ctx, row.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if n, err := consumed.RowsAffected(); err != nil || n != 1 {
-			return nil, apierrors.ToHuma(apierrors.AuthVerificationInvalid)
-		}
-		if err := q.InvalidateUserEmailVerifications(ctx, row.UserID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			// Whoever registered the address may not be whoever reads it. Proof
+			// from outside the account's own sessions hands the account to the
+			// mailbox: the registrant's password and sessions end here.
+			if n, err := verified.RowsAffected(); err == nil && n == 1 &&
+				!holdsSessionOf(ctx, q, deps.JWTSecret, in.Authorization, row.UserID) {
+				if err := revokePriorCredentials(ctx, q, row.UserID); err != nil {
+					return err
+				}
+			}
+			consumed, err := q.MarkEmailVerificationUsed(ctx, row.ID)
+			if err != nil {
+				return err
+			}
+			if n, err := consumed.RowsAffected(); err != nil || n != 1 {
+				return apierrors.AuthVerificationInvalid
+			}
+			if err := q.InvalidateUserEmailVerifications(ctx, row.UserID); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, toAPIError(err)
 		}
 
 		out := &ConfirmVerificationOutput{}

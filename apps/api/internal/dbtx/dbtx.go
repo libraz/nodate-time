@@ -11,6 +11,9 @@ package dbtx
 import (
 	"context"
 	"database/sql"
+	"errors"
+
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
@@ -30,17 +33,43 @@ func WithTx(ctx context.Context, tx *sql.Tx) context.Context {
 	return context.WithValue(ctx, ambientKey{}, tx)
 }
 
+// maxAttempts bounds how often a transaction is rerun after a deadlock or
+// lock-wait timeout.
+const maxAttempts = 3
+
 // Run opens a transaction, hands fn a Queries bound to it, and commits if
 // fn returns nil. Any error -- including one from appending the event row
 // -- rolls the whole thing back.
 //
-// The deferred rollback is a no-op after a successful commit, so it is
-// safe on both paths and covers an early return from anywhere in fn.
+// A MySQL deadlock (1213) or lock-wait timeout (1205) reruns the whole
+// transaction, so fn must have no effect outside it. A transaction joined
+// through WithTx is never rerun.
 func Run(ctx context.Context, db Beginner, fn func(q *generated.Queries) error) error {
+	return run(ctx, db, nil, fn)
+}
+
+// RunSerializable is Run at the SERIALIZABLE isolation level.
+func RunSerializable(ctx context.Context, db Beginner, fn func(q *generated.Queries) error) error {
+	return run(ctx, db, &sql.TxOptions{Isolation: sql.LevelSerializable}, fn)
+}
+
+func run(ctx context.Context, db Beginner, opts *sql.TxOptions, fn func(q *generated.Queries) error) error {
 	if tx, ok := ctx.Value(ambientKey{}).(*sql.Tx); ok {
 		return fn(generated.New(tx))
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err = once(ctx, db, opts, fn); !retryable(err) {
+			return err
+		}
+	}
+	return err
+}
+
+// once runs one attempt. The deferred rollback is a no-op after a successful
+// commit, so it covers an early return from anywhere in fn.
+func once(ctx context.Context, db Beginner, opts *sql.TxOptions, fn func(q *generated.Queries) error) error {
+	tx, err := db.BeginTx(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -50,4 +79,9 @@ func Run(ctx context.Context, db Beginner, fn func(q *generated.Queries) error) 
 		return err
 	}
 	return tx.Commit()
+}
+
+func retryable(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213)
 }

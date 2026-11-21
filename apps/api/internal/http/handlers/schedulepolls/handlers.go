@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
@@ -28,7 +28,6 @@ const (
 	maxPollStoredSlots = 4096
 	maxPollActions     = 1000
 	maxPollHistory     = 500
-	finalizeTries      = 3
 )
 
 type Deps struct {
@@ -308,35 +307,6 @@ func withReadSnapshot(ctx context.Context, db *sql.DB, fn func(*generated.Querie
 	return tx.Commit()
 }
 
-func withSerializable(ctx context.Context, db *sql.DB, fn func(*generated.Queries) error) error {
-	var lastErr error
-	for attempt := 0; attempt < finalizeTries; attempt++ {
-		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-		if err != nil {
-			return err
-		}
-		err = fn(generated.New(tx))
-		if err == nil {
-			err = tx.Commit()
-		} else {
-			_ = tx.Rollback()
-		}
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		if !retryableTransactionError(err) || attempt+1 == finalizeTries {
-			return err
-		}
-	}
-	return lastErr
-}
-
-func retryableTransactionError(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213)
-}
-
 func validatePollTitle(title string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" || utf8.RuneCountInString(title) > 500 {
@@ -526,7 +496,7 @@ func CreatePoll(deps Deps) func(context.Context, *CreatePollInput) (*CreatePollO
 			return nil, apiError(err)
 		}
 		var detail PollDetailResponse
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
 				return err
 			}
@@ -762,7 +732,7 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 			return nil, apiError(err)
 		}
 		var result PollDetailResponse
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
 				return err
 			}
@@ -826,7 +796,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollRespo
 		}
 		var result PollResponseBody
 		staleAfterRefresh := false
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
 				return err
 			}

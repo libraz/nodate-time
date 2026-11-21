@@ -147,6 +147,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			mustSend bool
 		)
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			mustSend = false
 			if _, err := lockDetailEdit(ctx, q, cal, evt.ID, userID); err != nil {
 				return err
 			}

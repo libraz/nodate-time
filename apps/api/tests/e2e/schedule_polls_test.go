@@ -358,3 +358,42 @@ func TestSchedulePollParallelConfirmationsOnlyBookOnePoll(t *testing.T) {
 		owner.CalendarID, titles[0], titles[1]).Scan(&count))
 	require.Equal(t, 1, count)
 }
+
+// TestSchedulePollFinalizesWithoutPendingAnswers verifies that a manager can
+// close a poll while some recipients have not answered; a "no" from someone
+// who did answer still blocks that slot.
+func TestSchedulePollFinalizesWithoutPendingAnswers(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	answered := helpers.NewTenant(t, testServerURL)
+	silent := helpers.NewTenant(t, testServerURL)
+	joinScheduleCalendar(t, owner, answered)
+	joinScheduleCalendar(t, owner, silent)
+	baseURL := testServerURL + "/calendars/" + owner.CalendarID + "/schedule-polls"
+	start := time.Now().UTC().AddDate(0, 0, 9).Truncate(time.Hour)
+	var poll schedulePollBody
+	helpers.DoJSON(t, http.MethodPost, baseURL, owner.AccessToken, map[string]any{
+		"title": "Rehearsal", "timezone": "UTC", "memberIds": []string{answered.UserID, silent.UserID},
+		"slots": []map[string]string{scheduleSlot(start), scheduleSlot(start.Add(24 * time.Hour))},
+	}, &poll)
+	pollURL := baseURL + "/" + poll.ID
+
+	status, raw := putPollResponse(t, pollURL, answered.AccessToken, []map[string]string{
+		{"slotId": poll.Slots[0].ID, "value": "yes"},
+		{"slotId": poll.Slots[1].ID, "value": "no"},
+	})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	helpers.DoJSON(t, http.MethodGet, pollURL, owner.AccessToken, nil, &poll)
+	require.Equal(t, 1, poll.RespondedCount)
+
+	status, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken,
+		map[string]any{"slotId": poll.Slots[1].ID, "ownerId": answered.UserID}, ifMatch(poll.ETag))
+	require.Equal(t, http.StatusConflict, status, string(raw))
+
+	doIfMatch(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken, poll.ETag,
+		map[string]any{"slotId": poll.Slots[0].ID, "ownerId": answered.UserID}, &poll)
+	require.Equal(t, "finalized", poll.Status)
+	require.NotEmpty(t, poll.ConfirmedEventID)
+}

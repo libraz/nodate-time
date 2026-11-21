@@ -7,6 +7,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
@@ -39,7 +40,7 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 		var result PollDetailResponse
 		blockedByNewFixedEvent := false
 		availabilityChangedAtFinalize := false
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err
@@ -79,17 +80,8 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			if len(memberIDs) == 0 {
 				return apierrors.SchedulePollConflict
 			}
-			memberCount, err := q.CountSchedulePollCurrentMembers(ctx, poll.ID)
-			if err != nil {
-				return err
-			}
-			respondedCount, err := q.CountSchedulePollCurrentResponded(ctx, poll.ID)
-			if err != nil {
-				return err
-			}
-			if memberCount == 0 || respondedCount != memberCount {
-				return apierrors.SchedulePollConflict
-			}
+			// Recipients who have not answered do not hold the poll open; the
+			// client confirms closing without them.
 
 			slot, err := q.GetSchedulePollSlotByPublicID(ctx, generated.GetSchedulePollSlotByPublicIDParams{
 				PollID:   poll.ID,

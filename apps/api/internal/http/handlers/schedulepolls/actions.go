@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
@@ -22,7 +23,7 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 			return nil, apiError(err)
 		}
 		var result PollDetailResponse
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err

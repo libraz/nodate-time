@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -105,35 +106,29 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 		if deps.DB == nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		q := generated.New(tx)
-		if _, err := q.GetUserByIDForUpdate(ctx, userID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		activeUploads, err = q.CountActiveAvatarUploads(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if activeUploads >= maxAvatarUploads {
-			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
-		}
-		if _, err := q.CreateAvatarUpload(ctx, generated.CreateAvatarUploadParams{
-			PublicID:    avatarPubID[:],
-			UserID:      userID,
-			Sha256:      digest,
-			StorageKey:  key,
-			ContentType: strings.ToLower(in.Body.ContentType),
-			ByteSize:    uint64(in.Body.ByteSize),
-			ExpiresAt:   expiresAt,
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if _, err := q.GetUserByIDForUpdate(ctx, userID); err != nil {
+				return err
+			}
+			activeUploads, err := q.CountActiveAvatarUploads(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if activeUploads >= maxAvatarUploads {
+				return apierrors.AvatarUploadLimit
+			}
+			_, err = q.CreateAvatarUpload(ctx, generated.CreateAvatarUploadParams{
+				PublicID:    avatarPubID[:],
+				UserID:      userID,
+				Sha256:      digest,
+				StorageKey:  key,
+				ContentType: strings.ToLower(in.Body.ContentType),
+				ByteSize:    uint64(in.Body.ByteSize),
+				ExpiresAt:   expiresAt,
+			})
+			return err
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, toAPIError(err)
 		}
 
 		out := &PresignAvatarOutput{}
@@ -216,64 +211,60 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 		if deps.DB == nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		tx, err := deps.DB.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		defer tx.Rollback()
-		q := generated.New(tx)
-		lockedUpload, err := q.GetAvatarUploadForUserForUpdate(ctx, generated.GetAvatarUploadForUserForUpdateParams{
-			ID:     upload.ID,
-			UserID: userID,
-		})
-		if err != nil || lockedUpload.StorageKey != upload.StorageKey {
-			return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
-		}
-		user, err := q.GetUserByIDForUpdate(ctx, userID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		// The picture is a storage_objects row scoped to this user, and the
-		// user row points at it. Releasing the previous reference here rather
-		// than deleting its blob is what makes the two-avatars-same-bytes
-		// case safe: the object survives while anything still refers to it.
-		object, err := blobref.Store(ctx, q, blobref.Blob{
-			OwnerUserID: userID,
-			SHA256:      upload.Sha256,
-			ByteSize:    upload.ByteSize,
-			ContentType: upload.ContentType,
-			StorageKey:  upload.StorageKey,
-		})
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-
-		// The user row holds one reference, on whichever object it points at.
-		// The same picture confirmed again is the same object, and the row
-		// already holds its reference.
-		previousObjectID := user.AvatarStorageObjectID
-		if !previousObjectID.Valid || uint32(previousObjectID.Int32) != object.ID {
-			if err := q.SetUserAvatarObject(ctx, generated.SetUserAvatarObjectParams{
-				AvatarStorageObjectID: sql.NullInt32{Int32: int32(object.ID), Valid: true},
-				ID:                    userID,
-			}); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			lockedUpload, err := q.GetAvatarUploadForUserForUpdate(ctx, generated.GetAvatarUploadForUserForUpdateParams{
+				ID:     upload.ID,
+				UserID: userID,
+			})
+			if err != nil || lockedUpload.StorageKey != upload.StorageKey {
+				return apierrors.AvatarNotFound
 			}
-			if err := blobref.Acquire(ctx, q, object.ID); err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			user, err := q.GetUserByIDForUpdate(ctx, userID)
+			if err != nil {
+				return err
 			}
-			if previousObjectID.Valid {
-				if err := blobref.Release(ctx, q, uint32(previousObjectID.Int32)); err != nil {
-					return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+
+			// The picture is a storage_objects row scoped to this user, and the
+			// user row points at it. Releasing the previous reference here rather
+			// than deleting its blob is what makes the two-avatars-same-bytes
+			// case safe: the object survives while anything still refers to it.
+			object, err := blobref.Store(ctx, q, blobref.Blob{
+				OwnerUserID: userID,
+				SHA256:      upload.Sha256,
+				ByteSize:    upload.ByteSize,
+				ContentType: upload.ContentType,
+				StorageKey:  upload.StorageKey,
+			})
+			if err != nil {
+				return err
+			}
+
+			// The user row holds one reference, on whichever object it points at.
+			// The same picture confirmed again is the same object, and the row
+			// already holds its reference.
+			previousObjectID := user.AvatarStorageObjectID
+			if !previousObjectID.Valid || uint32(previousObjectID.Int32) != object.ID {
+				if err := q.SetUserAvatarObject(ctx, generated.SetUserAvatarObjectParams{
+					AvatarStorageObjectID: sql.NullInt32{Int32: int32(object.ID), Valid: true},
+					ID:                    userID,
+				}); err != nil {
+					return err
+				}
+				if err := blobref.Acquire(ctx, q, object.ID); err != nil {
+					return err
+				}
+				if previousObjectID.Valid {
+					if err := blobref.Release(ctx, q, uint32(previousObjectID.Int32)); err != nil {
+						return err
+					}
 				}
 			}
-		}
-		if err := q.DeleteAvatarUpload(ctx, upload.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			if err := q.DeleteAvatarUpload(ctx, upload.ID); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, toAPIError(err)
 		}
 
 		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
@@ -332,4 +323,14 @@ func DeleteAvatar(deps Deps) func(context.Context, *DeleteAvatarInput) (*DeleteA
 
 		return &DeleteAvatarOutput{}, nil
 	}
+}
+
+// toAPIError keeps a declared refusal's spec and reports anything else as an
+// unexpected fault.
+func toAPIError(err error) error {
+	var spec *apierrors.Spec
+	if errors.As(err, &spec) {
+		return apierrors.ToHuma(spec)
+	}
+	return apierrors.ToHuma(apierrors.InternalUnexpected)
 }

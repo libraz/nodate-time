@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/availability"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
@@ -244,7 +245,7 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 		}
 
 		var result PollDetailResponse
-		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
+		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			poll, err := lockPollForManager(ctx, q, deps, cal, pollPublicID)
 			if err != nil {
 				return err
