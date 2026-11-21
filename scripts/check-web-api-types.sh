@@ -20,11 +20,11 @@ if ! diff -u "$committed" "$tmp"; then
 fi
 
 # Everything outside the typed client, its mock and the generated file must go
-# through the client. lib/upload.ts is the one place that PUTs to a signed
-# object-storage URL, which is not the API.
+# through the client. lib/upload.ts PUTs to a signed object-storage URL and
+# lib/build-check.ts reads the SPA's own index.html; neither is the API.
 bypass="$(grep -rnE --include='*.ts' --include='*.tsx' \
   -e '\bfetch\(' -e "lib/api['\"]" -e '^\s*(export )?(interface|type) \w+(Request|Response)\b' "$src" |
-  grep -vE '/(lib/client\.ts|lib/upload\.ts|lib/api-schema\.d\.ts|test/mock-client\.ts):|\.test\.tsx?:' || true)"
+  grep -vE '/(lib/client\.ts|lib/upload\.ts|lib/build-check\.ts|lib/api-schema\.d\.ts|test/mock-client\.ts):|\.test\.tsx?:' || true)"
 if [ -n "$bypass" ]; then
   echo "$bypass" >&2
   echo "check-web-api-types: web code bypasses the typed client" >&2
