@@ -691,6 +691,17 @@ export const ja = {
   'schedulePoll.findCandidates': '候補を探す',
   'schedulePoll.findCandidatesHint':
     '対象者の予定と重ならない日時を探します。予定の内容は表示されません。',
+  'schedulePoll.pickMode': '候補の選び方',
+  'schedulePoll.pickModeAuto': '自動',
+  'schedulePoll.pickModeManual': '手動',
+  'schedulePoll.autoModeHint':
+    '全員の予定が空いている日時から、日付と時間帯が偏らないように近い日程を選びます。予定の内容は表示されません。',
+  'schedulePoll.autoCount': '候補数',
+  'schedulePoll.autoFind': '候補を自動で選ぶ',
+  'schedulePoll.autoPickedHint':
+    '{count} 件を自動で選びました。マスを押すと入れ替えられます。1 枠 {minutes} 分です。',
+  'schedulePoll.autoPickedShort':
+    '空きが少ないため {count} 件だけ選びました。期間や時間帯を広げると増やせます。1 枠 {minutes} 分です。',
   'schedulePoll.manualCandidate': '日時を指定して候補を追加',
   'schedulePoll.manualCandidateHint':
     '入力したタイムゾーン（{timezone}）で指定します。送信前に空き状況を確認します。',

@@ -5,6 +5,11 @@ import { formatSchedulePollSlotTime, slotTimeRange } from '@/components/schedule
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/client';
 import {
+  AUTO_PICK_COUNTS,
+  type AutoPickCount,
+  autoPickCandidates,
+} from '@/lib/schedule-poll-auto-pick';
+import {
   type SchedulePollAvailabilityInput,
   type SchedulePollCandidate,
   schedulePollApi,
@@ -57,6 +62,8 @@ export function SchedulePollCandidateFinder({
   const [searched, setSearched] = useState(false);
   // Grid rows are ordered from the searched window's start, so an overnight window reads top-down.
   const [searchedStartTime, setSearchedStartTime] = useState(startTime);
+  const [autoMode, setAutoMode] = useState(true);
+  const [autoCount, setAutoCount] = useState<AutoPickCount>(5);
 
   useEffect(() => {
     if (previousIdentity.current !== requestIdentity) {
@@ -73,7 +80,11 @@ export function SchedulePollCandidateFinder({
     };
   }, [requestIdentity]);
 
-  const runSearch = async (input: SchedulePollAvailabilityInput, mode: 'replace' | 'append') => {
+  const runSearch = async (
+    input: SchedulePollAvailabilityInput,
+    mode: 'replace' | 'append',
+    autoPick?: AutoPickCount,
+  ) => {
     const sequence = ++requestSequence.current;
     const currentMemberKey = memberKey;
     activeController.current?.abort();
@@ -94,6 +105,10 @@ export function SchedulePollCandidateFinder({
       for (const candidate of result) merged.set(candidateKey(candidate), candidate);
       const nextSuggestions = [...merged.values()];
       setSuggestions(nextSuggestions);
+      if (autoPick) {
+        onChangeRef.current(autoPickCandidates(nextSuggestions, autoPick, timezone));
+        return;
+      }
       const byKey = new Map(
         nextSuggestions.map((candidate) => [candidateKey(candidate), candidate]),
       );
@@ -128,6 +143,7 @@ export function SchedulePollCandidateFinder({
         memberIds,
       },
       'replace',
+      autoMode ? autoCount : undefined,
     );
   };
 
@@ -174,6 +190,19 @@ export function SchedulePollCandidateFinder({
     );
   };
 
+  const applyAutoPick = (count: AutoPickCount) => {
+    if (suggestions.length > 0 && !searching)
+      onChange(autoPickCandidates(suggestions, count, timezone));
+  };
+  const chooseMode = (auto: boolean) => {
+    setAutoMode(auto);
+    if (auto) applyAutoPick(autoCount);
+  };
+  const chooseCount = (count: AutoPickCount) => {
+    setAutoCount(count);
+    applyAutoPick(count);
+  };
+
   const selectedKeys = new Set(selected.map(candidateKey));
   const toggle = (candidate: SchedulePollCandidate) => {
     const key = candidateKey(candidate);
@@ -186,13 +215,35 @@ export function SchedulePollCandidateFinder({
 
   return (
     <div className="page-card p-4 sm:p-5">
-      <div className="mb-4">
-        <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('schedulePoll.findCandidates')}
-        </h3>
-        <p className="mt-0.5 text-footnote text-[var(--color-text-secondary)]">
-          {t('schedulePoll.findCandidatesHint')}
-        </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
+            {t('schedulePoll.findCandidates')}
+          </h3>
+          <p className="mt-0.5 text-footnote text-[var(--color-text-secondary)]">
+            {t(autoMode ? 'schedulePoll.autoModeHint' : 'schedulePoll.findCandidatesHint')}
+          </p>
+        </div>
+        <div
+          className="segmented-control shrink-0"
+          role="radiogroup"
+          aria-label={t('schedulePoll.pickMode')}
+        >
+          {[true, false].map((auto) => (
+            // biome-ignore lint/a11y/useSemanticElements: the segmented control styles buttons, not radio inputs
+            <button
+              key={String(auto)}
+              type="button"
+              role="radio"
+              aria-checked={autoMode === auto}
+              data-active={autoMode === auto}
+              disabled={searching}
+              onClick={() => chooseMode(auto)}
+            >
+              {t(auto ? 'schedulePoll.pickModeAuto' : 'schedulePoll.pickModeManual')}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,0.8fr)]">
@@ -224,14 +275,41 @@ export function SchedulePollCandidateFinder({
           />
         </div>
       </div>
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-3">
+        {autoMode && (
+          <div className="flex items-center gap-2.5 max-sm:w-full max-sm:justify-between">
+            <span
+              id="auto-pick-count"
+              className="text-footnote font-medium text-[var(--color-text-secondary)]"
+            >
+              {t('schedulePoll.autoCount')}
+            </span>
+            <div className="segmented-control" role="radiogroup" aria-labelledby="auto-pick-count">
+              {AUTO_PICK_COUNTS.map((count) => (
+                // biome-ignore lint/a11y/useSemanticElements: the segmented control styles buttons, not radio inputs
+                <button
+                  key={count}
+                  type="button"
+                  role="radio"
+                  aria-checked={autoCount === count}
+                  data-active={autoCount === count}
+                  disabled={searching}
+                  onClick={() => chooseCount(count)}
+                  className="tabular-nums"
+                >
+                  {count}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={findCandidates}
           disabled={
             searching || memberIds.length === 0 || fromDate > toDate || durationMinutes < 15
           }
-          className="btn-primary inline-flex h-9 items-center gap-2 px-4 text-body"
+          className="btn-primary inline-flex h-9 items-center justify-center gap-2 px-4 text-body max-sm:w-full"
         >
           {searching ? (
             <span aria-hidden className="spinner h-3.5 w-3.5" />
@@ -250,7 +328,7 @@ export function SchedulePollCandidateFinder({
               <path d="m10.5 10.5 3 3" />
             </svg>
           )}
-          {t('schedulePoll.findCandidates')}
+          {t(autoMode ? 'schedulePoll.autoFind' : 'schedulePoll.findCandidates')}
         </button>
       </div>
 
@@ -266,6 +344,7 @@ export function SchedulePollCandidateFinder({
               selected={selected}
               selectedKeys={selectedKeys}
               anchorTime={searchedStartTime}
+              autoPicked={autoMode ? autoCount : undefined}
               disabled={searching}
               onToggle={toggle}
             />
@@ -351,6 +430,7 @@ function SlotGrid({
   selected,
   selectedKeys,
   anchorTime,
+  autoPicked,
   disabled,
   onToggle,
 }: {
@@ -358,6 +438,7 @@ function SlotGrid({
   selected: SchedulePollCandidate[];
   selectedKeys: Set<string>;
   anchorTime: string;
+  autoPicked: AutoPickCount | undefined;
   disabled: boolean;
   onToggle: (candidate: SchedulePollCandidate) => void;
 }) {
@@ -389,6 +470,7 @@ function SlotGrid({
     else cells.set(cellKey, [entry]);
     durations.set(durationOf(entry), (durations.get(durationOf(entry)) ?? 0) + 1);
   }
+  const pickable = autoPicked ? autoPickCandidates(suggestions, autoPicked, timezone).length : 0;
   const usualDuration = [...durations.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
   const selectedEntries = selected
     .map((candidate) => ({
@@ -402,7 +484,17 @@ function SlotGrid({
     <div>
       <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-footnote text-[var(--color-text-secondary)]">
-          {t('schedulePoll.slotGridHint', { minutes: usualDuration })}
+          {autoPicked
+            ? t(
+                pickable < autoPicked
+                  ? 'schedulePoll.autoPickedShort'
+                  : 'schedulePoll.autoPickedHint',
+                {
+                  minutes: usualDuration,
+                  count: pickable < autoPicked ? pickable : selected.length,
+                },
+              )
+            : t('schedulePoll.slotGridHint', { minutes: usualDuration })}
         </p>
         <ul className="flex items-center gap-3 text-micro text-[var(--color-text-tertiary)]">
           <li className="flex items-center gap-1.5">

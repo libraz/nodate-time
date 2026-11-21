@@ -675,6 +675,17 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.findCandidates': 'Find candidate times',
   'schedulePoll.findCandidatesHint':
     'The search checks invitees’ calendars without showing event details.',
+  'schedulePoll.pickMode': 'How to pick candidates',
+  'schedulePoll.pickModeAuto': 'Auto',
+  'schedulePoll.pickModeManual': 'Manual',
+  'schedulePoll.autoModeHint':
+    "Picks nearby times when everyone is free, spread across days and times of day. Nobody's plans are shown.",
+  'schedulePoll.autoCount': 'Candidates',
+  'schedulePoll.autoFind': 'Pick candidates',
+  'schedulePoll.autoPickedHint':
+    'Picked {count} candidate(s). Tap a slot to swap. Each slot is {minutes} minutes.',
+  'schedulePoll.autoPickedShort':
+    'Only {count} free candidate(s) found. Widen the dates or hours to get more. Each slot is {minutes} minutes.',
   'schedulePoll.manualCandidate': 'Add an exact time',
   'schedulePoll.manualCandidateHint':
     'Times use {timezone}. Availability is checked before the time can be selected.',
