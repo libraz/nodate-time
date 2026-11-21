@@ -1,12 +1,12 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BrandRow } from '@/components/brand-mark';
 import { CalendarCoverImage } from '@/components/calendar-cover-image';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
+import { PageTopBar } from '@/components/page-top-bar';
 import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
@@ -194,26 +194,16 @@ function SettingsPage() {
   return (
     <div className="app-bg h-full">
       <div className="mx-auto flex h-full max-w-[1080px] flex-col px-4 py-6 sm:px-6">
-        <header className="mb-6 flex items-center justify-between">
-          <div className="min-w-0">
-            <div className="mb-3">
-              <BrandRow />
-            </div>
-            <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
-              {t('settings.title')}
-            </h1>
-          </div>
-          <Link
-            to="/"
-            className="rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-body font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]"
-          >
-            {t('common.close')}
-          </Link>
+        <PageTopBar to="/" label={t('route.backToCalendar')} />
+        <header className="mb-6">
+          <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
+            {t('settings.title')}
+          </h1>
         </header>
 
-        {/* Mobile tab strip */}
+        {/* Mobile tab strip: bleeds to the screen edge so the overflow reads as scrollable. */}
         <nav
-          className="mb-4 flex gap-2 overflow-x-auto pb-1 sm:hidden"
+          className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:hidden"
           aria-label={t('settings.title')}
         >
           {tabs.map((td) => (
@@ -246,7 +236,7 @@ function SettingsPage() {
                 type="button"
                 onClick={() => setTab(td.id)}
                 aria-current={tab === td.id ? 'page' : undefined}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                className={`flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-left transition ${
                   tab === td.id
                     ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]'
                     : 'text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
@@ -254,7 +244,7 @@ function SettingsPage() {
               >
                 <span
                   aria-hidden
-                  className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] ${
                     tab === td.id
                       ? 'bg-[var(--color-accent)] text-[var(--color-text-on-accent)]'
                       : 'bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]'
@@ -272,7 +262,7 @@ function SettingsPage() {
             ))}
           </nav>
 
-          <main key={tab} className="calendar-enter flex-1 overflow-y-auto pb-12 sm:pr-2">
+          <main key={tab} className="page-scroll calendar-enter flex-1 overflow-y-auto pb-12">
             {tab === 'profile' && <ProfileSection />}
             {tab === 'appearance' && <AppearanceSection />}
             {tab === 'calendars' && <CalendarsSection />}
@@ -450,7 +440,7 @@ export function ProfileSection() {
             onFile={handleAvatarFile}
             busy={avatarBusy}
             hasImage
-            className="h-16 w-16 rounded-2xl shadow-sm"
+            className="h-16 w-16 rounded-[var(--radius-lg)] shadow-sm"
           >
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -525,7 +515,7 @@ export function ProfileSection() {
                   type="button"
                   onClick={handleResendVerification}
                   disabled={resendingVerification}
-                  className="btn-secondary h-8 shrink-0 self-start px-3 text-footnote sm:self-center"
+                  className="btn-secondary btn-sm shrink-0 self-start sm:self-center"
                 >
                   {t('profile.resendVerification')}
                 </button>
@@ -738,7 +728,7 @@ function SessionRow({ session: s, onRevoke }: { session: SessionData; onRevoke: 
         <button
           type="button"
           onClick={onRevoke}
-          className="h-8 shrink-0 rounded-lg px-3 text-footnote font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] active:scale-95"
+          className="btn-secondary btn-sm btn-danger shrink-0"
         >
           {t('sessions.revoke')}
         </button>
@@ -1000,7 +990,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
                 onFile={handleCoverFile}
                 busy={coverBusy}
                 hasImage={hasCover}
-                className="h-20 w-20 rounded-2xl"
+                className="h-20 w-20 rounded-[var(--radius-lg)]"
               >
                 {hasCover && (
                   <CalendarCoverImage
@@ -1016,8 +1006,8 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
                 <CalendarCoverImage
                   calendar={draftCover}
                   alt={calendar?.name ?? ''}
-                  className="h-20 w-20 shrink-0 rounded-2xl object-cover"
-                  fallbackClassName="block h-20 w-20 shrink-0 rounded-2xl"
+                  className="h-20 w-20 shrink-0 rounded-[var(--radius-lg)] object-cover"
+                  fallbackClassName="block h-20 w-20 shrink-0 rounded-[var(--radius-lg)]"
                 />
               )
             )}
@@ -1250,7 +1240,7 @@ export function CalendarsSection() {
                       type="button"
                       onClick={() => setPendingRemoveMember(m)}
                       aria-label={isMe ? t('members.leave') : t('common.delete')}
-                      className="shrink-0 rounded-lg p-2 text-[var(--color-text-tertiary)] transition hover:bg-[var(--color-danger-bg)] hover:text-[var(--color-danger)]"
+                      className="icon-btn icon-btn-danger h-9 w-9 shrink-0"
                     >
                       <svg
                         width="16"
@@ -1345,7 +1335,7 @@ export function CalendarsSection() {
           {loadingInvites ? (
             <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
           ) : joinInvites.length === 0 ? (
-            <p className="rounded-xl bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
+            <p className="rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
               {t('invites.empty')}
             </p>
           ) : (
@@ -1380,7 +1370,7 @@ export function CalendarsSection() {
                   <button
                     type="button"
                     onClick={() => setPendingRevokeId(inv.id)}
-                    className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-danger)] transition hover:bg-[var(--color-danger-bg)]"
+                    className="btn-secondary btn-sm btn-danger shrink-0"
                   >
                     {t('invites.revoke')}
                   </button>

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
-import { BrandRow } from '@/components/brand-mark';
+import { PageTopBar } from '@/components/page-top-bar';
 import { useT } from '@/i18n';
 import { HELP_SECTIONS, type HelpBlock } from '@/lib/help-topics';
 import { toast } from '@/lib/toast';
@@ -114,22 +114,12 @@ function HelpPage() {
   return (
     <div className="app-bg h-full">
       <div className="mx-auto flex h-full max-w-[1080px] flex-col px-4 py-6 sm:px-6">
-        <header className="mb-6 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="mb-3">
-              <BrandRow />
-            </div>
-            <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
-              {t('help.title')}
-            </h1>
-            <p className="mt-1 text-default text-[var(--color-text-secondary)]">{t('help.lead')}</p>
-          </div>
-          <Link
-            to="/"
-            className="shrink-0 whitespace-nowrap rounded-full bg-[var(--color-surface-inset)] px-4 py-2 text-body font-medium text-[var(--color-text-primary)] transition hover:bg-[var(--color-hover)]"
-          >
-            {t('common.close')}
-          </Link>
+        <PageTopBar to="/" label={t('route.backToCalendar')} />
+        <header className="mb-6">
+          <h1 className="text-display font-bold text-[var(--color-text-primary)] sm:text-hero">
+            {t('help.title')}
+          </h1>
+          <p className="mt-1 text-default text-[var(--color-text-secondary)]">{t('help.lead')}</p>
         </header>
 
         <div className="flex flex-1 gap-6 overflow-hidden">
@@ -157,7 +147,7 @@ function HelpPage() {
             </ul>
           </nav>
 
-          <main className="calendar-enter flex-1 overflow-y-auto pb-12 sm:pr-2">
+          <main className="page-scroll calendar-enter flex-1 overflow-y-auto pb-12">
             {/* Mobile table of contents */}
             <nav aria-label={t('help.contents')} className="mb-5 flex flex-wrap gap-2 sm:hidden">
               {HELP_SECTIONS.map((s) => (

@@ -1,8 +1,7 @@
-import { Link } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { Avatar } from '@/components/avatar';
-import { BrandRow } from '@/components/brand-mark';
+import { PageTopBar } from '@/components/page-top-bar';
 import { useT } from '@/i18n';
 import type { PollAnswer, PollAvailability, SchedulePoll } from '@/lib/schedule-polls';
 import { useUiStore } from '@/stores/ui-store';
@@ -24,28 +23,10 @@ export function SchedulePollFrame({
     // long scrolls inside its own frame.
     <div className="app-bg h-full overflow-y-auto">
       <div className="relative mx-auto flex min-h-full max-w-[1040px] flex-col px-4 py-5 sm:px-6 sm:py-8">
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <Link
-            to={backTo}
-            className="-ml-2 inline-flex h-9 items-center gap-1 rounded-[var(--radius-control)] pr-3 pl-1.5 text-body font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-hover)]"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            {backTo === '/' ? t('schedulePoll.backToCalendar') : t('schedulePoll.backToList')}
-          </Link>
-          <BrandRow />
-        </div>
+        <PageTopBar
+          to={backTo}
+          label={backTo === '/' ? t('schedulePoll.backToCalendar') : t('schedulePoll.backToList')}
+        />
         <header className="mb-6 min-w-0 sm:mb-8">
           {eyebrow && (
             <p className="mb-1 text-footnote font-medium text-[var(--color-text-secondary)]">
