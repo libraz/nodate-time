@@ -101,6 +101,31 @@ func (q *Queries) CountCalendarOwnersForUpdate(ctx context.Context, calendarID u
 	return count, err
 }
 
+const countUserCalendars = `-- name: CountUserCalendars :one
+SELECT COUNT(*)
+FROM calendars c
+INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
+WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
+  AND EXISTS (
+    SELECT 1 FROM workspace_members wm
+    WHERE wm.workspace_id = c.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+  )
+`
+
+type CountUserCalendarsParams struct {
+	UserID      uint32 `json:"userId"`
+	WorkspaceID uint32 `json:"workspaceId"`
+}
+
+// CountUserCalendars counts the calendars ListCalendarsByUser would return, so
+// the limit on how many a person can belong to is measured on what they see.
+func (q *Queries) CountUserCalendars(ctx context.Context, arg CountUserCalendarsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserCalendars, arg.UserID, arg.WorkspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getCalendarMember = `-- name: GetCalendarMember :one
 SELECT id, public_id, workspace_id, calendar_id, user_id, role, member_color, invited_by_user_id, sort_weight, notes, enabled, updated_at, created_at FROM calendar_members
 WHERE calendar_members.calendar_id = ? AND calendar_members.user_id = ?

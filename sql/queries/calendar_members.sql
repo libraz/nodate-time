@@ -128,3 +128,15 @@ WHERE calendar_members.calendar_id = ? AND calendar_members.role = 'owner'
                 AND wm.user_id = calendar_members.user_id
                 AND wm.enabled = TRUE)
 FOR UPDATE;
+
+-- CountUserCalendars counts the calendars ListCalendarsByUser would return, so
+-- the limit on how many a person can belong to is measured on what they see.
+-- name: CountUserCalendars :one
+SELECT COUNT(*)
+FROM calendars c
+INNER JOIN calendar_members cm ON cm.calendar_id = c.id AND cm.enabled = TRUE
+WHERE cm.user_id = ? AND c.workspace_id = ? AND c.enabled = TRUE
+  AND EXISTS (
+    SELECT 1 FROM workspace_members wm
+    WHERE wm.workspace_id = c.workspace_id AND wm.user_id = cm.user_id AND wm.enabled = TRUE
+  );

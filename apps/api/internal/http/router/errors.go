@@ -87,3 +87,9 @@ func errorStatuses(specs ...*apierrors.Spec) []int {
 	slices.Sort(out)
 	return out
 }
+
+// preconditionedErrors lists the statuses of a write guarded by If-Match: a
+// missing or malformed header, plus the stale and domain Specs passed in.
+func preconditionedErrors(specs ...*apierrors.Spec) []int {
+	return errorStatuses(append([]*apierrors.Spec{apierrors.PreconditionRequired, apierrors.BadIfMatch}, specs...)...)
+}
