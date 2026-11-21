@@ -388,7 +388,7 @@ func splitSeriesEdit(ctx context.Context, q *generated.Queries, deps Deps, e eve
 	}
 	if err := eventlog.Append(ctx, q, eventlog.Entry{
 		WorkspaceID: deps.WorkspaceID, CalendarID: e.cal.ID, ActorUserID: e.actorID,
-		Type: eventlog.TypeEventCreated, Title: body.Title, Subject: pub[:], Extra: extra,
+		Type: eventlog.TypeEventCreated, Title: body.Title, Subject: pub[:], Extra: splitExtra(extra, master.PublicID),
 	}); err != nil {
 		return editedRows{}, err
 	}
@@ -548,4 +548,15 @@ func splitSeriesDelete(ctx context.Context, q *generated.Queries, deps Deps, act
 			"originalStart": occ.StartAt.Format(time.RFC3339),
 		},
 	})
+}
+
+// splitExtra is the creation entry's payload for the series a cut starts: it
+// names the series it was cut from, which a source sync follows to undo the cut.
+func splitExtra(extra map[string]any, from []byte) map[string]any {
+	out := make(map[string]any, len(extra)+1)
+	for k, v := range extra {
+		out[k] = v
+	}
+	out["splitFrom"] = eventlog.UUID(from)
+	return out
 }

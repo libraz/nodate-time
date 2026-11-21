@@ -229,6 +229,9 @@ func syncDelete(
 		map[string]any{"source": s.source}); err != nil {
 		return deleteResult{}, err
 	}
+	if err := dropSplitSeries(ctx, s, q, cal, userID, row.PublicID); err != nil {
+		return deleteResult{}, err
+	}
 	return deleteResult{deleted: true}, nil
 }
 
@@ -345,6 +348,9 @@ func updateHead(
 	if err := eventstore.DeleteOverrides(ctx, q, sql.NullInt32{Int32: int32(row.ID), Valid: true}, overrides); err != nil {
 		return err
 	}
+	if err := dropSplitSeries(ctx, s, q, cal, userID, row.PublicID); err != nil {
+		return err
+	}
 	extra := map[string]any{"source": s.source}
 	if err := attendees.Replace(ctx, q, s.workspaceID, row.ID, h.attendees, attendees.Log{
 		ActorUserID: userID, CalendarID: cal.ID, Subject: row.PublicID, Title: h.title, Extra: extra,
@@ -360,6 +366,46 @@ func updateHead(
 		Subject:     row.PublicID,
 		Extra:       extra,
 	})
+}
+
+// dropSplitSeries soft-deletes the series a following split cut from the one
+// named by publicID, and those cut from them in turn: a cut is a local edit of
+// the source's series, and the source's version replaces it as it does an override.
+func dropSplitSeries(
+	ctx context.Context, s session, q *generated.Queries, cal generated.Calendar, userID uint32, publicID []byte,
+) error {
+	ids, err := q.ListLiveSplitSeries(ctx, generated.ListLiveSplitSeriesParams{
+		WorkspaceID: s.workspaceID,
+		CalendarID:  sql.NullInt32{Int32: int32(cal.ID), Valid: true},
+		SplitFrom:   json.RawMessage(eventlog.UUID(publicID)),
+	})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		row, err := calresolve.LockEvent(ctx, q, cal.ID, id)
+		if errors.Is(err, apierrors.EventNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		visible, err := visibleToImporter(ctx, q, cal, userID, row)
+		if err != nil {
+			return err
+		}
+		if !visible || row.TaskID.Valid {
+			continue
+		}
+		if err := eventstore.SoftDelete(ctx, q, s.workspaceID, cal.ID, userID, row,
+			map[string]any{"source": s.source}); err != nil {
+			return err
+		}
+		if err := dropSplitSeries(ctx, s, q, cal, userID, row.PublicID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // isFromSource reports whether row's creation entry names the session's source.

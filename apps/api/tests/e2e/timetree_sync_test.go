@@ -323,6 +323,38 @@ func TestTimeTreeSync(t *testing.T) {
 		}
 	})
 
+	t.Run("following", func(t *testing.T) {
+		t.Parallel()
+		occurrences := func(s *ttScenario) []flEvent {
+			var out []flEvent
+			for _, it := range flList(t, testServerURL+"/calendars/"+s.calendarID(t), s.token) {
+				if it.RecurrenceDate != nil {
+					out = append(out, it)
+				}
+			}
+			return out
+		}
+		split := func(s *ttScenario) {
+			occ := occurrences(s)[2]
+			status, raw, _ := flPatch(t, testServerURL+"/calendars/"+s.calendarID(t), s.token, occ, "following",
+				occ.SeriesEtag, map[string]any{"title": "cut here"})
+			require.Equal(t, http.StatusOK, status, "%s", raw)
+		}
+
+		s := newTTScenario(t, syncEvents())
+		s.syncOK(t)
+		want := flTitles(occurrences(s))
+		split(s)
+		got := s.syncOK(t)
+		assert.Equal(t, 1, got.updated, "%+v", got)
+		assert.Equal(t, want, flTitles(occurrences(s)), "the source's series replaces the cut")
+
+		split(s)
+		s.setFeed(9001, without(syncEvents(), "s-rec"))
+		assert.Equal(t, 1, s.syncOK(t).deleted)
+		assert.Empty(t, occurrences(s), "the series cut from a deleted one goes with it")
+	})
+
 	t.Run("kept", func(t *testing.T) {
 		t.Parallel()
 		s := newTTScenario(t, syncEvents())

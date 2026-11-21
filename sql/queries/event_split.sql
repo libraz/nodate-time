@@ -20,3 +20,13 @@ WHERE id = ?;
 UPDATE calendar_event_reminders
 SET event_id = ?, occurrence_start = ?
 WHERE id = ?;
+
+-- ListLiveSplitSeries returns the live series a following split cut from the
+-- series whose public id is split_from, read off their creation entries.
+-- name: ListLiveSplitSeries :many
+SELECT ce.id FROM calendar_events ce
+JOIN events ev ON ev.subject_public_id = ce.public_id
+WHERE ev.workspace_id = sqlc.arg(workspace_id) AND ev.calendar_id = sqlc.arg(calendar_id)
+  AND ev.type = 'calendar.event.created'
+  AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.splitFrom')) = sqlc.arg(split_from)
+  AND ce.enabled = TRUE;

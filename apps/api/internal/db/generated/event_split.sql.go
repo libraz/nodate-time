@@ -12,6 +12,46 @@ import (
 	"time"
 )
 
+const listLiveSplitSeries = `-- name: ListLiveSplitSeries :many
+SELECT ce.id FROM calendar_events ce
+JOIN events ev ON ev.subject_public_id = ce.public_id
+WHERE ev.workspace_id = ? AND ev.calendar_id = ?
+  AND ev.type = 'calendar.event.created'
+  AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.splitFrom')) = ?
+  AND ce.enabled = TRUE
+`
+
+type ListLiveSplitSeriesParams struct {
+	WorkspaceID uint32          `json:"workspaceId"`
+	CalendarID  sql.NullInt32   `json:"calendarId"`
+	SplitFrom   json.RawMessage `json:"splitFrom"`
+}
+
+// ListLiveSplitSeries returns the live series a following split cut from the
+// series whose public id is split_from, read off their creation entries.
+func (q *Queries) ListLiveSplitSeries(ctx context.Context, arg ListLiveSplitSeriesParams) ([]uint32, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveSplitSeries, arg.WorkspaceID, arg.CalendarID, arg.SplitFrom)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uint32
+	for rows.Next() {
+		var id uint32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const moveEventReminder = `-- name: MoveEventReminder :exec
 UPDATE calendar_event_reminders
 SET event_id = ?, occurrence_start = ?
