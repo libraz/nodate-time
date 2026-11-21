@@ -15,14 +15,7 @@ import (
 // The list is held from both sides: an entry that gains a producer fails as
 // stale, so it shrinks to empty as the handlers land rather than collecting
 // forgotten promises.
-var pendingProducers = map[string]bool{
-	"EventExceptionNotFound": true,
-	"EventNotDeleted":        true,
-	"EventNotRecurring":      true,
-	"EventRestoreConflict":   true,
-	"EventRestoreExpired":    true,
-	"SearchTooBroad":         true,
-}
+var pendingProducers = map[string]bool{}
 
 // A declared error that no path returns is a promise the client is written
 // against and the server never keeps. Every Spec must be referenced from

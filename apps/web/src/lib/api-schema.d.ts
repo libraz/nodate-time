@@ -665,6 +665,23 @@ export interface paths {
         patch: operations["update-checklist-item"];
         trace?: never;
     };
+    "/calendars/{calendarId}/events/{eventId}/exceptions/{occurrenceDate}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Put a cancelled occurrence back */
+        delete: operations["undo-event-exception"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/calendars/{calendarId}/events/{eventId}/history": {
         parameters: {
             query?: never;
@@ -676,6 +693,23 @@ export interface paths {
         get: operations["get-event-history"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/calendars/{calendarId}/events/{eventId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore a deleted event */
+        post: operations["restore-event"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1075,6 +1109,23 @@ export interface paths {
         put?: never;
         /** Accept a calendar invite */
         post: operations["accept-invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search events across the caller's calendars */
+        get: operations["search-events"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4320,8 +4371,8 @@ export interface operations {
     "delete-event": {
         parameters: {
             query?: {
-                /** @description 'this' deletes only the occurrence a composite id names and is refused on any other id; 'all' deletes the whole series */
-                scope?: "this" | "all";
+                /** @description 'this' deletes only the occurrence a composite id names and is refused on any other id; 'all' deletes the whole series; 'following' deletes the occurrence a composite id names and every one after it */
+                scope?: "this" | "all" | "following";
             };
             header: {
                 "If-Match": string;
@@ -4418,8 +4469,8 @@ export interface operations {
     "update-event": {
         parameters: {
             query?: {
-                /** @description 'this' edits only the occurrence a composite id names and is refused on any other id; 'all' edits the whole series, measuring a move from the dates GET returned for that occurrence */
-                scope?: "this" | "all";
+                /** @description 'this' edits only the occurrence a composite id names and is refused on any other id; 'all' edits the whole series, measuring a move from the dates GET returned for that occurrence; 'following' ends the series before that occurrence and creates a new one from it, returned in the response */
+                scope?: "this" | "all" | "following";
             };
             header: {
                 "If-Match": string;
@@ -5509,6 +5560,94 @@ export interface operations {
             };
         };
     };
+    "undo-event-exception": {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": string;
+            };
+            path: {
+                calendarId: string;
+                eventId: string;
+                /** @description The cancelled occurrence's date, YYYY-MM-DD, in the series' own zone */
+                occurrenceDate: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
     "get-event-history": {
         parameters: {
             query?: {
@@ -5536,6 +5675,84 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "restore-event": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                calendarId: string;
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6970,6 +7187,51 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "search-events": {
+        parameters: {
+            query: {
+                /** @description Text to find in titles, and in locations and memos the caller may read */
+                q: string;
+                /** @description RFC 3339 instant or YYYY-MM-DD date in the caller's zone; defaults to now. Events ending after it match */
+                from?: string;
+                /** @description Most events to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEventsBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
