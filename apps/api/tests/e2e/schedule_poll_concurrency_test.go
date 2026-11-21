@@ -13,10 +13,11 @@ import (
 type concurrentPollRequest struct {
 	method, url, token string
 	body               any
+	headers            map[string]string
 }
 
 // firePollRequestsTogether releases every request at once from a shared
-// barrier. Each must succeed or be refused with a 409; a deadlock that outlives
+// barrier. Each must succeed or be refused with a 412; a deadlock that outlives
 // the transaction retries surfaces as a 500.
 func firePollRequestsTogether(t *testing.T, requests []concurrentPollRequest) {
 	t.Helper()
@@ -27,14 +28,14 @@ func firePollRequestsTogether(t *testing.T, requests []concurrentPollRequest) {
 	for i, r := range requests {
 		wg.Go(func() {
 			<-release
-			status, raw := helpers.DoJSONStatus(t, r.method, r.url, r.token, r.body)
+			status, raw := helpers.DoJSONStatusWithHeaders(t, r.method, r.url, r.token, r.body, r.headers)
 			statuses[i], bodies[i] = status, string(raw)
 		})
 	}
 	close(release)
 	wg.Wait()
 	for i, r := range requests {
-		ok := statuses[i] >= 200 && statuses[i] < 300 || statuses[i] == http.StatusConflict
+		ok := statuses[i] >= 200 && statuses[i] < 300 || statuses[i] == http.StatusPreconditionFailed
 		require.True(t, ok, "%s %s: %d %s", r.method, r.url, statuses[i], bodies[i])
 	}
 }
@@ -71,7 +72,7 @@ func createConcurrencyPoll(t *testing.T, owner *helpers.TestTenant, members []*h
 	return poll
 }
 
-// answerRequests reads each recipient's ballot first, so only the answers
+// answerRequests reads each recipient's own answer first, so only the answers
 // themselves race.
 func answerRequests(t *testing.T, owner *helpers.TestTenant, poll schedulePollBody, members []*helpers.TestTenant) []concurrentPollRequest {
 	t.Helper()
@@ -81,10 +82,13 @@ func answerRequests(t *testing.T, owner *helpers.TestTenant, poll schedulePollBo
 		var ballot schedulePollBody
 		helpers.DoJSON(t, http.MethodGet, pollURL, m.AccessToken, nil, &ballot)
 		require.True(t, ballot.CanRespond)
+		status, _, header := helpers.DoJSONFull(t, http.MethodGet, pollURL+"/response", m.AccessToken, nil, nil)
+		require.Equal(t, http.StatusOK, status)
+		require.NotEmpty(t, header.Get("ETag"))
 		requests = append(requests, concurrentPollRequest{
 			method: http.MethodPut, url: pollURL + "/response", token: m.AccessToken,
+			headers: map[string]string{"If-Match": header.Get("ETag")},
 			body: map[string]any{
-				"version": ballot.Version, "answerVersion": *ballot.AnswerVersion,
 				"answers": []map[string]string{
 					{"slotId": ballot.Slots[0].ID, "value": "yes"},
 					{"slotId": ballot.Slots[1].ID, "value": "maybe"},

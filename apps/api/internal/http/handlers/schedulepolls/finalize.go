@@ -68,11 +68,8 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			if poll.Status != generated.CalendarSchedulePollsStatusOpen {
 				return apierrors.SchedulePollConflict
 			}
-			if poll.Version != in.Body.Version {
-				return apierrors.SchedulePollStale
-			}
-			if poll.ResponseVersion != in.Body.ReviewVersion {
-				return apierrors.SchedulePollStale
+			if err := checkIfMatch(in.IfMatch, pollETag(poll.Version, poll.ResponseVersion), apierrors.SchedulePollStale); err != nil {
+				return err
 			}
 
 			members, memberIDs, err := activePollMembers(ctx, q, poll.ID)

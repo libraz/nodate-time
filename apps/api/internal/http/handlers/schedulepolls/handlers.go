@@ -18,6 +18,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -51,6 +52,16 @@ func apiError(err error) error {
 		return apierrors.ToHuma(spec)
 	}
 	return apierrors.ToHuma(apierrors.InternalUnexpected)
+}
+
+// checkIfMatch compares the caller's If-Match with the current tag and answers
+// with the given stale error when they differ.
+func checkIfMatch(header precondition.IfMatch, current string, stale *apierrors.Spec) error {
+	err := header.Check(current)
+	if errors.Is(err, precondition.ErrStale) {
+		return stale
+	}
+	return err
 }
 
 func internalError(ctx context.Context, operation string, err error) error {
@@ -212,8 +223,7 @@ func detailResponse(ctx context.Context, q *generated.Queries, av *avatars.Resol
 		Title:          poll.Title,
 		Timezone:       poll.Timezone,
 		Status:         string(poll.Status),
-		Version:        poll.Version,
-		ReviewVersion:  poll.ResponseVersion,
+		ETag:           pollETag(poll.Version, poll.ResponseVersion),
 		CanManage:      canManage,
 		CanTakeOver:    canTakeOver,
 		CanRespond:     canRespond,
@@ -259,11 +269,6 @@ func detailResponse(ctx context.Context, q *generated.Queries, av *avatars.Resol
 		}
 	}
 	if isTarget {
-		pollMember, _, err := currentPollMember(ctx, q, poll.ID, actor)
-		if err != nil {
-			return PollDetailResponse{}, err
-		}
-		response.AnswerVersion = &pollMember.AnswerVersion
 		answers, err := q.ListSchedulePollAnswersForUser(ctx, generated.ListSchedulePollAnswersForUserParams{PollID: poll.ID, UserID: callerMember.UserID})
 		if err != nil {
 			return PollDetailResponse{}, err
@@ -609,7 +614,7 @@ func GetPoll(deps Deps) func(context.Context, *GetPollInput) (*GetPollOutput, er
 		if err != nil {
 			return nil, apiError(err)
 		}
-		return &GetPollOutput{Body: detail}, nil
+		return &GetPollOutput{ETag: detail.ETag, Body: detail}, nil
 	}
 }
 
@@ -805,12 +810,12 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 		if err != nil {
 			return nil, apiError(err)
 		}
-		return &PollMutationOutput{Body: result}, nil
+		return &PollMutationOutput{ETag: result.ETag, Body: result}, nil
 	}
 }
 
-func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutationOutput, error) {
-	return func(ctx context.Context, in *SetResponseInput) (*PollMutationOutput, error) {
+func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollResponseOutput, error) {
+	return func(ctx context.Context, in *SetResponseInput) (*PollResponseOutput, error) {
 		actor, err := actorID(ctx)
 		if err != nil {
 			return nil, err
@@ -819,7 +824,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 		if err != nil {
 			return nil, apiError(err)
 		}
-		var result PollDetailResponse
+		var result PollResponseBody
 		staleAfterRefresh := false
 		err = withSerializable(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
@@ -859,16 +864,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 			}
 			if changed {
 				staleAfterRefresh = true
-				updated, err := q.GetSchedulePollForUpdateByPublicID(ctx, generated.GetSchedulePollForUpdateByPublicIDParams{
-					WorkspaceID: deps.WorkspaceID,
-					CalendarID:  cal.ID,
-					PublicID:    pollPublicID,
-				})
-				if err != nil {
-					return err
-				}
-				result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
-				return err
+				return nil
 			}
 			pollMember, eligible, err := currentPollMember(ctx, q, poll.ID, actor)
 			if err != nil {
@@ -877,8 +873,8 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 			if !eligible {
 				return apierrors.SchedulePollNotFound
 			}
-			if poll.Version != in.Body.Version || pollMember.AnswerVersion != in.Body.AnswerVersion {
-				return apierrors.SchedulePollStale
+			if err := checkIfMatch(in.IfMatch, answerETag(pollMember.AnswerVersion), apierrors.SchedulePollResponseStale); err != nil {
+				return err
 			}
 			slots, err := q.ListSchedulePollSlots(ctx, poll.ID)
 			if err != nil {
@@ -944,15 +940,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 					return err
 				}
 			}
-			updated, err := q.GetSchedulePollByPublicID(ctx, generated.GetSchedulePollByPublicIDParams{
-				WorkspaceID: deps.WorkspaceID,
-				CalendarID:  cal.ID,
-				PublicID:    pollPublicID,
-			})
-			if err != nil {
-				return err
-			}
-			result, err = detailResponse(ctx, q, avatars.New(q, deps.Storage), updated, cal.PublicID, member.Role, actor)
+			result, err = ownResponse(ctx, q, poll.ID, actor)
 			return err
 		})
 		if err != nil {
@@ -961,6 +949,49 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollMutat
 		if staleAfterRefresh {
 			return nil, apiError(apierrors.SchedulePollStale)
 		}
-		return &PollMutationOutput{Body: result}, nil
+		return &PollResponseOutput{ETag: result.ETag, Body: result}, nil
+	}
+}
+
+// ownResponse reads the caller's current answer and its tag.
+func ownResponse(ctx context.Context, q *generated.Queries, pollID, actor uint32) (PollResponseBody, error) {
+	pollMember, eligible, err := currentPollMember(ctx, q, pollID, actor)
+	if err != nil {
+		return PollResponseBody{}, err
+	}
+	if !eligible {
+		return PollResponseBody{}, apierrors.SchedulePollNotFound
+	}
+	rows, err := q.ListSchedulePollAnswersForUser(ctx, generated.ListSchedulePollAnswersForUserParams{PollID: pollID, UserID: actor})
+	if err != nil {
+		return PollResponseBody{}, err
+	}
+	body := PollResponseBody{ETag: answerETag(pollMember.AnswerVersion), Answers: make([]PollAnswerResponse, 0, len(rows))}
+	for _, row := range rows {
+		body.Answers = append(body.Answers, PollAnswerResponse{SlotID: calresolve.PublicIDString(row.SlotPublicID), Value: string(row.Value)})
+	}
+	return body, nil
+}
+
+// GetResponse returns the caller's own answer so a client can read its ETag.
+func GetResponse(deps Deps) func(context.Context, *PollResponseInput) (*PollResponseOutput, error) {
+	return func(ctx context.Context, in *PollResponseInput) (*PollResponseOutput, error) {
+		actor, err := actorID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var body PollResponseBody
+		err = withReadSnapshot(ctx, deps.DB, func(q *generated.Queries) error {
+			_, _, poll, err := loadAuthorizedPoll(ctx, deps, q, in.CalendarID, in.PollID, actor)
+			if err != nil {
+				return err
+			}
+			body, err = ownResponse(ctx, q, poll.ID, actor)
+			return err
+		})
+		if err != nil {
+			return nil, apiError(err)
+		}
+		return &PollResponseOutput{ETag: body.ETag, Body: body}, nil
 	}
 }

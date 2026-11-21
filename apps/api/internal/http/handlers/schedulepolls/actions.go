@@ -43,8 +43,8 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 				return apierrors.SchedulePollConflict
 			}
 			if poll.Status == generated.CalendarSchedulePollsStatusOpen {
-				if in.Body.Version != poll.Version {
-					return apierrors.SchedulePollStale
+				if err := checkIfMatch(in.IfMatch, pollETag(poll.Version, poll.ResponseVersion), apierrors.SchedulePollStale); err != nil {
+					return err
 				}
 				if err := q.SetSchedulePollCancelled(ctx, poll.ID); err != nil {
 					return err

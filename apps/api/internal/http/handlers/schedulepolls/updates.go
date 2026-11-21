@@ -274,8 +274,8 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 			if poll.Status != generated.CalendarSchedulePollsStatusOpen {
 				return apierrors.SchedulePollConflict
 			}
-			if poll.Version != in.Body.Version {
-				return apierrors.SchedulePollStale
+			if err := checkIfMatch(in.IfMatch, pollETag(poll.Version, poll.ResponseVersion), apierrors.SchedulePollStale); err != nil {
+				return err
 			}
 			managerChanged := !assigned && in.Body.TakeOver
 			if newTitle == "" {
@@ -380,7 +380,7 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 		if err != nil {
 			return nil, apiError(err)
 		}
-		return &UpdatePollOutput{Body: result}, nil
+		return &UpdatePollOutput{ETag: result.ETag, Body: result}, nil
 	}
 }
 
