@@ -11,38 +11,6 @@
 INSERT INTO events (public_id, workspace_id, calendar_id, actor_user_id, subject_public_id, type, payload_json, occurred_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
--- ListEventsByCalendar is the calendar activity feed. Keyset-paginated by
--- id alone: id is strictly monotonic in insertion order, so it already
--- orders by time, and using one column keeps the ORDER BY and the cursor
--- from ever disagreeing about ties.
---
--- The cursor a client receives names the row by its public id; see
--- GetEventIDByPublicID. The internal id is a single deployment-wide sequence,
--- so handing it out tells anyone holding two cursors how much the whole
--- instance wrote in between.
---
--- The actor's avatar object is joined in with the row. A feed page is up to
--- two hundred entries and looking the key up per entry would be two hundred
--- reads for a handful of distinct people.
---
--- The index is named because the planner prices it equal to the contract's
--- calendar index and then orders by walking the primary key backwards, which
--- reads every other calendar's rows on the way to this one's.
--- name: ListEventsByCalendar :many
-SELECT e.id, e.public_id, e.type, e.payload_json, e.occurred_at,
-       e.actor_system_source,
-       u.public_id AS actor_public_id, u.display_name AS actor_display_name,
-       u.avatar_url AS actor_avatar_url,
-       so.storage_key AS actor_avatar_storage_key
-FROM events e FORCE INDEX (idx_events_workspace_calendar_id)
-LEFT JOIN users u ON u.id = e.actor_user_id
-LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-WHERE e.workspace_id = ?
-  AND e.calendar_id = ?
-  AND (sqlc.arg(after_id) = 0 OR e.id < sqlc.arg(after_id))
-ORDER BY e.id DESC
-LIMIT ?;
-
 -- GetEventIDByPublicID resolves the cursor a client was handed back to the
 -- row it names. The feed pages by the internal id because that is what orders
 -- strictly by insertion, but nothing outside ever sees that number.

@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"database/sql"
+	"math"
 	"testing"
 
 	"github.com/google/uuid"
@@ -56,19 +57,19 @@ func TestActivityFeedPageReadsOnlyItsOwnPage(t *testing.T) {
 	q := generated.New(conn)
 
 	const limit = 50
-	page := func(after uint64) ([]generated.ListEventsByCalendarRow, int64) {
+	page := func(beforeID uint64) ([]generated.ListCalendarLogPageRow, int64) {
 		before := handlerReads(t, conn)
-		rows, err := q.ListEventsByCalendar(testCtx(), generated.ListEventsByCalendarParams{
+		rows, err := q.ListCalendarLogPage(testCtx(), generated.ListCalendarLogPageParams{
 			WorkspaceID: workspaceID,
 			CalendarID:  sql.NullInt32{Int32: int32(calendarID), Valid: true},
-			AfterID:     after,
+			BeforeID:    beforeID,
 			Limit:       limit,
 		})
 		require.NoError(t, err)
 		return rows, handlerReads(t, conn) - before
 	}
 
-	first, reads := page(0)
+	first, reads := page(math.MaxUint64)
 	require.Len(t, first, limit)
 	require.LessOrEqual(t, reads, int64(limit*2),
 		"the first page read %d entries for %d rows kept", reads, limit)

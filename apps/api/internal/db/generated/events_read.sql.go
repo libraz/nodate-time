@@ -54,8 +54,11 @@ type ListCalendarLogPageRow struct {
 // Reads over the event log and the calendar rows it points at, for the
 // activity feed and per-event history.
 // ListCalendarLogPage is one page of the calendar's log, newest first, keyed
-// by id alone (see ListEventsByCalendar for why). before_id is the exclusive
-// upper bound; the first page passes the largest id.
+// by id alone: id is strictly monotonic, so the order and the cursor never
+// disagree about ties. before_id is the exclusive upper bound; the first page
+// passes the largest id. The actor's avatar key is joined in so a page is one
+// read, not one per entry. The index is named because the planner otherwise
+// walks the primary key backwards through every other calendar's rows.
 func (q *Queries) ListCalendarLogPage(ctx context.Context, arg ListCalendarLogPageParams) ([]ListCalendarLogPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listCalendarLogPage,
 		arg.WorkspaceID,
