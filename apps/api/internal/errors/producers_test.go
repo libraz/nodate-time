@@ -11,9 +11,45 @@ import (
 	"testing"
 )
 
+// pendingProducers are Specs declared ahead of the handlers that return them.
+// The list is held from both sides: an entry that gains a producer fails as
+// stale, so it shrinks to empty as the handlers land rather than collecting
+// forgotten promises.
+var pendingProducers = map[string]bool{
+	"AdminAdminsLimitReached":        true,
+	"AdminAllowedEmailsLimitReached": true,
+	"AdminAlreadyAdmin":              true,
+	"AdminUserNotFound":              true,
+	"AlbumStale":                     true,
+	"AttachmentLimitReached":         true,
+	"CalendarLimitReached":           true,
+	"CalendarStale":                  true,
+	"ChecklistLimitReached":          true,
+	"ChecklistStale":                 true,
+	"CommentStale":                   true,
+	"EventAllDayShape":               true,
+	"EventDateInvalid":               true,
+	"EventDateRangeInvalid":          true,
+	"EventDetailsHidden":             true,
+	"EventExceptionNotFound":         true,
+	"EventNotDeleted":                true,
+	"EventNotRecurring":              true,
+	"EventOccurrenceForm":            true,
+	"EventRestoreConflict":           true,
+	"EventRestoreExpired":            true,
+	"ExportRangeTooLarge":            true,
+	"InviteLimitReached":             true,
+	"MemberLimitReached":             true,
+	"MemoStale":                      true,
+	"SchedulePollResponseStale":      true,
+	"SearchTooBroad":                 true,
+	"UploadDigestMismatch":           true,
+	"UploadTooLarge":                 true,
+}
+
 // A declared error that no path returns is a promise the client is written
 // against and the server never keeps. Every Spec must be referenced from
-// non-test code outside this package.
+// non-test code outside this package, unless it is listed as pending.
 func TestEveryDeclaredSpecHasAProducer(t *testing.T) {
 	file, err := parser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
 	if err != nil {
@@ -63,9 +99,20 @@ func TestEveryDeclaredSpecHasAProducer(t *testing.T) {
 		t.Fatal(err)
 	}
 	all := source.String()
+	declared := map[string]bool{}
 	for _, name := range specs {
-		if !strings.Contains(all, "apierrors."+name) {
+		declared[name] = true
+		produced := strings.Contains(all, "apierrors."+name)
+		switch {
+		case !produced && !pendingProducers[name]:
 			t.Errorf("%s is declared but nothing returns it", name)
+		case produced && pendingProducers[name]:
+			t.Errorf("%s now has a producer; remove it from pendingProducers", name)
+		}
+	}
+	for name := range pendingProducers {
+		if !declared[name] {
+			t.Errorf("pendingProducers lists %s, which errors.go does not declare", name)
 		}
 	}
 }

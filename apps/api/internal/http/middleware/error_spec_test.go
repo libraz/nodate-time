@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -34,7 +35,7 @@ func TestMiddlewareRefusalsAreDeclaredSpecs(t *testing.T) {
 				t.Fatalf("body is not the error envelope: %s", rec.Body.String())
 			}
 			want := apierrors.HumaError{Status: tc.want.Status, Code: tc.want.Code, Message: tc.want.Message}
-			if rec.Code != tc.want.Status || got != want {
+			if rec.Code != tc.want.Status || !reflect.DeepEqual(got, want) {
 				t.Fatalf("got %d %+v, want %+v", rec.Code, got, want)
 			}
 		})
