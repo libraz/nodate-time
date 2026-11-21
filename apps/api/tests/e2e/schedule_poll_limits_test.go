@@ -78,7 +78,7 @@ func TestSchedulePollLimitsAnswerUnprocessable(t *testing.T) {
 }
 
 // A field the caller may not see is absent rather than blank, and the answer
-// revision exists only for someone who can answer.
+// resource exists only for someone who can answer.
 func TestSchedulePollDetailOmitsWhatTheCallerMayNotSee(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -96,24 +96,35 @@ func TestSchedulePollDetailOmitsWhatTheCallerMayNotSee(t *testing.T) {
 	}, &poll)
 	pollURL := baseURL + "/" + poll.ID
 
+	status, raw := helpers.DoJSONStatus(t, http.MethodGet, pollURL+"/response", owner.AccessToken, nil)
+	require.Equal(t, http.StatusNotFound, status, "a manager who is not a recipient has no answer: %s", raw)
+
 	var managerView map[string]any
 	helpers.DoJSON(t, http.MethodGet, pollURL, owner.AccessToken, nil, &managerView)
-	require.NotContains(t, managerView, "answerVersion", "a manager who is not a recipient has no answer revision")
-	require.Contains(t, managerView, "reviewVersion")
-	require.NotContains(t, managerView, "responseVersion")
+	require.Contains(t, managerView, "etag")
+	for _, gone := range []string{"version", "answerVersion", "reviewVersion", "responseVersion"} {
+		require.NotContains(t, managerView, gone)
+	}
 	people, ok := managerView["members"].([]any)
 	require.True(t, ok, "the manager sees the recipients")
 	require.Len(t, people, 1)
 	require.Equal(t, member.UserID, people[0].(map[string]any)["id"])
 
-	var recipientView schedulePollBody
-	helpers.DoJSON(t, http.MethodGet, pollURL, member.AccessToken, nil, &recipientView)
-	require.NotNil(t, recipientView.AnswerVersion)
-	var raw map[string]any
-	helpers.DoJSON(t, http.MethodGet, pollURL, member.AccessToken, nil, &raw)
-	require.Equal(t, float64(*recipientView.AnswerVersion), raw["answerVersion"])
-	require.NotContains(t, raw, "members", "a recipient does not see who else was asked")
-	require.Contains(t, raw, "reviewVersion")
+	var answer struct {
+		ETag    string `json:"etag"`
+		Answers []any  `json:"answers"`
+	}
+	status, raw, header := helpers.DoJSONFull(t, http.MethodGet, pollURL+"/response", member.AccessToken, nil, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &answer))
+	require.NotEmpty(t, answer.ETag)
+	require.Equal(t, answer.ETag, header.Get("ETag"))
+	require.NotNil(t, answer.Answers)
+
+	var raw2 map[string]any
+	helpers.DoJSON(t, http.MethodGet, pollURL, member.AccessToken, nil, &raw2)
+	require.NotContains(t, raw2, "members", "a recipient does not see who else was asked")
+	require.Contains(t, raw2, "etag")
 }
 
 // An address is shown to whoever administers the calendar and to its owner;

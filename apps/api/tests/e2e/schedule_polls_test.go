@@ -13,6 +13,7 @@ import (
 
 type schedulePollBody struct {
 	ID               string `json:"id"`
+	ETag             string `json:"etag"`
 	Status           string `json:"status"`
 	ConfirmedEventID string `json:"confirmedEventId"`
 	Version          int    `json:"version"`
@@ -42,6 +43,26 @@ func joinScheduleCalendar(t *testing.T, owner, member *helpers.TestTenant) {
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/calendars/"+owner.CalendarID+"/invites", owner.AccessToken,
 		map[string]any{"role": "viewer", "maxUses": 1}, &invite)
 	helpers.DoJSON(t, http.MethodPost, testServerURL+"/invites/"+invite.Token+"/accept", member.AccessToken, nil, nil)
+}
+
+// putPollResponse saves the caller's answers under the answer tag read just
+// before, and returns the status and raw body.
+func putPollResponse(t *testing.T, pollURL, token string, answers any) (int, []byte) {
+	t.Helper()
+	status, _, header := helpers.DoJSONFull(t, http.MethodGet, pollURL+"/response", token, nil, nil)
+	require.Equal(t, http.StatusOK, status)
+	return helpers.DoJSONStatusWithHeaders(t, http.MethodPut, pollURL+"/response", token,
+		map[string]any{"answers": answers}, map[string]string{"If-Match": header.Get("ETag")})
+}
+
+// doIfMatch sends a conditional write, requires a 2xx answer and decodes it.
+func doIfMatch(t *testing.T, method, url, token, etag string, body, out any) {
+	t.Helper()
+	status, raw, _ := helpers.DoJSONFull(t, method, url, token, body, map[string]string{"If-Match": etag})
+	require.True(t, status >= 200 && status < 300, "%s %s: %d %s", method, url, status, raw)
+	if out != nil {
+		require.NoError(t, json.Unmarshal(raw, out))
+	}
 }
 
 func scheduleSlot(start time.Time) map[string]string {
@@ -88,7 +109,7 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	assertAction := func(token string, expected ...action) {
 		t.Helper()
 		var body []action
-		helpers.DoJSON(t, http.MethodGet, testServerURL+"/me/schedule-poll-actions", token, nil, &body)
+		helpers.DoJSON(t, http.MethodGet, testServerURL+"/user/schedule-poll-actions", token, nil, &body)
 		require.ElementsMatch(t, expected, body)
 	}
 	assertAction(login.Token, action{PollID: poll.ID, Kind: "answer"})
@@ -98,35 +119,37 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	require.False(t, recipient.CanManage)
 	require.Empty(t, recipient.Responses)
 
-	save := func(current schedulePollBody, answers ...map[string]string) schedulePollBody {
+	type savedResponse struct {
+		ETag    string `json:"etag"`
+		Answers []struct{ SlotID, Value string }
+	}
+	save := func(etag string, answers ...map[string]string) savedResponse {
 		t.Helper()
-		var saved schedulePollBody
-		helpers.DoJSON(t, http.MethodPut, pollURL+"/response", login.Token, map[string]any{
-			"version": current.Version, "answerVersion": *current.AnswerVersion, "answers": answers,
-		}, &saved)
+		var saved savedResponse
+		doIfMatch(t, http.MethodPut, pollURL+"/response", login.Token, etag, map[string]any{"answers": answers}, &saved)
 		return saved
 	}
+	var initial savedResponse
+	helpers.DoJSON(t, http.MethodGet, pollURL+"/response", login.Token, nil, &initial)
+	require.Empty(t, initial.Answers)
 	yes := map[string]string{"slotId": poll.Slots[0].ID, "value": "yes"}
 	no := map[string]string{"slotId": poll.Slots[1].ID, "value": "no"}
-	partial := save(recipient, yes)
-	require.Len(t, partial.MyAnswers, 1)
-	code, raw = helpers.DoJSONStatus(t, http.MethodPut, pollURL+"/response", login.Token, map[string]any{
-		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
-		"answers": []map[string]string{{"slotId": poll.Slots[0].ID, "value": "no"}},
-	})
-	require.Equal(t, http.StatusConflict, code, string(raw))
+	partial := save(initial.ETag, yes)
+	require.Len(t, partial.Answers, 1)
+	code, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPut, pollURL+"/response", login.Token,
+		map[string]any{"answers": []map[string]string{{"slotId": poll.Slots[0].ID, "value": "no"}}},
+		ifMatch(initial.ETag))
+	require.Equal(t, http.StatusPreconditionFailed, code, string(raw))
+	require.Contains(t, string(raw), "SCHEDULE_POLL.RESPONSE_STALE")
 	assertAction(login.Token, action{PollID: poll.ID, Kind: "answer"})
 	assertAction(owner.AccessToken)
-	complete := save(partial, yes, no)
-	require.Len(t, complete.MyAnswers, 2)
+	complete := save(partial.ETag, yes, no)
+	require.Len(t, complete.Answers, 2)
 	assertAction(login.Token)
 	assertAction(owner.AccessToken)
-	var other schedulePollBody
-	helpers.DoJSON(t, http.MethodGet, pollURL, secondRespondent.AccessToken, nil, &other)
-	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", secondRespondent.AccessToken, map[string]any{
-		"version": other.Version, "answerVersion": *other.AnswerVersion,
-		"answers": []map[string]string{yes, {"slotId": poll.Slots[1].ID, "value": "yes"}},
-	}, nil)
+	status, raw := putPollResponse(t, pollURL, secondRespondent.AccessToken,
+		[]map[string]string{yes, {"slotId": poll.Slots[1].ID, "value": "yes"}})
+	require.Equal(t, http.StatusOK, status, string(raw))
 	assertAction(owner.AccessToken, action{PollID: poll.ID, Kind: "finalize"})
 
 	helpers.DoJSON(t, http.MethodGet, pollURL, owner.AccessToken, nil, &poll)
@@ -134,9 +157,9 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	require.Len(t, poll.Responses, 2)
 	require.ElementsMatch(t, []string{respondent.UserID, secondRespondent.UserID},
 		[]string{poll.Responses[0].MemberID, poll.Responses[1].MemberID})
-	body := map[string]any{"version": poll.Version, "reviewVersion": poll.ReviewVersion, "slotId": poll.Slots[0].ID, "ownerId": respondent.UserID}
-	wrongSlot := map[string]any{"version": poll.Version, "reviewVersion": poll.ReviewVersion, "slotId": poll.Slots[1].ID, "ownerId": respondent.UserID}
-	code, raw = helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken, wrongSlot)
+	body := map[string]any{"slotId": poll.Slots[0].ID, "ownerId": respondent.UserID}
+	wrongSlot := map[string]any{"slotId": poll.Slots[1].ID, "ownerId": respondent.UserID}
+	code, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken, wrongSlot, ifMatch(poll.ETag))
 	require.GreaterOrEqual(t, code, 400, string(raw))
 	require.Less(t, code, 500, string(raw))
 
@@ -149,7 +172,7 @@ func TestSchedulePollLifecycle(t *testing.T) {
 	results := make(chan result, 2)
 	for range 2 {
 		parallel.Go(func() {
-			status, body := helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken, body)
+			status, body := helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", owner.AccessToken, body, ifMatch(poll.ETag))
 			results <- result{status: status, body: body}
 		})
 	}
@@ -253,19 +276,15 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 	}, &poll)
 	require.Len(t, poll.Slots, 2)
 	pollURL := pollsURL + "/" + poll.ID
-	var recipient schedulePollBody
-	helpers.DoJSON(t, http.MethodGet, pollURL, participant.AccessToken, nil, &recipient)
-	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", participant.AccessToken, map[string]any{
-		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
-		"answers": []map[string]string{
-			{"slotId": poll.Slots[0].ID, "value": "yes"},
-			{"slotId": poll.Slots[1].ID, "value": "yes"},
-		},
-	}, nil)
+	status, raw := putPollResponse(t, pollURL, participant.AccessToken, []map[string]string{
+		{"slotId": poll.Slots[0].ID, "value": "yes"},
+		{"slotId": poll.Slots[1].ID, "value": "yes"},
+	})
+	require.Equal(t, http.StatusOK, status, string(raw))
 	helpers.DoJSON(t, http.MethodGet, pollURL, organizer.AccessToken, nil, &poll)
 	addEvent(usable, "fixed")
-	status, raw := helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken,
-		map[string]any{"version": poll.Version, "reviewVersion": poll.ReviewVersion, "slotId": poll.Slots[1].ID, "ownerId": participant.UserID})
+	status, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken,
+		map[string]any{"slotId": poll.Slots[1].ID, "ownerId": participant.UserID}, ifMatch(poll.ETag))
 	require.Equal(t, http.StatusConflict, status, string(raw))
 	helpers.DoJSON(t, http.MethodGet, pollURL, organizer.AccessToken, nil, &poll)
 	require.Equal(t, "open", poll.Status)
@@ -273,23 +292,19 @@ func TestSchedulePollChecksOtherCalendarsAndNewConflicts(t *testing.T) {
 	require.False(t, poll.Slots[1].Active)
 	require.Equal(t, 1, poll.RespondedCount)
 
-	softChoice := map[string]any{"version": poll.Version, "reviewVersion": poll.ReviewVersion, "slotId": poll.Slots[0].ID, "ownerId": participant.UserID}
-	status, raw = helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice)
+	softChoice := map[string]any{"slotId": poll.Slots[0].ID, "ownerId": participant.UserID}
+	status, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice, ifMatch(poll.ETag))
 	require.Equal(t, http.StatusConflict, status, string(raw))
 	softChoice["acknowledged"] = true
 
-	helpers.DoJSON(t, http.MethodGet, pollURL, participant.AccessToken, nil, &recipient)
-	helpers.DoJSON(t, http.MethodPut, pollURL+"/response", participant.AccessToken, map[string]any{
-		"version": recipient.Version, "answerVersion": *recipient.AnswerVersion,
-		"answers": []map[string]string{{"slotId": poll.Slots[0].ID, "value": "maybe"}},
-	}, nil)
-	status, raw = helpers.DoJSONStatus(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice)
-	require.Equal(t, http.StatusConflict, status, string(raw))
+	status, raw = putPollResponse(t, pollURL, participant.AccessToken,
+		[]map[string]string{{"slotId": poll.Slots[0].ID, "value": "maybe"}})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	status, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice, ifMatch(poll.ETag))
+	require.Equal(t, http.StatusPreconditionFailed, status, string(raw))
 	require.Contains(t, string(raw), "SCHEDULE_POLL.STALE")
 	helpers.DoJSON(t, http.MethodGet, pollURL, organizer.AccessToken, nil, &poll)
-	softChoice["version"] = poll.Version
-	softChoice["reviewVersion"] = poll.ReviewVersion
-	helpers.DoJSON(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, softChoice, &poll)
+	doIfMatch(t, http.MethodPost, pollURL+"/finalize", organizer.AccessToken, poll.ETag, softChoice, &poll)
 	require.Equal(t, "finalized", poll.Status)
 	require.NotEmpty(t, poll.ConfirmedEventID)
 }
@@ -312,24 +327,20 @@ func TestSchedulePollParallelConfirmationsOnlyBookOnePoll(t *testing.T) {
 			"slots": []map[string]string{scheduleSlot(start), scheduleSlot(start.Add(2 * time.Hour))},
 		}, &polls[i])
 		require.Len(t, polls[i].Slots, 2)
-		var target schedulePollBody
 		pollURL := pollsURL + "/" + polls[i].ID
-		helpers.DoJSON(t, http.MethodGet, pollURL, member.AccessToken, nil, &target)
-		helpers.DoJSON(t, http.MethodPut, pollURL+"/response", member.AccessToken, map[string]any{
-			"version": target.Version, "answerVersion": *target.AnswerVersion,
-			"answers": []map[string]string{
-				{"slotId": target.Slots[0].ID, "value": "yes"},
-				{"slotId": target.Slots[1].ID, "value": "no"},
-			},
-		}, nil)
+		status, raw := putPollResponse(t, pollURL, member.AccessToken, []map[string]string{
+			{"slotId": polls[i].Slots[0].ID, "value": "yes"},
+			{"slotId": polls[i].Slots[1].ID, "value": "no"},
+		})
+		require.Equal(t, http.StatusOK, status, string(raw))
 		helpers.DoJSON(t, http.MethodGet, pollURL, owner.AccessToken, nil, &polls[i])
 	}
 	var parallel sync.WaitGroup
 	codes := make(chan int, len(polls))
 	for _, poll := range polls {
 		parallel.Go(func() {
-			status, body := helpers.DoJSONStatus(t, http.MethodPost, pollsURL+"/"+poll.ID+"/finalize", owner.AccessToken,
-				map[string]any{"version": poll.Version, "reviewVersion": poll.ReviewVersion, "slotId": poll.Slots[0].ID, "ownerId": member.UserID})
+			status, body := helpers.DoJSONStatusWithHeaders(t, http.MethodPost, pollsURL+"/"+poll.ID+"/finalize", owner.AccessToken,
+				map[string]any{"slotId": poll.Slots[0].ID, "ownerId": member.UserID}, ifMatch(poll.ETag))
 			t.Logf("finalizing %s: %d %s", poll.ID, status, body)
 			codes <- status
 		})

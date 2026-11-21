@@ -100,11 +100,13 @@ func TestMySQLAvailabilityUsesEffectiveOccurrenceAndSharedCalendarConsent(t *tes
 	check(owner, slots, hard, open, open, open, open, hard, soft)
 	require.NoError(t, q.SetScheduleAvailabilitySharing(ctx, generated.SetScheduleAvailabilitySharingParams{CalendarID: source, Enabled: true}))
 	check(guest, slots, hard, open, open, open, hard, open, open)
-	// A series' stored recurrence_end was computed from the original 24h
-	// duration. Its final fall-back Sunday has 25h in this zone.
+	// An all-day row names UTC dates and is read in its owner's zone. The
+	// series' final fall-back Sunday has 25h there, past the 24h its stored
+	// recurrence_end implies.
+	insert("UPDATE users SET timezone='America/New_York' WHERE id=?", owner)
 	fall := event(workspace, target, owner, 0)
-	insert(`UPDATE calendar_events SET start_at='2026-10-25 04:00', end_at='2026-10-26 04:00',
-		recurrence_end='2026-11-02 04:00', timezone='America/New_York', all_day=TRUE,
+	insert(`UPDATE calendar_events SET start_at='2026-10-25', end_at='2026-10-26',
+		recurrence_end='2026-11-02', all_day=TRUE,
 		recurrence_rule='{"freq":"weekly","count":2}' WHERE id=?`, fall)
 	lastHour := time.Date(2026, 11, 2, 4, 30, 0, 0, time.UTC)
 	check(owner, []availability.Slot{{Start: lastHour, End: lastHour.Add(time.Minute)}}, hard)
