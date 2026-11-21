@@ -32,12 +32,12 @@ func main() {
 		AuthRateLimit:        -1,
 		ShareRateLimit:       -1,
 	})
-	body, err := json.Marshal(doc)
+	body, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "openapi:", err)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(*out, body, 0o644); err != nil {
+	if err := os.WriteFile(*out, append(body, '\n'), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "openapi:", err)
 		os.Exit(1)
 	}
