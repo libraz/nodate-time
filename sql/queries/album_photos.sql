@@ -1,11 +1,13 @@
 -- name: CreateAlbumPhoto :execresult
 -- Rows are created disabled and only become visible once ConfirmAlbumPhoto runs
 -- after the object upload succeeds, so a presign that is never uploaded leaves
--- no dangling row pointing at a nonexistent object.
+-- no dangling row pointing at a nonexistent object. The objects are reserved
+-- in the same transaction, which is where the declared digests are kept until
+-- the confirm reads the uploaded bytes back against them.
 INSERT INTO album_photos (
   public_id, workspace_id, calendar_id, uploaded_by_user_id, calendar_event_id, caption, content_type, byte_size,
-  width, height, storage_key, taken_at, enabled
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+  width, height, storage_key, storage_object_id, thumbnail_object_id, taken_at, enabled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
 
 -- ConfirmAlbumPhoto enables a reservation only while its calendar is live, and
 -- never a deleted photo: that is disabled too, and retired_at is what tells it
@@ -45,8 +47,8 @@ WHERE public_id = ? AND calendar_id = ? AND enabled = TRUE FOR UPDATE;
 -- per row would put the page's whole saving back. It is NULL when the photo has
 -- no thumbnail, which is normal -- the reader falls back to the picture itself.
 --
--- event_public_id names only a live event, the same rule the single-photo
--- responses follow: deleting an event leaves calendar_event_id in place.
+-- The event link is not resolved here: whether the reader may see the linked
+-- event is decided in the handler, from ListAlbumPhotoEvents.
 -- name: ListAlbumPhotosFirstPage :many
 SELECT ap.*,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
@@ -54,14 +56,12 @@ SELECT ap.*,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
-       so.storage_key AS uploader_avatar_storage_key,
-       e.public_id AS event_public_id
+       so.storage_key AS uploader_avatar_storage_key
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?;
@@ -73,14 +73,12 @@ SELECT ap.*,
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
-       so.storage_key AS uploader_avatar_storage_key,
-       e.public_id AS event_public_id
+       so.storage_key AS uploader_avatar_storage_key
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE
   AND (
@@ -96,7 +94,7 @@ UPDATE album_photos SET caption = ?, calendar_event_id = ? WHERE id = ? AND enab
 -- name: SoftDeleteAlbumPhoto :execresult
 UPDATE album_photos SET enabled = FALSE, retired_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND enabled = TRUE;
 
--- name: DeletePendingAlbumPhoto :exec
+-- name: DeletePendingAlbumPhoto :execresult
 -- Removes an unconfirmed (enabled = FALSE) row whose uploaded object failed the
 -- Confirm-time size/type check, so it is not left as an orphan pointing at a
 -- deleted object.
@@ -154,3 +152,22 @@ LIMIT ?;
 
 -- name: DeleteAbandonedAlbumPhoto :execresult
 DELETE FROM album_photos WHERE id = ? AND enabled = FALSE;
+
+-- ListAlbumPhotoEvents is what the listing needs to decide which of a page's
+-- event links the reader may see. Only live events are returned; a link to a
+-- deleted event has nothing to show.
+-- name: ListAlbumPhotoEvents :many
+SELECT id, public_id, visibility, owner_user_id, created_by_user_id
+FROM calendar_events
+WHERE id IN (sqlc.slice('event_ids')) AND enabled = TRUE;
+
+-- name: ListAlbumPhotoEventAttendees :many
+SELECT event_id, user_id FROM calendar_event_attendees
+WHERE event_id IN (sqlc.slice('event_ids')) AND enabled = TRUE;
+
+-- ClearAlbumPhotoThumbnail drops a thumbnail reservation whose bytes never
+-- arrived or did not match. The caller gives the reference back only when this
+-- reports a row.
+-- name: ClearAlbumPhotoThumbnail :execresult
+UPDATE album_photos SET thumbnail_object_id = NULL
+WHERE id = ? AND thumbnail_object_id = ?;

@@ -1,6 +1,11 @@
 package memos
 
-import "time"
+import (
+	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
+)
 
 type MemoResponse struct {
 	ID        string    `json:"id"`
@@ -10,6 +15,8 @@ type MemoResponse struct {
 	SortOrder int32     `json:"sortOrder"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// ETag names this revision of the memo; send it as If-Match to change or delete it.
+	ETag string `json:"etag"`
 }
 
 type ListMemosInput struct {
@@ -36,32 +43,32 @@ type CreateMemoInput struct {
 	}
 }
 type CreateMemoOutput struct {
+	ETag string `header:"ETag"`
 	Body MemoResponse
 }
 
-// UpdateMemoInput carries only what the caller wants to change. Every field
-// is optional and an omitted one keeps its stored value, so ticking a memo off
-// is a body of {"done": true} rather than the whole memo read back and sent
-// again. Position in particular belongs to the list, not to whoever is editing
-// the text, and requiring it made a caller resend a number it had no reason to
-// hold. The pointers are what carry the distinction: without them an omitted
-// done would arrive as false and quietly reopen a finished memo.
+// UpdateMemoInput is a merge patch: an omitted member keeps its stored value,
+// so ticking a memo off is a body of {"done": true}. Only body can be cleared
+// with null; the others have no empty state.
 type UpdateMemoInput struct {
-	CalendarID string `path:"calendarId"`
-	MemoID     string `path:"memoId"`
+	CalendarID string               `path:"calendarId"`
+	MemoID     string               `path:"memoId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 	Body       struct {
-		Title     *string `json:"title,omitempty" minLength:"1" maxLength:"500" required:"false"`
-		Body      *string `json:"body,omitempty" maxLength:"16000" required:"false"`
-		Done      *bool   `json:"done,omitempty" required:"false"`
-		SortOrder *int32  `json:"sortOrder,omitempty" required:"false" doc:"Position in the list, ascending; equal values keep creation order. Omitted keeps the stored value."`
+		Title     patch.Field[string] `json:"title,omitzero" required:"false" minLength:"1" maxLength:"500"`
+		Body      patch.Field[string] `json:"body,omitzero" required:"false" maxLength:"16000"`
+		Done      patch.Field[bool]   `json:"done,omitzero" required:"false"`
+		SortOrder patch.Field[int32]  `json:"sortOrder,omitzero" required:"false" doc:"Position in the list, ascending; equal values keep creation order."`
 	}
 }
 type UpdateMemoOutput struct {
+	ETag string `header:"ETag"`
 	Body MemoResponse
 }
 
 type DeleteMemoInput struct {
-	CalendarID string `path:"calendarId"`
-	MemoID     string `path:"memoId"`
+	CalendarID string               `path:"calendarId"`
+	MemoID     string               `path:"memoId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 }
 type DeleteMemoOutput struct{}

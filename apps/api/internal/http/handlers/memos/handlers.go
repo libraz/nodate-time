@@ -14,6 +14,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
 )
 
 type Deps struct {
@@ -70,8 +71,30 @@ func nullTimeValue(n sql.NullTime) time.Time {
 	return n.Time
 }
 
+// memoETag names one revision of a memo by its last write.
+func memoETag(m generated.CalendarMemo) string {
+	stamp := m.CreatedAt
+	if m.UpdatedAt.Valid {
+		stamp = m.UpdatedAt.Time
+	}
+	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
+}
+
+// checkIfMatch compares the caller's If-Match with the memo's current tag.
+func checkIfMatch(ifMatch precondition.IfMatch, m generated.CalendarMemo) error {
+	switch err := ifMatch.Check(memoETag(m)); {
+	case err == nil:
+		return nil
+	case errors.Is(err, precondition.ErrStale):
+		return apierrors.MemoStale
+	default:
+		return apierrors.BadIfMatch
+	}
+}
+
 func mapMemo(m generated.CalendarMemo) MemoResponse {
 	return MemoResponse{
+		ETag:      memoETag(m),
 		ID:        pubIDToHex(m.PublicID),
 		Title:     m.Title,
 		Body:      nullStringValue(m.Body),
@@ -243,7 +266,7 @@ func CreateMemo(deps Deps) func(context.Context, *CreateMemoInput) (*CreateMemoO
 			return nil, toAPIError(err)
 		}
 
-		return &CreateMemoOutput{Body: mapMemo(created)}, nil
+		return &CreateMemoOutput{ETag: memoETag(created), Body: mapMemo(created)}, nil
 	}
 }
 
@@ -265,25 +288,36 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 				return err
 			}
 
-			// An omitted field keeps the stored value, so a partial update does
-			// not blank out the rest of the memo. The stored value is the one
-			// read under the lock, so a concurrent update of another field is
-			// kept rather than written back over.
+			if err := checkIfMatch(in.IfMatch, memo); err != nil {
+				return err
+			}
+
+			// An omitted member keeps the value read under the lock, so a
+			// concurrent update of another field is kept rather than written
+			// back over.
 			title := memo.Title
-			if in.Body.Title != nil {
-				title = *in.Body.Title
+			if v, ok := in.Body.Title.Get(); ok {
+				title = v
+			} else if in.Body.Title.IsNull() {
+				return apierrors.Validation
 			}
 			body := memo.Body
-			if in.Body.Body != nil {
-				body = nullString(*in.Body.Body)
+			if v, ok := in.Body.Body.Get(); ok {
+				body = nullString(v)
+			} else if in.Body.Body.IsNull() {
+				body = sql.NullString{}
 			}
 			done := memo.Done
-			if in.Body.Done != nil {
-				done = *in.Body.Done
+			if v, ok := in.Body.Done.Get(); ok {
+				done = v
+			} else if in.Body.Done.IsNull() {
+				return apierrors.Validation
 			}
 			sortWeight := memo.SortWeight
-			if in.Body.SortOrder != nil {
-				sortWeight = *in.Body.SortOrder
+			if v, ok := in.Body.SortOrder.Get(); ok {
+				sortWeight = v
+			} else if in.Body.SortOrder.IsNull() {
+				return apierrors.Validation
 			}
 
 			if err := q.UpdateMemo(ctx, generated.UpdateMemoParams{
@@ -322,7 +356,7 @@ func UpdateMemo(deps Deps) func(context.Context, *UpdateMemoInput) (*UpdateMemoO
 			return nil, toAPIError(err)
 		}
 
-		return &UpdateMemoOutput{Body: mapMemo(updated)}, nil
+		return &UpdateMemoOutput{ETag: memoETag(updated), Body: mapMemo(updated)}, nil
 	}
 }
 
@@ -340,6 +374,9 @@ func DeleteMemo(deps Deps) func(context.Context, *DeleteMemoInput) (*DeleteMemoO
 			}
 			memo, err := lockMemo(ctx, q, cal.ID, in.MemoID)
 			if err != nil {
+				return err
+			}
+			if err := checkIfMatch(in.IfMatch, memo); err != nil {
 				return err
 			}
 			// The log row is appended only for a delete this transaction made.

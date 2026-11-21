@@ -1,16 +1,25 @@
 package albums
 
-import "time"
+import (
+	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
+)
 
 type AlbumPhotoResponse struct {
-	ID                string    `json:"id"`
-	CalendarID        string    `json:"calendarId"`
-	Caption           string    `json:"caption"`
-	ContentType       string    `json:"contentType"`
-	ByteSize          int64     `json:"byteSize"`
-	Width             *int      `json:"width,omitempty"`
-	Height            *int      `json:"height,omitempty"`
-	EventID           string    `json:"eventId,omitempty"`
+	ID          string `json:"id"`
+	CalendarID  string `json:"calendarId"`
+	Caption     string `json:"caption"`
+	ContentType string `json:"contentType"`
+	ByteSize    int64  `json:"byteSize"`
+	Width       *int   `json:"width,omitempty"`
+	Height      *int   `json:"height,omitempty"`
+	// EventID is null when the photo has no event link, and also when the
+	// reader may not see the linked event.
+	EventID *string `json:"eventId" nullable:"true"`
+	// ETag names this revision of the photo; send it as If-Match to change or delete it.
+	ETag              string    `json:"etag"`
 	TakenAt           time.Time `json:"takenAt"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UploaderID        string    `json:"uploaderId"`
@@ -42,6 +51,7 @@ type ListPhotosOutput struct {
 type PresignPhotoBody struct {
 	ContentType string    `json:"contentType" doc:"MIME type, must be image/*"`
 	ByteSize    int64     `json:"byteSize" minimum:"1"`
+	SHA256      string    `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-f]{64}$" doc:"lowercase hex SHA-256 of the photo bytes"`
 	Caption     string    `json:"caption" required:"false" maxLength:"500"`
 	EventID     string    `json:"eventId" required:"false" doc:"Optional event public ID"`
 	TakenAt     time.Time `json:"takenAt" required:"false" doc:"EXIF capture time. Defaults to upload time."`
@@ -54,6 +64,8 @@ type PresignPhotoBody struct {
 	// smaller than a tile gains nothing from one.
 	ThumbnailContentType string `json:"thumbnailContentType" required:"false" doc:"MIME type of the thumbnail, must be image/*"`
 	ThumbnailByteSize    int64  `json:"thumbnailByteSize" required:"false" minimum:"1"`
+	// ThumbnailSHA256 is required exactly when a thumbnail is declared.
+	ThumbnailSHA256 string `json:"thumbnailSha256" required:"false" minLength:"64" maxLength:"64" pattern:"^[0-9a-f]{64}$" doc:"lowercase hex SHA-256 of the thumbnail bytes"`
 }
 
 type PresignPhotoInput struct {
@@ -85,23 +97,26 @@ type ConfirmPhotoOutput struct {
 }
 
 type UpdatePhotoBody struct {
-	Caption *string `json:"caption" required:"false" maxLength:"500"`
-	EventID *string `json:"eventId" required:"false" doc:"Empty string clears the link"`
+	Caption patch.Field[string] `json:"caption,omitzero" required:"false" maxLength:"500" doc:"null clears the caption"`
+	EventID patch.Field[string] `json:"eventId,omitzero" required:"false" doc:"null removes the event link"`
 }
 
 type UpdatePhotoInput struct {
-	CalendarID string `path:"calendarId"`
-	PhotoID    string `path:"photoId"`
+	CalendarID string               `path:"calendarId"`
+	PhotoID    string               `path:"photoId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 	Body       UpdatePhotoBody
 }
 
 type UpdatePhotoOutput struct {
+	ETag string `header:"ETag"`
 	Body AlbumPhotoResponse
 }
 
 type DeletePhotoInput struct {
-	CalendarID string `path:"calendarId"`
-	PhotoID    string `path:"photoId"`
+	CalendarID string               `path:"calendarId"`
+	PhotoID    string               `path:"photoId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 }
 
 type DeletePhotoOutput struct{}

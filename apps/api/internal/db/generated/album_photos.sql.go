@@ -8,6 +8,7 @@ package generated
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -47,6 +48,23 @@ func (q *Queries) AttachAlbumPhotoThumbnailObject(ctx context.Context, arg Attac
 	return q.db.ExecContext(ctx, attachAlbumPhotoThumbnailObject, arg.ThumbnailObjectID, arg.ID)
 }
 
+const clearAlbumPhotoThumbnail = `-- name: ClearAlbumPhotoThumbnail :execresult
+UPDATE album_photos SET thumbnail_object_id = NULL
+WHERE id = ? AND thumbnail_object_id = ?
+`
+
+type ClearAlbumPhotoThumbnailParams struct {
+	ID                uint32        `json:"id"`
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
+}
+
+// ClearAlbumPhotoThumbnail drops a thumbnail reservation whose bytes never
+// arrived or did not match. The caller gives the reference back only when this
+// reports a row.
+func (q *Queries) ClearAlbumPhotoThumbnail(ctx context.Context, arg ClearAlbumPhotoThumbnailParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, clearAlbumPhotoThumbnail, arg.ID, arg.ThumbnailObjectID)
+}
+
 const confirmAlbumPhoto = `-- name: ConfirmAlbumPhoto :execresult
 UPDATE album_photos ap
 INNER JOIN calendars c ON c.id = ap.calendar_id
@@ -74,28 +92,32 @@ func (q *Queries) ConfirmAlbumPhoto(ctx context.Context, arg ConfirmAlbumPhotoPa
 const createAlbumPhoto = `-- name: CreateAlbumPhoto :execresult
 INSERT INTO album_photos (
   public_id, workspace_id, calendar_id, uploaded_by_user_id, calendar_event_id, caption, content_type, byte_size,
-  width, height, storage_key, taken_at, enabled
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  width, height, storage_key, storage_object_id, thumbnail_object_id, taken_at, enabled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 `
 
 type CreateAlbumPhotoParams struct {
-	PublicID         []byte        `json:"publicId"`
-	WorkspaceID      uint32        `json:"workspaceId"`
-	CalendarID       uint32        `json:"calendarId"`
-	UploadedByUserID uint32        `json:"uploadedByUserId"`
-	CalendarEventID  sql.NullInt32 `json:"calendarEventId"`
-	Caption          string        `json:"caption"`
-	ContentType      string        `json:"contentType"`
-	ByteSize         uint64        `json:"byteSize"`
-	Width            sql.NullInt32 `json:"width"`
-	Height           sql.NullInt32 `json:"height"`
-	StorageKey       string        `json:"storageKey"`
-	TakenAt          time.Time     `json:"takenAt"`
+	PublicID          []byte        `json:"publicId"`
+	WorkspaceID       uint32        `json:"workspaceId"`
+	CalendarID        uint32        `json:"calendarId"`
+	UploadedByUserID  uint32        `json:"uploadedByUserId"`
+	CalendarEventID   sql.NullInt32 `json:"calendarEventId"`
+	Caption           string        `json:"caption"`
+	ContentType       string        `json:"contentType"`
+	ByteSize          uint64        `json:"byteSize"`
+	Width             sql.NullInt32 `json:"width"`
+	Height            sql.NullInt32 `json:"height"`
+	StorageKey        string        `json:"storageKey"`
+	StorageObjectID   sql.NullInt32 `json:"storageObjectId"`
+	ThumbnailObjectID sql.NullInt32 `json:"thumbnailObjectId"`
+	TakenAt           time.Time     `json:"takenAt"`
 }
 
 // Rows are created disabled and only become visible once ConfirmAlbumPhoto runs
 // after the object upload succeeds, so a presign that is never uploaded leaves
-// no dangling row pointing at a nonexistent object.
+// no dangling row pointing at a nonexistent object. The objects are reserved
+// in the same transaction, which is where the declared digests are kept until
+// the confirm reads the uploaded bytes back against them.
 func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, createAlbumPhoto,
 		arg.PublicID,
@@ -109,6 +131,8 @@ func (q *Queries) CreateAlbumPhoto(ctx context.Context, arg CreateAlbumPhotoPara
 		arg.Width,
 		arg.Height,
 		arg.StorageKey,
+		arg.StorageObjectID,
+		arg.ThumbnailObjectID,
 		arg.TakenAt,
 	)
 }
@@ -121,7 +145,7 @@ func (q *Queries) DeleteAbandonedAlbumPhoto(ctx context.Context, id uint32) (sql
 	return q.db.ExecContext(ctx, deleteAbandonedAlbumPhoto, id)
 }
 
-const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :exec
+const deletePendingAlbumPhoto = `-- name: DeletePendingAlbumPhoto :execresult
 DELETE FROM album_photos
 WHERE id = ? AND uploaded_by_user_id = ? AND enabled = FALSE AND retired_at IS NULL
 `
@@ -134,9 +158,8 @@ type DeletePendingAlbumPhotoParams struct {
 // Removes an unconfirmed (enabled = FALSE) row whose uploaded object failed the
 // Confirm-time size/type check, so it is not left as an orphan pointing at a
 // deleted object.
-func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePendingAlbumPhotoParams) error {
-	_, err := q.db.ExecContext(ctx, deletePendingAlbumPhoto, arg.ID, arg.UploadedByUserID)
-	return err
+func (q *Queries) DeletePendingAlbumPhoto(ctx context.Context, arg DeletePendingAlbumPhotoParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deletePendingAlbumPhoto, arg.ID, arg.UploadedByUserID)
 }
 
 const getAlbumPhotoByPublicID = `-- name: GetAlbumPhotoByPublicID :one
@@ -277,6 +300,105 @@ func (q *Queries) ListAbandonedAlbumPhotoStorageKeys(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listAlbumPhotoEventAttendees = `-- name: ListAlbumPhotoEventAttendees :many
+SELECT event_id, user_id FROM calendar_event_attendees
+WHERE event_id IN (/*SLICE:event_ids*/?) AND enabled = TRUE
+`
+
+type ListAlbumPhotoEventAttendeesRow struct {
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+}
+
+func (q *Queries) ListAlbumPhotoEventAttendees(ctx context.Context, eventIds []sql.NullInt32) ([]ListAlbumPhotoEventAttendeesRow, error) {
+	query := listAlbumPhotoEventAttendees
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAlbumPhotoEventAttendeesRow
+	for rows.Next() {
+		var i ListAlbumPhotoEventAttendeesRow
+		if err := rows.Scan(&i.EventID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlbumPhotoEvents = `-- name: ListAlbumPhotoEvents :many
+SELECT id, public_id, visibility, owner_user_id, created_by_user_id
+FROM calendar_events
+WHERE id IN (/*SLICE:event_ids*/?) AND enabled = TRUE
+`
+
+type ListAlbumPhotoEventsRow struct {
+	ID              uint32                   `json:"id"`
+	PublicID        []byte                   `json:"publicId"`
+	Visibility      CalendarEventsVisibility `json:"visibility"`
+	OwnerUserID     uint32                   `json:"ownerUserId"`
+	CreatedByUserID uint32                   `json:"createdByUserId"`
+}
+
+// ListAlbumPhotoEvents is what the listing needs to decide which of a page's
+// event links the reader may see. Only live events are returned; a link to a
+// deleted event has nothing to show.
+func (q *Queries) ListAlbumPhotoEvents(ctx context.Context, eventIds []uint32) ([]ListAlbumPhotoEventsRow, error) {
+	query := listAlbumPhotoEvents
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAlbumPhotoEventsRow
+	for rows.Next() {
+		var i ListAlbumPhotoEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Visibility,
+			&i.OwnerUserID,
+			&i.CreatedByUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAlbumPhotosAfter = `-- name: ListAlbumPhotosAfter :many
 SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_id, ap.uploaded_by_user_id, ap.caption, ap.content_type, ap.byte_size, ap.width, ap.height, ap.storage_key, ap.storage_object_id, ap.thumbnail_object_id, ap.taken_at, ap.sort_weight, ap.notes, ap.enabled, ap.retired_at, ap.updated_at, ap.created_at,
        COALESCE(pso.storage_key, ap.storage_key) AS image_storage_key,
@@ -284,14 +406,12 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
-       so.storage_key AS uploader_avatar_storage_key,
-       e.public_id AS event_public_id
+       so.storage_key AS uploader_avatar_storage_key
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ?
   AND ap.enabled = TRUE
   AND (
@@ -337,7 +457,6 @@ type ListAlbumPhotosAfterRow struct {
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
 	UploaderAvatarStorageKey sql.NullString `json:"uploaderAvatarStorageKey"`
-	EventPublicID            sql.NullString `json:"eventPublicId"`
 }
 
 func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosAfterParams) ([]ListAlbumPhotosAfterRow, error) {
@@ -383,7 +502,6 @@ func (q *Queries) ListAlbumPhotosAfter(ctx context.Context, arg ListAlbumPhotosA
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
 			&i.UploaderAvatarStorageKey,
-			&i.EventPublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -405,14 +523,12 @@ SELECT ap.id, ap.public_id, ap.workspace_id, ap.calendar_id, ap.calendar_event_i
        u.public_id AS uploader_public_id,
        u.display_name AS uploader_display_name,
        u.avatar_url AS uploader_avatar_url,
-       so.storage_key AS uploader_avatar_storage_key,
-       e.public_id AS event_public_id
+       so.storage_key AS uploader_avatar_storage_key
 FROM album_photos ap
 INNER JOIN users u ON u.id = ap.uploaded_by_user_id
 LEFT JOIN storage_objects pso ON pso.id = ap.storage_object_id
 LEFT JOIN storage_objects tso ON tso.id = ap.thumbnail_object_id
 LEFT JOIN storage_objects so ON so.id = u.avatar_storage_object_id
-LEFT JOIN calendar_events e ON e.id = ap.calendar_event_id AND e.enabled = TRUE
 WHERE ap.calendar_id = ? AND ap.enabled = TRUE
 ORDER BY ap.taken_at DESC, ap.id DESC
 LIMIT ?
@@ -451,7 +567,6 @@ type ListAlbumPhotosFirstPageRow struct {
 	UploaderDisplayName      string         `json:"uploaderDisplayName"`
 	UploaderAvatarURL        sql.NullString `json:"uploaderAvatarUrl"`
 	UploaderAvatarStorageKey sql.NullString `json:"uploaderAvatarStorageKey"`
-	EventPublicID            sql.NullString `json:"eventPublicId"`
 }
 
 // Both listings join the uploader's avatar object, so a page carries the key
@@ -468,8 +583,8 @@ type ListAlbumPhotosFirstPageRow struct {
 // per row would put the page's whole saving back. It is NULL when the photo has
 // no thumbnail, which is normal -- the reader falls back to the picture itself.
 //
-// event_public_id names only a live event, the same rule the single-photo
-// responses follow: deleting an event leaves calendar_event_id in place.
+// The event link is not resolved here: whether the reader may see the linked
+// event is decided in the handler, from ListAlbumPhotoEvents.
 func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPhotosFirstPageParams) ([]ListAlbumPhotosFirstPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAlbumPhotosFirstPage, arg.CalendarID, arg.Limit)
 	if err != nil {
@@ -507,7 +622,6 @@ func (q *Queries) ListAlbumPhotosFirstPage(ctx context.Context, arg ListAlbumPho
 			&i.UploaderDisplayName,
 			&i.UploaderAvatarURL,
 			&i.UploaderAvatarStorageKey,
-			&i.EventPublicID,
 		); err != nil {
 			return nil, err
 		}
