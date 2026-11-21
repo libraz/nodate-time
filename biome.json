@@ -12,7 +12,8 @@
       "!**/dist",
       "!**/build",
       "!sql/core",
-      "!**/apps/web/src/routeTree.gen.ts"
+      "!**/apps/web/src/routeTree.gen.ts",
+      "!**/apps/web/src/lib/api-schema.d.ts"
     ]
   },
   "formatter": {

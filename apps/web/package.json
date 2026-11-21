@@ -16,6 +16,7 @@
     "@tanstack/react-router": "1.170.46",
     "date-holidays": "^3.39.2",
     "luxon": "3.7.2",
+    "openapi-fetch": "0.17.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zustand": "5.1.0"

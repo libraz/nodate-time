@@ -1,0 +1,50 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Sample", "version": "1.0.0" },
+  "paths": {
+    "/events/{eventId}": {
+      "get": {
+        "operationId": "getEvent",
+        "parameters": [
+          { "name": "eventId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Event" } }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Event": {
+        "type": "object",
+        "required": ["id", "title", "etag"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "etag": { "type": "string" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["status", "code", "message"],
+        "properties": {
+          "status": { "type": "integer" },
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}
