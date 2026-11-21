@@ -112,7 +112,7 @@ func TestAllowedEmailRowRestrictsSignInWithoutADomainList(t *testing.T) {
 	}
 
 	status, raw := register(outsider)
-	require.Equal(t, http.StatusOK, status, "open before any row exists: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "open before any row exists: %s", string(raw))
 
 	t.Cleanup(func() { withdrawAllowedEmail(t, insider) })
 	var created struct {
@@ -133,7 +133,7 @@ func TestAllowedEmailRowRestrictsSignInWithoutADomainList(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, login(outsider),
 		"an existing account outside the list stops signing in")
 	status, raw = register(insider)
-	require.Equal(t, http.StatusOK, status, "the listed address registers: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "the listed address registers: %s", string(raw))
 	require.Equal(t, http.StatusOK, login(insider))
 
 	status, raw = helpers.DoJSONStatus(t, http.MethodDelete, testServerURL+"/admin/allowed-emails/"+created.ID, admin.AccessToken, nil)

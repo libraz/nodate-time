@@ -48,7 +48,7 @@ func TestCreateUserPasswordPolicyAgreesWithTheAPI(t *testing.T) {
 
 		status, raw := helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/auth/register", "",
 			map[string]any{"name": "Accepted", "email": bootstrapEmail("cu-api-ok"), "password": password})
-		require.Equal(t, http.StatusOK, status,
+		require.Equal(t, http.StatusCreated, status,
 			"the API accepts the same password: %s", string(raw))
 
 		status, _ = helpers.DoJSONStatus(t, http.MethodPost, testServerURL+"/auth/login", "",

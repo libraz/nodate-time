@@ -64,8 +64,8 @@ func readProviderRow(t *testing.T, tx *sql.Tx, provider string) providerRow {
 
 func putProvider(t *testing.T, base, token, provider string, body map[string]any) (hasSecret bool) {
 	t.Helper()
-	status, raw := helpers.DoJSONStatus(t, http.MethodPut, base+"/admin/oauth-providers/"+provider, token, body)
-	require.Equal(t, http.StatusOK, status, "PUT %s %v: %s", provider, body, raw)
+	status, raw := helpers.DoJSONStatus(t, http.MethodPatch, base+"/admin/oauth-providers/"+provider, token, body)
+	require.Equal(t, http.StatusOK, status, "PATCH %s %v: %s", provider, body, raw)
 	var out struct {
 		HasSecret bool `json:"hasSecret"`
 	}
@@ -75,7 +75,7 @@ func putProvider(t *testing.T, base, token, provider string, body map[string]any
 
 // Every way the admin screen saves a provider -- first save relying on the
 // environment's secret, first save with a secret, keeping the stored secret,
-// replacing it, clearing it -- is accepted and leaves a row with a stable
+// replacing it, clearing it (null) -- is accepted and leaves a row with a stable
 // public id and a non-NULL ciphertext.
 func TestAdminOAuthProviderSaveCycle(t *testing.T) {
 	bootstrap(t)
@@ -95,7 +95,7 @@ func TestAdminOAuthProviderSaveCycle(t *testing.T) {
 
 	// Google has an environment secret, so a first save may omit one.
 	require.False(t, putProvider(t, srv.URL, admin.AccessToken, "google",
-		map[string]any{"clientId": "db-google-client", "clientSecret": "", "enabled": true}))
+		map[string]any{"clientId": "db-google-client", "enabled": true}))
 	first := readProviderRow(t, tx, "google")
 	require.Len(t, first.publicID, 16)
 	require.NotNil(t, first.ciphertext)
@@ -104,14 +104,14 @@ func TestAdminOAuthProviderSaveCycle(t *testing.T) {
 	require.True(t, putProvider(t, srv.URL, admin.AccessToken, "google",
 		map[string]any{"clientId": "db-google-client", "clientSecret": "replaced", "enabled": true}))
 	require.True(t, putProvider(t, srv.URL, admin.AccessToken, "google",
-		map[string]any{"clientId": "db-google-client-2", "clientSecret": "", "enabled": false}),
-		"an empty secret keeps the stored one")
+		map[string]any{"clientId": "db-google-client-2", "enabled": false}),
+		"an omitted secret keeps the stored one")
 	kept := readProviderRow(t, tx, "google")
 	require.Equal(t, first.publicID, kept.publicID, "an update must not change the public id")
 	require.NotEmpty(t, kept.ciphertext)
 
 	require.False(t, putProvider(t, srv.URL, admin.AccessToken, "google",
-		map[string]any{"clientId": "db-google-client-2", "clientSecret": "__clear__", "enabled": true}))
+		map[string]any{"clientId": "db-google-client-2", "clientSecret": nil, "enabled": true}))
 	cleared := readProviderRow(t, tx, "google")
 	require.Equal(t, first.publicID, cleared.publicID)
 	require.NotNil(t, cleared.ciphertext)
@@ -161,7 +161,7 @@ func TestAdminOAuthListingOmitsUpdatedAtWithoutAStoredRow(t *testing.T) {
 	}
 
 	putProvider(t, srv.URL, admin.AccessToken, "google",
-		map[string]any{"clientId": "db-google-client", "clientSecret": "", "enabled": true})
+		map[string]any{"clientId": "db-google-client", "enabled": true})
 	after := list()
 	require.Equal(t, "db", after["google"]["source"])
 	require.NotEmpty(t, after["google"]["updatedAt"], "a stored row reports when it was saved")

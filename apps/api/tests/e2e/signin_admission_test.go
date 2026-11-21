@@ -36,7 +36,7 @@ func TestPasswordLoginAppliesTheSignInRestriction(t *testing.T) {
 
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost, srv.URL+"/auth/register", "",
 		map[string]any{"name": "Admission", "email": email, "password": password})
-	require.Equal(t, http.StatusOK, status, "an allow-listed address registers: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "an allow-listed address registers: %s", string(raw))
 	status, raw = helpers.DoJSONStatus(t, http.MethodPost, srv.URL+"/auth/login", "",
 		map[string]any{"email": email, "password": password})
 	require.Equal(t, http.StatusOK, status, "and signs in while listed: %s", string(raw))

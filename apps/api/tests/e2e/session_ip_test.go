@@ -25,7 +25,7 @@ func TestSignInFromAnIPv6ClientStoresThePackedAddress(t *testing.T) {
 		map[string]any{"email": email, "password": "password123", "name": "IPv6 User"},
 		map[string]string{"X-Forwarded-For": clientIP},
 	)
-	require.Equal(t, http.StatusOK, status, "register from an IPv6 client: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "register from an IPv6 client: %s", string(raw))
 
 	var stored []byte
 	require.NoError(t, testDB.QueryRow(`
@@ -51,7 +51,7 @@ func TestSignInFromAnIPv4ClientStoresTheMappedForm(t *testing.T) {
 		map[string]any{"email": email, "password": "password123", "name": "IPv4 User"},
 		map[string]string{"X-Forwarded-For": clientIP},
 	)
-	require.Equal(t, http.StatusOK, status, "register from an IPv4 client: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "register from an IPv4 client: %s", string(raw))
 
 	var stored []byte
 	require.NoError(t, testDB.QueryRow(`

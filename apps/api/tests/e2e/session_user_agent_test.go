@@ -25,7 +25,7 @@ func TestSignInWithAnAwkwardUserAgentStoresValidUTF8(t *testing.T) {
 		map[string]any{"email": email, "password": "password123", "name": "UA User"},
 		map[string]string{"User-Agent": userAgent},
 	)
-	require.Equal(t, http.StatusOK, status, "register: %s", string(raw))
+	require.Equal(t, http.StatusCreated, status, "register: %s", string(raw))
 
 	status, raw = helpers.DoJSONStatusWithHeaders(t, http.MethodPost,
 		testServerURL+"/auth/login", "",

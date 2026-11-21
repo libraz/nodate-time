@@ -306,7 +306,7 @@ func TestIdentityContractCoreAllowlistRestrictsSignIn(t *testing.T) {
 
 	status, raw = helpers.DoJSONStatus(t, http.MethodPost, app.URL+"/auth/register", "",
 		map[string]any{"name": "Insider", "email": strings.ToUpper(insider), "password": password})
-	require.Equal(t, http.StatusOK, status, "the listed address is admitted, in any case: %s", raw)
+	require.Equal(t, http.StatusCreated, status, "the listed address is admitted, in any case: %s", raw)
 	status, _ = app.login(t, insider, password)
 	require.Equal(t, http.StatusOK, status)
 }
