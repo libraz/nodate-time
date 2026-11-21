@@ -45,6 +45,9 @@ type importReport struct {
 	Truncated        int  `json:"truncated"`
 	UnknownTimezones int  `json:"unknownTimezones"`
 	Unreadable       bool `json:"unreadable"`
+	// DroppedReminders counts alarms left off because their offset is out of
+	// the range a reminder can take.
+	DroppedReminders int `json:"droppedReminders"`
 }
 
 func importICS(t *testing.T, calURL, token, ics string) (int, []byte) {
@@ -103,10 +106,22 @@ func hostileCalendar(t *testing.T, tt *helpers.TestTenant, name string) string {
 	return testServerURL + "/calendars/" + newCalendar(t, tt, name)
 }
 
+// listEventItems reads an events listing, which answers {items, hasMore}, into
+// out, a pointer to a slice of the caller's row type.
+func listEventItems(t *testing.T, url, token string, out any) {
+	t.Helper()
+	var page struct {
+		Items json.RawMessage `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, url, token, nil, &page)
+	require.NotEmpty(t, page.Items, "a listing answers an items array")
+	require.NoError(t, json.Unmarshal(page.Items, out))
+}
+
 func listHostile(t *testing.T, calURL, token string) []recInstance {
 	t.Helper()
 	var listed []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events"+hostileWindow, token, nil, &listed)
+	listEventItems(t, calURL+"/events"+hostileWindow, token, &listed)
 	return listed
 }
 
@@ -124,7 +139,7 @@ func deleteEverything(t *testing.T, calURL, token string, rows []recInstance) {
 			continue
 		}
 		done[seriesID] = true
-		status, body := helpers.DoJSONStatus(t, http.MethodDelete,
+		status, body := sendAnyVersion(t, http.MethodDelete,
 			calURL+"/events/"+e.ID+"?scope=all", token, nil)
 		require.Equal(t, http.StatusNoContent, status,
 			"an imported row must be removable by the person who imported it: %s", cut(string(body), 200))
@@ -407,9 +422,8 @@ func TestICalImportCutsALongDescriptionToTheMemoLimit(t *testing.T) {
 			require.Equal(t, c.want, utf8.RuneCountInString(evt.Memo))
 			require.True(t, strings.HasPrefix(c.desc, evt.Memo), "the memo is the start of the description")
 
-			body := eventBody("Long notes", "2026-06-01T10:00:00Z", "2026-06-01T11:00:00Z")
-			body["memo"] = evt.Memo
-			status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+listed[0].ID,
+			body := map[string]any{"title": "Long notes", "memo": evt.Memo}
+			status, raw := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+listed[0].ID,
 				tt.AccessToken, body)
 			require.Equal(t, http.StatusOK, status, "an unchanged save of the imported memo: %s", cut(string(raw), 400))
 			deleteEverything(t, calURL, tt.AccessToken, listed)
@@ -1181,7 +1195,10 @@ func importedAlarmOffset(t *testing.T, calURL, token, trigger string) *int {
 		"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
 		"BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Ring",
 		"TRIGGER:"+trigger, "END:VALARM"))
-	require.Equal(t, importReport{Imported: 1}, importOK(t, calURL, token, ics))
+	res := importOK(t, calURL, token, ics)
+	// Whether an alarm was counted as dropped is checked where it matters.
+	res.DroppedReminders = 0
+	require.Equal(t, importReport{Imported: 1}, res)
 
 	listed := listHostile(t, calURL, token)
 	require.Len(t, listed, 1)
@@ -1192,9 +1209,9 @@ func importedAlarmOffset(t *testing.T, calURL, token, trigger string) *int {
 	return evt.NotificationOffset
 }
 
-// A reminder this product cannot show is left off rather than snapped to a
-// neighbouring value, and a trigger that names an instant, fires after the
-// start, or does not parse leaves the event with none. The event itself still
+// A reminder within the supported range is kept as written, never snapped to
+// a preset, and a trigger past the range, that names an instant, fires after
+// the start, or does not parse leaves the event with none. The event itself still
 // imports: an alarm is not a reason to lose what it was attached to.
 func TestICalImportKeepsOnlyAlarmsItCanShow(t *testing.T) {
 	bootstrap(t)
@@ -1202,14 +1219,15 @@ func TestICalImportKeepsOnlyAlarmsItCanShow(t *testing.T) {
 
 	tt := helpers.NewTenant(t, testServerURL)
 
-	fifteen := 15
+	fifteen, seven := 15, 7
 	cases := []struct {
 		name    string
 		trigger string
 		want    *int
 	}{
 		{"a supported offset", "-PT15M", &fifteen},
-		{"an offset the picker cannot show", "-PT7M", nil},
+		{"an offset that is not a picker preset", "-PT7M", &seven},
+		{"an offset past the longest reminder", "-PT10081M", nil},
 		{"more minutes than an int can hold", "-PT99999999999999999999M", nil},
 		{"a four-hundred-digit duration", "-P" + strings.Repeat("9", 400) + "D", nil},
 		{"weeks combined with days, which the grammar forbids", "-P1W2D", nil},
@@ -1227,6 +1245,15 @@ func TestICalImportKeepsOnlyAlarmsItCanShow(t *testing.T) {
 			deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
 		})
 	}
+
+	t.Run("an offset past the longest reminder is counted", func(t *testing.T) {
+		calURL := hostileCalendar(t, tt, "Alarm counted")
+		ics := wrap(vevent("UID:al-count@example.com", "SUMMARY:Alarmed",
+			"DTSTART:20260601T100000Z", "DTEND:20260601T110000Z",
+			"BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Ring", "TRIGGER:-PT10081M", "END:VALARM"))
+		require.Equal(t, importReport{Imported: 1, DroppedReminders: 1}, importOK(t, calURL, tt.AccessToken, ics))
+		deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
+	})
 }
 
 // A value that is not a duration leaves no reminder, on the parser's own

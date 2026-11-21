@@ -405,9 +405,9 @@ func TestTimeTreeImportAllDayRecurrenceHonoursTheExdateAndTheUntilDay(t *testing
 		StartAt string `json:"startAt"`
 		AllDay  bool   `json:"allDay"`
 	}
-	helpers.DoJSON(t, http.MethodGet,
+	listEventItems(t,
 		testServerURL+"/calendars/"+s.calendarID(t)+"/events?start=2026-04-01&end=2026-05-31&tz=Asia/Tokyo",
-		s.token, nil, &evts)
+		s.token, &evts)
 
 	starts := map[string][]time.Time{}
 	for _, e := range evts {

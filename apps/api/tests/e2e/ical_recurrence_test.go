@@ -76,7 +76,7 @@ func TestICalImportPreservesTimezoneAndRecurrence(t *testing.T) {
 		StartAt  string `json:"startAt"`
 		Timezone string `json:"timezone"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-25&end=2026-06-10", tt.AccessToken, nil, &listed)
+	listEventItems(t, calURL+"/events?start=2026-05-25&end=2026-06-10", tt.AccessToken, &listed)
 	require.Len(t, listed, 3, "RRULE must expand into its occurrences")
 	for _, e := range listed {
 		assert.Equal(t, "Tokyo meeting", e.Title)
@@ -133,21 +133,13 @@ func TestICalExportWritesTheSeriesAndItsDepartures(t *testing.T) {
 	evts := createWeeklyFriday(t, calURL, tt.AccessToken)
 
 	// Cancel 2026-04-10 and override 2026-04-17.
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
 	require.True(t, status >= 200 && status < 300)
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
-			"title":              "Special export",
-			"allDay":             false,
-			"startAt":            "2026-04-17T20:00:00+09:00",
-			"endAt":              "2026-04-17T21:00:00+09:00",
-			"location":           "",
-			"memo":               "",
-			"url":                "",
-			"notificationOffset": nil,
-			"participantIds":     []string{},
-			"ownerId":            nil,
-			"recurrenceRule":     nil,
+			"title":   "Special export",
+			"startAt": "2026-04-17T20:00:00+09:00",
+			"endAt":   "2026-04-17T21:00:00+09:00",
 		}, nil)
 
 	ics := fetchICS(t, calURL, tt.AccessToken)
@@ -176,9 +168,10 @@ func TestICalExportWritesTheSeriesAndItsDepartures(t *testing.T) {
 		"a changed occurrence belongs to its series, so it shares the UID")
 
 	// A rule that stores wkst SU leaves with WKST=SU.
-	body := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
-	body["recurrenceRule"] = map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "wkst": "SU"}
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+strings.Split(evts[0].ID, "_")[0], tt.AccessToken, body, nil)
+	body := map[string]any{
+		"recurrenceRule": map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"}, "wkst": "SU"},
+	}
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+strings.Split(evts[0].ID, "_")[0], tt.AccessToken, body, nil)
 	assert.Contains(t, fetchICS(t, calURL, tt.AccessToken), "RRULE:FREQ=WEEKLY;BYDAY=FR;WKST=SU")
 }
 

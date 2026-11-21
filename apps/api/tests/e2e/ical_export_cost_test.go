@@ -33,9 +33,9 @@ func TestExportCostDoesNotFollowTheNumberOfSeries(t *testing.T) {
 				"recurrenceRule": map[string]any{"freq": "daily", "interval": 1, "count": 3},
 			}, &series)
 			var instances []recInstance
-			helpers.DoJSON(t, http.MethodGet,
+			listEventItems(t,
 				calURL+fmt.Sprintf("/events?start=2026-10-%02d&end=2026-10-%02d&tz=UTC", day, day),
-				owner.AccessToken, nil, &instances)
+				owner.AccessToken, &instances)
 			var first string
 			for _, inst := range instances {
 				if inst.Title == title {
@@ -43,13 +43,11 @@ func TestExportCostDoesNotFollowTheNumberOfSeries(t *testing.T) {
 				}
 			}
 			require.NotEmpty(t, first)
-			helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+first+"?scope=this", owner.AccessToken,
+			doAnyVersion(t, http.MethodPatch, calURL+"/events/"+first+"?scope=this", owner.AccessToken,
 				map[string]any{
-					"title": title + " moved", "allDay": false,
-					"startAt":  fmt.Sprintf("2026-10-%02dT15:00:00Z", day),
-					"endAt":    fmt.Sprintf("2026-10-%02dT16:00:00Z", day),
-					"location": "", "memo": "", "url": "", "notificationOffset": nil,
-					"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
+					"title":   title + " moved",
+					"startAt": fmt.Sprintf("2026-10-%02dT15:00:00Z", day),
+					"endAt":   fmt.Sprintf("2026-10-%02dT16:00:00Z", day),
 				}, nil)
 		}
 	}
@@ -71,8 +69,8 @@ func TestExportCostDoesNotFollowTheNumberOfSeries(t *testing.T) {
 	require.Equal(t, csvBefore, measure("csv", 6), "CSV export queries follow the series count")
 }
 
-// The CSV export stops at its row cap and says so, rather than handing over a
-// file that silently ends early.
+// The CSV export refuses a range holding more rows than its cap rather than
+// handing over a file that silently ends early.
 func TestCSVExportReportsTruncation(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -80,8 +78,7 @@ func TestCSVExportReportsTruncation(t *testing.T) {
 	tt := helpers.NewTenant(t, testServerURL)
 	calURL := testServerURL + "/calendars/" + tt.CalendarID
 
-	small, h := exportResponse(t, calURL, tt.AccessToken, "format=csv")
-	require.Empty(t, h.Get("X-Result-Truncated"))
+	small, _ := exportResponse(t, calURL, tt.AccessToken, "format=csv")
 	require.Equal(t, 1, strings.Count(small, "\r\n"), "header row only")
 
 	// Four open-ended daily series over the default fifteen-year window are
@@ -94,11 +91,11 @@ func TestCSVExportReportsTruncation(t *testing.T) {
 			"recurrenceRule": map[string]any{"freq": "daily", "interval": 1},
 		}, nil)
 	}
-	csv, h := exportResponse(t, calURL, tt.AccessToken, "format=csv")
-	require.Equal(t, "true", h.Get("X-Result-Truncated"))
-	require.Equal(t, 20000+1, strings.Count(csv, "\r\n"))
+	status, raw := helpers.DoJSONStatus(t, http.MethodGet, calURL+"/export?format=csv", tt.AccessToken, nil)
+	require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
+	require.Contains(t, string(raw), "EXPORT.RANGE_TOO_LARGE")
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodGet,
+	status, _ = helpers.DoJSONStatus(t, http.MethodGet,
 		calURL+"/export?format=csv&from=1990-01-01&to=2030-01-01", tt.AccessToken, nil)
 	require.Equal(t, http.StatusBadRequest, status, "a window wider than the expander covers is refused")
 }

@@ -20,7 +20,7 @@ type zonedInstance struct {
 func zonesByTitle(t *testing.T, calURL, token, query string) map[string]zonedInstance {
 	t.Helper()
 	var listed []zonedInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?"+query, token, nil, &listed)
+	listEventItems(t, calURL+"/events?"+query, token, &listed)
 	out := make(map[string]zonedInstance, len(listed))
 	for _, e := range listed {
 		out[e.Title] = e
@@ -56,9 +56,11 @@ func TestICalRoundTripKeepsEveryTimedEventsZone(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, second)
-	moved := eventBody("Standup from New York", "2026-06-08T08:00:00-04:00", "2026-06-08T08:30:00-04:00")
-	moved["timezone"] = "America/New_York"
-	helpers.DoJSON(t, http.MethodPut, sourceURL+"/events/"+second+"?scope=this", tt.AccessToken, moved, nil)
+	moved := map[string]any{
+		"title": "Standup from New York", "timezone": "America/New_York",
+		"startAt": "2026-06-08T08:00:00-04:00", "endAt": "2026-06-08T08:30:00-04:00",
+	}
+	doAnyVersion(t, http.MethodPatch, sourceURL+"/events/"+second+"?scope=this", tt.AccessToken, moved, nil)
 
 	source := zonesByTitle(t, sourceURL, tt.AccessToken, window)
 	require.Equal(t, "America/New_York", source["Dentist"].Timezone)

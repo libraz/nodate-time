@@ -25,14 +25,16 @@ func TestImportedChangedOccurrenceWithoutATitleTakesTheSeriesTitle(t *testing.T)
 	require.Equal(t, importReport{Imported: 2}, importOK(t, calURL, tt.AccessToken, ics))
 
 	var moved []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-06-02&end=2026-06-02&tz=UTC",
-		tt.AccessToken, nil, &moved)
+	listEventItems(t, calURL+"/events?start=2026-06-02&end=2026-06-02&tz=UTC",
+		tt.AccessToken, &moved)
 	require.Len(t, moved, 1)
 	require.Equal(t, "2026-06-02T14:00:00Z", moved[0].StartAt)
 	require.Equal(t, "Standup", moved[0].Title)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+moved[0].ID+"?scope=this",
-		tt.AccessToken, eventBody(moved[0].Title, "2026-06-02T14:00:00Z", "2026-06-02T14:15:00Z"))
+	status, raw := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+moved[0].ID+"?scope=this",
+		tt.AccessToken, map[string]any{
+			"title": moved[0].Title, "startAt": "2026-06-02T14:00:00Z", "endAt": "2026-06-02T14:15:00Z",
+		})
 	require.Equal(t, http.StatusOK, status, "saving the imported occurrence unchanged: %s", raw)
 	deleteEverything(t, calURL, tt.AccessToken, listHostile(t, calURL, tt.AccessToken))
 }

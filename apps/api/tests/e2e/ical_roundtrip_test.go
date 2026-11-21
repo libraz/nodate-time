@@ -56,16 +56,14 @@ func TestICalRoundTripPreservesASeriesAndItsDepartures(t *testing.T) {
 
 	evts := createWeeklyFriday(t, sourceURL, tt.AccessToken)
 
-	status, raw := helpers.DoJSONStatus(t, http.MethodDelete,
+	status, raw := sendAnyVersion(t, http.MethodDelete,
 		sourceURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status, "cancel occurrence: %s", string(raw))
 
-	helpers.DoJSON(t, http.MethodPut, sourceURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, sourceURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
-			"title": "Moved to the evening", "allDay": false,
+			"title":   "Moved to the evening",
 			"startAt": "2026-04-17T20:00:00+09:00", "endAt": "2026-04-17T21:00:00+09:00",
-			"location": "", "memo": "", "url": "", "notificationOffset": nil,
-			"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
 		}, nil)
 
 	exported := fetchICS(t, sourceURL, tt.AccessToken)
@@ -96,14 +94,12 @@ func TestICalRoundTripLeavesTheSameOccurrencesOnTheCalendar(t *testing.T) {
 	sourceURL := testServerURL + "/calendars/" + tt.CalendarID
 
 	evts := createWeeklyFriday(t, sourceURL, tt.AccessToken)
-	helpers.DoJSONStatus(t, http.MethodDelete,
+	sendAnyVersion(t, http.MethodDelete,
 		sourceURL+"/events/"+evts[1].ID+"?scope=this", tt.AccessToken, nil)
-	helpers.DoJSON(t, http.MethodPut, sourceURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
+	doAnyVersion(t, http.MethodPatch, sourceURL+"/events/"+evts[2].ID+"?scope=this", tt.AccessToken,
 		map[string]any{
-			"title": "Moved to the evening", "allDay": false,
+			"title":   "Moved to the evening",
 			"startAt": "2026-04-17T20:00:00+09:00", "endAt": "2026-04-17T21:00:00+09:00",
-			"location": "", "memo": "", "url": "", "notificationOffset": nil,
-			"participantIds": []string{}, "ownerId": nil, "recurrenceRule": nil,
 		}, nil)
 
 	targetURL := testServerURL + "/calendars/" + newCalendar(t, tt, "Imported")
@@ -113,10 +109,10 @@ func TestICalRoundTripLeavesTheSameOccurrencesOnTheCalendar(t *testing.T) {
 	require.Equal(t, 2, res.Imported)
 
 	var source, imported []recInstance
-	helpers.DoJSON(t, http.MethodGet,
-		sourceURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &source)
-	helpers.DoJSON(t, http.MethodGet,
-		targetURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, nil, &imported)
+	listEventItems(t,
+		sourceURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, &source)
+	listEventItems(t,
+		targetURL+"/events?start=2026-04-01&end=2026-04-30", tt.AccessToken, &imported)
 
 	require.Equal(t, startsOf(source), startsOf(imported),
 		"the same occurrences on the same instants")
@@ -187,8 +183,8 @@ func TestImportHonorsExdate(t *testing.T) {
 	require.Equal(t, 1, res.Imported)
 
 	var listed []recInstance
-	helpers.DoJSON(t, http.MethodGet,
-		calURL+"/events?start=2026-06-01&end=2026-06-10", tt.AccessToken, nil, &listed)
+	listEventItems(t,
+		calURL+"/events?start=2026-06-01&end=2026-06-10", tt.AccessToken, &listed)
 	require.Equal(t,
 		[]string{"2026-06-01T10:00:00Z", "2026-06-03T10:00:00Z", "2026-06-05T10:00:00Z"},
 		startsOf(listed),

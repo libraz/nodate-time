@@ -65,7 +65,7 @@ func TestICalImportOutcomesDoNotDependOnWhereTransactionsSplitTheFile(t *testing
 		Imported: len(twins), Duplicates: total - 1 - len(twins), Failed: 1, Rejected: 1,
 	}, importOK(t, calURL, tt.AccessToken, ics))
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL, tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status)
 }
 
@@ -96,6 +96,6 @@ func TestICalImportAtTheEventCapAnswersWithinTheWriteTimeout(t *testing.T) {
 	require.Less(t, elapsed, app.DefaultTimeouts().Write)
 	t.Logf("%d events imported in %s", capacity, elapsed)
 
-	status, _ := helpers.DoJSONStatus(t, http.MethodDelete, calURL, tt.AccessToken, nil)
+	status, _ := sendAnyVersion(t, http.MethodDelete, calURL, tt.AccessToken, nil)
 	require.Equal(t, http.StatusNoContent, status)
 }

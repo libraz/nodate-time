@@ -33,13 +33,14 @@ func TestOccurrenceMovedBeforeTheSeriesStartStaysVisible(t *testing.T) {
 		"recurrenceRule": map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"MO"}},
 	}, nil)
 	var first []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-11-02&end=2026-11-02&tz=UTC",
-		tt.AccessToken, nil, &first)
+	listEventItems(t, calURL+"/events?start=2026-11-02&end=2026-11-02&tz=UTC",
+		tt.AccessToken, &first)
 	require.Len(t, first, 1)
 
 	const moved = "Weekly review brought forward"
-	helpers.DoJSON(t, http.MethodPut, calURL+"/events/"+first[0].ID+"?scope=this", tt.AccessToken,
-		eventBody(moved, "2026-10-30T10:00:00Z", "2026-10-30T11:00:00Z"), nil) // the Friday before
+	doAnyVersion(t, http.MethodPatch, calURL+"/events/"+first[0].ID+"?scope=this", tt.AccessToken,
+		map[string]any{"title": moved, "startAt": "2026-10-30T10:00:00Z", "endAt": "2026-10-30T11:00:00Z"},
+		nil) // the Friday before
 
 	for name, query := range map[string]string{
 		"week view":  "start=2026-10-26&end=2026-11-01&tz=UTC",
@@ -47,7 +48,7 @@ func TestOccurrenceMovedBeforeTheSeriesStartStaysVisible(t *testing.T) {
 		"day view":   "start=2026-10-30&end=2026-10-30&tz=UTC",
 	} {
 		var listed []recInstance
-		helpers.DoJSON(t, http.MethodGet, calURL+"/events?"+query, tt.AccessToken, nil, &listed)
+		listEventItems(t, calURL+"/events?"+query, tt.AccessToken, &listed)
 		require.Equal(t, []string{moved}, instanceTitles(listed), name)
 	}
 
@@ -60,8 +61,8 @@ func TestOccurrenceMovedBeforeTheSeriesStartStaysVisible(t *testing.T) {
 	var shared []struct {
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet,
-		testServerURL+"/share/"+invite.Token+"/events?start=2026-10-01&end=2026-10-31&tz=UTC", "", nil, &shared)
+	listEventItems(t,
+		testServerURL+"/share/"+invite.Token+"/events?start=2026-10-01&end=2026-10-31&tz=UTC", "", &shared)
 	require.Len(t, shared, 1, "share listing")
 	require.Equal(t, moved, shared[0].Title, "share listing")
 
@@ -74,7 +75,7 @@ func TestOccurrenceMovedBeforeTheSeriesStartStaysVisible(t *testing.T) {
 
 	// The occurrence moved off the series' first Monday, which is empty now.
 	var monday []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-11-02&end=2026-11-02&tz=UTC",
-		tt.AccessToken, nil, &monday)
+	listEventItems(t, calURL+"/events?start=2026-11-02&end=2026-11-02&tz=UTC",
+		tt.AccessToken, &monday)
 	require.Empty(t, monday)
 }

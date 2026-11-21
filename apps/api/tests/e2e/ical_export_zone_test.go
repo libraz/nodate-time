@@ -36,7 +36,7 @@ func listedStarts(t *testing.T, calURL, token, query string) []string {
 		Title   string    `json:"title"`
 		StartAt time.Time `json:"startAt"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?"+query, token, nil, &evts)
+	listEventItems(t, calURL+"/events?"+query, token, &evts)
 	out := make([]string, 0, len(evts))
 	for _, e := range evts {
 		out = append(out, e.Title+"@"+e.StartAt.UTC().Format(time.RFC3339))

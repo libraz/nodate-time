@@ -77,8 +77,8 @@ func TestFoldedTextSurvivesExportAndImport(t *testing.T) {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}
-	helpers.DoJSON(t, http.MethodGet,
-		targetURL+"/events?start=2026-06-01&end=2026-06-30", tt.AccessToken, nil, &listed)
+	listEventItems(t,
+		targetURL+"/events?start=2026-06-01&end=2026-06-30", tt.AccessToken, &listed)
 	require.Len(t, listed, 1)
 	require.Equal(t, foldedTitle, listed[0].Title,
 		"the title has to come back the way it went out, character for character")

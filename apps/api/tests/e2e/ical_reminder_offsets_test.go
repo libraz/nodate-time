@@ -14,6 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// maxNotificationOffset is the longest reminder, in minutes, the API accepts.
+const maxNotificationOffset = 10080
+
 // webNotificationOffsets reads the reminder offsets the web picker offers
 // straight from its source, so the test follows the client rather than a copy.
 func webNotificationOffsets(t *testing.T) map[int]bool {
@@ -32,16 +35,18 @@ func webNotificationOffsets(t *testing.T) map[int]bool {
 	return out
 }
 
-// The reminders an import keeps, the ones the events API accepts and the ones
-// the web picker offers are one set. A reminder outside it is invisible in the
-// picker, so the import drops it and the API refuses it; if the copies drift,
-// imported reminders are silently lost or kept where nothing can show them.
+// The reminders an import keeps and the ones the events API accepts are one
+// set: every offset from 0 to 10080 minutes, including the presets the web
+// picker offers. A value past the range is refused by the API and left off by
+// the import, which counts it; if the two drift, imported reminders are
+// silently lost or kept where the API would have refused them.
 func TestReminderOffsetsAreTheSameForImportTheAPIAndTheClient(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	web := webNotificationOffsets(t)
-	candidates := map[int]bool{1: true, 45: true, 90: true, 180: true, 720: true, 4320: true, 10080: true}
+	candidates := map[int]bool{0: true, 1: true, 45: true, 90: true, 180: true, 720: true, 4320: true,
+		10080: true, 10081: true, 20160: true}
 	for v := range web {
 		candidates[v] = true
 	}
@@ -63,7 +68,7 @@ func TestReminderOffsetsAreTheSameForImportTheAPIAndTheClient(t *testing.T) {
 			"startAt": "2026-10-05T10:00:00Z", "endAt": "2026-10-05T11:00:00Z",
 			"notificationOffset": v,
 		})
-		require.Equal(t, web[v], status < 300, "API with offset %d: %d %s", v, status, raw)
+		require.Equal(t, v <= maxNotificationOffset, status < 300, "API with offset %d: %d %s", v, status, raw)
 
 		fmt.Fprintf(&file, "BEGIN:VEVENT\r\nUID:offset-%d@example.com\r\nSUMMARY:Offset %d\r\n"+
 			"DTSTART:20261005T100000Z\r\nDTEND:20261005T110000Z\r\n"+
@@ -71,18 +76,34 @@ func TestReminderOffsetsAreTheSameForImportTheAPIAndTheClient(t *testing.T) {
 			v, v, v)
 	}
 	file.WriteString("END:VCALENDAR\r\n")
-	require.Equal(t, len(offsets), importOK(t, importURL, tt.AccessToken, file.String()).Imported)
+	outOfRange := 0
+	for _, v := range offsets {
+		if v > maxNotificationOffset {
+			outOfRange++
+		}
+	}
+	res := importOK(t, importURL, tt.AccessToken, file.String())
+	require.Equal(t, len(offsets), res.Imported)
+	require.Equal(t, outOfRange, res.DroppedReminders, "a reminder past the range is counted, not lost quietly")
 
 	var imported []struct {
 		Title              string `json:"title"`
 		NotificationOffset *int   `json:"notificationOffset"`
 	}
-	helpers.DoJSON(t, http.MethodGet, importURL+"/events?start=2026-10-05&end=2026-10-05&tz=UTC",
-		tt.AccessToken, nil, &imported)
+	listEventItems(t, importURL+"/events?start=2026-10-05&end=2026-10-05&tz=UTC",
+		tt.AccessToken, &imported)
 	require.Len(t, imported, len(offsets))
 	for _, e := range imported {
 		v, err := strconv.Atoi(strings.TrimPrefix(e.Title, "Offset "))
 		require.NoError(t, err)
-		require.Equal(t, web[v], e.NotificationOffset != nil, "import with offset %d", v)
+		if v > maxNotificationOffset {
+			require.Nil(t, e.NotificationOffset, "import with offset %d", v)
+			continue
+		}
+		require.NotNil(t, e.NotificationOffset, "import with offset %d", v)
+		require.Equal(t, v, *e.NotificationOffset)
+	}
+	for v := range web {
+		require.LessOrEqual(t, v, maxNotificationOffset, "a preset the picker offers must be one the API accepts")
 	}
 }

@@ -25,7 +25,7 @@ func TestRuleContractIsTheSameForTheAPIAndForImport(t *testing.T) {
 
 	// The series starts on Friday 2026-04-03.
 	bothEnds := map[string]any{"freq": "weekly", "interval": 1, "byDay": []string{"FR"},
-		"count": 3, "until": "2026-12-31"}
+		"count": 3, "until": "2026-12-31T00:00:00Z"}
 	create := map[string]any{
 		"title": "Refused", "allDay": false, "timezone": "Asia/Tokyo",
 		"startAt": "2026-04-03T15:00:00+09:00", "endAt": "2026-04-03T16:00:00+09:00",
@@ -33,16 +33,15 @@ func TestRuleContractIsTheSameForTheAPIAndForImport(t *testing.T) {
 	}
 	status, raw := helpers.DoJSONStatus(t, http.MethodPost, calURL+"/events", tt.AccessToken, create)
 	require.Equal(t, http.StatusBadRequest, status, "create, count and until: %s", raw)
-	update := eventBody("Weekly meeting", "2026-04-03T15:00:00+09:00", "2026-04-03T16:00:00+09:00")
-	update["recurrenceRule"] = bothEnds
-	status, raw = helpers.DoJSONStatus(t, http.MethodPut, seriesURL, tt.AccessToken, update)
+	update := map[string]any{"recurrenceRule": bothEnds}
+	status, raw = sendAnyVersion(t, http.MethodPatch, seriesURL, tt.AccessToken, update)
 	require.Equal(t, http.StatusBadRequest, status, "update, count and until: %s", raw)
 
 	startOnly := map[string]map[string]any{
 		"first Monday after the until": {"freq": "weekly", "interval": 1, "byDay": []string{"MO"},
-			"until": "2026-04-05"},
+			"until": "2026-04-05T00:00:00Z"},
 		"day of month already past, until this month": {"freq": "monthly", "interval": 1,
-			"byMonthDay": []int{2}, "until": "2026-04-30"},
+			"byMonthDay": []int{2}, "until": "2026-04-30T00:00:00Z"},
 	}
 	for name, rule := range startOnly {
 		target := hostileCalendar(t, tt, "API "+name)
@@ -90,8 +89,8 @@ func TestImportTakesAnOrdinalWeekdayLikeItsSetPositionForm(t *testing.T) {
 		"a negative ordinal is still one the expander cannot reproduce")
 
 	var listed []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-06-01&end=2026-10-31&tz=UTC",
-		tt.AccessToken, nil, &listed)
+	listEventItems(t, calURL+"/events?start=2026-06-01&end=2026-10-31&tz=UTC",
+		tt.AccessToken, &listed)
 	byTitle := map[string][]string{}
 	for _, e := range listed {
 		byTitle[e.Title] = append(byTitle[e.Title], e.StartAt)

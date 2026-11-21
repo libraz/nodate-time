@@ -82,8 +82,8 @@ func TestImportKeepsDuration(t *testing.T) {
 		EndAt    time.Time `json:"endAt"`
 		Timezone string    `json:"timezone"`
 	}
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-06-01&end=2026-06-01&tz=UTC",
-		tt.AccessToken, nil, &evts)
+	listEventItems(t, calURL+"/events?start=2026-06-01&end=2026-06-01&tz=UTC",
+		tt.AccessToken, &evts)
 	require.Len(t, evts, 1)
 	require.Equal(t, time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC), evts[0].StartAt.UTC(),
 		"the quoted TZID is read as the zone")
@@ -151,8 +151,8 @@ func TestImportReadsComponentNamesInAnyCase(t *testing.T) {
 				StartAt time.Time `json:"startAt"`
 				Memo    string    `json:"memo"`
 			}
-			helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-06-01&end=2026-06-01&tz=UTC",
-				tt.AccessToken, nil, &evts)
+			listEventItems(t, calURL+"/events?start=2026-06-01&end=2026-06-01&tz=UTC",
+				tt.AccessToken, &evts)
 			require.Len(t, evts, 1)
 			require.Equal(t, time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC), evts[0].StartAt.UTC())
 			require.Empty(t, evts[0].Memo, "the alarm's DESCRIPTION stays inside the alarm")
@@ -180,8 +180,8 @@ func TestImportedOccurrenceMovedPastTheSeriesEndStillLists(t *testing.T) {
 	require.Equal(t, 2, report.Imported)
 
 	var evts []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-06-20&end=2026-06-20&tz=UTC",
-		tt.AccessToken, nil, &evts)
+	listEventItems(t, calURL+"/events?start=2026-06-20&end=2026-06-20&tz=UTC",
+		tt.AccessToken, &evts)
 	require.Len(t, evts, 1)
 	require.Equal(t, "Moved far out", evts[0].Title)
 }
