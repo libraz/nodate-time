@@ -75,6 +75,8 @@ interface DensityStyle {
   cursorFixed: string;
   /** Whether a timed chip leads with its start time; a phone cell is too narrow for both. */
   chipTime: boolean;
+  /** Overflow of a chip's label: a phone cell fades the clipped end, since an ellipsis costs most of a short title. */
+  label: string;
 }
 
 const DENSITY: Record<WeekRowDensity, DensityStyle> = {
@@ -92,6 +94,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     cursorMovable: 'cursor-grab active:cursor-grabbing',
     cursorFixed: 'cursor-pointer',
     chipTime: true,
+    label: 'truncate',
   },
   compact: {
     metrics: { padTop: 4, dateRowH: 24, slotH: 15, overflowH: 13 },
@@ -106,6 +109,8 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     cursorMovable: 'active:cursor-grabbing',
     cursorFixed: '',
     chipTime: false,
+    label:
+      'min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left [mask-image:linear-gradient(to_right,black_calc(100%-6px),transparent)]',
   },
 };
 
@@ -357,6 +362,7 @@ function MonthWeekRowImpl({
                           opacity: draggingEventId === evt.id ? 0.4 : undefined,
                         } as CSSProperties
                       }
+                      title={evt.title}
                     >
                       {style.markSize > 0 ? (
                         <OwnerMark
@@ -372,7 +378,7 @@ function MonthWeekRowImpl({
                           className={`evt-dot shrink-0 rounded-full ${style.dot}`}
                         />
                       )}
-                      <span className="truncate">
+                      <span className={style.label}>
                         {evt.allDay || !style.chipTime ? '' : `${start.toFormat('H:mm')} `}
                         {evt.title}
                       </span>
@@ -467,7 +473,7 @@ function MonthWeekRowImpl({
                   inverse={p.event.showAs !== 'free' && p.event.showAs !== 'tentative'}
                 />
               )}
-              <span className="truncate">
+              <span className={style.label}>
                 {!p.event.allDay && !p.continuesLeft && (
                   <span className="mr-1 opacity-90">{start.toFormat('H:mm')}</span>
                 )}
