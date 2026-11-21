@@ -92,22 +92,30 @@ type PublicEventsInput struct {
 	TZ string `query:"tz" required:"false" doc:"IANA timezone the dates are read in"`
 }
 type PublicEventsOutput struct {
-	// Truncated says the listing stopped at the per-request instance cap.
-	Truncated string `header:"X-Result-Truncated" required:"false"`
-	Body      []PublicEventResponse
+	Body PublicEventList
+}
+
+// PublicEventList is a window of events. HasMore says the visible events
+// past the per-request cap were left out.
+type PublicEventList struct {
+	Items   []PublicEventResponse `json:"items"`
+	HasMore bool                  `json:"hasMore"`
 }
 
 type PublicEventResponse struct {
-	ID       string    `json:"id"`
-	Title    string    `json:"title"`
-	AllDay   bool      `json:"allDay"`
-	StartAt  time.Time `json:"startAt"`
-	EndAt    time.Time `json:"endAt"`
-	Timezone string    `json:"timezone"`
-	Color    string    `json:"color"`
-	Location string    `json:"location,omitempty"`
-	// Private is true when the event's visibility keeps its details from a
-	// public viewer. Title and location are withheld in that case, so the
-	// page shows that the time is taken without saying by what.
-	Private bool `json:"private"`
+	ID string `json:"id"`
+	// Title is null when the event's visibility withholds it from an
+	// anonymous reader.
+	Title   *string   `json:"title" nullable:"true"`
+	AllDay  bool      `json:"allDay"`
+	StartAt time.Time `json:"startAt"`
+	EndAt   time.Time `json:"endAt"`
+	// StartDate and EndDate (exclusive) are set on all-day events.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+	Timezone  string `json:"timezone"`
+	Color     string `json:"color"`
+	Location  string `json:"location,omitempty"`
+	// DetailsHidden is true when fields are withheld from an anonymous reader.
+	DetailsHidden bool `json:"detailsHidden"`
 }

@@ -32,11 +32,12 @@ func registerInvites(g apiGroups, deps Deps) {
 	api = g.protected
 
 	huma.Register(api, huma.Operation{
-		OperationID: "create-invite",
-		Method:      http.MethodPost,
-		Path:        "/calendars/{calendarId}/invites",
-		Summary:     "Create a calendar invite link",
-		Tags:        []string{"Invite"},
+		OperationID:   "create-invite",
+		Method:        http.MethodPost,
+		DefaultStatus: http.StatusCreated,
+		Path:          "/calendars/{calendarId}/invites",
+		Summary:       "Create a calendar invite link",
+		Tags:          []string{"Invite"},
 	}, invites.CreateInvite(invDeps))
 
 	huma.Register(api, huma.Operation{

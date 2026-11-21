@@ -8,12 +8,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
@@ -28,10 +30,10 @@ type Deps struct {
 	WorkspaceID uint32
 }
 
-// maxInvitesListed caps one response. Revoking a link takes it out of this
-// answer, so the list is what an administrator is currently managing rather
-// than a history, and a ceiling is enough.
-const maxInvitesListed = 500
+// maxInvites bounds the links one calendar holds at once. Revoking a link
+// frees its place, so the bound applies to what is being managed rather than
+// to a history.
+const maxInvites = 500
 
 // joinInviteLife bounds a link that was created without terms. A join link
 // that never expires makes removing a member reversible by anyone still
@@ -203,18 +205,26 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 
 		var created generated.CalendarInvite
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if isPublic {
-				// Lock the calendar row so two concurrent requests cannot both
-				// find no public link and both create one.
-				if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
-					return err
-				}
+			// Lock the calendar row so concurrent requests cannot both find
+			// room under the limit, or both find no public link.
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
+				return err
 			}
 			// The caller's role is decided here, under lock, not from the read
 			// that found the calendar: a manager removed in between creates
 			// nothing, and a calendar deleted in between takes no link.
 			if _, err := calresolve.LockManage(ctx, q, cal.ID, userID); err != nil {
 				return err
+			}
+			held, herr := q.ListInvitesByCalendar(ctx, generated.ListInvitesByCalendarParams{
+				CalendarID: cal.ID,
+				Limit:      maxInvites,
+			})
+			if herr != nil {
+				return herr
+			}
+			if len(held) >= maxInvites {
+				return apierrors.InviteLimitReached
 			}
 			if isPublic {
 				count, err := q.CountActivePublicInvites(ctx, cal.ID)
@@ -295,7 +305,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if err := calresolve.LockShared(ctx, q, cal.ID); err != nil {
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
 				if errors.Is(err, apierrors.CalendarNotFound) {
 					return apierrors.InviteCalendarGone
 				}
@@ -359,6 +369,15 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				return apierrors.InvitePublicViewOnly
 			}
 
+			// The calendar is locked exclusively, so two accepts cannot both
+			// find the last place.
+			if err := calresolve.RequireRoomForMember(ctx, q, cal.ID); err != nil {
+				return err
+			}
+			if err := calresolve.RequireRoomForCalendar(ctx, q, deps.WorkspaceID, userID); err != nil {
+				return err
+			}
+
 			// Claim a use atomically; zero rows means the link is exhausted.
 			res, err := q.ConsumeInviteUse(ctx, locked.ID)
 			if err != nil {
@@ -405,7 +424,7 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 
 		rows, err := deps.Queries.ListInvitesByCalendar(ctx, generated.ListInvitesByCalendarParams{
 			CalendarID: cal.ID,
-			Limit:      maxInvitesListed,
+			Limit:      math.MaxInt32,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -503,26 +522,14 @@ func inviteSpent(maxUses sql.NullInt32, useCount uint32) bool {
 	return int64(useCount) >= int64(maxUses.Int32)
 }
 
-// publicEventFields decides what a link holder may see of an event. A
-// calendar published read-only still contains events whose visibility says
-// their details are not for everyone, and the link does not override that:
-// those show as taken time with no title.
-func publicEventFields(e generated.CalendarEvent) (title, location string, private bool) {
-	if e.Visibility == generated.CalendarEventsVisibilityPrivate {
-		return "", "", true
-	}
-	return e.Title, nullStringValue(e.Location), false
-}
-
-// publishedToLink reports whether an event belongs in a public feed at all.
-//
-// Private and confidential differ in kind, not degree: private hides the
-// details but still says the time is taken, while confidential says the event
-// is nobody else's business. Publishing a confidential event as an anonymous
-// busy block still tells a stranger when its owner is occupied, which is the
-// thing the setting exists to withhold.
-func publishedToLink(e generated.CalendarEvent) bool {
-	return e.Visibility != generated.CalendarEventsVisibilityConfidential
+// anonymousView is what an anonymous reader may see of one event row.
+func anonymousView(e generated.CalendarEvent, calendarDefault eventacl.Visibility) eventacl.Decision {
+	return eventacl.Decide(eventacl.Event{
+		Visibility:      eventacl.Visibility(e.Visibility),
+		CalendarDefault: calendarDefault,
+		OwnerUserID:     e.OwnerUserID,
+		CreatedByUserID: e.CreatedByUserID,
+	}, eventacl.Reader{Anonymous: true}, nil)
 }
 
 func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicEventsOutput, error) {
@@ -539,6 +546,14 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 		calendarID := row.CalendarID
 		calendarColor := row.CalendarColor
+		cal, err := deps.Queries.GetCalendarByID(ctx, calendarID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
+			}
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+		calendarDefault := eventacl.Visibility(cal.DefaultEventVisibility)
 
 		loc := daterange.Location(in.TZ, "")
 		window, err := daterange.Resolve(in.StartDate, in.EndDate, in.Days, loc)
@@ -547,19 +562,34 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 		startTime, endTime := window.Start, window.End
 
-		render := func(e generated.CalendarEvent, id string, startAt, endAt time.Time) PublicEventResponse {
-			title, location, private := publicEventFields(e)
-			return PublicEventResponse{
-				ID:       id,
-				Title:    title,
-				AllDay:   e.AllDay,
-				StartAt:  startAt,
-				EndAt:    endAt,
-				Timezone: e.Timezone,
-				Color:    calendarColor,
-				Location: location,
-				Private:  private,
+		// offer renders one row or occurrence and hands it to the cap only
+		// when the reader may see it, so hidden ones never take a slot.
+		offer := func(kept *daterange.Earliest[PublicEventResponse], e generated.CalendarEvent, id string, startAt, endAt time.Time) {
+			d := anonymousView(e, calendarDefault)
+			if !d.Exists {
+				return
 			}
+			r := PublicEventResponse{
+				ID:            id,
+				AllDay:        e.AllDay,
+				StartAt:       startAt,
+				EndAt:         endAt,
+				Timezone:      e.Timezone,
+				Color:         calendarColor,
+				DetailsHidden: d.DetailsHidden,
+			}
+			if e.AllDay {
+				r.StartDate = startAt.UTC().Format(time.DateOnly)
+				r.EndDate = endAt.UTC().Format(time.DateOnly)
+			}
+			if d.Title {
+				title := e.Title
+				r.Title = &title
+			}
+			if d.Location {
+				r.Location = nullStringValue(e.Location)
+			}
+			kept.Offer(startAt, r)
 		}
 
 		rows, err := deps.Queries.ListCalendarEventsByCalendarAndRange(ctx, generated.ListCalendarEventsByCalendarAndRangeParams{
@@ -577,10 +607,10 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		// window, never a whole series.
 		kept := daterange.NewEarliest[PublicEventResponse](daterange.MaxInstances)
 		for _, e := range rows {
-			if !e.StartAt.Valid || !e.EndAt.Valid || !publishedToLink(e) {
+			if !e.StartAt.Valid || !e.EndAt.Valid {
 				continue
 			}
-			kept.Offer(e.StartAt.Time, render(e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time))
+			offer(kept, e, pubIDToHex(e.PublicID), e.StartAt.Time, e.EndAt.Time)
 		}
 
 		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
@@ -602,9 +632,6 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 
 		for _, e := range recurringRows {
-			if !publishedToLink(e) {
-				continue
-			}
 			parentID := pubIDToHex(e.PublicID)
 			for _, inst := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], startTime, endTime) {
 				// The series' own zone decides the day, matching the ids the
@@ -612,23 +639,20 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 				dateStr := inst.OriginalStart.In(recurrence.LoadLocation(e.Timezone)).Format("20060102")
 				id := fmt.Sprintf("%s_%s", parentID, dateStr)
 				if inst.IsOverride {
-					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid || !publishedToLink(inst.Event) {
+					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
 						continue
 					}
-					kept.Offer(inst.Event.StartAt.Time, render(inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time))
+					offer(kept, inst.Event, id, inst.Event.StartAt.Time, inst.Event.EndAt.Time)
 					continue
 				}
-				kept.Offer(inst.Occurrence.StartAt, render(e, id, inst.Occurrence.StartAt, inst.Occurrence.EndAt))
+				offer(kept, e, id, inst.Occurrence.StartAt, inst.Occurrence.EndAt)
 			}
 		}
 
-		out := &PublicEventsOutput{Body: kept.Items()}
-		if kept.Truncated() {
-			out.Truncated = "true"
+		items := kept.Items()
+		if items == nil {
+			items = []PublicEventResponse{}
 		}
-		if out.Body == nil {
-			out.Body = []PublicEventResponse{}
-		}
-		return out, nil
+		return &PublicEventsOutput{Body: PublicEventList{Items: items, HasMore: kept.Truncated()}}, nil
 	}
 }
