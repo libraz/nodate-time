@@ -74,3 +74,15 @@ func wallClockBoundary(day, clock time.Time, zone *time.Location) (time.Time, bo
 		wallTime.Year() == year && wallTime.Month() == month && wallTime.Day() == date &&
 		wallTime.Hour() == clock.Hour() && wallTime.Minute() == clock.Minute()
 }
+
+// upcomingSlots drops candidates that have already started: a poll only asks
+// about times still ahead, and a search window may open on today or earlier.
+func upcomingSlots(slots []availability.Slot, now time.Time) []availability.Slot {
+	upcoming := make([]availability.Slot, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Start.After(now) {
+			upcoming = append(upcoming, slot)
+		}
+	}
+	return upcoming
+}

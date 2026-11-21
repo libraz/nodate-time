@@ -173,6 +173,7 @@ func SearchAvailability(deps Deps) func(context.Context, *SearchAvailabilityInpu
 		if _, err := time.LoadLocation(in.Body.Timezone); err != nil || in.Body.Timezone == "Local" {
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
+		slots = upcomingSlots(slots, time.Now())
 
 		var states []availability.State
 		err = withReadSnapshot(ctx, deps.DB, func(q *generated.Queries) error {
@@ -184,7 +185,7 @@ func SearchAvailability(deps Deps) func(context.Context, *SearchAvailabilityInpu
 				return apierrors.CalendarRoleRequired
 			}
 			memberIDs, err := memberIDsFromPublic(ctx, q, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
-			if err != nil {
+			if err != nil || len(slots) == 0 {
 				return err
 			}
 			states, err = availability.Check(ctx, q, deps.WorkspaceID, cal.ID, memberIDs, slots)

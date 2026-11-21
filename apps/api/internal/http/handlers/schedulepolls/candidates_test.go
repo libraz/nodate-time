@@ -33,3 +33,14 @@ func TestGenerateCandidateSlotsFailsRatherThanReturningTruncatedAvailability(t *
 	_, err := generateCandidateSlots("UTC", "2026-01-01", "2026-12-31", "08:00", "18:00", 60)
 	require.ErrorIs(t, err, availability.ErrLimit)
 }
+
+func TestUpcomingSlotsDropsStartedCandidates(t *testing.T) {
+	now := time.Date(2026, 11, 22, 6, 0, 0, 0, time.UTC)
+	at := func(hour, minute int) availability.Slot {
+		start := time.Date(2026, 11, 22, hour, minute, 0, 0, time.UTC)
+		return availability.Slot{Start: start, End: start.Add(time.Hour)}
+	}
+	slots := upcomingSlots([]availability.Slot{at(5, 30), at(6, 0), at(6, 15)}, now)
+	require.Equal(t, []availability.Slot{at(6, 15)}, slots)
+	require.Empty(t, upcomingSlots([]availability.Slot{at(5, 0)}, now))
+}
