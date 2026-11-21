@@ -418,11 +418,13 @@ func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 		}
 		// EXDATE says which occurrences the series does not have. Dropping it
 		// hands back every occurrence its author cancelled.
-		column, err := exceptionList(e.Exdates, e.AllDay, h.tz).MarshalColumn()
-		if err != nil {
-			return head{}, importFailed
+		if len(e.Exdates) > 0 {
+			column, err := exceptionList(e.Exdates, e.AllDay, h.tz).MarshalColumn()
+			if err != nil {
+				return head{}, importFailed
+			}
+			h.exceptions = column
 		}
-		h.exceptions = column
 	}
 	if h.recEnd.Valid && !storableInstant(h.recEnd.Time) {
 		return head{}, importRejected

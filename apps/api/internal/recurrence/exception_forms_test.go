@@ -116,3 +116,17 @@ func TestExpansionZone(t *testing.T) {
 		t.Errorf("timed = %q, want Asia/Tokyo", got)
 	}
 }
+
+// A list edited down to nothing is stored as [], the form the other writer of
+// the column leaves; only a series that never had a cancellation is NULL.
+func TestExceptionListEmptiedByAnEditIsAnEmptyArray(t *testing.T) {
+	col := json.RawMessage(`["2026-03-10"]`)
+	start := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+	out, err := ParseExceptionList(&col).Without(start, true, "UTC").MarshalColumn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == nil || string(*out) != `[]` {
+		t.Errorf("emptied list = %v, want []", out)
+	}
+}

@@ -86,10 +86,12 @@ func (e ExceptionList) Without(start time.Time, allDay bool, tz string) Exceptio
 	return out
 }
 
-// MarshalColumn renders the list for storage; an empty list is NULL.
+// MarshalColumn renders the list for storage. An emptied list is [], as the
+// other writer leaves it; a series that never had a cancellation is NULL,
+// which is the creating caller's to write.
 func (e ExceptionList) MarshalColumn() (*json.RawMessage, error) {
-	if len(e) == 0 {
-		return nil, nil
+	if e == nil {
+		e = ExceptionList{}
 	}
 	body, err := json.Marshal([]json.RawMessage(e))
 	if err != nil {

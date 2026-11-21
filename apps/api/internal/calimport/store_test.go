@@ -86,8 +86,10 @@ func TestExceptionListWritesTheSeriesForm(t *testing.T) {
 	if err != nil || timed == nil || string(*timed) != `["2026-07-11T00:00:00Z"]` {
 		t.Errorf("timed = %v, %v; want a UTC instant", timed, err)
 	}
-	if none, _ := exceptionList(nil, true, "UTC").MarshalColumn(); none != nil {
-		t.Errorf("no exceptions must be NULL, got %s", *none)
+	recurring := syncEvent()
+	recurring.RRule, recurring.Exdates = "FREQ=DAILY;COUNT=3", nil
+	if h := mustHead(t, recurring); h.exceptions != nil {
+		t.Errorf("a series imported without EXDATE must be NULL, got %s", *h.exceptions)
 	}
 }
 
