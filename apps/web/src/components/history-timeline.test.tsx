@@ -2,13 +2,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ja, type TranslationKey } from '@/i18n/ja';
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+
   // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
   client: { GET: vi.fn() },
-}));
-
-vi.mock('@/lib/api', () => ({
-  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
 }));
 
 vi.mock('@/i18n', () => ({

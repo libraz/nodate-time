@@ -1,10 +1,11 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import type { CalendarEvent } from '@/types/calendar';
 
 const get = vi.fn();
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the HTTP method name of the client
     GET: (...args: unknown[]) => get(...args),

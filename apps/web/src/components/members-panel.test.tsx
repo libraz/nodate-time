@@ -15,14 +15,13 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/client', () => ({
-  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() },
-}));
-
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
   isAbortError: () => false,
+
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() },
 }));
 
 vi.mock('@/lib/toast', () => ({

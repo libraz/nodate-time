@@ -2,8 +2,8 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { useT } from '@/i18n';
-import { setToken } from '@/lib/api';
 import { resolveSignInTarget } from '@/lib/invite-join';
+import { setToken } from '@/lib/session';
 import { useAuthStore } from '@/stores/auth-store';
 
 export interface OAuthSearch {

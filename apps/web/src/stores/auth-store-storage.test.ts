@@ -1,28 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/api', () => ({
-  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
-  ApiError: class ApiError extends Error {},
-  setToken: vi.fn(),
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   endSession: vi.fn(),
-  hasToken: vi.fn(() => true),
   errorMessage: () => 'error',
-  isSessionStorageEvent: (e: StorageEvent) =>
-    e.key === null || e.key === 'tt_token' || e.key === 'tt_refresh',
-  // biome-ignore lint/style/useNamingConvention: must mirror the real module export
-  SESSION_EXPIRED_EVENT: 'nodate:session-expired',
-}));
-
-vi.mock('@/lib/client', () => ({
   // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
   client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
   createApiClient: vi.fn(),
 }));
+
+vi.mock('@/lib/session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session')>()),
+  setToken: vi.fn(),
+  hasToken: vi.fn(() => true),
+}));
 vi.mock('@/i18n', () => ({ getT: () => (key: string) => key }));
 vi.mock('@/lib/image-resize', () => ({ resizeImageForAvatar: vi.fn() }));
 
-import { hasToken } from '@/lib/api';
 import { client } from '@/lib/client';
+import { hasToken } from '@/lib/session';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';

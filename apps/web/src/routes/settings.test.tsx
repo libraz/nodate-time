@@ -24,7 +24,7 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => {
+vi.mock('@/lib/client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -35,19 +35,17 @@ vi.mock('@/lib/api', () => {
     }
   }
   return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
     filenameFromDisposition: (header: string | null) =>
       header?.match(/filename="([^"]+)"/)?.[1] ?? '',
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
     isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
   };
 });
-
-vi.mock('@/lib/client', () => ({
-  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
-}));
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -109,10 +107,9 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-import { ApiError } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
 import { APP_NAME } from '@/lib/brand';
-import { client } from '@/lib/client';
+import { ApiError, client } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
 import { toast } from '@/lib/toast';
 import {

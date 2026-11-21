@@ -52,7 +52,7 @@ vi.mock('@/components/schedule-poll-candidate-finder', () => ({
   SchedulePollCandidateFinder: () => null,
 }));
 
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import { Route } from './schedule-polls_.$calendarId.$pollId';
 
 const Page = (Route as unknown as { options: { component: () => React.ReactNode } }).options

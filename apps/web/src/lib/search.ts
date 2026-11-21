@@ -1,8 +1,7 @@
 import type { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { getT, type Locale } from '@/i18n';
-import { ApiError, errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { ApiError, client, errorMessage } from '@/lib/client';
 import { formatTime } from '@/lib/date-utils';
 import { eventStartDay } from '@/lib/week-layout';
 import type { CalendarEvent } from '@/types/calendar';

@@ -6,7 +6,7 @@ import {
   slotTimeRange,
 } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/client';
 import {
   type SchedulePollAvailabilityInput,
   type SchedulePollCandidate,

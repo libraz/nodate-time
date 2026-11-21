@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, isStaleError } from '@/lib/client';
 import {
   type EventScope,
   isRecurringEvent,
@@ -8,7 +8,6 @@ import {
   restoreInput,
   scopeEtag,
 } from '@/lib/event-move';
-import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { type EventPatch, useCalendarStore } from '@/stores/calendar-store';

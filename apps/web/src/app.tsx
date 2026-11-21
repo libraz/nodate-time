@@ -14,7 +14,7 @@ import { SchedulePollActionNotice } from '@/components/schedule-poll-actions';
 import { Highlight } from '@/components/search-results';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
+import { errorMessage } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
 import { searchResultDay, searchResultLabel, useEventSearch } from '@/lib/search';
 import { useCalendarShortcuts } from '@/lib/shortcuts';

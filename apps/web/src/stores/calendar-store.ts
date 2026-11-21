@@ -1,14 +1,13 @@
 import { create } from 'zustand';
-import { errorMessage, isAbortError } from '@/lib/api';
 import type { components } from '@/lib/api-schema';
-import { client } from '@/lib/client';
+import { client, errorMessage, isAbortError, present } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
 import { type EventScope, scopeEtag, seriesId } from '@/lib/event-move';
 import { offerOccurrenceRestore, offerRestore } from '@/lib/event-restore';
 import { resizeImageForCover } from '@/lib/image-resize';
 import { loadJson, saveJson } from '@/lib/storage';
 import { toast } from '@/lib/toast';
-import { present, uploadCalendarCover as uploadCover } from '@/lib/upload';
+import { uploadCalendarCover as uploadCover } from '@/lib/upload';
 import { useUiStore } from '@/stores/ui-store';
 import type {
   Calendar,

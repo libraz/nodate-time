@@ -3,8 +3,7 @@ import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatSheetDay, PublicDaySheet } from '@/components/public-day-sheet';
 import { useT } from '@/i18n';
-import { errorMessage, hasToken } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
 import {
   type PublicCalendar,
@@ -12,6 +11,7 @@ import {
   type ShareFailure,
   shareFailureOf,
 } from '@/lib/public-calendar';
+import { hasToken } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { usePublicEvents, usePublicMonth, usePublicMonthGrid } from '@/lib/use-public-events';
 import { useUiStore } from '@/stores/ui-store';

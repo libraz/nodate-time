@@ -17,7 +17,7 @@ import {
   SchedulePollStatus,
 } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
-import { ApiError, errorMessage } from '@/lib/api';
+import { ApiError, errorMessage, isStaleError } from '@/lib/client';
 import { memberOption } from '@/lib/member-option';
 import {
   type PollAnswer,
@@ -26,7 +26,6 @@ import {
   type SchedulePollCandidate,
   schedulePollApi,
 } from '@/lib/schedule-polls';
-import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useUnsavedGuard } from '@/lib/use-unsaved-guard';

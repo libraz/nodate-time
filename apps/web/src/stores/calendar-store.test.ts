@@ -25,7 +25,11 @@ function resolved(path: string, init?: Init): string {
   return query ? `${filled}?${query}` : filled;
 }
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+  isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
+
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
     GET: async (path: string, init?: Init) => ({ data: await raw.get(resolved(path, init), init) }),
@@ -44,11 +48,6 @@ vi.mock('@/lib/client', () => ({
       data: await raw.delete(resolved(path, init), init),
     }),
   },
-}));
-
-vi.mock('@/lib/api', () => ({
-  errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
-  isAbortError: (e: unknown) => e instanceof DOMException && e.name === 'AbortError',
 }));
 
 vi.mock('@/lib/toast', () => ({

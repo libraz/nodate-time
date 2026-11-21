@@ -2,9 +2,12 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/i18n', () => ({ getT: () => (key: string) => key }));
-vi.mock('@/lib/api', () => ({ errorMessage: () => 'boom' }));
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: () => 'boom',
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn() },
+}));
 
 import { client } from '@/lib/client';
 import { resetAuthConfig, useAuthConfig } from './auth-config';

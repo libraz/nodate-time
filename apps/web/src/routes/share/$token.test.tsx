@@ -29,8 +29,8 @@ vi.mock('@/lib/toast', () => ({
 
 // Only the transport is replaced. The error localisation is the thing under
 // test on the join path, so it runs for real.
-vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api')>();
+vi.mock('@/lib/session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/session')>();
   return { ...actual, hasToken: vi.fn(() => true) };
 });
 
@@ -49,7 +49,8 @@ const raw = vi.hoisted(() => {
   return { resolve, get: vi.fn(), post: vi.fn() };
 });
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
     GET: async (path: string, init?: Parameters<typeof raw.resolve>[1]) => ({
@@ -68,7 +69,8 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 import { formatSheetDay } from '@/components/public-day-sheet';
-import { ApiError, hasToken } from '@/lib/api';
+import { ApiError } from '@/lib/client';
+import { hasToken } from '@/lib/session';
 import { toast } from '@/lib/toast';
 import { SharedCalendarView } from './$token';
 

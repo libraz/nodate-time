@@ -83,6 +83,7 @@ verify-codegen:
 		|| { echo "sql/time/upgrades/triggers.sql is out of date: run make db-schema"; exit 1; }
 	bash scripts/check-error-messages.sh
 	bash scripts/check-openapi-drift.sh
+	bash scripts/check-web-api-types.sh
 
 # Write the OpenAPI document, then the web types generated from it.
 openapi:

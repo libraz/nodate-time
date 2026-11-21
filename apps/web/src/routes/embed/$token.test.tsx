@@ -29,7 +29,8 @@ const raw = vi.hoisted(() => {
   return { resolve, get: vi.fn() };
 });
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
     GET: async (path: string, init?: Parameters<typeof raw.resolve>[1]) => ({
@@ -44,7 +45,7 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 import { formatSheetDay } from '@/components/public-day-sheet';
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import { EmbeddedCalendarView } from './$token';
 
 const apiGet = raw.get;

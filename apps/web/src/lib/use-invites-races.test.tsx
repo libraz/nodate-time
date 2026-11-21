@@ -8,10 +8,6 @@ vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  errorMessage: (error: unknown) => (error instanceof Error ? error.message : 'error'),
-}));
-
 // The typed client is replaced by an adapter over three stubs that see the
 // resolved path and body, so the assertions read as the requests made.
 const raw = vi.hoisted(() => {
@@ -22,7 +18,10 @@ const raw = vi.hoisted(() => {
 
 type Init = { params?: { path?: Record<string, string> }; body?: unknown };
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: (error: unknown) => (error instanceof Error ? error.message : 'error'),
+
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
     GET: async (path: string, init?: Init) => ({ data: await raw.get(raw.fill(path, init)) }),

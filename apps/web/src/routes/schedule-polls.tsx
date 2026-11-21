@@ -13,7 +13,7 @@ import {
 } from '@/components/schedule-poll-ui';
 import { Switch } from '@/components/switch';
 import { useT } from '@/i18n';
-import { errorMessage, isAbortError } from '@/lib/api';
+import { errorMessage, isAbortError } from '@/lib/client';
 import { canManage as roleCanManage } from '@/lib/permissions';
 import {
   type SchedulePoll,

@@ -1,7 +1,6 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { isAbortError } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, isAbortError } from '@/lib/client';
 import { getMonthDays, gridRange, nowInZone } from '@/lib/date-utils';
 import {
   type PublicEvent,

@@ -1,7 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { errorMessage } from '@/lib/api';
 import type { components } from '@/lib/api-schema';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 import type { Role } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { type InviteData, inviteCreateBody, isPublicLink, mergeInviteTokens } from '@/types/invite';

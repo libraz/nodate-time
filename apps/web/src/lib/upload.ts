@@ -1,6 +1,5 @@
 import { getT } from '@/i18n';
-import { ApiError } from '@/lib/api';
-import { client } from '@/lib/client';
+import { ApiError, client, present } from '@/lib/client';
 import { Sha256, toHex } from '@/lib/sha256';
 import type { Calendar } from '@/types/calendar';
 
@@ -122,12 +121,6 @@ interface UploadViaPresignArgs<P extends PresignResult> {
    * every presign request declares, and returns the server's reservation.
    */
   presign: (sha256: string) => Promise<P>;
-}
-
-/** Unwraps a response body the client has already checked for failure. */
-export function present<T>(data: T | undefined): T {
-  if (data === undefined) throw new ApiError(502, 'Empty response');
-  return data;
 }
 
 /** PUTs `body` to a signed URL, failing with the localized upload error. */

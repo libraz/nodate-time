@@ -1,19 +1,11 @@
 import { create } from 'zustand';
 import { getT, type Locale } from '@/i18n';
-import {
-  ApiError,
-  endSession,
-  errorMessage,
-  hasToken,
-  isSessionStorageEvent,
-  SESSION_EXPIRED_EVENT,
-  setToken,
-} from '@/lib/api';
 import type { components } from '@/lib/api-schema';
-import { client, createApiClient } from '@/lib/client';
+import { ApiError, client, createApiClient, endSession, errorMessage, present } from '@/lib/client';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { accountPreferences, detectLocale, detectTimezone } from '@/lib/preferences';
-import { present, uploadViaPresign } from '@/lib/upload';
+import { hasToken, isSessionStorageEvent, SESSION_EXPIRED_EVENT, setToken } from '@/lib/session';
+import { uploadViaPresign } from '@/lib/upload';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';

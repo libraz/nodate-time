@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 
 interface Page<T> {
   items: T[] | null;

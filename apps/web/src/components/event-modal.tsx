@@ -14,8 +14,7 @@ import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage, isStaleError } from '@/lib/client';
 import { writableVisibleCalendars } from '@/lib/create-event';
 import { seriesId } from '@/lib/event-move';
 import {
@@ -31,7 +30,6 @@ import {
   visibilityLabelKey,
 } from '@/lib/permissions';
 import { rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
-import { isStaleError } from '@/lib/stale';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
 import { useModalA11y } from '@/lib/use-modal-a11y';

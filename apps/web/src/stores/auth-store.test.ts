@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/api', () => {
+vi.mock('@/lib/client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -12,24 +12,22 @@ vi.mock('@/lib/api', () => {
     }
   }
   return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
-    setToken: vi.fn(),
     endSession: vi.fn(),
-    hasToken: vi.fn(() => false),
-    isSessionStorageEvent: (e: StorageEvent) =>
-      e.key === null || e.key === 'tt_token' || e.key === 'tt_refresh',
     errorMessage: (e: unknown, fallback?: string) =>
       e instanceof ApiError ? e.detail : (fallback ?? 'error.generic'),
-    // biome-ignore lint/style/useNamingConvention: must mirror the real module export
-    SESSION_EXPIRED_EVENT: 'nodate:session-expired',
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
+    createApiClient: vi.fn(),
   };
 });
 
-vi.mock('@/lib/client', () => ({
-  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-  client: { GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() },
-  createApiClient: vi.fn(),
+vi.mock('@/lib/session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/session')>()),
+  setToken: vi.fn(),
+  hasToken: vi.fn(() => false),
 }));
 
 vi.mock('@/i18n', () => ({
@@ -40,9 +38,9 @@ vi.mock('@/lib/image-resize', () => ({
   resizeImageForAvatar: vi.fn(),
 }));
 
-import { ApiError, endSession, hasToken, setToken } from '@/lib/api';
-import { client } from '@/lib/client';
+import { ApiError, client, endSession } from '@/lib/client';
 import { resizeImageForAvatar } from '@/lib/image-resize';
+import { hasToken, setToken } from '@/lib/session';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { useUiStore } from '@/stores/ui-store';

@@ -17,7 +17,7 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => {
+vi.mock('@/lib/client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -28,14 +28,14 @@ vi.mock('@/lib/api', () => {
     }
   }
   return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
     errorMessage: (e: unknown) => String(e),
+    // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+    client: { GET: vi.fn() },
   };
 });
-
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
 
 // The month views stand in for themselves here. Nothing in this file asserts
 // anything about a day cell, and jsdom applies no CSS, so both layouts mount at
@@ -95,8 +95,7 @@ vi.mock('@/stores/auth-store', () => ({
   }),
 }));
 
-import { ApiError } from '@/lib/api';
-import { client } from '@/lib/client';
+import { ApiError, client } from '@/lib/client';
 import { App } from './app';
 import { fetchWindow } from './lib/date-utils';
 import { useUiStore } from './stores/ui-store';

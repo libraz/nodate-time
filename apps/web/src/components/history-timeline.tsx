@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { activityColor, activityLabelKey } from '@/lib/activity';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 import { formatRelativeTime } from '@/lib/date-utils';
 import { useUiStore } from '@/stores/ui-store';
 

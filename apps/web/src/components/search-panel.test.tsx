@@ -30,14 +30,15 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 const get = vi.fn();
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the HTTP method name of the client
     GET: (...args: unknown[]) => get(...args),
   },
 }));
 
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import { SearchPanel } from './search-panel';
 
 /** Matches a result line by its whole text, which the match highlight splits across nodes. */

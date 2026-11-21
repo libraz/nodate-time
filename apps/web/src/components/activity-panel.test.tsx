@@ -17,8 +17,8 @@ vi.mock('@/i18n', () => ({
   translate: (_locale: string, key: string) => key,
 }));
 
-vi.mock('@/lib/api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/api')>()),
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
 }));
 

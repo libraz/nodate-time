@@ -10,9 +10,15 @@ import { LoadFailureBanner } from '@/components/load-failure';
 import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
-import { ApiError, errorMessage, filenameFromDisposition, isAbortError } from '@/lib/api';
+import type { components } from '@/lib/api-schema';
 import { useAuthConfig } from '@/lib/auth-config';
-import { client } from '@/lib/client';
+import {
+  ApiError,
+  client,
+  errorMessage,
+  filenameFromDisposition,
+  isAbortError,
+} from '@/lib/client';
 import { copyText } from '@/lib/clipboard';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
@@ -1805,20 +1811,16 @@ export function InstanceAdminsSection() {
   );
 }
 
-interface AllowedEmailsResponse {
+/** The allow list with its absent lists read as empty. */
+interface AllowedEmails {
   allowedDomains: string[];
   restricted: boolean;
-  emails: {
-    id: string;
-    email: string;
-    reason: string;
-    createdAt: string;
-  }[];
+  emails: Omit<components['schemas']['AllowedEmail'], '$schema'>[];
 }
 
 export function AllowedEmailsSection() {
   const t = useT();
-  const [data, setData] = useState<AllowedEmailsResponse | null>(null);
+  const [data, setData] = useState<AllowedEmails | null>(null);
   const [email, setEmail] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);

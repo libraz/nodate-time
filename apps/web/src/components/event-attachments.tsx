@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
-import { getT, useT } from '@/i18n';
-import { ApiError, errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { useT } from '@/i18n';
+import { ApiError, client, errorMessage } from '@/lib/client';
 import { startDownload } from '@/lib/download';
 import { toast } from '@/lib/toast';
-import { sha256Hex, validateUpload } from '@/lib/upload';
+import { putToSignedUrl, sha256Hex, validateUpload } from '@/lib/upload';
 import type { EventAttachment } from '@/types/calendar';
 
 export function AttachmentsSection({
@@ -62,12 +61,7 @@ export function AttachmentsSection({
       if (!presign) throw new ApiError(502, 'Malformed presign response');
       // An empty URL means these bytes are already stored; only the confirm is left.
       if (presign.uploadUrl) {
-        const put = await fetch(presign.uploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': contentType },
-          body: file,
-        });
-        if (!put.ok) throw new ApiError(put.status, getT()('error.uploadFailed'));
+        await putToSignedUrl(presign.uploadUrl, contentType, file);
       }
       // The row is created disabled; confirm enables it once the object is stored.
       await client.POST(

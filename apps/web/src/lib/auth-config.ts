@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 
 export type OAuthProvider = 'google' | 'line';
 
-interface AuthConfigResponse {
+/** The deployment's sign-in options, narrowed to the providers this build knows. */
+interface SignInOptions {
   providers: OAuthProvider[];
   passwordEnabled: boolean;
   mailEnabled: boolean;
@@ -16,7 +16,7 @@ const KNOWN_PROVIDERS: readonly string[] = ['google', 'line'];
 type Snapshot =
   | { status: 'loading' }
   | { status: 'error'; detail: string }
-  | ({ status: 'ready' } & AuthConfigResponse);
+  | ({ status: 'ready' } & SignInOptions);
 
 /**
  * What the public auth-providers endpoint says about this deployment.

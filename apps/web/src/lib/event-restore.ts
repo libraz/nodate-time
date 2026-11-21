@@ -1,7 +1,5 @@
 import { getT } from '@/i18n';
-import { ApiError, errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
-import { isStaleError } from '@/lib/stale';
+import { ApiError, client, errorMessage, isStaleError } from '@/lib/client';
 import { toast } from '@/lib/toast';
 
 /** What the toast needs to put a deletion back. */

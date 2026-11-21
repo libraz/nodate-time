@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
-import { errorMessage, isAbortError } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage, isAbortError } from '@/lib/client';
 import {
   DEFAULT_INVITE_ROLE,
   INVITE_ROLE_OPTIONS,

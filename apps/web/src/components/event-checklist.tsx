@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
-import { isStaleError } from '@/lib/stale';
+import { client, errorMessage, isStaleError } from '@/lib/client';
 import { toast } from '@/lib/toast';
 import type { ChecklistItem } from '@/types/calendar';
 

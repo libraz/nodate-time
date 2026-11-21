@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AuthShell } from '@/components/auth-shell';
 import { LoadFailure } from '@/components/load-failure';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
 import { useAuthConfig } from '@/lib/auth-config';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 
 export interface ResetSearch {
   token?: string | undefined;

@@ -8,23 +8,6 @@ vi.mock('@tanstack/react-router', () => ({
   ),
 }));
 
-vi.mock('@/lib/api', () => {
-  class ApiError extends Error {
-    constructor(
-      public status: number,
-      public detail: string,
-      public code = '',
-    ) {
-      super(detail);
-    }
-  }
-  return {
-    // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
-    ApiError,
-    errorMessage: (e: unknown) => String(e),
-  };
-});
-
 /**
  * The typed client, answered through plain functions keyed by the concrete
  * URL, so a test names a request the way a reader would. Writes receive the
@@ -69,7 +52,25 @@ const mockApi = vi.hoisted(() => {
   return Object.assign(api, { client });
 });
 
-vi.mock('@/lib/client', () => ({ client: mockApi.client }));
+vi.mock('@/lib/client', async (importOriginal) => {
+  class ApiError extends Error {
+    constructor(
+      public status: number,
+      public detail: string,
+      public code = '',
+    ) {
+      super(detail);
+    }
+  }
+  return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
+    // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+    ApiError,
+    isStaleError: (e: unknown) => e instanceof ApiError && e.status === 412,
+    errorMessage: (e: unknown) => String(e),
+    client: mockApi.client,
+  };
+});
 
 vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
@@ -115,7 +116,7 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: { user: null }) => unknown) => selector({ user: null }),
 }));
 
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import { toast } from '@/lib/toast';
 import { AlbumPanel } from './album-panel';
 

@@ -1,5 +1,5 @@
 import type { components } from '@/lib/api-schema';
-import { client } from '@/lib/client';
+import { client, present, withSignal } from '@/lib/client';
 import type { CalendarEvent } from '@/types/calendar';
 
 export type PollAnswer = 'yes' | 'maybe' | 'no';
@@ -26,7 +26,7 @@ export interface PollMember {
   avatarUrl?: string;
 }
 
-export interface PollResponse {
+export interface PollMemberAnswers {
   memberId: string;
   answers: PollAnswerEntry[];
 }
@@ -46,7 +46,7 @@ export interface SchedulePoll {
   /** Absent for callers who may not manage the poll. */
   members?: PollMember[];
   myAnswers: PollAnswerEntry[];
-  responses?: PollResponse[];
+  responses?: PollMemberAnswers[];
   respondedCount: number;
   memberCount: number;
   confirmedEventId?: string;
@@ -54,7 +54,7 @@ export interface SchedulePoll {
 }
 
 /** The caller's own answers with the etag that PUT .../response must send. */
-export interface PollMyResponse {
+export interface PollMyAnswers {
   etag: string;
   answers: PollAnswerEntry[];
 }
@@ -108,14 +108,6 @@ function toPoll(wire: PollWire): SchedulePoll {
   };
 }
 
-function present<T>(data: T | undefined): T {
-  if (data === undefined) throw new Error('Empty response body');
-  return data;
-}
-
-/** Leaves `signal` out when absent, as exactOptionalPropertyTypes requires. */
-const withSignal = (signal?: AbortSignal) => (signal ? { signal } : {});
-
 const pathOf = (calendarId: string, pollId: string) => ({ calendarId, pollId });
 
 export const schedulePollApi = {
@@ -144,7 +136,7 @@ export const schedulePollApi = {
     calendarId: string,
     pollId: string,
     signal?: AbortSignal,
-  ): Promise<PollMyResponse> {
+  ): Promise<PollMyAnswers> {
     const { data } = await client.GET('/calendars/{calendarId}/schedule-polls/{pollId}/response', {
       params: { path: pathOf(calendarId, pollId) },
       ...withSignal(signal),
@@ -205,7 +197,7 @@ export const schedulePollApi = {
     pollId: string,
     answerEtag: string,
     answers: PollAnswerEntry[],
-  ): Promise<PollMyResponse> {
+  ): Promise<PollMyAnswers> {
     const { data } = await client.PUT('/calendars/{calendarId}/schedule-polls/{pollId}/response', {
       params: { path: pathOf(calendarId, pollId), header: { 'If-Match': answerEtag } },
       body: { answers },

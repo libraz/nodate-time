@@ -9,8 +9,8 @@ vi.mock('@/i18n', async (importOriginal) => ({
   useT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   errorMessage: (e: unknown) => String(e),
 }));
 

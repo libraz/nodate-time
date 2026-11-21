@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from './api';
-import { client } from './client';
+import { ApiError, client } from './client';
 import { sha256Hex, uploadCalendarCover, uploadViaPresign, validateUpload } from './upload';
 
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('./client', () => ({ client: { POST: vi.fn(), PUT: vi.fn() } }));
+vi.mock('./client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./client')>()),
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { POST: vi.fn(), PUT: vi.fn() },
+}));
 
 /** The rejection `validateUpload` threw, so the assertions can read its status
  *  rather than a message that changes with the interface language. */

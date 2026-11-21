@@ -1,7 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useT } from '@/i18n';
-import { errorMessage } from '@/lib/api';
-import { client } from '@/lib/client';
+import { client, errorMessage } from '@/lib/client';
 import { assignableRoles, canManage, canOwn, type Role, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';

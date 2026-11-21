@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { errorMessage, isAbortError } from '@/lib/api';
+import { errorMessage, isAbortError } from '@/lib/client';
 import { type SchedulePollAction, schedulePollApi } from '@/lib/schedule-polls';
 
 interface SchedulePollState {

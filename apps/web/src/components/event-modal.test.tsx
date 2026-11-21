@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import type { CalendarEvent, Member } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
@@ -9,7 +9,15 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => {
+const typed = vi.hoisted(() => ({
+  get: vi.fn(),
+  put: vi.fn(),
+  post: vi.fn(),
+  patch: vi.fn(),
+  delete: vi.fn(),
+}));
+
+vi.mock('@/lib/client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -20,34 +28,25 @@ vi.mock('@/lib/api', () => {
     }
   }
   return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
     // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
     ApiError,
+    isStaleError: (e: unknown) => e instanceof ApiError && e.status === 412,
     errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+    client: {
+      // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+      GET: typed.get,
+      // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+      PUT: typed.put,
+      // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+      POST: typed.post,
+      // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+      PATCH: typed.patch,
+      // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
+      DELETE: typed.delete,
+    },
   };
 });
-
-const typed = vi.hoisted(() => ({
-  get: vi.fn(),
-  put: vi.fn(),
-  post: vi.fn(),
-  patch: vi.fn(),
-  delete: vi.fn(),
-}));
-
-vi.mock('@/lib/client', () => ({
-  client: {
-    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
-    GET: typed.get,
-    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
-    PUT: typed.put,
-    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
-    POST: typed.post,
-    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
-    PATCH: typed.patch,
-    // biome-ignore lint/style/useNamingConvention: mirrors the client's method names
-    DELETE: typed.delete,
-  },
-}));
 
 vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },

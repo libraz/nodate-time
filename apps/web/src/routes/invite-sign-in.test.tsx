@@ -25,12 +25,14 @@ vi.mock('@/components/auth-shell', () => ({
 }));
 
 vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('@/lib/client', () => ({ client: { GET: vi.fn(), POST: vi.fn() } }));
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn(), POST: vi.fn() },
+}));
 
-import { ApiError } from '@/lib/api';
 import { resetAuthConfig } from '@/lib/auth-config';
-import { client } from '@/lib/client';
+import { ApiError, client } from '@/lib/client';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
 import { Route as LoginRoute } from './login';

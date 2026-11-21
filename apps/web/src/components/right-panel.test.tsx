@@ -6,7 +6,7 @@ vi.mock('@/i18n', () => ({
   getT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => {
+vi.mock('@/lib/client', async (importOriginal) => {
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -16,8 +16,13 @@ vi.mock('@/lib/api', () => {
       super(detail);
     }
   }
-  // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
-  return { ApiError, errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error') };
+  return {
+    ...(await importOriginal<typeof import('@/lib/client')>()),
+    // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported class name
+    ApiError,
+    isStaleError: (e: unknown) => e instanceof ApiError && e.status === 412,
+    errorMessage: (e: unknown) => (e instanceof Error ? e.message : 'error'),
+  };
 });
 
 vi.mock('@/lib/toast', () => ({
@@ -62,7 +67,7 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
-import { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/client';
 import { toast } from '@/lib/toast';
 import { MemoSection } from './right-panel';
 

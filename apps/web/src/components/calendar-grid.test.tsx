@@ -9,18 +9,8 @@ vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
 }));
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    // The stored copy's revision, which is what a drop checks its copy against.
-    getWithRevision: async () => ({
-      data: { updatedAt: '2026-08-01T00:00:00+09:00' },
-      revision: '"rev-1"',
-    }),
-  },
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   errorMessage: (e: unknown) => String(e),
 }));
 

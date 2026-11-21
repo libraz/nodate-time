@@ -1,17 +1,16 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/api', () => ({
-  errorMessage: (e: unknown) => String(e),
-}));
-
 // The typed client is replaced by an adapter that reports the request made as
 // a path with its parameters filled in, so assertions read as URLs.
 const raw = vi.hoisted(() => ({ get: vi.fn() }));
 
 type Init = { params?: { path?: Record<string, string>; query?: Record<string, string> } };
 
-vi.mock('@/lib/client', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: (e: unknown) => String(e),
+
   client: {
     // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
     GET: async (path: string, init?: Init) => {

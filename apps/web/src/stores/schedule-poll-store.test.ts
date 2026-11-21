@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SchedulePollAction } from '@/lib/schedule-polls';
 
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
-
-vi.mock('@/lib/api', () => ({
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
   errorMessage: (error: unknown) => String(error),
   isAbortError: (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn() },
 }));
 
 import { client } from '@/lib/client';

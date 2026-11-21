@@ -26,9 +26,12 @@ vi.mock('@/components/auth-shell', () => ({
   ),
 }));
 
-vi.mock('@/lib/api', () => ({ errorMessage: () => 'error' }));
-// biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
-vi.mock('@/lib/client', () => ({ client: { GET: vi.fn() } }));
+vi.mock('@/lib/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/client')>()),
+  errorMessage: () => 'error',
+  // biome-ignore lint/style/useNamingConvention: mirrors the client's HTTP method names
+  client: { GET: vi.fn() },
+}));
 
 const authState = {
   isAuthenticated: false,
