@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"log/slog"
 	"regexp"
 	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/attendees"
@@ -601,7 +602,7 @@ func requireEventEdit(ctx context.Context, q *generated.Queries, w eventAccess, 
 		if errors.Is(err, sql.ErrNoRows) {
 			return apierrors.EventEditDenied
 		}
-		return apierrors.InternalUnexpected
+		return fmt.Errorf("check event edit access: %w", err)
 	}
 	if !att.CanEdit {
 		return apierrors.EventEditDenied
@@ -680,7 +681,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var startAt, endAt time.Time
@@ -704,7 +705,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		tz := in.Body.Timezone
@@ -733,9 +734,9 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			if spec != nil {
 				return spec
 			}
-			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
-			if spec != nil {
-				return spec
+			participants, partErr := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
+			if partErr != nil {
+				return partErr
 			}
 			attendeeUserIDs := make([]uint32, 0, len(participants))
 			for _, participant := range participants {
@@ -771,13 +772,12 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to create event", "calendarID", cal.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to create event: %w", err), "calendarID", cal.ID)
 		}
 
 		resp := mapEvent(created, cal.PublicID)
 		if err := setAttendees(ctx, deps, &resp, created.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		decorate(ctx, deps, &resp, created, cal.ID)
 
@@ -954,9 +954,9 @@ func patchedText(f patch.Field[string], stored sql.NullString) string {
 // the occurrence's current attendees when none was.
 func patchedParticipants(ctx context.Context, q *generated.Queries, w eventAccess, sent []string) ([]attendees.Person, error) {
 	if sent != nil {
-		people, spec := validateEventParticipants(ctx, q, w.cal.ID, sent)
-		if spec != nil {
-			return nil, spec
+		people, partErr := validateEventParticipants(ctx, q, w.cal.ID, sent)
+		if partErr != nil {
+			return nil, partErr
 		}
 		return people, nil
 	}
@@ -986,7 +986,7 @@ func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEvent
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var edited editedRows
@@ -1062,12 +1062,11 @@ func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEvent
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to update event", "eventID", evt.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to update event: %w", err), "eventID", evt.ID)
 		}
 		resp, err := edited.render(ctx, deps, cal)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		withhold(&resp, seen)
 		return &PatchEventOutput{ETag: resp.Etag, Body: resp}, nil
@@ -1107,7 +1106,7 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -1157,8 +1156,7 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to delete event", "eventID", evt.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to delete event: %w", err), "eventID", evt.ID)
 		}
 		return &DeleteEventOutput{}, nil
 	}

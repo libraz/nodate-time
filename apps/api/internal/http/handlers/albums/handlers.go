@@ -73,14 +73,6 @@ type Deps struct {
 	WorkspaceID uint32
 }
 
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
@@ -497,7 +489,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		limit := int32(in.Limit)
@@ -533,7 +525,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 			photos = afterPagePhotoRows(rows)
 		}
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListPhotosOutput{}
@@ -552,7 +544,7 @@ func ListPhotos(deps Deps) func(context.Context, *ListPhotosInput) (*ListPhotosO
 		}
 		links, err := visibleEventLinks(ctx, deps.Queries, cal, userID, eventIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		av := avatars.New(deps.Queries, deps.Storage)
@@ -622,7 +614,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if !isImageContentType(in.Body.ContentType) {
 			return nil, apierrors.ToHuma(apierrors.AlbumInvalidContentType)
@@ -631,11 +623,11 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			return nil, apierrors.ToHuma(apierrors.AlbumPhotoTooLarge)
 		}
 		if err := validateThumbnailDeclaration(in.Body); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		digest, err := blobref.ParseDigest(in.Body.SHA256)
 		if err != nil {
-			return nil, digestError(err)
+			return nil, digestError(ctx, err)
 		}
 		// A thumbnail identical to the photo is the photo: it is drawn from the
 		// picture, and a second reservation of the same bytes would wait on the
@@ -644,7 +636,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 		var thumbDigest []byte
 		if withThumbnail {
 			if thumbDigest, err = blobref.ParseDigest(in.Body.ThumbnailSHA256); err != nil {
-				return nil, digestError(err)
+				return nil, digestError(ctx, err)
 			}
 			withThumbnail = !bytes.Equal(thumbDigest, digest)
 		}
@@ -654,7 +646,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 
 		eventID, err := resolveEventForCalendar(ctx, deps, cal, userID, in.Body.EventID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		photoPubID, _ := uuid.NewV7()
@@ -727,7 +719,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignPhotoInput) (*Presig
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		url, err := deps.Storage.SignedPutURL(uploadKey(photoObject, key), in.Body.ContentType, in.Body.ByteSize, uploadTTL)
@@ -762,11 +754,11 @@ func nullInt32(v uint32) sql.NullInt32 {
 }
 
 // digestError maps a refused declared digest or read-back to its Spec.
-func digestError(err error) error {
+func digestError(ctx context.Context, err error) error {
 	if spec, ok := apierrors.FromBlobref(err); ok {
 		return apierrors.ToHuma(spec)
 	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
+	return apierrors.Internal(ctx, err)
 }
 
 // uploadedBytes locates the bytes an upload left for a reserved object: at the
@@ -807,7 +799,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
@@ -826,7 +818,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		}
 		object, err := deps.Queries.GetStorageObjectByID(ctx, uint32(p.StorageObjectID.Int32))
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		key, info, sent, exists, err := uploadedBytes(ctx, deps, object, p.StorageKey)
@@ -923,7 +915,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, queued...); err != nil {
 			slog.WarnContext(ctx, "failed to remove superseded album bytes; left to the drainer", "photoID", p.ID, "error", err)
@@ -938,7 +930,7 @@ func ConfirmPhoto(deps Deps) func(context.Context, *ConfirmPhotoInput) (*Confirm
 		// whatever the photo now points at.
 		confirmed, err := deps.Queries.GetAlbumPhotoByPublicID(ctx, p.PublicID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &ConfirmPhotoOutput{Body: mapPhoto(ctx, deps, cal, userID, confirmed)}, nil
 	}
@@ -1137,14 +1129,14 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var linkedEvent sql.NullInt32
 		if v, ok := in.Body.EventID.Get(); ok {
 			linkedEvent, err = resolveEventForCalendar(ctx, deps, cal, userID, v)
 			if err != nil {
-				return nil, toAPIError(err)
+				return nil, apierrors.Respond(ctx, err)
 			}
 		}
 
@@ -1195,7 +1187,7 @@ func UpdatePhoto(deps Deps) func(context.Context, *UpdatePhotoInput) (*UpdatePho
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &UpdatePhotoOutput{ETag: photoETag(refreshed.UpdatedAt, refreshed.CreatedAt), Body: mapPhoto(ctx, deps, cal, userID, refreshed)}, nil
 	}
@@ -1207,7 +1199,7 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -1241,7 +1233,7 @@ func DeletePhoto(deps Deps) func(context.Context, *DeletePhotoInput) (*DeletePho
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		// The bytes are not deleted here, and that is not tidiness deferred:
 		// photos with identical content share one storage object, so the key
@@ -1263,12 +1255,12 @@ func GetDownload(deps Deps) func(context.Context, *DownloadPhotoInput) (*Downloa
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		photo, err := loadPhotoForCalendar(ctx, deps, cal.ID, in.PhotoID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		if deps.Storage == nil {

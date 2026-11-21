@@ -35,7 +35,9 @@ func TestMemberDistinguishesMissingMembershipFromDatabaseFailure(t *testing.T) {
 	assert.ErrorIs(t, err, apierrors.CalendarAccessDenied)
 
 	_, _, err = Member(context.Background(), fakeQuerier{calendar: cal, memberErr: errors.New("database offline")}, workspaceID, calendarID, 7)
-	assert.ErrorIs(t, err, apierrors.InternalUnexpected)
+	assert.ErrorContains(t, err, "database offline")
+	var spec *apierrors.Spec
+	assert.False(t, errors.As(err, &spec))
 }
 
 // The role helpers decide who may write and who may administer. They are

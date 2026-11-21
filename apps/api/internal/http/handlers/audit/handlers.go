@@ -12,7 +12,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -76,14 +75,6 @@ func resolveActivityCursor(ctx context.Context, deps Deps, calendarID uint32, cu
 
 func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
-}
-
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
 }
 
 // resolveCalendar resolves the calendar by public ID and verifies the caller is
@@ -164,7 +155,7 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		// A recurring instance is addressed as "uuid_YYYYMMDD". Every entry
@@ -185,7 +176,7 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 		rd := newReader(cal, userID)
 		hidden, err := eventHiddenFrom(ctx, deps, rd, subject[:])
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if hidden {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
@@ -198,7 +189,7 @@ func EventHistory(deps Deps) func(context.Context, *EventHistoryInput) (*EventHi
 		}
 		shown, more, err := pageOf(ctx, deps, rd, subjectLogSource(deps, cal.ID, subject[:]), beforeBound(before), limit)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &EventHistoryOutput{Body: HistoryPage{Items: make([]HistoryItem, 0, len(shown))}}
@@ -279,7 +270,7 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		if _, err := uuid.Parse(in.MemoID); err != nil {
@@ -288,7 +279,7 @@ func MemoHistory(deps Deps) func(context.Context, *MemoHistoryInput) (*MemoHisto
 
 		items, err := subjectHistory(ctx, deps, cal.ID, in.MemoID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &MemoHistoryOutput{Body: items}, nil
 	}
@@ -333,7 +324,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		limit := pageLimit(in.Limit)
@@ -343,7 +334,7 @@ func Activity(deps Deps) func(context.Context, *ActivityInput) (*ActivityOutput,
 		}
 		shown, more, err := pageOf(ctx, deps, newReader(cal, userID), calendarLogSource(deps, cal.ID), beforeBound(before), limit)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ActivityOutput{

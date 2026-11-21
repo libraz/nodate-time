@@ -72,7 +72,7 @@ func ListInstanceAdmins(deps Deps) func(context.Context, *ListInstanceAdminsInpu
 	return func(ctx context.Context, _ *ListInstanceAdminsInput) (*ListInstanceAdminsOutput, error) {
 		rows, err := deps.Queries.ListInstanceAdmins(ctx)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		out := &ListInstanceAdminsOutput{Body: make([]InstanceAdmin, 0, len(rows))}
 		for _, r := range rows {
@@ -104,13 +104,13 @@ func AddInstanceAdmin(deps Deps) func(context.Context, *AddInstanceAdminInput) (
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.AdminUserNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		actorID, _ := middleware.ActorFromContext(ctx)
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		var granted generated.ListInstanceAdminsRow
@@ -163,7 +163,7 @@ func AddInstanceAdmin(deps Deps) func(context.Context, *AddInstanceAdminInput) (
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &AddInstanceAdminOutput{Body: InstanceAdmin{
 			UserID:    calresolve.PublicIDString(granted.UserPublicID),
@@ -197,7 +197,7 @@ func RevokeInstanceAdmin(deps Deps) func(context.Context, *RevokeInstanceAdminIn
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.NotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		actorID, _ := middleware.ActorFromContext(ctx)
@@ -240,7 +240,7 @@ func RevokeInstanceAdmin(deps Deps) func(context.Context, *RevokeInstanceAdminIn
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &RevokeInstanceAdminOutput{}, nil
 	}

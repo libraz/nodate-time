@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -110,7 +111,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		loc := daterange.Location(in.TZ, actorTimezone(ctx, deps, userID))
@@ -126,7 +127,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		recurringRows, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
@@ -135,7 +136,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// Everything the listing needs beyond the two range queries is read
@@ -147,7 +148,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 		overrides, err := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// Who attends decides who may see an occurrence, so every row the
@@ -164,7 +165,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 		rawAttendees, err := loadAttendeeRows(ctx, deps.Queries, decisionIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		reader := newMemberReader(cal, userID)
 
@@ -230,11 +231,11 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		}
 		attendees, err := loadOccurrenceAttendees(ctx, deps, eventIDs, parentOf)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		who, err := loadPeople(ctx, deps, cal.ID, userIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		results := make([]EventResponse, 0, len(items))
@@ -265,7 +266,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		reader := newMemberReader(cal, userID)
 
@@ -274,7 +275,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 		if parentUUID != "" {
 			evt, err := loadEventInCalendar(ctx, deps, cal.ID, parentUUID)
 			if err != nil {
-				return nil, toAPIError(err)
+				return nil, apierrors.Respond(ctx, err)
 			}
 
 			// Resolved by the occurrence it names, not by where it now sits:
@@ -295,7 +296,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				return nil, apierrors.ToHuma(apierrors.EventNotFound)
 			}
 			if xerr != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, fmt.Errorf("resolve occurrence: %w", xerr))
 			}
 			var resp EventResponse
 			var override *generated.CalendarEvent
@@ -313,7 +314,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 			}
 			rows, err := loadAttendeeRows(ctx, deps.Queries, ids)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 			var overrideRows []eventacl.Attendee
 			if override != nil {
@@ -330,7 +331,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 				attErr = setAttendees(ctx, deps, &resp, evt.ID)
 			}
 			if attErr != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, fmt.Errorf("read attendees: %w", attErr))
 			}
 			decorate(ctx, deps, &resp, source, cal.ID)
 			withhold(&resp, d)
@@ -339,11 +340,11 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 
 		evt, err := loadEventInCalendar(ctx, deps, cal.ID, in.EventID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		rows, err := loadAttendeeRows(ctx, deps.Queries, []uint32{evt.ID})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		d := reader.decide(evt, rows[evt.ID], nil)
 		if !d.Exists {
@@ -352,7 +353,7 @@ func GetEvent(deps Deps) func(context.Context, *GetEventInput) (*GetEventOutput,
 
 		resp := mapEvent(evt, cal.PublicID)
 		if err := setAttendees(ctx, deps, &resp, evt.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		decorate(ctx, deps, &resp, evt, cal.ID)
 		withhold(&resp, d)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -103,7 +104,7 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		events := parseICS(in.Body.ICS)

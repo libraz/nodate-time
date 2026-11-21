@@ -68,11 +68,11 @@ func ListAllowedEmails(deps Deps) func(context.Context, *ListAllowedEmailsInput)
 	return func(ctx context.Context, _ *ListAllowedEmailsInput) (*ListAllowedEmailsOutput, error) {
 		rows, err := deps.Queries.ListOauthSigninAllowlistEmails(ctx)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		entries, err := deps.Queries.CountEnabledOauthSigninAllowlistEntries(ctx)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		out := &ListAllowedEmailsOutput{}
 		out.Body.AllowedDomains = deps.AllowedDomains
@@ -109,14 +109,14 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 				return nil, apierrors.ToHuma(apierrors.Conflict)
 			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		userID, _ := middleware.ActorFromContext(ctx)
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		reason := strings.TrimSpace(in.Body.Reason)
 		// A withdrawn address is re-enabled in place under the new public id,
@@ -156,7 +156,7 @@ func CreateAllowedEmail(deps Deps) func(context.Context, *CreateAllowedEmailInpu
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &CreateAllowedEmailOutput{Body: AllowedEmail{
 			ID:        calresolve.PublicIDString(stored.PublicID),
@@ -199,7 +199,7 @@ func DeleteAllowedEmail(deps Deps) func(context.Context, *DeleteAllowedEmailInpu
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &DeleteAllowedEmailOutput{}, nil
 	}

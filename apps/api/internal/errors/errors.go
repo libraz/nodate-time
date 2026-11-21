@@ -1,9 +1,11 @@
 package apierrors
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -40,6 +42,21 @@ func (e *HumaError) GetStatus() int { return e.Status }
 // ToHuma converts a Spec into a huma error response that includes the Code.
 func ToHuma(s *Spec) error {
 	return &HumaError{Status: s.Status, Code: s.Code, Message: s.Message}
+}
+
+// Internal records err as the cause of a 500 and returns the response for it.
+func Internal(ctx context.Context, err error, attrs ...any) error {
+	slog.ErrorContext(ctx, "unexpected error", append(attrs, "error", err)...)
+	return ToHuma(InternalUnexpected)
+}
+
+// Respond answers err: a Spec in its chain as declared, anything else as Internal.
+func Respond(ctx context.Context, err error) error {
+	var spec *Spec
+	if errors.As(err, &spec) {
+		return ToHuma(spec)
+	}
+	return Internal(ctx, err)
 }
 
 // ensure huma's StatusError contract is satisfied at compile time.

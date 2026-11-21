@@ -63,7 +63,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		digest, err := blobref.ParseDigest(in.Body.SHA256)
@@ -73,7 +73,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 
 		avatarPubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		userPubHex := pubIDToHex(user.PublicID)
 		avatarPubHex := avatarPubID.String()
@@ -82,7 +82,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 
 		activeUploads, err := deps.Queries.CountActiveAvatarUploads(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if activeUploads >= maxAvatarUploads {
 			return nil, apierrors.ToHuma(apierrors.AvatarUploadLimit)
@@ -104,7 +104,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			}
 		}
 		if deps.DB == nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, errors.New("avatar upload has no database"))
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if _, err := q.GetUserByIDForUpdate(ctx, userID); err != nil {
@@ -128,7 +128,7 @@ func PresignAvatar(deps Deps) func(context.Context, *PresignAvatarInput) (*Presi
 			})
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		out := &PresignAvatarOutput{}
@@ -164,7 +164,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			if err == sql.ErrNoRows {
 				return nil, apierrors.ToHuma(apierrors.AvatarNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		info, exists, err := deps.Storage.StatObject(ctx, upload.StorageKey)
@@ -194,7 +194,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			// type -- and is not this reservation's to delete.
 			used, err := deps.Queries.CountStorageObjectsByKey(ctx, upload.StorageKey)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 			if used == 0 {
 				if err := deps.Storage.DeleteObject(ctx, upload.StorageKey); err != nil {
@@ -209,7 +209,7 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 		}
 
 		if deps.DB == nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, errors.New("avatar upload has no database"))
 		}
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			lockedUpload, err := q.GetAvatarUploadForUserForUpdate(ctx, generated.GetAvatarUploadForUserForUpdateParams{
@@ -264,12 +264,12 @@ func ConfirmAvatar(deps Deps) func(context.Context, *ConfirmAvatarInput) (*Confi
 			}
 			return nil
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		refreshed, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ConfirmAvatarOutput{Body: mapUserWithAvatar(ctx, deps, refreshed)}
@@ -318,19 +318,9 @@ func DeleteAvatar(deps Deps) func(context.Context, *DeleteAvatarInput) (*DeleteA
 			}
 			return blobref.Release(ctx, q, uint32(user.AvatarStorageObjectID.Int32))
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		return &DeleteAvatarOutput{}, nil
 	}
-}
-
-// toAPIError keeps a declared refusal's spec and reports anything else as an
-// unexpected fault.
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
 }

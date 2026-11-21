@@ -222,20 +222,20 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 		if in.Body.Title != nil {
 			newTitle, err = validatePollTitle(*in.Body.Title)
 			if err != nil {
-				return nil, apiError(err)
+				return nil, apierrors.Respond(ctx, err)
 			}
 		}
 		var requestedSlots []availability.Slot
 		if in.Body.Slots != nil {
 			requestedSlots, err = parsePollSlots(in.Body.Slots)
 			if err != nil {
-				return nil, apiError(err)
+				return nil, apierrors.Respond(ctx, err)
 			}
 		}
 
 		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		// A rejected memberIds is reported where it was before, after the poll checks.
 		var requestedIDs []uint32
@@ -379,7 +379,7 @@ func UpdatePoll(deps Deps) func(context.Context, *UpdatePollInput) (*UpdatePollO
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &UpdatePollOutput{ETag: result.ETag, Body: result}, nil
 	}

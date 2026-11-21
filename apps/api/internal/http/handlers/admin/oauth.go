@@ -92,7 +92,7 @@ func ListOAuthProviders(deps Deps) func(context.Context, *ListProvidersInput) (*
 				info.UpdatedAt = nullTimePtr(row.UpdatedAt)
 				info.Source = "db"
 			} else if !errors.Is(err, sql.ErrNoRows) {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			} else if deps.EnvFallback != nil && deps.EnvFallback(p) {
 				info.HasSecret = true
 				info.Enabled = true
@@ -115,7 +115,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		existing, err := deps.Queries.GetOAuthProviderConfig(ctx, generated.OauthProviderConfigsProvider(in.Provider))
 		hadRow := err == nil
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		if in.Body.ClientID.IsNull() || in.Body.Enabled.IsNull() {
@@ -137,7 +137,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		case secretSet:
 			encSecret, err = deps.Cipher.Encrypt([]byte(secret))
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 		case in.Body.ClientSecret.IsNull():
 			// Stored as no secret below.
@@ -171,7 +171,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 		// Used only when this inserts; an update leaves the stored id alone.
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		updatedBy := sql.NullInt32{Int32: int32(userID), Valid: userID > 0}
 		var row generated.OauthProviderConfig
@@ -206,7 +206,7 @@ func UpdateOAuthProvider(deps Deps) func(context.Context, *UpdateProviderInput) 
 			})
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &UpdateProviderOutput{Body: ProviderInfo{
 			Provider:  string(row.Provider),
@@ -261,7 +261,7 @@ func DeleteOAuthProvider(deps Deps) func(context.Context, *DeleteProviderInput) 
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &DeleteProviderOutput{}, nil
 	}

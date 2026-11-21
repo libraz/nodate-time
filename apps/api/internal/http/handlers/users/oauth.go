@@ -238,14 +238,14 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 
 		state, err := auth.RandomHex(oauthStateBytes)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// PKCE (RFC 7636): bind the authorization code to a one-time verifier so a
 		// stolen/injected code cannot be exchanged without it.
 		verifier, challenge, err := auth.GeneratePKCE()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// OIDC nonce: bind the returned id_token to this request (LINE).
@@ -253,13 +253,13 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 		if in.Provider == "line" {
 			nonce, err = auth.RandomHex(16)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 		}
 
 		statePubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if err := deps.Queries.CreateSigninState(ctx, generated.CreateSigninStateParams{
 			PublicID:     statePubID[:],
@@ -270,7 +270,7 @@ func OAuthStart(deps OAuthDeps) func(context.Context, *OAuthStartInput) (*OAuthS
 			Nonce:        nonce,
 			ExpiresAt:    time.Now().Add(oauthStateTTL),
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		params := url.Values{}

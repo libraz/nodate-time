@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -150,7 +151,7 @@ func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID u
 	return nil
 }
 
-func validateEventParticipants(ctx context.Context, q *generated.Queries, calID uint32, participantIDs []string) ([]attendees.Person, *apierrors.Spec) {
+func validateEventParticipants(ctx context.Context, q *generated.Queries, calID uint32, participantIDs []string) ([]attendees.Person, error) {
 	participants := make([]attendees.Person, 0, len(participantIDs))
 	seen := make(map[uint32]struct{}, len(participantIDs))
 	for _, pUUID := range participantIDs {
@@ -163,14 +164,14 @@ func validateEventParticipants(ctx context.Context, q *generated.Queries, calID 
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.BadRequest
 			}
-			return nil, apierrors.InternalUnexpected
+			return nil, fmt.Errorf("look up participant: %w", err)
 		}
 		// Only calendar members may be added as participants.
 		if _, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{CalendarID: calID, UserID: u.ID}); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.BadRequest
 			}
-			return nil, apierrors.InternalUnexpected
+			return nil, fmt.Errorf("check participant membership: %w", err)
 		}
 		if _, duplicate := seen[u.ID]; duplicate {
 			continue

@@ -64,7 +64,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 		userID, _ := middleware.ActorFromContext(ctx)
 		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		limit := int32(in.Limit)
@@ -120,7 +120,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 			}
 		}
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		hasMore := int32(len(rows)) > limit
@@ -161,12 +161,12 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		var stored generated.GetEventCommentByPublicIDRow
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -190,7 +190,7 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			stored, err = q.GetEventCommentByPublicID(ctx, pubID[:])
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		resp := mapComment(ctx, deps, stored)
@@ -344,7 +344,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 		}
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var stored generated.GetEventCommentByPublicIDRow
@@ -377,7 +377,7 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			stored, err = q.GetEventCommentByPublicID(ctx, comment.PublicID)
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		resp := mapComment(ctx, deps, stored)
@@ -390,7 +390,7 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -426,7 +426,7 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 			}
 			return logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentDeleted, comment.PublicID)
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &DeleteCommentOutput{}, nil
 	}

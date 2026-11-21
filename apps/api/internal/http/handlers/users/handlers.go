@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 	"unicode/utf8"
@@ -159,7 +160,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		// Enforce the same access policy as OIDC sign-in.
 		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, in.Body.Email)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if !allowed {
 			return nil, apierrors.ToHuma(apierrors.AuthSignupNotAllowed)
@@ -170,21 +171,21 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		hash, err := auth.HashPassword(in.Body.Password)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		userPubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		identityPubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		defaults := deps.Defaults.resolved()
@@ -233,8 +234,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 			if isDuplicateKey(err) {
 				return nil, apierrors.ToHuma(apierrors.AuthRegisterFailed)
 			}
-			slog.ErrorContext(ctx, "registration failed", "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("registration failed: %w", err))
 		}
 
 		// Registration does not prove the registrant reads this mailbox, so the
@@ -252,8 +252,7 @@ func Register(deps Deps) func(context.Context, *RegisterInput) (*RegisterOutput,
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, created.ID, userAgent, ipAddress)
 		if err != nil {
-			slog.ErrorContext(ctx, "registration session not opened", "userID", created.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("registration session not opened: %w", err), "userID", created.ID)
 		}
 
 		out := &RegisterOutput{}
@@ -289,7 +288,7 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 				auth.CheckPassword(in.Body.Password, dummyPasswordHash)
 				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// A locked identity is refused whatever the password is, so
@@ -312,7 +311,7 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 		// Refused as bad credentials so the answer says nothing about the account.
 		allowed, err := emailAllowedToSignIn(ctx, deps.Queries, deps.AllowedDomains, user.Email)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if !allowed {
 			return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
@@ -329,13 +328,13 @@ func Login(deps Deps) func(context.Context, *LoginInput) (*LoginOutput, error) {
 		}
 
 		if err := joinWorkspace(ctx, deps.DB, deps.WorkspaceID, user.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, user.ID, userAgent, ipAddress)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &LoginOutput{}
@@ -434,11 +433,11 @@ func Refresh(deps Deps) func(context.Context, *RefreshInput) (*RefreshOutput, er
 			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errRefreshReplayed) {
 				return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &RefreshOutput{}
@@ -458,7 +457,7 @@ func Logout(deps Deps) func(context.Context, *LogoutInput) (*LogoutOutput, error
 			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
 		}
 		if err := deps.Queries.RevokeSession(ctx, sessionID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &LogoutOutput{}, nil
 	}
@@ -472,7 +471,7 @@ func GetMe(deps Deps) func(context.Context, *GetMeInput) (*GetMeOutput, error) {
 		}
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &GetMeOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
 	}
@@ -492,7 +491,7 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 				// through a provider.
 				return nil, apierrors.ToHuma(apierrors.AuthWrongPassword)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// Changing the password hands this device a fresh session, which an
@@ -514,7 +513,7 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 
 		hash, err := auth.HashPassword(in.Body.NewPassword)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// Replacing the credential ends every session opened with the old
@@ -531,13 +530,13 @@ func ChangePassword(deps Deps) func(context.Context, *ChangePasswordInput) (*Cha
 			return q.RevokeAllUserSessions(ctx, userID)
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, userID, userAgent, ipAddress)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ChangePasswordOutput{}
@@ -602,11 +601,11 @@ func UpdateUser(deps Deps) func(context.Context, *UpdateUserInput) (*UpdateUserO
 			return q.UpdateUser(ctx, params)
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &UpdateUserOutput{Body: mapUserWithAvatar(ctx, deps, user)}, nil
 	}

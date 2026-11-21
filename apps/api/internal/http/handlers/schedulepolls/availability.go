@@ -3,6 +3,7 @@ package schedulepolls
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -55,7 +56,7 @@ func parsePollSlots(inputs []PollSlotInput) ([]availability.Slot, error) {
 	return slots, nil
 }
 
-func availabilityError(err error) error {
+func availabilityError(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, availability.ErrInvalid):
 		return apierrors.ToHuma(apierrors.BadRequest)
@@ -64,7 +65,7 @@ func availabilityError(err error) error {
 	case errors.Is(err, availability.ErrMembership):
 		return apierrors.ToHuma(apierrors.SchedulePollStale)
 	default:
-		return apierrors.ToHuma(apierrors.InternalUnexpected)
+		return apierrors.Internal(ctx, err)
 	}
 }
 
@@ -97,11 +98,11 @@ func GetAvailabilitySharing(deps Deps) func(context.Context, *CalendarMembersInp
 		}
 		cal, err := calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, in.CalendarID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		enabled, err := deps.Queries.GetScheduleAvailabilitySharing(ctx, cal.ID)
 		if err != nil {
-			return nil, internalError(ctx, "get schedule availability sharing", err)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("get schedule availability sharing: %w", err))
 		}
 		out := &AvailabilitySharingOutput{}
 		out.Body.Enabled = enabled
@@ -118,7 +119,7 @@ func SetAvailabilitySharing(deps Deps) func(context.Context, *AvailabilitySharin
 		}
 		cal, err := calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, in.CalendarID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if _, err := calresolve.LockManage(ctx, q, cal.ID, actor); err != nil {
@@ -147,7 +148,7 @@ func SetAvailabilitySharing(deps Deps) func(context.Context, *AvailabilitySharin
 			return q.SetScheduleAvailabilitySharing(ctx, generated.SetScheduleAvailabilitySharingParams{CalendarID: currentCal.ID, Enabled: in.Body.Enabled})
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		out := &AvailabilitySharingOutput{}
 		out.Body.Enabled = in.Body.Enabled
@@ -220,7 +221,7 @@ func mapAvailabilityHandlerError(ctx context.Context, err error) error {
 	if errors.Is(err, availability.ErrLimit) {
 		return apierrors.ToHuma(apierrors.SchedulePollTooManySlots)
 	}
-	return internalError(ctx, "check schedule poll availability", err)
+	return apierrors.Internal(ctx, fmt.Errorf("check schedule poll availability: %w", err))
 }
 
 func candidateAvailability(ctx context.Context, q *generated.Queries, workspaceID, calendarID uint32, members []uint32, slots []availability.Slot) ([]availability.State, error) {

@@ -2,7 +2,7 @@ package events
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -95,8 +95,7 @@ func SearchEvents(deps Deps) func(context.Context, *SearchEventsInput) (*SearchE
 			Limit:       maxSearchCandidates + 1,
 		})
 		if err != nil {
-			slog.ErrorContext(ctx, "search candidates failed", "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("search candidates failed: %w", err))
 		}
 		if len(candidates) > maxSearchCandidates {
 			return nil, apierrors.ToHuma(apierrors.SearchTooBroad)
@@ -126,7 +125,7 @@ func SearchEvents(deps Deps) func(context.Context, *SearchEventsInput) (*SearchE
 		if len(missing) > 0 {
 			parents, err := deps.Queries.ListSearchSeriesByIDs(ctx, missing)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 			for _, p := range parents {
 				known[p.ID] = p
@@ -139,7 +138,7 @@ func SearchEvents(deps Deps) func(context.Context, *SearchEventsInput) (*SearchE
 		}
 		changed, err := eventexpand.LoadOverrides(ctx, deps.Queries, masterIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		decisionIDs := make([]uint32, 0, len(candidates)*2)
@@ -156,7 +155,7 @@ func SearchEvents(deps Deps) func(context.Context, *SearchEventsInput) (*SearchE
 		}
 		rawAttendees, err := loadAttendeeRows(ctx, deps.Queries, decisionIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		cals := map[uint32]generated.Calendar{}
@@ -221,7 +220,7 @@ func SearchEvents(deps Deps) func(context.Context, *SearchEventsInput) (*SearchE
 
 		items, err := renderHits(ctx, deps, hits)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &SearchEventsOutput{Body: ListEventsBody{Items: items, HasMore: hasMore}}, nil
 	}

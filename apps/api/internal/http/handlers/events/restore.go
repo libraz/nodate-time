@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -49,7 +49,7 @@ func RestoreEvent(deps Deps) func(context.Context, *RestoreEventInput) (*Restore
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarWrite(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if parent, _ := parseCompositeID(in.EventID); parent != "" {
 			return nil, apierrors.ToHuma(apierrors.EventNotFound)
@@ -106,19 +106,16 @@ func RestoreEvent(deps Deps) func(context.Context, *RestoreEventInput) (*Restore
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to restore event", "eventID", found.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to restore event: %w", err), "eventID", found.ID)
 		}
 
 		row, err := deps.Queries.GetCalendarEventByID(ctx, found.ID)
 		if err != nil {
-			slog.ErrorContext(ctx, "failed to read restored event", "eventID", found.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to read restored event: %w", err), "eventID", found.ID)
 		}
 		resp, err := editedRows{series: row}.render(ctx, deps, cal)
 		if err != nil {
-			slog.ErrorContext(ctx, "failed to render restored event", "eventID", found.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to render restored event: %w", err), "eventID", found.ID)
 		}
 		withhold(&resp, decision)
 		return &RestoreEventOutput{ETag: resp.Etag, Body: resp}, nil
@@ -200,7 +197,7 @@ func UndoException(deps Deps) func(context.Context, *UndoExceptionInput) (*UndoE
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		day, spec := parseDate(in.OccurrenceDate)
 		if spec != nil {
@@ -269,8 +266,7 @@ func UndoException(deps Deps) func(context.Context, *UndoExceptionInput) (*UndoE
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to undo occurrence exception", "eventID", evt.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to undo occurrence exception: %w", err), "eventID", evt.ID)
 		}
 		return &UndoExceptionOutput{}, nil
 	}

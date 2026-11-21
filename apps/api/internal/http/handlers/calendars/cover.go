@@ -171,21 +171,21 @@ func PresignCalendarCover(deps Deps) func(context.Context, *PresignCalendarCover
 		}
 		calendar, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if err := coverBlock(deps, calendar); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		digest, err := blobref.ParseDigest(in.Body.SHA256)
 		if err != nil {
-			return nil, toAPIError(uploadError(err))
+			return nil, apierrors.Respond(ctx, uploadError(err))
 		}
 		if in.Body.ByteSize > MaxCalendarCoverSize {
 			return nil, apierrors.ToHuma(apierrors.CalendarCoverTooLarge)
 		}
 		storageKey, err := calendarCoverStorageKey()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		var staged generated.StorageObject
@@ -201,7 +201,7 @@ func PresignCalendarCover(deps Deps) func(context.Context, *PresignCalendarCover
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		out := &PresignCalendarCoverOutput{}
@@ -240,10 +240,10 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 		}
 		calendar, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if err := coverBlock(deps, calendar); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		coverID, err := uuid.Parse(in.Body.CoverID)
 		if err != nil {
@@ -272,14 +272,14 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		// Storage I/O runs with no transaction open.
 		digest := staged.Sha256
 		data, contentType, err := readCover(ctx, deps, staged, digest)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var updated generated.Calendar
@@ -382,15 +382,15 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		key, err := calendarCoverKey(ctx, deps.Queries, calendar.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		response, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, key), calendar.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &PutCalendarCoverOutput{Body: response}, nil
 	}
@@ -477,7 +477,7 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 		}
 		calendar, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if !calendarAllowsUploadedCover(calendar.Kind, calendar.OwnerUserID) {
 			return nil, apierrors.ToHuma(apierrors.CalendarCoverForbidden)
@@ -527,7 +527,7 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 			return nil
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &DeleteCalendarCoverOutput{}, nil
 	}

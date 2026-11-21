@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ func Member(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID
 		if errors.Is(err, sql.ErrNoRows) {
 			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarNotFound
 		}
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, fmt.Errorf("look up calendar: %w", err)
 	}
 	member, err := q.GetCalendarMember(ctx, generated.GetCalendarMemberParams{
 		CalendarID: cal.ID,
@@ -69,7 +70,7 @@ func Member(ctx context.Context, q Querier, workspaceID uint32, calendarPublicID
 		if errors.Is(err, sql.ErrNoRows) {
 			return generated.Calendar{}, generated.CalendarMember{}, apierrors.CalendarAccessDenied
 		}
-		return generated.Calendar{}, generated.CalendarMember{}, apierrors.InternalUnexpected
+		return generated.Calendar{}, generated.CalendarMember{}, fmt.Errorf("look up calendar member: %w", err)
 	}
 	return cal, member, nil
 }

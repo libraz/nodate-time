@@ -107,7 +107,7 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, nil
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		// An account that signs in only through a provider has no password to
 		// reset, and a link that appears to set one would sign it out
@@ -116,18 +116,18 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			if errors.Is(err, sql.ErrNoRows) {
 				return out, nil
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		token, hash, err := auth.GenerateResetToken()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		expiresAt := time.Now().Add(1 * time.Hour)
 
 		resetPubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		if _, err := deps.Queries.CreatePasswordReset(ctx, generated.CreatePasswordResetParams{
 			PublicID:  resetPubID[:],
@@ -135,7 +135,7 @@ func RequestPasswordReset(deps ResetDeps) func(context.Context, *RequestResetInp
 			TokenHash: hash,
 			ExpiresAt: expiresAt,
 		}); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		resetURL := fmt.Sprintf("%s/reset-password?token=%s", deps.WebURL, token)
@@ -166,7 +166,7 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 		hash := auth.HashResetToken(in.Body.Token)
 		newHash, err := auth.HashPassword(in.Body.NewPassword)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -213,7 +213,7 @@ func ConfirmPasswordReset(deps ResetDeps) func(context.Context, *ConfirmResetInp
 			}
 			return nil
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		out := &ConfirmResetOutput{}

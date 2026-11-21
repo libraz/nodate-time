@@ -20,7 +20,7 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 		}
 		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		var result PollDetailResponse
 		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
@@ -57,7 +57,7 @@ func CancelPoll(deps Deps) func(context.Context, *CancelPollInput) (*PollMutatio
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &PollMutationOutput{Body: result}, nil
 	}
@@ -136,7 +136,7 @@ func SchedulePollActions(deps Deps) func(context.Context, *PollActionsInput) (*P
 			return nil
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return out, nil
 	}

@@ -65,7 +65,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 		userID, _ := middleware.ActorFromContext(ctx)
 		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		rows, err := deps.Queries.ListChecklistItems(ctx, generated.ListChecklistItemsParams{
@@ -73,7 +73,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 			EventID:     evt.ID,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListChecklistOutput{Body: make([]ChecklistItemResponse, 0, len(rows))}
@@ -90,12 +90,12 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		var item generated.CalendarEventChecklistItem
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -131,7 +131,7 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 			item, err = q.GetChecklistItemByPublicID(ctx, pubID[:])
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		resp := mapChecklistItem(item)
@@ -167,7 +167,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 		}
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var updated generated.CalendarEventChecklistItem
@@ -211,7 +211,7 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			updated, err = q.GetChecklistItemByPublicID(ctx, item.PublicID)
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		resp := mapChecklistItem(updated)
@@ -227,7 +227,7 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -256,7 +256,7 @@ func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemIn
 			return logEventActivity(ctx, q, deps, cal.ID, userID, w.evt,
 				eventlog.TypeChecklistDeleted, "itemId", item.Title, item.PublicID)
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &DeleteChecklistItemOutput{}, nil

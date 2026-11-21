@@ -23,11 +23,11 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		actor, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		var att generated.CalendarEventAttendee
@@ -54,7 +54,7 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 			return logAttendeeChange(ctx, q, deps, userID, w, actor.PublicID, "rsvp", in.Body.Rsvp)
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &SetRsvpOutput{Body: AttendeeResponse{
@@ -76,7 +76,7 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, actorID, resolveCalendar)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		targetPub, err := parseUUID(in.UserID)
 		if err != nil {
@@ -114,7 +114,7 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			return logAttendeeChange(ctx, q, deps, actorID, w, target.PublicID, "canEdit", att.CanEdit)
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &SetAttendeeCanEditOutput{Body: AttendeeResponse{

@@ -31,23 +31,23 @@ func DevLogin(deps Deps) func(context.Context, *DevLoginInput) (*DevLoginOutput,
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.AuthBadCredentials)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// The password is skipped, never the rest of what a sign-in checks.
 		if required, err := userRequiresSecondFactor(ctx, deps.Queries, user.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		} else if required {
 			return nil, apierrors.ToHuma(apierrors.AuthMFARequired)
 		}
 		if err := joinWorkspace(ctx, deps.DB, deps.WorkspaceID, user.ID); err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		userAgent, ipAddress := requestOrigin(ctx)
 		creds, err := startSession(ctx, deps, user.ID, userAgent, ipAddress)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &DevLoginOutput{}

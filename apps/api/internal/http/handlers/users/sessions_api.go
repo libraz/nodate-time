@@ -75,7 +75,7 @@ func ListSessions(deps Deps) func(context.Context, *ListSessionsInput) (*ListSes
 
 		rows, err := deps.Queries.ListSessionsForUser(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListSessionsOutput{Body: make([]SessionResponse, 0, len(rows))}
@@ -109,11 +109,11 @@ func RevokeSession(deps Deps) func(context.Context, *RevokeSessionInput) (*Revok
 			UserID:   userID,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		affected, err := res.RowsAffected()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		// A session that is not the caller's, or is already gone, is reported
 		// the same way: the list a person can act on is their own, and saying

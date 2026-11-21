@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+
 	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -22,20 +24,20 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 		}
 		slotPublicID, err := parseFinalSlotID(in.Body.SlotID)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		ownerPublicID, hasOwner, err := parseFinalOwnerID(in.Body.OwnerID)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		eventPublicID, err := newPublicID()
 		if err != nil {
-			return nil, internalError(ctx, "generate confirmed event id", err)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("generate confirmed event id: %w", err))
 		}
 
 		cal, pollPublicID, err := authorizePollManager(ctx, deps, in.CalendarID, in.PollID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		var result PollDetailResponse
 		blockedByNewFixedEvent := false
@@ -226,13 +228,13 @@ func FinalizePoll(deps Deps) func(context.Context, *FinalizePollInput) (*PollMut
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if blockedByNewFixedEvent {
-			return nil, apiError(apierrors.SchedulePollSlotUnavailable)
+			return nil, apierrors.Respond(ctx, apierrors.SchedulePollSlotUnavailable)
 		}
 		if availabilityChangedAtFinalize {
-			return nil, apiError(apierrors.SchedulePollStale)
+			return nil, apierrors.Respond(ctx, apierrors.SchedulePollStale)
 		}
 		return &PollMutationOutput{Body: result}, nil
 	}

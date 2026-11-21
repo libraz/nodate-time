@@ -72,14 +72,6 @@ func pubIDToHex(b []byte) string {
 	return calresolve.PublicIDString(b)
 }
 
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
 func nullStringValue(n sql.NullString) string {
 	if !n.Valid {
 		return ""
@@ -159,13 +151,13 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 	return func(ctx context.Context, in *CreateInviteInput) (*CreateInviteOutput, error) {
 		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		userID, _ := middleware.ActorFromContext(ctx)
 		token, err := generateToken()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		role := in.Body.Role
 		if role == "" {
@@ -200,7 +192,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 
 		pubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		var created generated.CalendarInvite
@@ -264,7 +256,7 @@ func CreateInvite(deps Deps) func(context.Context, *CreateInviteInput) (*CreateI
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		out := &CreateInviteOutput{}
@@ -284,7 +276,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		cal, err := deps.Queries.GetCalendarByID(ctx, invite.CalendarID)
 		if err != nil {
@@ -294,7 +286,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 				// broken, when nothing they did or hold is wrong.
 				return nil, apierrors.ToHuma(apierrors.InviteCalendarGone)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &AcceptInviteOutput{}
@@ -302,7 +294,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 
 		user, err := deps.Queries.GetUserByID(ctx, userID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
@@ -408,7 +400,7 @@ func AcceptInvite(deps Deps) func(context.Context, *AcceptInviteInput) (*AcceptI
 			return nil
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return out, nil
@@ -419,7 +411,7 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 	return func(ctx context.Context, in *ListInvitesInput) (*ListInvitesOutput, error) {
 		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		rows, err := deps.Queries.ListInvitesByCalendar(ctx, generated.ListInvitesByCalendarParams{
@@ -427,7 +419,7 @@ func ListInvites(deps Deps) func(context.Context, *ListInvitesInput) (*ListInvit
 			Limit:      math.MaxInt32,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListInvitesOutput{Body: make([]InviteResponse, 0, len(rows))}
@@ -443,7 +435,7 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarManage(ctx, deps, in.CalendarID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		invitePub, err := parseUUID(in.InviteID)
@@ -482,7 +474,7 @@ func DeleteInviteHandler(deps Deps) func(context.Context, *DeleteInviteInput) (*
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &DeleteInviteOutput{}, nil
 	}
@@ -497,7 +489,7 @@ func PublicCalendar(deps Deps) func(context.Context, *PublicCalendarInput) (*Pub
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &PublicCalendarOutput{}
@@ -542,7 +534,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		calendarID := row.CalendarID
 		calendarColor := row.CalendarColor
@@ -551,7 +543,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, apierrors.ToHuma(apierrors.InviteNotFound)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		calendarDefault := eventacl.Visibility(cal.DefaultEventVisibility)
 
@@ -598,7 +590,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		// This endpoint takes no token beyond the link itself, so the cost of
@@ -619,7 +611,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 			RangeStart: sql.NullTime{Time: startTime, Valid: true},
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		seriesIDs := make([]uint32, 0, len(recurringRows))
@@ -628,7 +620,7 @@ func PublicEvents(deps Deps) func(context.Context, *PublicEventsInput) (*PublicE
 		}
 		overrides, err := eventexpand.LoadOverrides(ctx, deps.Queries, seriesIDs)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		for _, e := range recurringRows {

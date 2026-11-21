@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log/slog"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -45,14 +45,6 @@ func actorID(ctx context.Context) (uint32, error) {
 	return id, nil
 }
 
-func apiError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
 // checkIfMatch compares the caller's If-Match with the current tag and answers
 // with the given stale error when they differ.
 func checkIfMatch(header precondition.IfMatch, current string, stale *apierrors.Spec) error {
@@ -61,11 +53,6 @@ func checkIfMatch(header precondition.IfMatch, current string, stale *apierrors.
 		return stale
 	}
 	return err
-}
-
-func internalError(ctx context.Context, operation string, err error) error {
-	slog.ErrorContext(ctx, operation, "error", err)
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
 }
 
 func parsePublicID(value string, invalid *apierrors.Spec) ([]byte, error) {
@@ -467,33 +454,33 @@ func CreatePoll(deps Deps) func(context.Context, *CreatePollInput) (*CreatePollO
 		}
 		title, err := validatePollTitle(in.Body.Title)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if err := validateTimezone(in.Body.Timezone); err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		slots, err := parsePollSlots(in.Body.Slots)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		pollPublicID, err := newPublicID()
 		if err != nil {
-			return nil, internalError(ctx, "generate schedule poll id", err)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("generate schedule poll id: %w", err))
 		}
 		slotPublicIDs := make([][]byte, len(slots))
 		for i := range slotPublicIDs {
 			slotPublicIDs[i], err = newPublicID()
 			if err != nil {
-				return nil, internalError(ctx, "generate schedule poll candidate id", err)
+				return nil, apierrors.Internal(ctx, fmt.Errorf("generate schedule poll candidate id: %w", err))
 			}
 		}
 		cal, err := calresolve.Manage(ctx, deps.Queries, deps.WorkspaceID, in.CalendarID, actor)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		memberIDs, err := memberIDsFromPublic(ctx, deps.Queries, deps.WorkspaceID, cal.ID, in.Body.MemberIDs)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		var detail PollDetailResponse
 		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
@@ -558,7 +545,7 @@ func CreatePoll(deps Deps) func(context.Context, *CreatePollInput) (*CreatePollO
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &CreatePollOutput{Body: detail}, nil
 	}
@@ -582,7 +569,7 @@ func GetPoll(deps Deps) func(context.Context, *GetPollInput) (*GetPollOutput, er
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &GetPollOutput{ETag: detail.ETag, Body: detail}, nil
 	}
@@ -628,7 +615,7 @@ func ListPolls(deps Deps) func(context.Context, *ListPollsInput) (*ListPollsOutp
 			return nil
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return out, nil
 	}
@@ -729,7 +716,7 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 		}
 		cal, pollPublicID, err := authorizePollParticipant(ctx, deps, in.CalendarID, in.PollID, actor, true)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		var result PollDetailResponse
 		err = dbtx.RunSerializable(ctx, deps.DB, func(q *generated.Queries) error {
@@ -778,7 +765,7 @@ func RefreshAvailability(deps Deps) func(context.Context, *PollMutationInput) (*
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &PollMutationOutput{ETag: result.ETag, Body: result}, nil
 	}
@@ -792,7 +779,7 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollRespo
 		}
 		cal, pollPublicID, err := authorizePollParticipant(ctx, deps, in.CalendarID, in.PollID, actor, false)
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		var result PollResponseBody
 		staleAfterRefresh := false
@@ -914,10 +901,10 @@ func SetResponse(deps Deps) func(context.Context, *SetResponseInput) (*PollRespo
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if staleAfterRefresh {
-			return nil, apiError(apierrors.SchedulePollStale)
+			return nil, apierrors.Respond(ctx, apierrors.SchedulePollStale)
 		}
 		return &PollResponseOutput{ETag: result.ETag, Body: result}, nil
 	}
@@ -960,7 +947,7 @@ func GetResponse(deps Deps) func(context.Context, *PollResponseInput) (*PollResp
 			return err
 		})
 		if err != nil {
-			return nil, apiError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &PollResponseOutput{ETag: body.ETag, Body: body}, nil
 	}

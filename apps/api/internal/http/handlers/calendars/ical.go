@@ -172,7 +172,7 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		loc := daterange.Location(in.TZ, actorTimezone(ctx, deps, userID))
@@ -416,7 +416,7 @@ func loadExportEvents(
 func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, viewer exportViewer, window exportWindow) (*ExportOutput, error) {
 	exports, err := loadExportEvents(ctx, deps, cal, viewer, window, false)
 	if err != nil {
-		return nil, toAPIError(err)
+		return nil, apierrors.Respond(ctx, err)
 	}
 	return &ExportOutput{
 		ContentType:        "text/calendar; charset=utf-8",
@@ -444,7 +444,7 @@ func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, viewer ex
 
 	exports, err := loadExportEvents(ctx, deps, cal, viewer, window, true)
 	if err != nil {
-		return nil, toAPIError(err)
+		return nil, apierrors.Respond(ctx, err)
 	}
 	return &ExportOutput{
 		ContentType:        "text/csv; charset=utf-8",

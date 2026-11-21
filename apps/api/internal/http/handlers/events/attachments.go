@@ -104,7 +104,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		if in.Body.ByteSize > maxAttachmentSize {
@@ -137,7 +137,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 
 		attachPubID, err := uuid.NewV7()
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		storageKey := attachmentStorageKey(deps, digest)
@@ -190,8 +190,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			if errors.As(err, &spec) {
 				return nil, apierrors.ToHuma(spec)
 			}
-			slog.ErrorContext(ctx, "failed to reserve attachment", "eventID", evt.ID, "error", err)
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, fmt.Errorf("failed to reserve attachment: %w", err), "eventID", evt.ID)
 		}
 
 		out := &PresignUploadOutput{}
@@ -230,12 +229,12 @@ func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*L
 		userID, _ := middleware.ActorFromContext(ctx)
 		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		rows, err := deps.Queries.ListEventAttachments(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListAttachmentsOutput{Body: make([]AttachmentResponse, 0, len(rows))}
@@ -305,7 +304,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 		// files by passing a foreign attachment UUID (cross-tenant IDOR).
 		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		attPub, err := parseUUID(in.AttachmentID)
@@ -341,7 +340,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		attPub, err := parseUUID(in.AttachmentID)
@@ -385,7 +384,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 				eventlog.TypeAttachmentDeleted, "attachmentId", att.Filename, att.PublicID)
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &DeleteAttachmentOutput{}, nil
@@ -402,7 +401,7 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		// Refused callers are told so before anything about the reservation or
@@ -411,7 +410,7 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 			_, err := lockDetailEdit(ctx, q, cal, evt.ID, userID)
 			return err
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if deps.Storage == nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
@@ -559,7 +558,7 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 				eventlog.TypeAttachmentCreated, "attachmentId", att.Filename, att.PublicID)
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, queued...); err != nil {
 			slog.WarnContext(ctx, "failed to remove superseded attachment bytes; left to the drainer", "error", err)

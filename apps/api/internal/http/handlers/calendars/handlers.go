@@ -49,14 +49,6 @@ func parseUUID(s string) ([]byte, error) {
 	return b, nil
 }
 
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
 func nullStringValue(n sql.NullString) string {
 	if !n.Valid {
 		return ""
@@ -172,7 +164,7 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 			WorkspaceID: deps.WorkspaceID,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		// Mark calendars that currently expose an active public link.
 		publicSet := map[uint32]bool{}
@@ -191,7 +183,7 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 			}
 			coverRows, err := deps.Queries.ListCalendarCoverKeys(ctx, calendarIDs)
 			if err != nil {
-				return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+				return nil, apierrors.Internal(ctx, err)
 			}
 			coverKeys = make(map[uint32]string, len(coverRows))
 			for _, cover := range coverRows {
@@ -223,15 +215,15 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, member, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		coverKey, err := calendarCoverKey(ctx, deps.Queries, cal.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		resp, err := withShareState(ctx, deps, mapCalendarWithCover(deps, cal, member.Role, member.MemberColor, coverKey), cal.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &GetCalendarOutput{ETag: resp.ETag, Body: resp}, nil
 	}
@@ -251,7 +243,7 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		// The creator owns the calendar, in the colour it was just created
@@ -271,7 +263,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		}
 		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		var updated generated.Calendar
@@ -326,7 +318,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		// A rename says nothing about who the calendar is shared with, so the
@@ -335,11 +327,11 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		// the omission for a calendar that had stopped being shared.
 		coverKey, err := calendarCoverKey(ctx, deps.Queries, cal.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		resp, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, coverKey), cal.ID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return &UpdateCalendarOutput{ETag: resp.ETag, Body: resp}, nil
 	}
@@ -350,7 +342,7 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, err := resolveCalendarOwn(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -393,7 +385,7 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &DeleteCalendarOutput{}, nil
 	}
@@ -404,7 +396,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, caller, err := resolveCalendarMember(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		rows, err := deps.Queries.ListCalendarMembers(ctx, generated.ListCalendarMembersParams{
@@ -412,7 +404,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 			Limit:      math.MaxInt32,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ListMembersOutput{Body: make([]MemberResponse, 0, len(rows))}
@@ -444,7 +436,7 @@ func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidates
 		userID, _ := middleware.ActorFromContext(ctx)
 		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		rows, err := deps.Queries.ListCalendarMemberCandidates(ctx, generated.ListCalendarMemberCandidatesParams{
 			WorkspaceID: cal.WorkspaceID,
@@ -453,7 +445,7 @@ func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidates
 			Limit:       maxCandidatesListed + 1,
 		})
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		out := &ListMemberCandidatesOutput{}
 		if len(rows) > maxCandidatesListed {
@@ -481,7 +473,7 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		targetPub, err := parseUUID(in.Body.UserID)
 		if err != nil {
@@ -511,7 +503,7 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 			return err
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &AddMemberOutput{Body: MemberResponse{
@@ -530,7 +522,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -613,7 +605,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		return &UpdateMemberRoleOutput{Body: MemberResponse{
@@ -638,7 +630,7 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, _, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -689,7 +681,7 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		email := ""
@@ -712,12 +704,12 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 		actorID, _ := middleware.ActorFromContext(ctx)
 		cal, actorMember, err := resolveCalendarMember(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		actor, err := deps.Queries.GetUserByID(ctx, actorID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		targetPub, err := parseUUID(in.UserID)
@@ -805,7 +797,7 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			})
 		})
 		if err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &RemoveMemberOutput{}, nil
 	}
@@ -901,7 +893,7 @@ func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsO
 	return func(ctx context.Context, in *ListLabelsInput) (*ListLabelsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
 		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 		return &ListLabelsOutput{Body: labels}, nil
 	}

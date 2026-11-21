@@ -84,7 +84,7 @@ func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificatio
 		}
 		user, err := deps.Queries.GetUserByID(ctx, actorUserID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 
 		out := &ResendVerificationOutput{}
@@ -114,7 +114,7 @@ func ResendEmailVerification(deps Deps) func(context.Context, *ResendVerificatio
 			if errors.Is(err, errMailNotAccepted) {
 				return nil, apierrors.ToHuma(apierrors.RateLimited)
 			}
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+			return nil, apierrors.Internal(ctx, err)
 		}
 		return out, nil
 	}
@@ -191,7 +191,7 @@ func ConfirmEmailVerification(deps Deps) func(context.Context, *ConfirmVerificat
 			}
 			return nil
 		}); err != nil {
-			return nil, toAPIError(err)
+			return nil, apierrors.Respond(ctx, err)
 		}
 
 		out := &ConfirmVerificationOutput{}
