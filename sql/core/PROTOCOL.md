@@ -13,15 +13,17 @@ either side reading the other's source.
 
 ## What is in here
 
-| Path                       | Contents                                                           |
-| -------------------------- | ------------------------------------------------------------------ |
-| `tables/`                  | Every table shared across implementations.                         |
-| `triggers/`                | The invariants that cannot be expressed as constraints.            |
-| `conformance/`             | A runnable suite that checks an implementation.                    |
-| `tools/`                   | Schema build, vendoring and layer checks, identical in every copy. |
-| `upgrades/`                | Idempotent scripts that bring an existing core schema up to date.  |
-| `recurrence/fixtures.json` | Recurrence rules with the occurrences every expander must produce. |
-| `event-kinds.yaml`         | The registry of event kinds written for changes to core tables.    |
+| Path                              | Contents                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `tables/`                         | Every table shared across implementations.                                |
+| `triggers/`                       | The invariants that cannot be expressed as constraints.                   |
+| `conformance/`                    | A runnable suite that checks an implementation.                           |
+| `tools/`                          | Schema build, vendoring and layer checks, identical in every copy.        |
+| `upgrades/`                       | Idempotent scripts that bring an existing core schema up to date.         |
+| `recurrence/fixtures.json`        | Recurrence rules with the occurrences every expander must produce.        |
+| `recurrence/exception-forms.json` | Exception elements, their classification and the occurrence each cancels. |
+| `all-day/fixtures.json`           | Stored all-day rows and the dates a viewer in each zone must see.         |
+| `event-kinds.yaml`                | The registry of event kinds written for changes to core tables.           |
 
 A product adds its own tables in a sibling layer — this repository keeps
 its own under `sql/flow/`. Layers compose: a deployment applies core, then
@@ -228,16 +230,16 @@ JSON object in this canonical shape:
 { "freq": "weekly", "interval": 2, "byDay": ["TU", "SU"], "wkst": "SU", "count": 10 }
 ```
 
-| Key          | Type and range                                              | Meaning                                                                              |
-| ------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `freq`       | Required. `daily`, `weekly`, `monthly` or `yearly`.         |                                                                                      |
-| `interval`   | Optional. Integer 1..999.                                   | Absent means 1.                                                                      |
-| `byDay`      | Optional. Array of `MO`..`SU`, 1..7 items, no repeats.      | Weekly: the set of weekdays. Monthly: one weekday, paired with `bySetPos`.           |
-| `byMonthDay` | Optional. Array of integers 1..31, 1..31 items, no repeats. | Monthly only. A day the month does not have is clamped to the month's last day.      |
-| `bySetPos`   | Optional. One-item array of 1..5 or -1.                     | Only together with `byDay`. Applied after the other `by*` keys.                      |
-| `wkst`       | Optional. `MO` or `SU`.                                     | Absent means `MO`. Changes the result only for weekly rules with `interval` above 1. |
-| `until`      | Optional. An RFC 3339 instant, or a `YYYY-MM-DD` date.      | Inclusive. A date means the end of that day in the event's time zone.                |
-| `count`      | Optional. Integer 1..1000.                                  | Number of occurrences, the first included. Not combined with `until`.                |
+| Key          | Type and range                                              | Meaning                                                                                  |
+| ------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `freq`       | Required. `daily`, `weekly`, `monthly` or `yearly`.         |                                                                                          |
+| `interval`   | Optional. Integer 1..999.                                   | Absent means 1.                                                                          |
+| `byDay`      | Optional. Array of `MO`..`SU`, 1..7 items, no repeats.      | Weekly: the set of weekdays. Monthly: one weekday, paired with `bySetPos`.               |
+| `byMonthDay` | Optional. Array of integers 1..31, 1..31 items, no repeats. | Monthly only. A day the month does not have is clamped to the month's last day.          |
+| `bySetPos`   | Optional. One-item array of 1..5 or -1.                     | Only together with `byDay`. Applied after the other `by*` keys.                          |
+| `wkst`       | Optional. `MO` or `SU`.                                     | Absent means `MO`. Changes the result only for weekly rules with `interval` above 1.     |
+| `until`      | Optional. An RFC 3339 instant, or a `YYYY-MM-DD` date.      | Inclusive. A date means the end of that day in the event's time zone (UTC when all-day). |
+| `count`      | Optional. Integer 1..1000.                                  | Number of occurrences, the first included. Not combined with `until`.                    |
 
 No other key is allowed, and no key may hold `null`. Every array form is an
 array even with one item.
@@ -252,6 +254,15 @@ Expansion rules shared by every expander:
   A yearly series from Feb 29 falls on Feb 28 in other years.
 - A `bySetPos` position the month does not have (a fifth Thursday) produces
   no occurrence that month.
+- An all-day series expands in UTC whatever its `timezone` says, so every
+  occurrence starts at UTC midnight and daylight-saving changes move nothing.
+- On an all-day series `until`, every exception element and every
+  occurrence identifier is a `YYYY-MM-DD` date, and `until` includes its
+  day. On a timed series `until` and exception elements are RFC 3339
+  instants in UTC.
+- The date in an occurrence identifier is the date the occurrence starts on
+  in the series' time zone for a timed series, and its UTC date for an
+  all-day one.
 
 The table enforces the shape with `CHECK chk_calendar_events_recurrence_shape`,
 a `JSON_SCHEMA_VALID` schema written only with draft-4 keywords, the
@@ -265,7 +276,129 @@ produce, as `{name, rule, dtstart, tz, expect}`. A rule without `count` or
 `until` is unbounded, and `expect` lists its first occurrences. Every
 expander in every implementation runs these fixtures. Each fixture's
 expectation comes from the rules above, not from any implementation's
-output.
+output. A case with `"allDay": true` is an all-day series: `dtstart` is its
+first UTC midnight, `tz` is the event's recorded zone and does not affect
+the result, and `until` is a date.
+
+## All-day events
+
+A row with `all_day = TRUE` and a non-NULL `start_at` has this shape, and
+`CHECK chk_calendar_events_all_day_canonical` refuses any other:
+
+- `start_at` is the first day at 00:00:00 UTC.
+- `end_at` is the day after the last day at 00:00:00 UTC, so the range is
+  half-open and a one-day event spans exactly 24 hours.
+- A `milestone` is a point: `end_at = start_at`. Every other kind has
+  `end_at > start_at`.
+
+A reader takes the UTC date part of `start_at` as the event's first day, and
+the UTC date part of `end_at` as the day after its last (the same day, for a
+milestone). The date does not depend on who is looking.
+
+`timezone` is a record of the zone the writer worked in. It plays no part in
+the dates of an all-day row. The one exception is the reminder: it is due at
+midnight of the occurrence's date in the event's `timezone`, minus
+`notification_offset`, and is claimed in `calendar_event_reminders` under the
+occurrence's canonical UTC midnight.
+
+Against timed events, an all-day row occupies midnight to midnight of each of
+its dates in the zone of whoever is evaluating overlap or free time. A reader
+widens a range query by a day on each side and then filters by date.
+
+## Visibility
+
+`calendar_events.visibility` resolves to an effective value: `default` takes
+the calendar's `default_event_visibility`, and `public` when the calendar has
+none. A value outside the enum is treated as `confidential`.
+
+For each event, and for each occurrence of a series, a reader is in one of
+three classes:
+
+- **Party:** the event's `owner_user_id`, its `created_by_user_id`, and an
+  enabled attendee of that occurrence (see [Override attendees](#override-attendees)).
+- **Member:** any other member of the calendar, whatever the role.
+- **Anonymous:** a reader reaching the event through a public share or embed.
+
+| Effective value | Party      | Member                                                                                                                                                                         | Anonymous                                       |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `public`        | Everything | Everything                                                                                                                                                                     | Title, times, `all_day`, location               |
+| `private`       | Everything | Title, times, `all_day`, kind, block label, `show_as`, owner, attendees and their answers. Location, memo and url are withheld, and so are comments, checklist and attachments | Times and `all_day` only; the title is withheld |
+| `confidential`  | Everything | The event does not exist                                                                                                                                                       | The event does not exist                        |
+
+"Does not exist" is literal: a list omits the row and a direct read finds
+nothing. A reader that withholds fields says so rather than returning empty
+values.
+
+## Recurrence exceptions
+
+`recurrence_exceptions` is a JSON array of strings, each naming an occurrence
+of the series to skip. A writer writes `YYYY-MM-DD` on an all-day series and
+an RFC 3339 instant in UTC on a timed one. It leaves every element it is not
+changing in its original spelling, including elements it cannot read.
+
+An element has one of these forms:
+
+| Form     | Regular expression                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------- |
+| date     | `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`                                                                     |
+| RFC 3339 | `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z\|[+-][0-9]{2}:[0-9]{2})$` |
+| floating | `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$`                                          |
+
+`T` and `Z` are upper case only; a lower-case letter or a space separator
+makes the element unreadable. Anything matching none of the three is
+unreadable.
+
+| Form \ Series | All-day                                          | Timed                                                                                |
+| ------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| date          | Cancels the occurrence on that date              | Cancels the occurrence that starts on that date in the series' time zone             |
+| RFC 3339      | Cancels the occurrence on the instant's UTC date | Cancels the occurrence starting at that instant                                      |
+| floating      | Cancels the occurrence on its date part          | Cancels the occurrence whose wall-clock start in the series' time zone is that value |
+| unreadable    | Ignored and kept                                 | Ignored and kept                                                                     |
+
+Removing a cancellation removes every element that, by this table, cancels
+that occurrence. `recurrence/exception-forms.json` lists elements with their
+form and the occurrence each cancels on a sample all-day and a sample timed
+series.
+
+## Notification offset
+
+`notification_offset` is NULL or an integer from 0 to 10080 (seven days, in
+minutes), held by `CHECK chk_calendar_events_notification_offset_range`. The
+reminder scheduler's horizon is seven days, so a larger offset could never
+fire.
+
+## Override attendees
+
+The attendees of one occurrence are decided by its override row, when it has
+attendee rows:
+
+- If the override row has any `calendar_event_attendees` row, enabled or not,
+  its enabled rows are the occurrence's attendees and the series' attendees
+  do not apply. This is replacement, not union.
+- If it has none, the occurrence's attendees are the series' attendees.
+- A writer that creates an override row adds a disabled row for each series
+  attendee that is not attending the occurrence, so that a replacement which
+  removes everyone is still distinguishable from an override that never
+  stated attendees.
+
+## Log calendar_id
+
+An `events` row whose kind begins with `calendar.` and whose
+`subject_public_id` names an existing `calendar_events` row has a non-NULL
+`calendar_id`. The value is the event's calendar when the row was written. The
+log is append-only, so moving an event to another calendar does not rewrite
+earlier rows.
+
+## Owner column
+
+`calendar_events.owner_user_id` is a free column. The contract fixes only
+that it is NOT NULL and names a user. Whether an owner who leaves a calendar
+passes their events to someone else is each product's choice.
+
+## Dateless rows
+
+A row with a NULL `start_at` is a planning-stage placeholder. A reader may
+leave such rows out of every surface it offers.
 
 ## Access
 
@@ -446,7 +579,9 @@ It runs in four modes, chosen with `--mode`:
   database; it creates and removes its own fixtures.
 - **data** — sweeps an existing database for rows that violate the
   obligations, which is how a writer that skipped the event log or bypassed
-  the guard is caught after the fact.
+  the guard is caught after the fact. It also checks that all-day series
+  carry date-only exceptions and UTC-midnight override keys, and that
+  `calendar.*` log rows about an existing event name a calendar.
 - **all** — runs schema and then data.
 - **selftest** — plants one violation per check and per `CHECK` keyword,
   confirms each is refused, and cleans up, so a check that has stopped
@@ -482,6 +617,15 @@ shipped upgrade is never edited; a later change is a new file.
 An upgrade that rewrites data first makes the changes that do not alter
 meaning, then lists by `public_id` any rows that still violate the new
 constraint and stops, before it adds the constraint.
+
+An upgrade that writes `calendar_events` rows may set
+`@nf_item_projection_engine` for the length of its transaction, and clears it
+before the transaction ends. An upgrade may also fill a NULL column from
+other rows when the value is derivable from them (the `calendar_id` of an
+event-log row from its subject's event); it does not correct content.
+
+After the upgrades, run `bash sql/core/conformance/run.sh --mode all`, which
+adds the data checks to step 4's schema checks.
 
 ### Layer upgrades
 

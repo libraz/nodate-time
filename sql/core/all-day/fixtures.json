@@ -1,0 +1,239 @@
+{
+  "description": "Stored all-day rows (startAt, endAt in UTC) and the dates every viewer sees. firstDate and lastDate are inclusive; startDate and endDate are the wire form, endDate exclusive (equal to startDate for a milestone). The dates do not depend on the viewer zone.",
+  "cases": [
+    {
+      "name": "one-day",
+      "kind": "event",
+      "startAt": "2026-03-10T00:00:00Z",
+      "endAt": "2026-03-11T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        },
+        "UTC": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        }
+      }
+    },
+    {
+      "name": "multi-day",
+      "kind": "event",
+      "startAt": "2026-03-10T00:00:00Z",
+      "endAt": "2026-03-13T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-12",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-13"
+        },
+        "UTC": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-12",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-13"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-12",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-13"
+        }
+      }
+    },
+    {
+      "name": "milestone",
+      "kind": "milestone",
+      "startAt": "2026-03-10T00:00:00Z",
+      "endAt": "2026-03-10T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-10"
+        },
+        "UTC": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-10"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-10"
+        }
+      }
+    },
+    {
+      "name": "month-boundary",
+      "kind": "event",
+      "startAt": "2026-01-31T00:00:00Z",
+      "endAt": "2026-02-03T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-01-31",
+          "lastDate": "2026-02-02",
+          "startDate": "2026-01-31",
+          "endDate": "2026-02-03"
+        },
+        "UTC": {
+          "firstDate": "2026-01-31",
+          "lastDate": "2026-02-02",
+          "startDate": "2026-01-31",
+          "endDate": "2026-02-03"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-01-31",
+          "lastDate": "2026-02-02",
+          "startDate": "2026-01-31",
+          "endDate": "2026-02-03"
+        }
+      }
+    },
+    {
+      "name": "year-boundary",
+      "kind": "event",
+      "startAt": "2026-12-31T00:00:00Z",
+      "endAt": "2027-01-02T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-12-31",
+          "lastDate": "2027-01-01",
+          "startDate": "2026-12-31",
+          "endDate": "2027-01-02"
+        },
+        "UTC": {
+          "firstDate": "2026-12-31",
+          "lastDate": "2027-01-01",
+          "startDate": "2026-12-31",
+          "endDate": "2027-01-02"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-12-31",
+          "lastDate": "2027-01-01",
+          "startDate": "2026-12-31",
+          "endDate": "2027-01-02"
+        }
+      }
+    },
+    {
+      "name": "leap-day-one-day",
+      "kind": "event",
+      "startAt": "2028-02-29T00:00:00Z",
+      "endAt": "2028-03-01T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2028-02-29",
+          "lastDate": "2028-02-29",
+          "startDate": "2028-02-29",
+          "endDate": "2028-03-01"
+        },
+        "UTC": {
+          "firstDate": "2028-02-29",
+          "lastDate": "2028-02-29",
+          "startDate": "2028-02-29",
+          "endDate": "2028-03-01"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2028-02-29",
+          "lastDate": "2028-02-29",
+          "startDate": "2028-02-29",
+          "endDate": "2028-03-01"
+        }
+      }
+    },
+    {
+      "name": "leap-day-spanned",
+      "kind": "event",
+      "startAt": "2028-02-28T00:00:00Z",
+      "endAt": "2028-03-02T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2028-02-28",
+          "lastDate": "2028-03-01",
+          "startDate": "2028-02-28",
+          "endDate": "2028-03-02"
+        },
+        "UTC": {
+          "firstDate": "2028-02-28",
+          "lastDate": "2028-03-01",
+          "startDate": "2028-02-28",
+          "endDate": "2028-03-02"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2028-02-28",
+          "lastDate": "2028-03-01",
+          "startDate": "2028-02-28",
+          "endDate": "2028-03-02"
+        }
+      }
+    },
+    {
+      "name": "non-leap-february-end",
+      "kind": "event",
+      "startAt": "2027-02-28T00:00:00Z",
+      "endAt": "2027-03-01T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2027-02-28",
+          "lastDate": "2027-02-28",
+          "startDate": "2027-02-28",
+          "endDate": "2027-03-01"
+        },
+        "UTC": {
+          "firstDate": "2027-02-28",
+          "lastDate": "2027-02-28",
+          "startDate": "2027-02-28",
+          "endDate": "2027-03-01"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2027-02-28",
+          "lastDate": "2027-02-28",
+          "startDate": "2027-02-28",
+          "endDate": "2027-03-01"
+        }
+      }
+    },
+    {
+      "name": "block-one-day",
+      "kind": "block",
+      "startAt": "2026-03-10T00:00:00Z",
+      "endAt": "2026-03-11T00:00:00Z",
+      "viewers": {
+        "Asia/Tokyo": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        },
+        "UTC": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        },
+        "America/Los_Angeles": {
+          "firstDate": "2026-03-10",
+          "lastDate": "2026-03-10",
+          "startDate": "2026-03-10",
+          "endDate": "2026-03-11"
+        }
+      }
+    }
+  ]
+}

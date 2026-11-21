@@ -38,7 +38,7 @@ CREATE TABLE calendars (
    * row-level list filter free of a join on this table, which several of
    * the event list queries do not have.
    */
-  default_event_visibility ENUM('public','private') NOT NULL DEFAULT 'public' COMMENT 'What calendar_events.visibility = ''default'' means here. public: details are for every member. private: the time is visible, the details are for the owner and the invited. Never confidential — hiding the row is a per-event decision.',
+  default_event_visibility ENUM('public','private') NOT NULL DEFAULT 'public' COMMENT 'What calendar_events.visibility = ''default'' means here. public: details are for every member. private: title and time are visible to members, location, memo and url are for the owner, creator and attendees. Never confidential — hiding the row is a per-event decision.',
 
   sort_weight INT NOT NULL DEFAULT 0 COMMENT 'Display order',
   notes TEXT NULL COMMENT 'Admin notes',

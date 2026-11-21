@@ -70,6 +70,10 @@ kinds:
     family: calendar
     subject: calendar_events
     required_payload_keys: [eventId, title]
+  - kind: calendar.event.restored
+    family: calendar
+    subject: calendar_events
+    required_payload_keys: [eventId, title]
 
   # Details hanging off one calendar event. The subject is the event.
   - kind: calendar.event.comment.created

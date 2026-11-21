@@ -1,0 +1,103 @@
+{
+  "series": {
+    "allDay": {
+      "allDay": true,
+      "rule": { "freq": "daily", "count": 5 },
+      "dtstart": "2026-03-09T00:00:00Z",
+      "tz": "America/Los_Angeles"
+    },
+    "timed": {
+      "allDay": false,
+      "rule": { "freq": "daily", "count": 5 },
+      "dtstart": "2026-03-09T08:00:00+09:00",
+      "tz": "Asia/Tokyo"
+    }
+  },
+  "cases": [
+    {
+      "element": "2026-03-10",
+      "form": "date",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": "2026-03-09T23:00:00Z" }
+    },
+    { "element": "2026-02-30", "form": "date", "cancels": { "allDay": null, "timed": null } },
+    {
+      "element": "2026-03-10T00:00:00Z",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": null }
+    },
+    {
+      "element": "2026-03-10T00:00:00.000Z",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": null }
+    },
+    {
+      "element": "2026-03-10T00:00:00.5Z",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": null }
+    },
+    {
+      "element": "2026-03-10T09:00:00+09:00",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": null }
+    },
+    {
+      "element": "2026-03-10T08:00:00+09:00",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-09T00:00:00Z", "timed": "2026-03-09T23:00:00Z" }
+    },
+    {
+      "element": "2026-03-09T16:00:00-07:00",
+      "form": "rfc3339",
+      "cancels": { "allDay": "2026-03-09T00:00:00Z", "timed": "2026-03-09T23:00:00Z" }
+    },
+    {
+      "element": "2026-03-10T08:00:00",
+      "form": "floating",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": "2026-03-09T23:00:00Z" }
+    },
+    {
+      "element": "2026-03-10T09:00:00",
+      "form": "floating",
+      "cancels": { "allDay": "2026-03-10T00:00:00Z", "timed": null }
+    },
+    {
+      "element": "2026-03-10T00:00:00z",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    {
+      "element": "2026-03-10t00:00:00Z",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    {
+      "element": "2026-03-10 00:00:00Z",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    {
+      "element": "2026-03-10 08:00:00",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    {
+      "element": "2026-03-10T00:00:00+0900",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    {
+      "element": "2026-03-10T00:00Z",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    { "element": "2026-3-10", "form": "unreadable", "cancels": { "allDay": null, "timed": null } },
+    { "element": "20260310", "form": "unreadable", "cancels": { "allDay": null, "timed": null } },
+    {
+      "element": "2026-03-10T00:00:00.1234567890Z",
+      "form": "unreadable",
+      "cancels": { "allDay": null, "timed": null }
+    },
+    { "element": "", "form": "unreadable", "cancels": { "allDay": null, "timed": null } },
+    { "element": "garbage", "form": "unreadable", "cancels": { "allDay": null, "timed": null } }
+  ]
+}

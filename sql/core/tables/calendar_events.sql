@@ -12,7 +12,7 @@ CREATE TABLE calendar_events (
 
   -- Event classification
   kind ENUM('event','block','free','milestone') NOT NULL DEFAULT 'event' COMMENT 'event=regular, block=declarative time frame (work hours, focus), free=available slot, milestone=umbrella/milestone, has no duration semantics',
-  visibility ENUM('default','public','private','confidential') NOT NULL DEFAULT 'default' COMMENT 'Who can see event details: default (calendar setting), public (all), private (time only), confidential (owner only)',
+  visibility ENUM('default','public','private','confidential') NOT NULL DEFAULT 'default' COMMENT 'Who can see event details: default (the calendar''s default_event_visibility), public (every reader), private (members see time and title but not location, memo or url), confidential (only the owner, creator and attendees). PROTOCOL.md §Visibility.',
   show_as ENUM('busy','free','tentative','oof') NOT NULL DEFAULT 'busy' COMMENT 'Availability display: busy, free, tentative, out-of-office. The iCalendar TRANSP axis — whether the time reads as taken — and nothing more.',
   /**
    * flexibility: whether a confirmed commitment could be moved, which
@@ -36,8 +36,8 @@ CREATE TABLE calendar_events (
 
   title VARCHAR(500) NOT NULL COMMENT 'Event title',
   all_day BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'All-day event flag',
-  start_at DATETIME(3) NULL COMMENT 'Start time (UTC or with timezone context); NULL = undated (planning-stage placeholder)',
-  end_at DATETIME(3) NULL COMMENT 'End time; NULL = undated (planning-stage placeholder)',
+  start_at DATETIME(3) NULL COMMENT 'Start time in UTC; for an all-day row the first day at 00:00:00 UTC; NULL = undated (planning-stage placeholder)',
+  end_at DATETIME(3) NULL COMMENT 'End time in UTC; for an all-day row the day after the last day at 00:00:00 UTC (equal to start_at for a milestone); NULL = undated (planning-stage placeholder)',
   timezone VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL DEFAULT 'UTC' COMMENT 'IANA timezone identifier; resolved from event > user > workspace > UTC',
 
   location VARCHAR(500) NULL COMMENT 'Location text',
@@ -66,7 +66,7 @@ CREATE TABLE calendar_events (
   -- Recurrence (RFC 5545 subset stored as JSON)
   recurrence_rule JSON NULL COMMENT 'Recurrence rule: {freq, interval, byDay[], byMonthDay[], bySetPos[], wkst, until, count}. The shape is enforced by chk_calendar_events_recurrence_shape; the semantics are PROTOCOL.md §Recurrence.',
   recurrence_end DATETIME(3) NULL COMMENT 'Computed end date for recurrence expansion queries',
-  recurrence_exceptions JSON DEFAULT NULL COMMENT 'Array of ISO 8601 occurrence starts to skip when expanding this rule. Cancelling one occurrence is an entry here, never a row.',
+  recurrence_exceptions JSON DEFAULT NULL COMMENT 'Array of strings naming occurrences to skip when expanding this rule: YYYY-MM-DD on an all-day series, an RFC 3339 UTC instant on a timed one. Unreadable entries are kept. Cancelling one occurrence is an entry here, never a row. PROTOCOL.md §Recurrence exceptions.',
   /**
    * A recurring series is one row plus two ways of departing from it,
    * and they are not interchangeable:
@@ -93,7 +93,7 @@ CREATE TABLE calendar_events (
    * single column here. A column can only remember one answer, and a
    * series needs one per week.
    */
-  notification_offset INT NULL COMMENT 'Minutes before an occurrence to send its reminder; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.',
+  notification_offset INT NULL COMMENT 'Minutes before an occurrence to send its reminder, 0..10080; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.',
 
   -- Cross-module link to nodate-flow tasks
   task_id INT UNSIGNED NULL COMMENT 'Linked task (optional, for task-calendar sync)',
@@ -175,6 +175,14 @@ CREATE TABLE calendar_events (
   CONSTRAINT chk_calendar_events_recurrence_requires_start CHECK (start_at IS NOT NULL OR recurrence_rule IS NULL),
   CONSTRAINT chk_calendar_events_notification_requires_start CHECK (start_at IS NOT NULL OR notification_offset IS NULL),
   CONSTRAINT chk_calendar_events_chronology CHECK (end_at IS NULL OR start_at IS NULL OR end_at >= start_at),
+  CONSTRAINT chk_calendar_events_notification_offset_range CHECK (notification_offset IS NULL OR notification_offset BETWEEN 0 AND 10080),
+  -- The all-day row shape of PROTOCOL.md §All-day events. Must stay
+  -- byte-identical to the literal in sql/core/upgrades/0004-all-day-canonical.sql.
+  CONSTRAINT chk_calendar_events_all_day_canonical CHECK (
+    NOT all_day OR start_at IS NULL OR (
+      start_at = DATE(start_at) AND end_at = DATE(end_at) AND (
+        (kind = 'milestone' AND end_at = start_at) OR
+        (kind <> 'milestone' AND end_at > start_at)))),
   CONSTRAINT chk_calendar_events_milestone_no_recurrence CHECK (kind <> 'milestone' OR recurrence_rule IS NULL),
   -- The rule's shape. Draft-4 keywords only: MySQL enforces those and
   -- silently ignores newer ones. Which keys suit which freq is left to

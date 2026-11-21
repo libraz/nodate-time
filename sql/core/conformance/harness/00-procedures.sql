@@ -9,6 +9,7 @@ DROP PROCEDURE IF EXISTS nf_conformance_assert;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_rejected;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_duplicate;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_recurrence;
+DROP PROCEDURE IF EXISTS nf_conformance_expect_event_row;
 
 DELIMITER $$
 
@@ -111,6 +112,47 @@ BEGIN
   CALL nf_conformance_assert(refused <> accepted,
     CONCAT(what, IF(accepted, ': the shape CHECK refused ', ': the shape CHECK accepted '),
            IFNULL(rule, 'NULL')));
+END$$
+
+-- nf_conformance_expect_event_row inserts a calendar_events row and fails
+-- the run unless the named CHECK gives the expected answer: the row is
+-- refused by `constraint_name` when `accepted` is false, stored when true.
+-- A refusal by any other constraint fails in both directions. `columns`
+-- and `vals` are the column list and value list spliced after the
+-- fixture workspace, calendar, owner, creator and title, so a call states
+-- only what it varies. Needs @ws, @cal and @usr; stored rows land in the
+-- fixture workspace and leave with it.
+CREATE PROCEDURE nf_conformance_expect_event_row(
+  IN columns TEXT, IN vals TEXT, IN constraint_name VARCHAR(64), IN accepted BOOLEAN, IN what TEXT)
+BEGIN
+  DECLARE refused BOOLEAN DEFAULT FALSE;
+  DECLARE other_error TEXT DEFAULT NULL;
+  DECLARE err_text TEXT DEFAULT NULL;
+
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 3819
+    BEGIN
+      GET DIAGNOSTICS CONDITION 1 err_text = MESSAGE_TEXT;
+      IF err_text LIKE CONCAT('%', constraint_name, '%') THEN
+        SET refused = TRUE;
+      ELSE
+        SET other_error = err_text;
+      END IF;
+    END;
+    SET @nf_conformance_stmt = CONCAT(
+      'INSERT INTO calendar_events (public_id, workspace_id, calendar_id, owner_user_id, ',
+      'created_by_user_id, title, ', columns, ') VALUES (UUID_TO_BIN(UUID(), 0), ',
+      @ws, ', ', @cal, ', ', @usr, ', ', @usr, ', ''check row'', ', vals, ')');
+    PREPARE nf_conformance_ps FROM @nf_conformance_stmt;
+    EXECUTE nf_conformance_ps;
+    DEALLOCATE PREPARE nf_conformance_ps;
+  END;
+
+  CALL nf_conformance_assert(other_error IS NULL,
+    CONCAT(what, ': refused by another constraint: ', IFNULL(other_error, '')));
+  CALL nf_conformance_assert(refused <> accepted,
+    CONCAT(what, IF(accepted, ': ', ' accepted: '), constraint_name,
+           IF(accepted, ' refused the row', ' did not refuse the row')));
 END$$
 
 DELIMITER ;

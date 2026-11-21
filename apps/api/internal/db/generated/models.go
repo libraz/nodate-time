@@ -1192,7 +1192,7 @@ type Calendar struct {
 	OwnerUserID sql.NullInt32 `json:"ownerUserId"`
 	// For system calendars: provider identifier (e.g., holidays.jp)
 	SystemSlug sql.NullString `json:"systemSlug"`
-	// What calendar_events.visibility = 'default' means here. public: details are for every member. private: the time is visible, the details are for the owner and the invited. Never confidential — hiding the row is a per-event decision.
+	// What calendar_events.visibility = 'default' means here. public: details are for every member. private: title and time are visible to members, location, memo and url are for the owner, creator and attendees. Never confidential — hiding the row is a per-event decision.
 	DefaultEventVisibility CalendarsDefaultEventVisibility `json:"defaultEventVisibility"`
 	// Display order
 	SortWeight int32 `json:"sortWeight"`
@@ -1222,7 +1222,7 @@ type CalendarEvent struct {
 	CalendarID uint32 `json:"calendarId"`
 	// event=regular, block=declarative time frame (work hours, focus), free=available slot, milestone=umbrella/milestone, has no duration semantics
 	Kind CalendarEventsKind `json:"kind"`
-	// Who can see event details: default (calendar setting), public (all), private (time only), confidential (owner only)
+	// Who can see event details: default (the calendar's default_event_visibility), public (every reader), private (members see time and title but not location, memo or url), confidential (only the owner, creator and attendees). PROTOCOL.md §Visibility.
 	Visibility CalendarEventsVisibility `json:"visibility"`
 	// Availability display: busy, free, tentative, out-of-office. The iCalendar TRANSP axis — whether the time reads as taken — and nothing more.
 	ShowAs CalendarEventsShowAs `json:"showAs"`
@@ -1232,9 +1232,9 @@ type CalendarEvent struct {
 	Title string `json:"title"`
 	// All-day event flag
 	AllDay bool `json:"allDay"`
-	// Start time (UTC or with timezone context); NULL = undated (planning-stage placeholder)
+	// Start time in UTC; for an all-day row the first day at 00:00:00 UTC; NULL = undated (planning-stage placeholder)
 	StartAt sql.NullTime `json:"startAt"`
-	// End time; NULL = undated (planning-stage placeholder)
+	// End time in UTC; for an all-day row the day after the last day at 00:00:00 UTC (equal to start_at for a milestone); NULL = undated (planning-stage placeholder)
 	EndAt sql.NullTime `json:"endAt"`
 	// IANA timezone identifier; resolved from event > user > workspace > UTC
 	Timezone string `json:"timezone"`
@@ -1258,13 +1258,13 @@ type CalendarEvent struct {
 	RecurrenceRule *json.RawMessage `json:"recurrenceRule"`
 	// Computed end date for recurrence expansion queries
 	RecurrenceEnd sql.NullTime `json:"recurrenceEnd"`
-	// Array of ISO 8601 occurrence starts to skip when expanding this rule. Cancelling one occurrence is an entry here, never a row.
+	// Array of strings naming occurrences to skip when expanding this rule: YYYY-MM-DD on an all-day series, an RFC 3339 UTC instant on a timed one. Unreadable entries are kept. Cancelling one occurrence is an entry here, never a row. PROTOCOL.md §Recurrence exceptions.
 	RecurrenceExceptions *json.RawMessage `json:"recurrenceExceptions"`
 	// Set on an override row: the recurring event whose single occurrence this row replaces. NULL on ordinary and master rows.
 	RecurrenceParentID sql.NullInt32 `json:"recurrenceParentId"`
 	// Set on an override row: the start the occurrence would have had under the parent rule. Identifies which occurrence is replaced, so moving the override does not lose track of what it overrides.
 	RecurrenceOriginalStart sql.NullTime `json:"recurrenceOriginalStart"`
-	// Minutes before an occurrence to send its reminder; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.
+	// Minutes before an occurrence to send its reminder, 0..10080; NULL = no reminder. Applies to every occurrence of a recurring event; what has already been sent is recorded in calendar_event_reminders.
 	NotificationOffset sql.NullInt32 `json:"notificationOffset"`
 	// Linked task (optional, for task-calendar sync)
 	TaskID sql.NullInt32 `json:"taskId"`
@@ -1732,7 +1732,7 @@ type Event struct {
 	WorkspaceID uint32 `json:"workspaceId"`
 	// Internal FK to tasks.id when the event targets a task
 	TaskID sql.NullInt32 `json:"taskId"`
-	// Internal FK to calendars.id when the event targets a calendar or something inside one. The symmetric counterpart of task_id, and the reason a per-calendar activity feed can read the log directly instead of keeping a second history table that would drift from it.
+	// Internal FK to calendars.id when the event targets a calendar or something inside one. Non-NULL on every calendar.* row whose subject is an existing event, set to the event's calendar when the row is written and never rewritten if the event later moves. The symmetric counterpart of task_id, and the reason a per-calendar activity feed can read the log directly instead of keeping a second history table that would drift from it.
 	CalendarID sql.NullInt32 `json:"calendarId"`
 	// Internal FK to signals.id; set when this event was emitted by the Applier in response to a judged signal. Provides full traceability from external input to task event. Belongs to a product layer: NULL in a deployment without one.
 	TriggeredBySignalID sql.NullInt32 `json:"triggeredBySignalId"`

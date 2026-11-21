@@ -180,5 +180,53 @@
       "2026-01-12T09:00:00+09:00",
       "2026-01-19T09:00:00+09:00"
     ]
+  },
+  {
+    "name": "all-day-daily-los-angeles-across-dst",
+    "allDay": true,
+    "rule": { "freq": "daily", "count": 5 },
+    "dtstart": "2026-03-07T00:00:00Z",
+    "tz": "America/Los_Angeles",
+    "expect": [
+      "2026-03-07T00:00:00Z",
+      "2026-03-08T00:00:00Z",
+      "2026-03-09T00:00:00Z",
+      "2026-03-10T00:00:00Z",
+      "2026-03-11T00:00:00Z"
+    ]
+  },
+  {
+    "name": "all-day-daily-until-date-inclusive",
+    "allDay": true,
+    "rule": { "freq": "daily", "until": "2026-11-03" },
+    "dtstart": "2026-10-31T00:00:00Z",
+    "tz": "America/Los_Angeles",
+    "expect": [
+      "2026-10-31T00:00:00Z",
+      "2026-11-01T00:00:00Z",
+      "2026-11-02T00:00:00Z",
+      "2026-11-03T00:00:00Z"
+    ]
+  },
+  {
+    "name": "all-day-weekly-count-los-angeles",
+    "allDay": true,
+    "rule": { "freq": "weekly", "byDay": ["MO"], "count": 3 },
+    "dtstart": "2026-10-26T00:00:00Z",
+    "tz": "America/Los_Angeles",
+    "expect": ["2026-10-26T00:00:00Z", "2026-11-02T00:00:00Z", "2026-11-09T00:00:00Z"]
+  },
+  {
+    "name": "all-day-monthly-31-clamp-auckland",
+    "allDay": true,
+    "rule": { "freq": "monthly", "byMonthDay": [31], "count": 4 },
+    "dtstart": "2026-01-31T00:00:00Z",
+    "tz": "Pacific/Auckland",
+    "expect": [
+      "2026-01-31T00:00:00Z",
+      "2026-02-28T00:00:00Z",
+      "2026-03-31T00:00:00Z",
+      "2026-04-30T00:00:00Z"
+    ]
   }
 ]

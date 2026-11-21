@@ -1,15 +1,27 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "dc3550523241995118d4ddd700fb7096a71f53ab",
+  "ref": "e2a139a481545d4a03f6e10d35dbfd2da7ac5501",
   "files": [
     {
       "path": "PROTOCOL.md",
-      "sha256": "f888055cd83ad9ed8e1287a27163cd9861a03fcfa61cc7644602b9b781114256"
+      "sha256": "aa301a1ac4cebe458985d9184ed9123793919965f054c8481d7737a728557321"
+    },
+    {
+      "path": "all-day/fixtures.json",
+      "sha256": "248217cbe89a3543a05d27663671e2e52c25fb7b51c249c7ee05fea30b9a648f"
     },
     {
       "path": "conformance/data/10-invariants.sql",
       "sha256": "f72719f401bd8ef9aceba1d7d8a5ed92b425f9a7d58992a6f3d407bc945819c9"
+    },
+    {
+      "path": "conformance/data/20-all-day-series.sql",
+      "sha256": "4da794ee4544782f93400c080a4ef703dc90d1441c1b88d2e18ae9d9492d94c0"
+    },
+    {
+      "path": "conformance/data/30-event-log-calendar-id.sql",
+      "sha256": "12201e54f72b905c3e2155ddfd6bb9998355df4f702246ec6e865a25cf881053"
     },
     {
       "path": "conformance/data/60-storage-ref-count.sql",
@@ -29,7 +41,7 @@
     },
     {
       "path": "conformance/harness/00-procedures.sql",
-      "sha256": "f8751bff252fdb3805e7d53faf8750f2d442bd397469cd7b452b91829de46a61"
+      "sha256": "306eac0e843182c321fa496e6e05a328f5218b1b068a8227ac242b553e246aed"
     },
     {
       "path": "conformance/harness/10-fixtures.sql",
@@ -37,11 +49,11 @@
     },
     {
       "path": "conformance/harness/99-teardown.sql",
-      "sha256": "36923d099c80de7e28aa774b6a794448eb295fec09fccd0d7ec1cb49ec09c7f3"
+      "sha256": "eb1a07def0da854d7af85eb80455db3d30bce2758704f46618a072175eba0f13"
     },
     {
       "path": "conformance/run.sh",
-      "sha256": "d33cf9386d855380968743a9d3cf27170f4624fa8356876b1811980587b63979"
+      "sha256": "24bf7c6cc877cc3cc099eb86538eabe28c364e4d8de70547ea479075391632da"
     },
     {
       "path": "conformance/schema/10-structure.sql",
@@ -68,12 +80,36 @@
       "sha256": "e4224f6a073767092664bf9e2276d42571ca65ba4e194f11976412132498c3af"
     },
     {
+      "path": "conformance/schema/72-all-day-and-notification.sql",
+      "sha256": "cb9095d152f0097af3bab37ccbfa21f9a6f27abb09eb98842711dcce9bcd34bc"
+    },
+    {
       "path": "conformance/selftest/10-fixture-rules.sql",
       "sha256": "5360026e282174e98d72788f5f91caeef1c3af2f1c63789fbfa9a50b112f6ac8"
     },
     {
       "path": "conformance/selftest/cases/00-long-message.sql",
       "sha256": "6e997b46cf196c8813e3dc3de50eeb6ce9f1348732f53cf16067d4d6b341fc32"
+    },
+    {
+      "path": "conformance/selftest/cases/20-all-day-instant-exception.sql",
+      "sha256": "5f8d7d9f4de6aa76ed36ef2e1a3f86b477b730d73977412262294e747efaa2ac"
+    },
+    {
+      "path": "conformance/selftest/cases/20-all-day-override-off-midnight.sql",
+      "sha256": "2a679126d0fcaa14f69761dc406df5ca7e915300ee8a3cef674a8016d24473a3"
+    },
+    {
+      "path": "conformance/selftest/cases/20-all-day-unreadable-exception.sql",
+      "sha256": "9db997c93fb7e39001b27261ed12e8f488405369644188672a30f7a68ef45e7b"
+    },
+    {
+      "path": "conformance/selftest/cases/30-event-moved-between-calendars.sql",
+      "sha256": "9ca718d18ae3cbbf13a090c0ac0480fba10aeb15f3853e42fd4f082a5cc9de84"
+    },
+    {
+      "path": "conformance/selftest/cases/30-itemkit-update-without-calendar.sql",
+      "sha256": "029e9d5cb8b09046e53daacaba6228eedb0d56bf78293a6220d0c86d5f4684a9"
     },
     {
       "path": "conformance/selftest/cases/60-ref-count-without-rows.sql",
@@ -90,6 +126,22 @@
     {
       "path": "conformance/selftest/cases/70-shape-refuses-invalid-rule.sql",
       "sha256": "91263dfdd9774c32acba1f0ee20b6752c31c2f832d439988ad9bb769737b3b5e"
+    },
+    {
+      "path": "conformance/selftest/cases/72-all-day-row-expected-refused.sql",
+      "sha256": "3bad72badc1face2f8c248535227cb9b50e60b5928ff24f35369938fd433aae8"
+    },
+    {
+      "path": "conformance/selftest/cases/72-all-day-row-expected-stored.sql",
+      "sha256": "95cdb28ddfd84999c51d35f4865b75e72355da478b460956d73216cc6e6dc2fa"
+    },
+    {
+      "path": "conformance/selftest/cases/72-notification-offset-expected-refused.sql",
+      "sha256": "a4d5b9d20d5fb27a7557f8ed99a67db18a5f14905e21ec3b8c6ff0f66e92878c"
+    },
+    {
+      "path": "conformance/selftest/cases/72-notification-offset-expected-stored.sql",
+      "sha256": "c20412a52a0149c042d78b9b7ad6232c25ddc68827da79f1040005ae8a5601af"
     },
     {
       "path": "conformance/selftest/cases/80-kind-in-wrong-case.sql",
@@ -117,11 +169,15 @@
     },
     {
       "path": "event-kinds.yaml",
-      "sha256": "d445ffa2bdfb1210a1f34dab654fe448a2fab64b210473b56826bcc042a830a6"
+      "sha256": "2270726c1c1fa51fcea37567a912c7e1b4528a87615d28f1d4e4c3bc4869bc42"
+    },
+    {
+      "path": "recurrence/exception-forms.json",
+      "sha256": "11e212cc6cb6ffc16f1f55462e2d9f30c1de6f4020239e01a72ef36b787bfb6a"
     },
     {
       "path": "recurrence/fixtures.json",
-      "sha256": "43e56f19abcc3595f494eabf451986f7e653cc834f516b65721e789d3e9b5ded"
+      "sha256": "8f2005c5b31feedf9c9f6f79670c8097c54ef6abfc5c73a19acd6768dc7a0a59"
     },
     {
       "path": "tables/audit_logs.sql",
@@ -153,7 +209,7 @@
     },
     {
       "path": "tables/calendar_events.sql",
-      "sha256": "277123a2caca64995ac9524bb18d0816f1f364f470cbc015951f4cad4ab96263"
+      "sha256": "abf030f653ec05593820a5deec902e6c3b5a6cff6746d11af2d01f8564a905b4"
     },
     {
       "path": "tables/calendar_members.sql",
@@ -177,11 +233,11 @@
     },
     {
       "path": "tables/calendars.sql",
-      "sha256": "28127817019a5d349f279220fac3e08cf9400859149fdd91cb391ea04564198c"
+      "sha256": "6d9ccd833d983064c3f1522cde3d5904a41587bdb664c8d2614cb958b96d3aa8"
     },
     {
       "path": "tables/events.sql",
-      "sha256": "185a100e17681a1904f626c3725152ceb4e65f0b19847a4d4b096b80f0e65367"
+      "sha256": "2229635aa4779a6d3479cefef11b1fea2ff5add96265d812765124b8cfcc2ace"
     },
     {
       "path": "tables/identities.sql",
@@ -264,6 +320,50 @@
       "sha256": "aa780c3dad334aefea78d8106be38f97c74284e0597687a019e99a4c1eade206"
     },
     {
+      "path": "tools/classify-all-day.sql",
+      "sha256": "387e31d1e66d516d68de7ea8df050af78c872f25b43a92267b92e9f9970eae18"
+    },
+    {
+      "path": "tools/fixtures/0004-base.sql",
+      "sha256": "6ad260b29b0f40dd3224d7ec8eff432738d3478da77932e217e4a524764ab5ce"
+    },
+    {
+      "path": "tools/fixtures/0004-decisions.sql",
+      "sha256": "86d519244d18a8e4d4a2659224594bd9f1dc4d9e6ef8ae2631978cee52e64ae3"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-collision.sql",
+      "sha256": "c0f3e96092bd05b5262ecc36a0d05bb4ac38de9d3c21d03578306f3c86bdccb0"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-import-saved.sql",
+      "sha256": "d54d3988cb2557797536c1611522097e3bf0508797709a62e9ef2cf546054374"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-keys.sql",
+      "sha256": "1a56aa13e18a608bd3755a9381d0d7a88dfb50632115b015f3f47bd8d0f1ce69"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-offset.sql",
+      "sha256": "034a7393b6b6e1f6c28c04bfa671ca08dd2fdccd936c104d336b6e50c10f9843"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-task-zone.sql",
+      "sha256": "aa0bbda44a165a8ae641c0420ad2192a1ce9ad8b5346b8e8d035a5669448fb2b"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-until.sql",
+      "sha256": "93408191c951b3a947682555418ff25be7f67c42bf9e04941ccdf45a1b9ca05a"
+    },
+    {
+      "path": "tools/fixtures/0004-stop-zone.sql",
+      "sha256": "99c153ef44e1e355654655c76e23650072017b5bec7db57d3f405e2baed277fe"
+    },
+    {
+      "path": "tools/test-0004.sh",
+      "sha256": "03faed6181c4e15e1c14552179c78a23c1e10f3891e0dd76965f82092ce5681e"
+    },
+    {
       "path": "tools/vendor.sh",
       "sha256": "97335455f48fd1510f5cf242049e62ba1416652dda5e37e9a7630013af89fa91"
     },
@@ -290,6 +390,10 @@
     {
       "path": "upgrades/0003-theme-families.sql",
       "sha256": "6829564e8add8f5a67dda6cf5ea14c0db9af89b1a79ab6d2cb738d8b9e93a688"
+    },
+    {
+      "path": "upgrades/0004-all-day-canonical.sql",
+      "sha256": "35e7c74865defa9a8ff2e8069bc9badf2df1822c9b00b725a9306c243ef0c9b1"
     }
   ]
 }

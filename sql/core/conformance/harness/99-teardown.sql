@@ -23,3 +23,4 @@ DROP PROCEDURE IF EXISTS nf_conformance_assert;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_rejected;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_duplicate;
 DROP PROCEDURE IF EXISTS nf_conformance_expect_recurrence;
+DROP PROCEDURE IF EXISTS nf_conformance_expect_event_row;

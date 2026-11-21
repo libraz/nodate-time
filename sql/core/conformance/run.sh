@@ -14,8 +14,10 @@
 #   selftest  prove the checks are not vacuous: every recurrence fixture is
 #             stored by the shape CHECK, and each case under
 #             selftest/cases/ plants one violation inside a transaction
-#             that is never committed and must make its check fail. Writes,
-#             so point it at a test database.
+#             that is never committed and must make its check fail. A case
+#             whose first line is `-- selftest: accepted` plants a legitimate
+#             row instead and must leave its check passing. Writes, so
+#             point it at a test database.
 #
 # Exit codes:
 #   0  the database conforms
@@ -247,7 +249,8 @@ if [[ "${MODE}" == "selftest" ]]; then
   # The shape CHECK against the edge values, then every fixture rule.
   if { concat "${SCRIPT_DIR}/harness/00-procedures.sql" \
               "${SCRIPT_DIR}/harness/10-fixtures.sql" \
-              "${SCRIPT_DIR}"/schema/70-*.sql
+              "${SCRIPT_DIR}"/schema/70-*.sql \
+              "${SCRIPT_DIR}"/schema/72-*.sql
        fixtures_sql
        concat "${SCRIPT_DIR}/selftest/10-fixture-rules.sql" \
               "${SCRIPT_DIR}/harness/99-teardown.sql"; } | run_sql; then
@@ -282,7 +285,15 @@ if [[ "${MODE}" == "selftest" ]]; then
       baselined+="${num} "
     fi
 
-    if out="$(planted_run "${case_file}" "${check_file}" | run_sql 2>&1)"; then
+    if head -n 1 "${case_file}" | grep -q '^-- selftest: accepted$'; then
+      if out="$(planted_run "${case_file}" "${check_file}" | run_sql 2>&1)"; then
+        echo "conformance: selftest: ${name}: accepted"
+      else
+        echo "conformance: selftest: ${name}: a legitimate row was refused:" >&2
+        printf '%s\n' "${out}" >&2
+        failed=1
+      fi
+    elif out="$(planted_run "${case_file}" "${check_file}" | run_sql 2>&1)"; then
       echo "conformance: selftest: ${name}: the planted violation was not caught" >&2
       failed=1
     elif [[ "${out}" != *"conformance failure: ${num} "* ]]; then

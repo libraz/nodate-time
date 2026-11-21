@@ -14,12 +14,14 @@ type fixture struct {
 	Rule    json.RawMessage `json:"rule"`
 	DTStart string          `json:"dtstart"`
 	TZ      string          `json:"tz"`
+	AllDay  bool            `json:"allDay"`
 	Expect  []string        `json:"expect"`
 }
 
 // Every case in the shared fixtures must expand to exactly its expect list,
 // wall clock and offset included. A rule with neither count nor until is
-// unbounded, so only its first len(expect) occurrences are compared.
+// unbounded, so only its first len(expect) occurrences are compared. An
+// all-day series expands in UTC whatever tz says (PROTOCOL.md §Recurrence).
 func TestFixtures(t *testing.T) {
 	raw, err := os.ReadFile(fixturesPath)
 	if err != nil {
@@ -29,12 +31,16 @@ func TestFixtures(t *testing.T) {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatalf("decode fixtures: %v", err)
 	}
-	if len(cases) != 15 {
-		t.Fatalf("fixtures hold %d cases, want 15", len(cases))
+	if len(cases) != 19 {
+		t.Fatalf("fixtures hold %d cases, want 19", len(cases))
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
-			loc, err := time.LoadLocation(c.TZ)
+			zone := c.TZ
+			if c.AllDay {
+				zone = "UTC"
+			}
+			loc, err := time.LoadLocation(zone)
 			if err != nil {
 				t.Skipf("tz database unavailable: %v", err)
 			}
@@ -52,7 +58,7 @@ func TestFixtures(t *testing.T) {
 			}
 
 			windowEnd := start.AddDate(30, 0, 0)
-			occ := ExpandInZone(rule, start, start.Add(time.Hour), start, windowEnd, c.TZ)
+			occ := ExpandInZone(rule, start, start.Add(time.Hour), start, windowEnd, zone)
 			bounded := rule.Count > 0 || rule.Until != nil
 			if bounded && len(occ) != len(c.Expect) {
 				t.Fatalf("expanded %d occurrences, want %d", len(occ), len(c.Expect))
