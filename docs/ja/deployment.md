@@ -67,15 +67,25 @@ docker compose -f compose.prod.yml exec -T mysql \
 
 先に[バックアップ](#バックアップ)のとおり 2 つのボリュームを保存します。データの入った DB は作り直しません。`sql/schema.sql` も `sql/core/tools/build-schema.sh` も、作るテーブルをすべて DROP してから作り直すので、稼働中の DB に流すとデータが消えます。既存の DB は更新用の SQL で上げます。API と、同じ DB に書き込む他のプロダクトをすべて止めたうえで、次の順に当てます。
 
-1. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てます。これが済むまで次の手順は実行を拒否します。
-2. `sql/time/upgrades/from-v0.1.0.sql` を、まだ当てていない DB にだけ。`album_photos.retired_at` 列がなければ未適用です。新しい API が一度でもリクエストを処理したら、二度と流しません。
-3. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 2 を済ませたどの DB にも当てられます。
-4. `sql/time/upgrades/triggers.sql` を最後に。この層のトリガーをすべて DROP して作り直します。MySQL はトリガーを不可分に置き換えられないので、その間に走った削除はトリガーを通りません。書き込む側をすべて止めるのはこのためです。
-5. 適合性検査。結果が契約どおりになっているかを確かめます。
+1. 終日の行を分類します。`sql/core/tools/classify-all-day.sql` を DB に対して流します。読み取りだけを行います。先に `@nf_http_cutoff` に、他のプロダクトによる終日の行の正規化がこの DB に届いた UTC の時刻を設定します。レポートは各終日の行がどう変換されるかを示し、最後に、判断が要る行ごとに `INSERT` を 1 本出力します。それらの行の form と zone を埋めて実行します。入れ先の `core_upgrade_0004_decisions` は、手順 2 の初回の実行が作るテーブルです。
+2. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てます。これが済むまで後続の手順は実行を拒否します。`0004-all-day-canonical.sql` はすべての終日の行を正規の形に変換し、それを強制する制約を足します。未判定の行や、ほかに解消すべき指摘が残っている間は、`public_id` で行を列挙して止まります。解消してからもう一度流します。`--force` は付けません。
+3. `sql/time/upgrades/from-v0.1.0.sql` を、まだ当てていない DB にだけ。`album_photos.retired_at` 列がなければ未適用です。新しい API が一度でもリクエストを処理したら、二度と流しません。
+4. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 3 を済ませたどの DB にも当てられます。
+5. `sql/time/upgrades/triggers.sql` を機能ファイルの後に。この層のトリガーをすべて DROP して作り直します。MySQL はトリガーを不可分に置き換えられないので、その間に走った削除はトリガーを通りません。書き込む側をすべて止めるのはこのためです。
+6. 適合性検査 `sql/core/conformance/run.sh --mode all`。結果が契約どおりになっているかを確かめます。データの検査は手順 2 が済んでいることを前提にします。
+7. 新しい API を起動します。
 
 ```sh
 docker compose -f compose.prod.yml stop api
 docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
+
+# 手順 1: 読み取り専用のレポート。未判定の行がなくなるまで繰り返す。
+docker compose -f compose.prod.yml exec -T mysql bash -euc '
+  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+  mysql -uroot --table "$MYSQL_DATABASE" -e "SET @nf_http_cutoff = '"'"'2026-01-01 00:00:00'"'"'; source /tmp/upgrade-sql/core/tools/classify-all-day.sql"
+'
+
+# 手順 2〜7。失敗したファイルで止まる。0004 が未判定の行で止まったら、判定を記録してからこのブロックをもう一度流す。
 docker compose -f compose.prod.yml exec -T mysql bash -euc '
   export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
   up=/tmp/upgrade-sql/time/upgrades
@@ -86,12 +96,12 @@ docker compose -f compose.prod.yml exec -T mysql bash -euc '
   fi
   for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
-    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
+    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode all
   rm -rf /tmp/upgrade-sql
 ' && docker compose -f compose.prod.yml up -d --build
 ```
 
-パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はありません。スクリプトは失敗したファイルで止まり、再ビルドはすべてのファイルと検査が成功したときだけ走ります。旧版の API は先に止めてください。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまいます。各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せます。
+パスワードとデータベース名はコンテナの中で、`.env` から渡された値として読まれるので、ホスト側で export する必要はありません。レポートのコマンドにある `@nf_http_cutoff` の値は例なので、実際の値に置き換えてください。スクリプトは失敗したファイルで止まり、再ビルドはすべてのファイルと検査が成功したときだけ走ります。旧版の API は先に止めてください。更新が済んだあとに旧版が削除した行は、確認待ちのアップロードに見えてしまいます。各ステップは現状を確かめてから動くので、途中で止まったものは、新しい API がまだリクエストを処理していない限り、もう一度流せます。
 
 ### 許可したメールアドレスがあるとサインインの制限が有効になる
 

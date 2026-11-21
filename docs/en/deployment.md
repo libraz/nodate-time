@@ -67,15 +67,25 @@ docker compose -f compose.prod.yml exec -T mysql \
 
 Back up both volumes first, as described in [Backups](#backups). A database that holds data is never rebuilt: `sql/schema.sql` and `sql/core/tools/build-schema.sh` drop every table they create, so applying either to a live database wipes it. It is brought forward by upgrade files instead, in this order, with the API and every other product writing the same database stopped:
 
-1. `sql/core/upgrades/*.sql`, every file, in number order. These change the tables shared with other products and always come first; the next step refuses to run until they have.
-2. `sql/time/upgrades/from-v0.1.0.sql`, only on a database that has not had it, which is one without the `album_photos.retired_at` column. Once the new API has served a request it is never run again.
-3. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 2.
-4. `sql/time/upgrades/triggers.sql`, last. It drops and recreates every trigger of this layer. MySQL cannot replace a trigger atomically, so a delete running in between would miss it; this is why every writer is stopped.
-5. The conformance check, which confirms the result matches the contract.
+1. Classify the all-day rows. Run `sql/core/tools/classify-all-day.sql` against the database; it only reads. Set `@nf_http_cutoff` first, to the UTC time at which the other product's normalisation of all-day rows reached this database. The report lists how each all-day row will be converted and ends with one `INSERT` per row that needs a decision. Fill in the form and zone of those rows and run the statements: they go into `core_upgrade_0004_decisions`, a table that step 2 creates on its first run.
+2. `sql/core/upgrades/*.sql`, every file, in number order. These change the tables shared with other products and always come first; the later steps refuse to run until they have. `0004-all-day-canonical.sql` converts every all-day row to its canonical form and adds the constraints that enforce it. It stops, listing the rows by `public_id`, while any row is undecided or any other finding remains; settle those and run it again. Apply it without `--force`.
+3. `sql/time/upgrades/from-v0.1.0.sql`, only on a database that has not had it, which is one without the `album_photos.retired_at` column. Once the new API has served a request it is never run again.
+4. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 3.
+5. `sql/time/upgrades/triggers.sql`, after the feature files. It drops and recreates every trigger of this layer. MySQL cannot replace a trigger atomically, so a delete running in between would miss it; this is why every writer is stopped.
+6. The conformance check, `sql/core/conformance/run.sh --mode all`, which confirms the result matches the contract. Its data checks need step 2 applied.
+7. Start the new API.
 
 ```sh
 docker compose -f compose.prod.yml stop api
 docker compose -f compose.prod.yml cp sql mysql:/tmp/upgrade-sql
+
+# Step 1: read-only report. Repeat until no row is left undecided.
+docker compose -f compose.prod.yml exec -T mysql bash -euc '
+  export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+  mysql -uroot --table "$MYSQL_DATABASE" -e "SET @nf_http_cutoff = '"'"'2026-01-01 00:00:00'"'"'; source /tmp/upgrade-sql/core/tools/classify-all-day.sql"
+'
+
+# Steps 2 to 7. Stops at the first file that fails; if 0004 stops on undecided rows, record the decisions and run this block again.
 docker compose -f compose.prod.yml exec -T mysql bash -euc '
   export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
   up=/tmp/upgrade-sql/time/upgrades
@@ -86,12 +96,12 @@ docker compose -f compose.prod.yml exec -T mysql bash -euc '
   fi
   for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
-    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode schema
+    --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode all
   rm -rf /tmp/upgrade-sql
 ' && docker compose -f compose.prod.yml up -d --build
 ```
 
-The password and database name are read inside the container, from the values `.env` gave it, so nothing has to be exported on the host. The script stops at the first file that fails, and the rebuild runs only if every file and the check succeeded. Stop the old API first: a row it deletes after the upgrade has run would read as an upload still awaiting confirmation. Each step checks what is already there, so a run that stopped partway can be repeated, as long as the new API has not yet served a request.
+The password and database name are read inside the container, from the values `.env` gave it, so nothing has to be exported on the host. The `@nf_http_cutoff` value in the report command is a placeholder; use your own. The script stops at the first file that fails, and the rebuild runs only if every file and the check succeeded. Stop the old API first: a row it deletes after the upgrade has run would read as an upload still awaiting confirmation. Each step checks what is already there, so a run that stopped partway can be repeated, as long as the new API has not yet served a request.
 
 ### Allowed sign-in addresses turn the restriction on
 

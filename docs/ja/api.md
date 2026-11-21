@@ -5,7 +5,133 @@ Huma v2 が OpenAPI 記述を自動生成します。認証なしで `/openapi.j
 以下のグループは網羅ではありません。全件はルーターを参照してください。
 
 - **公開**: `/health`、`/openapi.json`、`/openapi.yaml`、`/docs`。`/auth/*`（`/auth/logout` を除く。register / login / refresh / password-reset / verify-email/confirm / oauth があり、`dev-login` は開発時のみ）。`/share/{token}` と `/share/{token}/events`。`/blobs/*` はセッションを持たず、URL の署名で認可されます。
-- **要認証**: `/auth/logout`、`/user/*`、`/calendars`、`/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import}`、`/invites/{token}/accept`。
+- **要認証**: `/auth/logout`、`/user/*`、`/calendars`、`/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import,schedule-polls}`、`/search`、`/invites/{token}/accept`。
 - **管理者**: `/admin/oauth-providers`、`/admin/allowed-emails`、`/admin/instance-admins`。
 
 サインイン・登録・パスワード再設定・OAuth（`/auth/*`）と公開共有リンク（`/share/*`）は IP 単位でレート制限されます。上限は[設定](configuration.md)の `TC_AUTH_RATE_LIMIT` と `TC_SHARE_RATE_LIMIT` で決まります。`/health`、OpenAPI と docs のルート、`/blobs/*` は対象外です。
+
+## 規約
+
+スキーマは OpenAPI 記述が正です。このページは、操作をまたいで成り立つ規則を扱います。操作ごとの表（メソッド、成功ステータス、`If-Match` の要否、一覧の封筒）は `apps/api/internal/http/router/conventions.go`、`conventions_restore.go`、`conventions_search.go` にあり、配信している API がこの表と食い違わないことはテストが見ています。
+
+### ステータスコード
+
+| 操作                                                                                 | ステータス      |
+| ------------------------------------------------------------------------------------ | --------------- |
+| 行を作る（作成の `POST`、register、presign、メンバー追加、インスタンス管理者の追加） | 201             |
+| 読み取り、`PATCH`、`PUT`、restore、confirm、招待の受諾、finalize、cancel             | 200             |
+| `DELETE`                                                                             | 204（本文なし） |
+
+すでにメンバーまたは管理者である相手を追加すると 409 です。
+
+### エラー
+
+エラー本文はどれも同じ形です。検証エラーでは、フィールドごとの失敗を示す `errors` 配列が加わります。
+
+```json
+{ "status": 412, "code": "EVENT.STALE", "message": "This event changed since you opened it" }
+```
+
+分岐には `message` ではなく `code` を使ってください。スキーマ検証に失敗したリクエストは 422 `REQUEST.VALIDATION` です。範囲外の `limit` も含みます。
+
+検査は決まった順に行われるので、ステータスから最初に引っかかった検査が分かります。
+
+1. `If-Match` がない（428 `REQUEST.PRECONDITION_REQUIRED`）、または入力の誤り（400）。
+2. 資源が存在しない、または呼び出し者から見えない（404）。
+3. 呼び出し者に権限がない（403）。
+4. 版が古い（412）。
+
+### 条件付き書き込み
+
+他の人も編集できる資源への書き込みは、置き換える版を名指しします。
+
+- 条件付きで書ける資源は、一覧の各項目にも単体の応答にも `etag` を持ちます。単体の `GET` は `ETag` ヘッダでも返します。
+- それを `If-Match` に付けて送ります。ヘッダがなければ 428、エンティティタグとして不正な `If-Match` は 400 `REQUEST.BAD_IF_MATCH`、古ければ資源ごとのコードを付けた 412 です。コードは `EVENT.STALE`、`CALENDAR.STALE`、`MEMO.STALE`、`COMMENT.STALE`、`CHECKLIST.STALE`、`ALBUM.STALE`、`SCHEDULE_POLL.STALE`、`SCHEDULE_POLL.RESPONSE_STALE` です。弱い検証子（`W/`）とタグの列挙は一致しません。`*` は存在する行すべてに一致します。
+- 書き込みが成功すると、本文の `etag` と `ETag` ヘッダに新しい版を返します。412 のときは読み込み直し、あらためて利用者に判断してもらいます。
+- 編集は、マージパッチの意味を持つ `PATCH` です。省略したフィールドは変わらず、`null` は nullable なフィールドを消し、配列は丸ごと置き換えます。単一の値を置き換える操作（RSVP、メンバーのロールと色、空き時間の共有、日程調整の回答）は `PUT` です。
+
+条件付きの対象は、予定（`PATCH`、`DELETE`、1 回分の変更の取り消し）、カレンダー、メモ、チェックリスト項目、コメント、アルバム写真、日程調整（`PATCH`、cancel、finalize、delete）、自分の回答（`PUT .../response`。版は `GET .../response` で得ます）です。
+
+無条件の書き込みと、その理由は次のとおりです。
+
+| 書き込み                                                                                                       | 理由                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 作成                                                                                                           | 新しい行には前の版がありません。                                                                                  |
+| 削除した予定の restore                                                                                         | 削除済みの予定はもう読めず、名指しする版がありません。2 回目の restore は「削除されていない」として拒否されます。 |
+| 識別子で指す削除（メンバー、招待、添付、セッション、許可メール、管理者、OAuth プロバイダ、カレンダーのカバー） | 何もマージしません。                                                                                              |
+| 単一の値の `PUT`（RSVP、メンバーのロールと色、参加者の編集権、空き時間の共有、アバター）                       | 値をそのまま置き換えます。                                                                                        |
+| 呼び出し者自身の状態への操作（`PATCH /user`、パスワード、セッション）                                          | 他に書く人がいません。                                                                                            |
+| アップロードの confirm                                                                                         | presign が確保した行に対する操作です。                                                                            |
+
+### 一覧
+
+| 封筒                  | 使われる一覧                                                                                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{items, nextCursor}` | 辿れる一覧。カレンダーのアクティビティ、予定の履歴、アルバム写真、コメント。`nextCursor` を渡して続きを取り、末尾では空になります。                               |
+| `{items, hasMore}`    | 期間または件数で切る一覧。`GET /calendars/{calendarId}/events`、`GET /share/{token}/events`、`GET /search`、メンバー候補。切り捨てがあれば `hasMore` が立ちます。 |
+| 素の配列              | 書き込み時に上限を守らせる一覧。メンバー、チェックリスト、招待、添付（100）、カレンダー、インスタンス管理者、許可メール（各 500）、セッション（50）。             |
+
+上限を超えて追加すると、`*.LIMIT_REACHED` の 409 で拒否されます。セッションだけは例外で、51 個目のサインインが最も古いセッションを失効させます。エクスポートの範囲が上限を超えると 422 `EXPORT.RANGE_TOO_LARGE` です。
+
+`GET /calendars/{calendarId}/events` は、`start` と `end`（日付。`end` を含む）または `days`（既定 30、最大 366）、`tz`、`limit`（既定・最大とも 5000。早いほうから残る）を受け取ります。
+
+### 終日の予定
+
+終日の予定は、時刻ではなく日付です。
+
+- `allDay: true` とともに、`startDate` と `endDate` を `YYYY-MM-DD` で読み書きします。`endDate` は含まない終端です。2026-03-01 の 1 日だけの予定は `endDate` が 2026-03-02 になります。`startAt`、`endAt`、時刻は送りません。
+- どのゾーンの閲覧者にも、同じ暦日が見えます。UTC の 0 時として保存され、`startAt` と `endAt` はその 0 時です。日付は `startDate` と `endDate` から読みます。
+- `timezone` は作成者のゾーンの記録で、日付は動かしません。
+- 終日の繰り返しシリーズの `until` は `YYYY-MM-DD` で、各回は UTC の 0 時に始まります。`recurrenceDate` は日付です。
+- `GET /search` は終日の予定を、呼び出し者の日付で `from` と比べます。今日の終日の予定も見つかります。
+
+### 公開範囲
+
+`visibility` は `default`（カレンダーの設定に従う。それも default なら public）、`public`、`private`、`confidential` のいずれかです。所有者、作成者、予定の参加者には常にすべてが見えます。それ以外の読み手には次のとおりです。
+
+|                | カレンダーのメンバー                                                                             | 匿名の共有・埋め込みの読み手                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `public`       | すべて                                                                                           | タイトル、時刻、場所。`detailsHidden` が true                                  |
+| `private`      | タイトル、時刻、種別、show-as、所有者、参加者。場所、メモ、URL は伏せる。`detailsHidden` が true | 時刻のみ（予定ありの時間帯として）。`title` は `null`、`detailsHidden` は true |
+| `confidential` | 一覧に出ない。読むと 404                                                                         | 一覧に出ない                                                                   |
+
+`detailsHidden: true` の応答は縮約された表示です。その表示が伏せているフィールドを書くと 403 `EVENT.DETAILS_HIDDEN` で拒否されます。見たことのない値を上書きしないためです。
+
+### 繰り返しの予定
+
+繰り返しの予定への書き込みは `scope` を取ります。
+
+| `scope`     | 効果                                 | `If-Match` の比較先      |
+| ----------- | ------------------------------------ | ------------------------ |
+| `this`      | 1 回分を変更または取り消す           | その回自身の `etag`      |
+| `following` | この回とそれ以降を編集または削除する | シリーズ（`seriesEtag`） |
+| `all`       | シリーズ全体を編集または削除する     | シリーズ（`seriesEtag`） |
+
+- 回の項目は `isRecurrence`、`recurrenceDate`、`id` が指す行の `etag`（上書き行があればそれ、なければシリーズ）、シリーズの `seriesEtag` を持ちます。
+- `following` は、その回でシリーズを分割します。前半は短く切り詰められ、編集ならその回以降の新しいシリーズが作られて応答に返ります。削除なら 204 です。最初の回での分割は `all` と同じ扱いです。`count` で回数を決めているときは、規則が生成する回で数えて 2 つに分けます。編集で規則か `allDay` が変わる場合、以降の回への変更は捨てられます。`following` とシリーズ全体の削除は、予定の所有者とカレンダーを管理する人に限られ、編集権を付与された参加者はできません。task が所有する予定では 409 `EVENT.TASK_OWNED`、繰り返さない予定では 400 `EVENT.NOT_RECURRING` で拒否されます。
+- 1 回分の取り消し（`DELETE ...?scope=this`）は、`DELETE /calendars/{calendarId}/events/{eventId}/exceptions/{occurrenceDate}`（`YYYY-MM-DD`、シリーズの `etag` で条件付け、204）で元に戻せます。戻す変更がない回は 404 `EVENT.EXCEPTION_NOT_FOUND` です。`following` の削除は元に戻せません。
+
+### 削除した予定の復元
+
+`POST /calendars/{calendarId}/events/{eventId}/restore` は、削除から 10 分以内なら、削除した予定またはシリーズを添付とともに戻します。`If-Match` は取りません。
+
+| ステータス | コード                   | 意味                                                    |
+| ---------- | ------------------------ | ------------------------------------------------------- |
+| 410        | `EVENT.RESTORE_EXPIRED`  | 10 分を過ぎている。                                     |
+| 409        | `EVENT.NOT_DELETED`      | 予定は削除されていない。                                |
+| 409        | `EVENT.RESTORE_CONFLICT` | 同じ UID の取り込み済みの予定が、その場所を占めている。 |
+| 409        | `EVENT.TASK_OWNED`       | task が予定を所有している。                             |
+
+### 検索
+
+`GET /search?q=&from=&limit=` は、呼び出し者が参加するすべてのカレンダーを検索し、`{items, hasMore}` を返します。1 つの予定につき 1 項目で、`from` より後に終わる最初の回を開始の昇順に並べます。`q` は 1〜100 文字で、タイトルと、呼び出し者が読める場所・メモに一致します。`from` は RFC 3339 の時刻か、呼び出し者のゾーンの `YYYY-MM-DD` で、省略すると現在です。`limit` の既定は 30、最大は 100 です。走査する候補が多すぎる検索は 422 `SEARCH.TOO_BROAD` なので、絞り込んでください。
+
+### アップロード
+
+添付、アルバム写真、アバター、カレンダーのカバーは、どれも同じ手順で、API ではなくブロブストレージにアップロードします。
+
+1. presign（`POST`、201）。内容種別、バイト数、バイト列の `sha256` を送ります。`sha256` は小文字 16 進 64 文字で、それ以外は 422 です。アルバム写真は `thumbnailSha256` も送ります。応答に ID と `uploadUrl` が入ります。
+2. `uploadUrl`（有効 15 分）にバイト列を `PUT` します。`uploadUrl` が空なら、そのバイト列はすでに保存されているので、この手順は省きます。
+3. confirm（200。アバターとカバーは `PUT`）。サーバはオブジェクトを読み戻し、宣言された digest と大きさに照合します。不一致は 422 `UPLOAD.DIGEST_MISMATCH`、超過は 413 `UPLOAD.TOO_LARGE` です。失敗したアップロードは何も残しません。
+
+ストレージが未設定なら 503 `STORAGE.UNAVAILABLE` です。
