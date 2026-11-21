@@ -23,6 +23,7 @@ import { isGroupEvent } from '@/lib/event-group';
 import { buildMovedEvent, buildResizedEvent } from '@/lib/event-move';
 import { showAsClass } from '@/lib/event-style';
 import { atMinutesIntoDay, minutesIntoDay } from '@/lib/event-times';
+import { readableInk } from '@/lib/member-color';
 import { showAsLabelKey } from '@/lib/permissions';
 import {
   layoutTimedEventsForDay,
@@ -33,13 +34,27 @@ import { useCanMoveEvent } from '@/lib/use-can-move-event';
 import { type DragDropContext, useEventDrag, useEventResize } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
 import { weekDropStart } from '@/lib/week-drag';
-import { eventEndDay, eventOccupiesDay } from '@/lib/week-layout';
+import {
+  eventEndDay,
+  eventOccupiesDay,
+  isMultiDay,
+  layoutWeek,
+  type PositionedEvent,
+} from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 import type { CalendarEvent } from '@/types/calendar';
 
 const HOUR_HEIGHT = 48;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+/** Height of one track of the all-day row. */
+const ALL_DAY_ROW_HEIGHT = 18;
+
+/** A bar running on past the week keeps a square end on that side. */
+function allDayRadius(continuesLeft: boolean, continuesRight: boolean): string {
+  const r = `${ALL_DAY_ROW_HEIGHT / 2}px`;
+  return `${continuesLeft ? 0 : r} ${continuesRight ? 0 : r} ${continuesRight ? 0 : r} ${continuesLeft ? 0 : r}`;
+}
 /** Where a week without "now" in it opens: the start of a working day. */
 const DEFAULT_SCROLL_HOUR = 8;
 /** How much of the past stays above the now line when a week opens on it. */
@@ -252,26 +267,43 @@ export function WeeklyTimeline() {
     return () => window.clearInterval(id);
   }, []);
 
-  // All-day events by the dates they occupy in their own zone, as the month
-  // grid draws them; timed events go to the layout, which owns the rule for
-  // which day a span or a marker belongs to.
-  const { allDayEvents, timedLayouts } = useMemo(() => {
-    const allDay: Map<string, CalendarEvent[]> = new Map();
+  // All-day events laid out the way the month row lays them: a multi-day event
+  // is one bar across its days, a single day fills the lowest free track.
+  // Timed events go to the layout, which owns the rule for which day a span or
+  // a marker belongs to.
+  const { allDayRow, timedLayouts } = useMemo(() => {
+    const allDay: CalendarEvent[] = [];
     const timed: CalendarEvent[] = [];
     for (const evt of events) {
       if (!activeCalendarIds.includes(evt.calendarId)) continue;
-      if (!evt.allDay) {
-        timed.push(evt);
-        continue;
-      }
-      for (const day of days) {
-        if (!eventOccupiesDay(evt, day, timezone)) continue;
-        const key = day.toFormat('yyyy-MM-dd');
-        const arr = allDay.get(key) ?? [];
-        arr.push(evt);
-        allDay.set(key, arr);
-      }
+      (evt.allDay ? allDay : timed).push(evt);
     }
+    const weekStart = days[0] ?? DateTime.now();
+    const bars = layoutWeek(weekStart, allDay, timezone);
+    const taken = days.map(() => new Set<number>());
+    for (const bar of bars) {
+      for (let col = bar.startCol; col < bar.startCol + bar.span; col++) taken[col]?.add(bar.track);
+    }
+    const singles: PositionedEvent[] = [];
+    days.forEach((day, col) => {
+      for (const evt of allDay) {
+        if (isMultiDay(evt, timezone) || !eventOccupiesDay(evt, day, timezone)) continue;
+        const used = taken[col] ?? new Set<number>();
+        let track = 0;
+        while (used.has(track)) track++;
+        used.add(track);
+        singles.push({
+          event: evt,
+          startCol: col,
+          span: 1,
+          track,
+          continuesLeft: false,
+          continuesRight: false,
+        });
+      }
+    });
+    const placements = [...bars, ...singles];
+    const tracks = placements.reduce((n, p) => Math.max(n, p.track + 1), 0);
     const layouts: Map<string, ReturnType<typeof layoutTimedEventsForDay>> = new Map();
     for (const day of days) {
       layouts.set(
@@ -279,7 +311,7 @@ export function WeeklyTimeline() {
         layoutTimedEventsForDay(timed, day.startOf('day'), timezone),
       );
     }
-    return { allDayEvents: allDay, timedLayouts: layouts };
+    return { allDayRow: { placements, tracks }, timedLayouts: layouts };
   }, [events, activeCalendarIds, days, timezone]);
 
   /** Pixel offset within the day column of a wall-clock minute of the day. */
@@ -327,40 +359,71 @@ export function WeeklyTimeline() {
       </div>
 
       {/* All-day events row */}
-      {Array.from(allDayEvents.values()).some((a) => a.length > 0) && (
+      {allDayRow.tracks > 0 && (
         <div className="flex border-b border-[var(--color-separator)]">
           <div className="flex w-14 shrink-0 items-start justify-end pr-2 pt-1 text-caption font-medium text-[var(--color-text-tertiary)]">
             {t('calendar.allDay')}
           </div>
-          {days.map((day) => {
-            const key = day.toFormat('yyyy-MM-dd');
-            const dayAllDay = allDayEvents.get(key) ?? [];
-            return (
-              <div
-                key={key}
-                className="flex flex-1 flex-col gap-px border-l border-[var(--color-separator)] p-0.5"
-              >
-                {dayAllDay.map((evt) => (
-                  <button
-                    key={evt.id}
-                    type="button"
-                    onClick={() => openEventModal(evt.id)}
-                    className="event-chip flex items-center gap-1 rounded-full pr-2 pl-0.5 text-left text-caption font-semibold leading-[18px]"
-                    style={{ '--evt': evt.color } as CSSProperties}
-                  >
+          <div
+            className="relative grid flex-1 gap-y-px py-0.5"
+            style={{
+              gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+              gridAutoRows: ALL_DAY_ROW_HEIGHT,
+            }}
+          >
+            <div aria-hidden className="pointer-events-none absolute inset-0 flex">
+              {days.map((day) => (
+                <div
+                  key={day.toISO()}
+                  className="flex-1 border-l border-[var(--color-separator)]"
+                />
+              ))}
+            </div>
+            {allDayRow.placements.map((p) => {
+              // A span is a bar as on the month grid; one day is a chip.
+              const bar = p.span > 1 || p.continuesLeft || p.continuesRight;
+              return (
+                <button
+                  key={`${p.event.id}-${p.startCol}`}
+                  type="button"
+                  onClick={() => openEventModal(p.event.id)}
+                  className={`${bar ? 'event-bar' : 'event-chip'} relative mx-0.5 flex min-w-0 items-center gap-1 pr-2 pl-0.5 text-left text-caption font-semibold`}
+                  style={
+                    {
+                      '--evt': p.event.color,
+                      '--evt-ink': bar ? readableInk(p.event.color) : undefined,
+                      gridColumn: `${p.startCol + 1} / span ${p.span}`,
+                      gridRow: p.track + 1,
+                      lineHeight: `${ALL_DAY_ROW_HEIGHT}px`,
+                      borderRadius: allDayRadius(p.continuesLeft, p.continuesRight),
+                    } as CSSProperties
+                  }
+                  title={p.event.title}
+                >
+                  {p.continuesLeft ? (
+                    <span aria-hidden className="pl-1 opacity-80">
+                      ‹
+                    </span>
+                  ) : (
                     <OwnerMark
-                      name={evt.ownerName}
-                      avatarUrl={evt.ownerAvatarUrl}
-                      color={evt.color}
+                      name={p.event.ownerName}
+                      avatarUrl={p.event.ownerAvatarUrl}
+                      color={p.event.color}
                       size={14}
-                      group={isGroupEvent(evt)}
+                      group={isGroupEvent(p.event)}
+                      inverse={bar}
                     />
-                    <span className="truncate">{evt.title}</span>
-                  </button>
-                ))}
-              </div>
-            );
-          })}
+                  )}
+                  <span className="truncate">{p.event.title}</span>
+                  {p.continuesRight && (
+                    <span aria-hidden className="ml-auto opacity-80">
+                      ›
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

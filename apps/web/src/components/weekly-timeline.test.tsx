@@ -319,10 +319,32 @@ describe('WeeklyTimeline week model', () => {
 
     const chips = screen.getAllByText('Birthday');
     expect(chips).toHaveLength(1);
-    const cell = chips[0]?.closest('button')?.parentElement;
-    const row = cell?.parentElement;
-    // The row opens with the gutter label; Wednesday is the fourth column.
-    expect(row && Array.from(row.children).indexOf(cell as Element)).toBe(4);
+    // Wednesday is the fourth column of the all-day grid, one day wide.
+    expect(chips[0]?.closest('button')?.style.gridColumn).toBe('4 / span 1');
+  });
+
+  it('draws a multi-day all-day event as one bar across its days', () => {
+    uiState.selectedDate = DateTime.fromISO('2026-08-05', { zone: ZONE });
+    uiState.currentMonth = DateTime.fromISO('2026-08-01', { zone: ZONE });
+    calendarState.events = [
+      {
+        ...probe,
+        id: 'a2',
+        title: 'Trip',
+        allDay: true,
+        startAt: '2026-08-04T00:00:00Z',
+        endAt: '2026-08-07T00:00:00Z',
+        startDate: '2026-08-04',
+        endDate: '2026-08-07',
+        timezone: 'Asia/Tokyo',
+      },
+    ];
+
+    render(<WeeklyTimeline />);
+
+    const bars = screen.getAllByText('Trip');
+    expect(bars).toHaveLength(1);
+    expect(bars[0]?.closest('button')?.style.gridColumn).toBe('3 / span 3');
   });
 
   // A marker opening the day belongs to it. A pre-filter asking that the span
