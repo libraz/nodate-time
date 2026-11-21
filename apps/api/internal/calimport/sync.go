@@ -57,6 +57,13 @@ func PlanSync(
 	for _, row := range rows {
 		uid := row.SourceUidKey.String
 		synced[uid] = row
+		visible, err := visibleToImporter(ctx, q, cal, actorUserID, row)
+		if err != nil {
+			return SyncPlan{}, err
+		}
+		if !visible {
+			continue
+		}
 		if !present[uid] {
 			plan.Delete = append(plan.Delete, row.ID)
 			plan.DeleteUIDs = append(plan.DeleteUIDs, uid)
@@ -70,6 +77,14 @@ func PlanSync(
 		}
 		h, outcome := buildHead(e, actorUserID)
 		row, isSynced := synced[identity.String]
+		if isSynced {
+			if visible, err := visibleToImporter(ctx, q, cal, actorUserID, row); err != nil {
+				return SyncPlan{}, err
+			} else if !visible {
+				plan.Kept++
+				continue
+			}
+		}
 		if !isSynced {
 			_, err := q.FindCalendarEventBySourceUID(ctx,
 				generated.FindCalendarEventBySourceUIDParams{CalendarID: cal.ID, SourceUid: identity})
@@ -199,6 +214,10 @@ func syncDelete(
 	if err != nil {
 		return deleteResult{}, err
 	}
+	visible, err := visibleToImporter(ctx, q, cal, userID, row)
+	if err != nil || !visible {
+		return deleteResult{}, err
+	}
 	if row.TaskID.Valid || !row.SourceUidKey.Valid || present[row.SourceUidKey.String] {
 		return deleteResult{}, nil
 	}
@@ -243,6 +262,13 @@ func syncHead(
 		return importFailed, err
 	}
 	if outcome != importCreated {
+		return importKept, nil
+	}
+	visible, err := visibleToImporter(ctx, q, cal, userID, existing)
+	if err != nil {
+		return importFailed, err
+	}
+	if !visible {
 		return importKept, nil
 	}
 
@@ -439,13 +465,13 @@ func sameRule(a, b *json.RawMessage) bool {
 	return reflect.DeepEqual(ra, rb)
 }
 
-// sameExceptions compares the exclusion lists as sets of instants; NULL and an
+// sameExceptions compares the exclusion lists as sets of elements; NULL and an
 // empty list are the same.
 func sameExceptions(a, b *json.RawMessage) bool {
-	set := func(raw *json.RawMessage) map[int64]bool {
-		out := map[int64]bool{}
-		for _, t := range recurrence.ParseExceptions(raw) {
-			out[t.UnixMilli()] = true
+	set := func(raw *json.RawMessage) map[string]bool {
+		out := map[string]bool{}
+		for _, el := range recurrence.ParseExceptionList(raw) {
+			out[string(el)] = true
 		}
 		return out
 	}

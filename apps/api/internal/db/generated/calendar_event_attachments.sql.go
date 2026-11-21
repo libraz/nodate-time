@@ -77,6 +77,20 @@ func (q *Queries) ConfirmEventAttachment(ctx context.Context, arg ConfirmEventAt
 	return q.db.ExecContext(ctx, confirmEventAttachment, arg.ID, arg.UploaderID)
 }
 
+const countEventAttachments = `-- name: CountEventAttachments :one
+SELECT COUNT(*) FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE
+`
+
+// CountEventAttachments is the number of live attachments of an event, read
+// under the event's row lock by the write that would add one.
+func (q *Queries) CountEventAttachments(ctx context.Context, eventID sql.NullInt32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countEventAttachments, eventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEventAttachment = `-- name: CreateEventAttachment :execresult
 INSERT INTO calendar_event_attachments (public_id, workspace_id, event_id, uploader_id, storage_object_id, filename, enabled)
 VALUES (?, ?, ?, ?, ?, ?, FALSE)

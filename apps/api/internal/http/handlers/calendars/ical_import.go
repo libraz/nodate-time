@@ -6,7 +6,6 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
-	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
@@ -49,6 +48,9 @@ type ImportOutput struct {
 		// fallback that says nothing is the defect, and one that reports
 		// itself is something its reader can go and look at.
 		UnknownTimezones int `json:"unknownTimezones"`
+		// DroppedReminders is how many events carried a reminder longer than
+		// the calendar stores; they were imported without it.
+		DroppedReminders int `json:"droppedReminders"`
 		// Unreadable says the body held nothing this parser recognised as
 		// iCalendar. Without it, a file whose shape cannot be read answers
 		// exactly like a calendar that genuinely had no events in it: every
@@ -57,13 +59,14 @@ type ImportOutput struct {
 	}
 }
 
-// importAlarm maps a parsed alarm onto the stored offset, accepting exactly
-// the reminders the events API does. An alarm outside them would be invisible
-// in the picker, and the next edit through it would clear it without anyone
-// choosing to, so it is left off rather than snapped to a neighbouring value;
-// dropping it here at least happens where the import result can report it.
+// maxNotificationOffset is the longest reminder the calendar stores, in minutes.
+const maxNotificationOffset = 10080
+
+// importAlarm maps a parsed alarm onto the stored offset. An alarm outside the
+// range the calendar holds is left off rather than snapped to a neighbouring
+// value; the import result counts those it dropped.
 func importAlarm(minutes *int32) sql.NullInt32 {
-	if minutes == nil || !events.SupportedNotificationOffset(int(*minutes)) {
+	if minutes == nil || *minutes < 0 || *minutes > maxNotificationOffset {
 		return sql.NullInt32{}
 	}
 	return sql.NullInt32{Int32: *minutes, Valid: true}
@@ -113,8 +116,12 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		}
 
 		converted := make([]calimport.Event, len(events))
+		dropped := 0
 		for i, e := range events {
 			converted[i] = importEvent(e)
+			if e.alarmMinutes != nil && !converted[i].NotificationOffset.Valid {
+				dropped++
+			}
 		}
 		res := calimport.Run(ctx, deps.DB, deps.WorkspaceID, cal, userID, converted, "ics-import")
 
@@ -126,6 +133,7 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		out.Body.Duplicates = res.Duplicates
 		out.Body.Truncated = truncated
 		out.Body.UnknownTimezones = res.UnknownTimezones
+		out.Body.DroppedReminders = dropped
 		out.Body.Unreadable = res.Imported+res.Skipped+res.Failed+res.Duplicates+truncated == 0 &&
 			!containsICSComponent(in.Body.ICS)
 		return out, nil

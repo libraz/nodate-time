@@ -10,6 +10,25 @@ import (
 	"database/sql"
 )
 
+const countChecklistItems = `-- name: CountChecklistItems :one
+SELECT COUNT(*) FROM calendar_event_checklist_items
+WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
+`
+
+type CountChecklistItemsParams struct {
+	WorkspaceID uint32 `json:"workspaceId"`
+	EventID     uint32 `json:"eventId"`
+}
+
+// CountChecklistItems is the size of an event's live checklist, read under the
+// event's row lock by the write that would add to it.
+func (q *Queries) CountChecklistItems(ctx context.Context, arg CountChecklistItemsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countChecklistItems, arg.WorkspaceID, arg.EventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createChecklistItem = `-- name: CreateChecklistItem :execresult
 INSERT INTO calendar_event_checklist_items (public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -100,25 +119,21 @@ const listChecklistItems = `-- name: ListChecklistItems :many
 SELECT id, public_id, workspace_id, event_id, created_by_user_id, title, done, sort_weight, notes, enabled, updated_at, created_at FROM calendar_event_checklist_items
 WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
 ORDER BY sort_weight, id
-LIMIT ?
 `
 
 type ListChecklistItemsParams struct {
 	WorkspaceID uint32 `json:"workspaceId"`
 	EventID     uint32 `json:"eventId"`
-	Limit       int32  `json:"limit"`
 }
 
 // ListChecklistItems names the workspace as well as the event: the index is
 // (workspace_id, event_id, sort_weight), and a query that skips its leading
 // column cannot use it at all.
 //
-// The LIMIT is a cap rather than a page. A checklist belongs to one event and
-// is read as a whole -- it is the list somebody ticks off, so splitting it
-// across pages would be a worse answer than the ceiling. The cap only exists
-// so a runaway writer cannot make one event's modal unbounded.
+// It has no LIMIT: a checklist is read as a whole -- it is the list somebody
+// ticks off -- and CountChecklistItems is what bounds it at write time.
 func (q *Queries) ListChecklistItems(ctx context.Context, arg ListChecklistItemsParams) ([]CalendarEventChecklistItem, error) {
-	rows, err := q.db.QueryContext(ctx, listChecklistItems, arg.WorkspaceID, arg.EventID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listChecklistItems, arg.WorkspaceID, arg.EventID)
 	if err != nil {
 		return nil, err
 	}

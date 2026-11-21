@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/calendars"
 )
 
@@ -29,44 +30,64 @@ func registerCalendars(g apiGroups, deps Deps) {
 	}, calendars.GetCalendar(calDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "create-calendar",
-		Method:      http.MethodPost,
-		Path:        "/calendars",
-		Summary:     "Create a calendar",
-		Tags:        []string{"Calendar"},
+		OperationID:   "create-calendar",
+		Method:        http.MethodPost,
+		Path:          "/calendars",
+		Summary:       "Create a calendar",
+		Tags:          []string{"Calendar"},
+		DefaultStatus: http.StatusCreated,
+		Errors:        errorStatuses(apierrors.CalendarLimitReached),
 	}, calendars.CreateCalendar(calDeps))
 
 	huma.Register(api, huma.Operation{
 		OperationID: "update-calendar",
-		Method:      http.MethodPut,
+		Method:      http.MethodPatch,
 		Path:        "/calendars/{calendarId}",
 		Summary:     "Update a calendar",
 		Tags:        []string{"Calendar"},
+		Errors:      calendarWriteErrors(),
 	}, calendars.UpdateCalendar(calDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID:  "put-calendar-cover",
-		Method:       http.MethodPut,
-		Path:         "/calendars/{calendarId}/cover",
-		Summary:      "Upload a shared calendar cover image",
-		Tags:         []string{"Calendar"},
-		MaxBodyBytes: calendars.MaxCalendarCoverSize + 1,
+		OperationID:   "presign-calendar-cover",
+		Method:        http.MethodPost,
+		Path:          "/calendars/{calendarId}/cover/presign",
+		Summary:       "Reserve an upload for a shared calendar cover image",
+		Tags:          []string{"Calendar"},
+		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.CalendarCoverForbidden, apierrors.CalendarCoverTooLarge,
+			apierrors.CalendarCoverConflict, apierrors.UploadDigestMismatch, apierrors.StorageUnavailable),
+	}, calendars.PresignCalendarCover(calDeps))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "confirm-calendar-cover",
+		Method:      http.MethodPut,
+		Path:        "/calendars/{calendarId}/cover",
+		Summary:     "Confirm an uploaded image as the shared calendar cover",
+		Tags:        []string{"Calendar"},
+		Errors: errorStatuses(apierrors.CalendarCoverForbidden, apierrors.CalendarCoverTooLarge,
+			apierrors.CalendarCoverInvalid, apierrors.CalendarCoverConflict, apierrors.UploadDigestMismatch,
+			apierrors.UploadTooLarge, apierrors.StorageUnavailable, apierrors.NotFound),
 	}, calendars.PutCalendarCover(calDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "delete-calendar-cover",
-		Method:      http.MethodDelete,
-		Path:        "/calendars/{calendarId}/cover",
-		Summary:     "Remove a calendar cover image",
-		Tags:        []string{"Calendar"},
+		OperationID:   "delete-calendar-cover",
+		Method:        http.MethodDelete,
+		Path:          "/calendars/{calendarId}/cover",
+		Summary:       "Remove a calendar cover image",
+		Tags:          []string{"Calendar"},
+		DefaultStatus: http.StatusNoContent,
+		Errors:        errorStatuses(apierrors.CalendarCoverForbidden),
 	}, calendars.DeleteCalendarCover(calDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "delete-calendar",
-		Method:      http.MethodDelete,
-		Path:        "/calendars/{calendarId}",
-		Summary:     "Delete a calendar",
-		Tags:        []string{"Calendar"},
+		OperationID:   "delete-calendar",
+		Method:        http.MethodDelete,
+		Path:          "/calendars/{calendarId}",
+		Summary:       "Delete a calendar",
+		Tags:          []string{"Calendar"},
+		DefaultStatus: http.StatusNoContent,
+		Errors:        calendarWriteErrors(),
 	}, calendars.DeleteCalendar(calDeps))
 
 	// Calendar members
@@ -85,6 +106,7 @@ func registerCalendars(g apiGroups, deps Deps) {
 		Summary:       "Add a workspace member to a calendar",
 		Tags:          []string{"Member"},
 		DefaultStatus: http.StatusCreated,
+		Errors:        errorStatuses(apierrors.MemberLimitReached, apierrors.CalendarLimitReached, apierrors.MemberAlreadyAdded),
 	}, calendars.AddMember(calDeps))
 
 	huma.Register(api, huma.Operation{
@@ -136,6 +158,7 @@ func registerCalendars(g apiGroups, deps Deps) {
 		Path:        "/calendars/{calendarId}/export",
 		Summary:     "Export calendar events as iCal/CSV",
 		Tags:        []string{"Calendar"},
+		Errors:      errorStatuses(apierrors.ExportRangeTooLarge),
 	}, calendars.ExportEvents(calDeps))
 
 	huma.Register(api, huma.Operation{
@@ -146,4 +169,10 @@ func registerCalendars(g apiGroups, deps Deps) {
 		Tags:         []string{"Calendar"},
 		MaxBodyBytes: 12 * 1024 * 1024,
 	}, calendars.ImportEvents(calDeps))
+}
+
+// calendarWriteErrors lists the statuses of a conditional calendar write.
+func calendarWriteErrors() []int {
+	return preconditionedErrors(apierrors.CalendarStale, apierrors.CalendarAccessDenied,
+		apierrors.CalendarRoleRequired, apierrors.Validation)
 }

@@ -3,17 +3,19 @@ package calendars
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
-	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
+
+	_ "golang.org/x/image/webp"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/blobref"
@@ -33,6 +35,7 @@ const (
 	calendarCoverPath         = "calendar-covers"
 	calendarCoverImageTTL     = time.Hour
 	calendarCoverIOTimeout    = 15 * time.Second
+	calendarCoverUploadTTL    = 15 * time.Minute
 )
 
 // calendarCoverStorageAvailable checks both halves of cover delivery: the
@@ -108,9 +111,127 @@ func sniffCalendarCover(data []byte) (string, bool) {
 	}
 }
 
-// PutCalendarCover uploads an image in one bounded request, validates the
-// image bytes, verifies storage read-back, and attaches the resulting object
-// to the shared calendar.
+// coverBlock rejects a request that cannot concern an uploaded cover: the
+// calendar is not one that takes one, or storage cannot serve it.
+func coverBlock(deps Deps, calendar generated.Calendar) error {
+	if !calendarAllowsUploadedCover(calendar.Kind, calendar.OwnerUserID) {
+		return apierrors.CalendarCoverForbidden
+	}
+	if !calendarCoverStorageAvailable(deps) {
+		return apierrors.StorageUnavailable
+	}
+	return nil
+}
+
+// uploadError maps a failed check of uploaded bytes to its Spec.
+func uploadError(err error) error {
+	if spec, ok := apierrors.FromBlobref(err); ok {
+		return spec
+	}
+	return err
+}
+
+// stageCover finds or creates the object for the declared bytes under the
+// calendar lock, refreshing an unconfirmed reservation. contentType and
+// byteSize describe the reservation if it has to be created.
+func stageCover(ctx context.Context, q *generated.Queries, deps Deps, calendarID, userID uint32, blob blobref.Blob) (generated.StorageObject, error) {
+	if err := calresolve.LockExclusive(ctx, q, calendarID); err != nil {
+		return generated.StorageObject{}, err
+	}
+	if _, err := calresolve.LockManage(ctx, q, calendarID, userID); err != nil {
+		return generated.StorageObject{}, err
+	}
+	locked, err := q.GetCalendarByIDForUpdate(ctx, calendarID)
+	if err != nil {
+		return generated.StorageObject{}, err
+	}
+	if !calendarAllowsUploadedCover(locked.Kind, locked.OwnerUserID) {
+		return generated.StorageObject{}, apierrors.CalendarCoverForbidden
+	}
+	staged, err := blobref.Stage(ctx, q, blob)
+	if err != nil {
+		return generated.StorageObject{}, err
+	}
+	// A pending object from an unrelated feature is not a key this endpoint is
+	// allowed to write, even though the digest is shared.
+	if !blobref.Verified(staged) && !strings.HasPrefix(staged.StorageKey, calendarCoverPath+"/") {
+		return generated.StorageObject{}, apierrors.CalendarCoverConflict
+	}
+	return staged, nil
+}
+
+// PresignCalendarCover reserves the object a cover will be stored as and
+// returns the URL to upload it to. The calendar does not change until
+// PutCalendarCover confirms the upload.
+func PresignCalendarCover(deps Deps) func(context.Context, *PresignCalendarCoverInput) (*PresignCalendarCoverOutput, error) {
+	return func(ctx context.Context, in *PresignCalendarCoverInput) (*PresignCalendarCoverOutput, error) {
+		userID, ok := middleware.ActorFromContext(ctx)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
+		}
+		calendar, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+		if err := coverBlock(deps, calendar); err != nil {
+			return nil, toAPIError(err)
+		}
+		digest, err := blobref.ParseDigest(in.Body.SHA256)
+		if err != nil {
+			return nil, toAPIError(uploadError(err))
+		}
+		if in.Body.ByteSize > MaxCalendarCoverSize {
+			return nil, apierrors.ToHuma(apierrors.CalendarCoverTooLarge)
+		}
+		storageKey, err := calendarCoverStorageKey()
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		}
+
+		var staged generated.StorageObject
+		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			var err error
+			staged, err = stageCover(ctx, q, deps, calendar.ID, userID, blobref.Blob{
+				WorkspaceID: deps.WorkspaceID,
+				SHA256:      digest,
+				ByteSize:    uint64(in.Body.ByteSize),
+				ContentType: in.Body.ContentType,
+				StorageKey:  storageKey,
+			})
+			return err
+		})
+		if err != nil {
+			return nil, toAPIError(err)
+		}
+
+		out := &PresignCalendarCoverOutput{}
+		out.Body.CoverID = uuid.UUID(staged.PublicID).String()
+		if blobref.Verified(staged) {
+			return out, nil
+		}
+		// The relay never overwrites a stored key, so bytes already there are
+		// confirmed rather than offered for writing again.
+		statCtx, cancel := context.WithTimeout(ctx, calendarCoverIOTimeout)
+		defer cancel()
+		_, stored, err := deps.Storage.StatObject(statCtx, staged.StorageKey)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+		if stored {
+			return out, nil
+		}
+		url, err := deps.Storage.SignedPutURL(staged.StorageKey, in.Body.ContentType, in.Body.ByteSize, calendarCoverUploadTTL)
+		if err != nil {
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
+		}
+		out.Body.UploadURL = url
+		return out, nil
+	}
+}
+
+// PutCalendarCover confirms an uploaded image as the cover of the shared
+// calendar: it reads the stored bytes back, checks them against the declared
+// digest and the image rules, and attaches the object to the calendar.
 func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (*PutCalendarCoverOutput, error) {
 	return func(ctx context.Context, in *PutCalendarCoverInput) (*PutCalendarCoverOutput, error) {
 		userID, ok := middleware.ActorFromContext(ctx)
@@ -121,39 +242,14 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		if !calendarAllowsUploadedCover(calendar.Kind, calendar.OwnerUserID) {
-			return nil, apierrors.ToHuma(apierrors.CalendarCoverForbidden)
+		if err := coverBlock(deps, calendar); err != nil {
+			return nil, toAPIError(err)
 		}
-		if !calendarCoverStorageAvailable(deps) {
-			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-		}
-		if len(in.RawBody) == 0 {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		if len(in.RawBody) > MaxCalendarCoverSize {
-			return nil, apierrors.ToHuma(apierrors.CalendarCoverTooLarge)
-		}
-		contentType, valid := sniffCalendarCover(in.RawBody)
-		if !valid {
-			return nil, apierrors.ToHuma(apierrors.CalendarCoverInvalid)
-		}
-
-		digest := sha256.Sum256(in.RawBody)
-		storageKey, err := calendarCoverStorageKey()
+		coverID, err := uuid.Parse(in.Body.CoverID)
 		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		blob := blobref.Blob{
-			WorkspaceID: deps.WorkspaceID,
-			SHA256:      digest[:],
-			ByteSize:    uint64(len(in.RawBody)),
-			ContentType: contentType,
-			StorageKey:  storageKey,
+			return nil, apierrors.ToHuma(apierrors.NotFound)
 		}
 
-		// Commit the reservation before touching S3. Its updated_at was
-		// refreshed under the digest-row lock by Stage, giving the normal
-		// unconfirmed-upload grace period a current timestamp.
 		var staged generated.StorageObject
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockExclusive(ctx, q, calendar.ID); err != nil {
@@ -162,14 +258,14 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			if _, err := calresolve.LockManage(ctx, q, calendar.ID, userID); err != nil {
 				return err
 			}
-			lockedCalendar, err := q.GetCalendarByIDForUpdate(ctx, calendar.ID)
-			if err != nil {
-				return err
+			var err error
+			staged, err = q.GetStorageObjectByPublicID(ctx, generated.GetStorageObjectByPublicIDParams{
+				WorkspaceID: sql.NullInt32{Int32: int32(deps.WorkspaceID), Valid: true},
+				PublicID:    coverID[:],
+			})
+			if errors.Is(err, sql.ErrNoRows) {
+				return apierrors.NotFound
 			}
-			if !calendarAllowsUploadedCover(lockedCalendar.Kind, lockedCalendar.OwnerUserID) {
-				return apierrors.CalendarCoverForbidden
-			}
-			staged, err = blobref.Stage(ctx, q, blob)
 			if err == nil && !blobref.Verified(staged) && !strings.HasPrefix(staged.StorageKey, calendarCoverPath+"/") {
 				return apierrors.CalendarCoverConflict
 			}
@@ -179,14 +275,15 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			return nil, toAPIError(err)
 		}
 
-		// Storage I/O runs with no transaction open, against the staged key.
-		if err := verifyCalendarCoverBytes(ctx, deps, staged, in.RawBody, contentType, digest[:]); err != nil {
+		// Storage I/O runs with no transaction open.
+		digest := staged.Sha256
+		data, contentType, err := readCover(ctx, deps, staged, digest)
+		if err != nil {
 			return nil, toAPIError(err)
 		}
 
 		var updated generated.Calendar
 		var member generated.CalendarMember
-		changed := false
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockExclusive(ctx, q, calendar.ID); err != nil {
 				return err
@@ -231,26 +328,20 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 			}
 			object, ok := lockedObjects[staged.ID]
 			if !ok || !object.WorkspaceID.Valid || uint32(object.WorkspaceID.Int32) != deps.WorkspaceID ||
-				!bytes.Equal(object.Sha256, digest[:]) || object.StorageKey != staged.StorageKey {
-				return apierrors.CalendarCoverConflict
-			}
-			if !blobref.Verified(object) && !strings.HasPrefix(object.StorageKey, calendarCoverPath+"/") {
-				// A pending object from an unrelated feature is not a key this
-				// endpoint is allowed to write, even though the digest is shared.
+				!bytes.Equal(object.Sha256, digest) || object.StorageKey != staged.StorageKey {
 				return apierrors.CalendarCoverConflict
 			}
 			// A verified row that went back to pending was reset after the I/O.
 			if blobref.Verified(staged) && !blobref.Verified(object) {
 				return apierrors.CalendarCoverConflict
 			}
-			if (object.ByteSize != uint64(len(in.RawBody)) && blobref.Verified(object)) ||
-				(blobref.Verified(object) && !storage.SameMediaType(object.ContentType, contentType)) {
+			if blobref.Verified(object) && (object.ByteSize != uint64(len(data)) || !storage.SameMediaType(object.ContentType, contentType)) {
 				return apierrors.CalendarCoverConflict
 			}
 			object, err = blobref.MarkVerified(ctx, q, object, blobref.Blob{
 				WorkspaceID: deps.WorkspaceID,
-				SHA256:      digest[:],
-				ByteSize:    uint64(len(in.RawBody)),
+				SHA256:      digest,
+				ByteSize:    uint64(len(data)),
 				ContentType: contentType,
 				StorageKey:  object.StorageKey,
 			})
@@ -276,9 +367,6 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 						return err
 					}
 				}
-				changed = true
-			}
-			if changed {
 				if err := eventlog.Append(ctx, q, eventlog.Entry{
 					WorkspaceID: deps.WorkspaceID,
 					CalendarID:  calendar.ID,
@@ -308,42 +396,79 @@ func PutCalendarCover(deps Deps) func(context.Context, *PutCalendarCoverInput) (
 	}
 }
 
-// verifyCalendarCoverBytes writes the cover to the staged key when the staged
-// row is still pending, then checks what storage holds there against the
-// request. It must run with no transaction open.
-func verifyCalendarCoverBytes(ctx context.Context, deps Deps, staged generated.StorageObject, body []byte, contentType string, digest []byte) error {
-	verifyCtx, cancel := context.WithTimeout(ctx, calendarCoverIOTimeout)
+// readCover reads the bytes stored for the staged object and checks them: the
+// digest the upload declared, the size bound, and that they are an image of an
+// accepted format. It returns the bytes and their media type, and discards an
+// unconfirmed upload whose bytes fail. It must run with no transaction open.
+func readCover(ctx context.Context, deps Deps, staged generated.StorageObject, digest []byte) ([]byte, string, error) {
+	ioCtx, cancel := context.WithTimeout(ctx, calendarCoverIOTimeout)
 	defer cancel()
-	if !blobref.Verified(staged) {
-		putErr := deps.Storage.Put(verifyCtx, staged.StorageKey, bytes.NewReader(body), int64(len(body)), contentType)
-		if putErr != nil && !errors.Is(putErr, storage.ErrObjectExists) {
-			return apierrors.StorageUnavailable
-		}
-	}
-	info, exists, err := deps.Storage.StatObject(verifyCtx, staged.StorageKey)
+	obj, exists, err := deps.Storage.Open(ioCtx, staged.StorageKey)
 	if err != nil {
-		return apierrors.StorageUnavailable
+		return nil, "", apierrors.StorageUnavailable
 	}
 	if !exists {
-		return apierrors.CalendarCoverConflict
+		return nil, "", apierrors.CalendarCoverConflict
 	}
-	if info.Size != int64(len(body)) || !storage.SameMediaType(info.ContentType, contentType) ||
-		(staged.ByteSize != uint64(len(body)) && blobref.Verified(staged)) ||
-		(blobref.Verified(staged) && !storage.SameMediaType(staged.ContentType, contentType)) {
-		return apierrors.CalendarCoverConflict
-	}
-	storedDigest, err := deps.Storage.SHA256(verifyCtx, staged.StorageKey)
+	defer obj.Close()
+	data, err := io.ReadAll(io.LimitReader(obj, MaxCalendarCoverSize+1))
 	if err != nil {
-		return apierrors.StorageUnavailable
+		return nil, "", apierrors.StorageUnavailable
 	}
-	if !bytes.Equal(storedDigest, digest) {
-		return apierrors.CalendarCoverConflict
+	fail := func(spec error) ([]byte, string, error) {
+		if !blobref.Verified(staged) {
+			discardCover(ctx, deps, staged)
+		}
+		return nil, "", spec
 	}
-	return nil
+	if err := blobref.VerifyReadBack(bytes.NewReader(data), digest, MaxCalendarCoverSize); err != nil {
+		if spec, ok := apierrors.FromBlobref(err); ok {
+			return fail(spec)
+		}
+		return nil, "", err
+	}
+	contentType, valid := sniffCalendarCover(data)
+	if !valid {
+		return fail(apierrors.CalendarCoverInvalid)
+	}
+	return data, contentType, nil
 }
 
-// DeleteCalendarCover removes the uploaded cover reference and returns the
-// calendar in its current shared state.
+// discardCover drops an unconfirmed cover reservation whose bytes failed their
+// checks, and queues the stored object for removal. A reservation another
+// feature holds is left alone.
+func discardCover(ctx context.Context, deps Deps, staged generated.StorageObject) {
+	var queued bool
+	err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+		queued = false
+		object, err := q.GetStorageObjectByIDForUpdate(ctx, staged.ID)
+		if errors.Is(err, sql.ErrNoRows) || err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		if blobref.Verified(object) || object.RefCount > 0 {
+			return nil
+		}
+		if _, err := q.DeleteUnconfirmedStorageObject(ctx, object.ID); err != nil {
+			return err
+		}
+		queued = true
+		return blobref.QueueRemoval(ctx, q, object.StorageKey)
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to discard a rejected cover upload", "objectID", staged.ID, "error", err)
+		return
+	}
+	if queued {
+		if err := blobref.RemoveQueued(ctx, deps.Queries, deps.Storage, staged.StorageKey); err != nil {
+			slog.WarnContext(ctx, "failed to remove a rejected cover upload; left to the drainer", "key", staged.StorageKey, "error", err)
+		}
+	}
+}
+
+// DeleteCalendarCover removes the uploaded cover reference.
 func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverInput) (*DeleteCalendarCoverOutput, error) {
 	return func(ctx context.Context, in *DeleteCalendarCoverInput) (*DeleteCalendarCoverOutput, error) {
 		userID, ok := middleware.ActorFromContext(ctx)
@@ -358,14 +483,11 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 			return nil, apierrors.ToHuma(apierrors.CalendarCoverForbidden)
 		}
 
-		var updated generated.Calendar
-		var member generated.CalendarMember
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			if err := calresolve.LockExclusive(ctx, q, calendar.ID); err != nil {
 				return err
 			}
-			var err error
-			if member, err = calresolve.LockManage(ctx, q, calendar.ID, userID); err != nil {
+			if _, err := calresolve.LockManage(ctx, q, calendar.ID, userID); err != nil {
 				return err
 			}
 			current, err := q.GetCalendarByIDForUpdate(ctx, calendar.ID)
@@ -378,7 +500,6 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 
 			objectID, err := q.GetCalendarCoverObjectID(ctx, calendar.ID)
 			if errors.Is(err, sql.ErrNoRows) {
-				updated = current
 				return nil
 			}
 			if err != nil {
@@ -403,16 +524,11 @@ func DeleteCalendarCover(deps Deps) func(context.Context, *DeleteCalendarCoverIn
 			}); err != nil {
 				return err
 			}
-			updated = current
 			return nil
 		})
 		if err != nil {
 			return nil, toAPIError(err)
 		}
-		response, err := withShareState(ctx, deps, mapCalendarWithCover(deps, updated, member.Role, member.MemberColor, ""), calendar.ID)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
-		}
-		return &DeleteCalendarCoverOutput{Body: response}, nil
+		return &DeleteCalendarCoverOutput{}, nil
 	}
 }

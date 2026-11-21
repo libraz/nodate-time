@@ -61,7 +61,7 @@ func TestConvertRRuleKeepsTheWeekStart(t *testing.T) {
 		{"FREQ=DAILY;UNTIL=20260101T000000Z", monday, false, ""},
 	}
 	for _, c := range cases {
-		data, ok := convertRRule(c.rule, c.start)
+		data, ok := convertRRule(c.rule, c.start, false)
 		if ok != c.ok {
 			t.Errorf("convertRRule(%q, %s) ok = %v, want %v", c.rule, c.start.Weekday(), ok, c.ok)
 			continue
@@ -71,6 +71,69 @@ func TestConvertRRuleKeepsTheWeekStart(t *testing.T) {
 		}
 		if ok && c.wkst == "" && strings.Contains(string(*data), "wkst") {
 			t.Errorf("convertRRule(%q) = %s, want no wkst where it changes nothing", c.rule, *data)
+		}
+	}
+}
+
+func TestExceptionListWritesTheSeriesForm(t *testing.T) {
+	day := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	instant := time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+	allDay, err := exceptionList([]time.Time{day, day}, true, "America/Los_Angeles").MarshalColumn()
+	if err != nil || allDay == nil || string(*allDay) != `["2026-07-11"]` {
+		t.Errorf("all-day = %v, %v; want one date", allDay, err)
+	}
+	timed, err := exceptionList([]time.Time{instant}, false, "Asia/Tokyo").MarshalColumn()
+	if err != nil || timed == nil || string(*timed) != `["2026-07-11T00:00:00Z"]` {
+		t.Errorf("timed = %v, %v; want a UTC instant", timed, err)
+	}
+	if none, _ := exceptionList(nil, true, "UTC").MarshalColumn(); none != nil {
+		t.Errorf("no exceptions must be NULL, got %s", *none)
+	}
+}
+
+func TestUntilTakesTheFormOfItsSeries(t *testing.T) {
+	tokyo, _ := time.LoadLocation("Asia/Tokyo")
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name   string
+		until  *string
+		loc    *time.Location
+		allDay bool
+		want   string
+	}{
+		{"instant on an all-day series", str("2026-08-01T10:00:00Z"), time.UTC, true, "2026-08-01"},
+		{"date on an all-day series", str("2026-08-01"), time.UTC, true, "2026-08-01"},
+		{"date on a timed series", str("2026-08-01"), tokyo, false, "2026-08-01T14:59:59Z"},
+		{"instant on a timed series", str("2026-08-01T10:00:00Z"), tokyo, false, "2026-08-01T10:00:00Z"},
+	}
+	for _, c := range cases {
+		got := untilInSeriesForm(c.until, c.loc, c.allDay)
+		if got == nil || *got != c.want {
+			t.Errorf("%s: got %v, want %s", c.name, got, c.want)
+		}
+	}
+	if untilInSeriesForm(nil, time.UTC, true) != nil {
+		t.Error("no until stays no until")
+	}
+}
+
+func TestAllDayEndDefaultsAndOrder(t *testing.T) {
+	day := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		end     time.Time
+		wantEnd time.Time
+		wantOK  bool
+	}{
+		{"no end is a day", time.Time{}, day.AddDate(0, 0, 1), true},
+		{"end on the start day is a day", day, day.AddDate(0, 0, 1), true},
+		{"end before the start is refused", day.AddDate(0, 0, -1), time.Time{}, false},
+		{"a range is kept", day.AddDate(0, 0, 3), day.AddDate(0, 0, 3), true},
+	}
+	for _, c := range cases {
+		end, _, ok := validateImported(Event{Title: "x", Start: day, End: c.end, AllDay: true})
+		if ok != c.wantOK || (ok && !end.Equal(c.wantEnd)) {
+			t.Errorf("%s: end %s ok %v, want %s %v", c.name, end, ok, c.wantEnd, c.wantOK)
 		}
 	}
 }

@@ -71,7 +71,7 @@ func (q *Queries) ListScheduleAvailabilityCalendars(ctx context.Context, arg Lis
 }
 
 const listScheduleAvailabilityEvents = `-- name: ListScheduleAvailabilityEvents :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (idx_calendar_events_calendar_range)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
@@ -99,6 +99,8 @@ type ListScheduleAvailabilityEventsParams struct {
 
 type ListScheduleAvailabilityEventsRow struct {
 	ID                      uint32                    `json:"id"`
+	AllDay                  bool                      `json:"allDay"`
+	OwnerUserID             uint32                    `json:"ownerUserId"`
 	ShowAs                  CalendarEventsShowAs      `json:"showAs"`
 	Flexibility             CalendarEventsFlexibility `json:"flexibility"`
 	StartAt                 sql.NullTime              `json:"startAt"`
@@ -149,6 +151,8 @@ func (q *Queries) ListScheduleAvailabilityEvents(ctx context.Context, arg ListSc
 		var i ListScheduleAvailabilityEventsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.AllDay,
+			&i.OwnerUserID,
 			&i.ShowAs,
 			&i.Flexibility,
 			&i.StartAt,
@@ -222,7 +226,7 @@ func (q *Queries) ListScheduleAvailabilityMembers(ctx context.Context, arg ListS
 }
 
 const listScheduleAvailabilityOverrides = `-- name: ListScheduleAvailabilityOverrides :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (uniq_calendar_events_recurrence_override)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
@@ -240,6 +244,8 @@ type ListScheduleAvailabilityOverridesParams struct {
 
 type ListScheduleAvailabilityOverridesRow struct {
 	ID                      uint32                    `json:"id"`
+	AllDay                  bool                      `json:"allDay"`
+	OwnerUserID             uint32                    `json:"ownerUserId"`
 	ShowAs                  CalendarEventsShowAs      `json:"showAs"`
 	Flexibility             CalendarEventsFlexibility `json:"flexibility"`
 	StartAt                 sql.NullTime              `json:"startAt"`
@@ -277,6 +283,8 @@ func (q *Queries) ListScheduleAvailabilityOverrides(ctx context.Context, arg Lis
 		var i ListScheduleAvailabilityOverridesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.AllDay,
+			&i.OwnerUserID,
 			&i.ShowAs,
 			&i.Flexibility,
 			&i.StartAt,
@@ -301,7 +309,7 @@ func (q *Queries) ListScheduleAvailabilityOverrides(ctx context.Context, arg Lis
 }
 
 const listScheduleAvailabilityParents = `-- name: ListScheduleAvailabilityParents :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (PRIMARY)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
@@ -316,6 +324,8 @@ type ListScheduleAvailabilityParentsParams struct {
 
 type ListScheduleAvailabilityParentsRow struct {
 	ID                      uint32                    `json:"id"`
+	AllDay                  bool                      `json:"allDay"`
+	OwnerUserID             uint32                    `json:"ownerUserId"`
 	ShowAs                  CalendarEventsShowAs      `json:"showAs"`
 	Flexibility             CalendarEventsFlexibility `json:"flexibility"`
 	StartAt                 sql.NullTime              `json:"startAt"`
@@ -350,6 +360,8 @@ func (q *Queries) ListScheduleAvailabilityParents(ctx context.Context, arg ListS
 		var i ListScheduleAvailabilityParentsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.AllDay,
+			&i.OwnerUserID,
 			&i.ShowAs,
 			&i.Flexibility,
 			&i.StartAt,

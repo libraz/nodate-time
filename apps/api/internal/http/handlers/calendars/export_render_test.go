@@ -1,14 +1,27 @@
 package calendars
 
 import (
+	"database/sql"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
+
+// exceptionsOf builds a stored exclusion list from its elements.
+func exceptionsOf(elements ...string) recurrence.ExceptionList {
+	var list recurrence.ExceptionList
+	for _, el := range elements {
+		body, _ := json.Marshal(el)
+		list = append(list, body)
+	}
+	return list
+}
 
 var testPublicID = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
@@ -21,7 +34,7 @@ func TestBuildICSWritesASeriesInItsOwnZone(t *testing.T) {
 	out := buildICS("Nodate Time", "Cal", []exportEvent{{
 		event: ev, startAt: start.UTC(), endAt: start.Add(time.Hour).UTC(),
 		rule:       &recurrence.Rule{Freq: "weekly", Interval: 1, ByDay: []string{"MO"}},
-		exceptions: recurrence.Exceptions{start.AddDate(0, 0, 7).UTC()},
+		exceptions: exceptionsOf(start.AddDate(0, 0, 7).UTC().Format(time.RFC3339)),
 	}})
 	for _, want := range []string{
 		"DTSTART;TZID=Asia/Tokyo:20260105T080000",
@@ -95,10 +108,10 @@ func TestRecurrenceIDFollowsTheSeries(t *testing.T) {
 	}
 
 	timedOverride := generated.CalendarEvent{PublicID: testPublicID, Title: "Moved", Timezone: "Asia/Tokyo"}
-	day := time.Date(2026, 1, 12, 0, 0, 0, 0, tokyo)
+	day := time.Date(2026, 1, 12, 0, 0, 0, 0, time.UTC)
 	out = buildICS("Nodate Time", "Cal", []exportEvent{{
 		event: timedOverride, startAt: day.Add(10 * time.Hour).UTC(), endAt: day.Add(11 * time.Hour).UTC(),
-		originalStart: day.UTC(), isOverride: true, parentAllDay: true, parentTimezone: "Asia/Tokyo",
+		originalStart: day, isOverride: true, parentAllDay: true, parentTimezone: "Asia/Tokyo",
 	}})
 	if !strings.Contains(out, "RECURRENCE-ID;VALUE=DATE:20260112") {
 		t.Errorf("a timed override of an all-day series must name a date:\n%s", out)
@@ -174,5 +187,78 @@ func TestExportWindowIsLocalDays(t *testing.T) {
 	}
 	if got := w.end.Sub(w.start); got != 25*time.Hour {
 		t.Errorf("the day DST ends spans %s, want 25h", got)
+	}
+}
+
+// A reader who sees an event with its details withheld gets the title and the
+// times, and nothing that says where, what about, or the link.
+func TestBuildICSMaskedEventLeavesOnlyTitleAndTimes(t *testing.T) {
+	start := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
+	ev := generated.CalendarEvent{
+		PublicID: testPublicID, Title: "Planning", Timezone: "UTC",
+		Location: sql.NullString{String: "Room 4", Valid: true},
+		Memo:     sql.NullString{String: "agenda", Valid: true},
+		URL:      sql.NullString{String: "https://example.test/x", Valid: true},
+	}
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour), masked: true}})
+	if !strings.Contains(out, "SUMMARY:Planning") {
+		t.Errorf("the title stays:\n%s", out)
+	}
+	for _, leaked := range []string{"LOCATION", "DESCRIPTION:agenda", "URL:", "Room 4"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("masked export leaks %q:\n%s", leaked, out)
+		}
+	}
+	csv := string(buildCSV([]exportEvent{{event: ev, startAt: start, endAt: start.Add(time.Hour), masked: true}}))
+	if strings.Contains(csv, "Room 4") || strings.Contains(csv, "agenda") || strings.Contains(csv, "example.test") {
+		t.Errorf("masked CSV leaks details:\n%s", csv)
+	}
+}
+
+// Every element of a series' exclusion list leaves as the occurrence it names,
+// in the series' own value type; what cannot be read stays out of the file.
+func TestIcsExdateWritesEveryReadableForm(t *testing.T) {
+	tokyo, _ := time.LoadLocation("Asia/Tokyo")
+	start := time.Date(2026, 1, 5, 8, 0, 0, 0, tokyo)
+	timed := exceptionsOf("2026-01-12", "2026-01-18T23:00:00Z", "2026-01-26T08:00:00", "not a date")
+	want := "EXDATE;TZID=Asia/Tokyo:20260112T080000,20260119T080000,20260126T080000"
+	if got := icsExdate(timed, false, "Asia/Tokyo", start.UTC()); got != want {
+		t.Errorf("timed series: got %q, want %q", got, want)
+	}
+
+	allDay := exceptionsOf("2026-01-12", "2026-01-19T00:00:00Z", "2026-01-26T00:00:00", "garbage")
+	want = "EXDATE;VALUE=DATE:20260112,20260119,20260126"
+	if got := icsExdate(allDay, true, "America/Los_Angeles", time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)); got != want {
+		t.Errorf("all-day series: got %q, want %q", got, want)
+	}
+	if got := icsExdate(exceptionsOf("garbage"), true, "UTC", start); got != "" {
+		t.Errorf("an unreadable element writes nothing, got %q", got)
+	}
+}
+
+// An override with attendee rows of its own replaces the series' attendees,
+// even when none of them is enabled; one with none inherits them.
+func TestExportAttendeesFollowTheReplacementRule(t *testing.T) {
+	a := exportAttendees{
+		byEvent: map[uint32][]eventacl.Attendee{
+			1: {{UserID: 10, Enabled: true}, {UserID: 11, Enabled: true}},
+			2: {{UserID: 12, Enabled: true}},
+		},
+		withRows: map[uint32]bool{2: true, 3: true},
+	}
+	inherit := generated.CalendarEvent{ID: 4}
+	replaced := generated.CalendarEvent{ID: 2}
+	emptied := generated.CalendarEvent{ID: 3}
+	if got := a.of(1, nil); len(got) != 2 {
+		t.Errorf("the series keeps its own attendees, got %v", got)
+	}
+	if got := a.of(1, &inherit); len(got) != 2 {
+		t.Errorf("an override with no rows inherits, got %v", got)
+	}
+	if got := a.of(1, &replaced); len(got) != 1 || got[0] != 12 {
+		t.Errorf("an override with rows replaces, got %v", got)
+	}
+	if got := a.of(1, &emptied); len(got) != 0 {
+		t.Errorf("an override whose rows are all disabled replaces with nobody, got %v", got)
 	}
 }

@@ -1,7 +1,6 @@
 package events
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -21,7 +20,11 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 )
 
-const maxAttachmentSize = 100 * 1024 * 1024 // 100 MB
+const (
+	maxAttachmentSize = 100 * 1024 * 1024 // 100 MB
+	// maxEventAttachments is the most live attachments one event holds.
+	maxEventAttachments = 100
+)
 
 // isRejectedAttachmentContentType blocks SVG, which browsers can render
 // inline with active content (<script>) when opened directly. mime.ParseMediaType
@@ -35,20 +38,6 @@ func isRejectedAttachmentContentType(contentType string) bool {
 		return strings.EqualFold(strings.TrimSpace(contentType), "image/svg+xml")
 	}
 	return strings.EqualFold(mediaType, "image/svg+xml")
-}
-
-// parseSHA256 accepts the digest the client computed over the bytes it is
-// about to upload. It is what makes the blob content-addressed: the same
-// file attached to two events is stored once and referred to twice.
-func parseSHA256(s string) ([]byte, bool) {
-	if len(s) != 64 {
-		return nil, false
-	}
-	raw, err := hex.DecodeString(strings.ToLower(s))
-	if err != nil {
-		return nil, false
-	}
-	return raw, true
 }
 
 func mapAttachment(publicID []byte, filename, contentType string, byteSize uint64, createdAt time.Time) AttachmentResponse {
@@ -113,7 +102,7 @@ func canReadObject(ctx context.Context, q *generated.Queries, objectID, userID u
 func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*PresignUploadOutput, error) {
 	return func(ctx context.Context, in *PresignUploadInput) (*PresignUploadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -128,9 +117,10 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
-		digest, ok := parseSHA256(in.Body.SHA256)
-		if !ok {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		digest, err := blobref.ParseDigest(in.Body.SHA256)
+		if err != nil {
+			spec, _ := apierrors.FromBlobref(err)
+			return nil, apierrors.ToHuma(spec)
 		}
 
 		contentType := in.Body.ContentType
@@ -157,10 +147,16 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 			mustSend bool
 		)
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEventEdit(ctx, q, cal, evt.ID, userID); err != nil {
+			if _, err := lockDetailEdit(ctx, q, cal, evt.ID, userID); err != nil {
 				return err
 			}
-			var err error
+			count, err := q.CountEventAttachments(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
+			if err != nil {
+				return err
+			}
+			if count >= maxEventAttachments {
+				return apierrors.AttachmentLimitReached
+			}
 			object, err = blobref.Reserve(ctx, q, blobref.Blob{
 				WorkspaceID: deps.WorkspaceID,
 				SHA256:      digest,
@@ -231,12 +227,7 @@ func PresignUpload(deps Deps) func(context.Context, *PresignUploadInput) (*Presi
 func ListAttachments(deps Deps) func(context.Context, *ListAttachmentsInput) (*ListAttachmentsOutput, error) {
 	return func(ctx context.Context, in *ListAttachmentsInput) (*ListAttachmentsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -308,15 +299,10 @@ func discardReservation(ctx context.Context, deps Deps, att generated.GetPending
 func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
 	return func(ctx context.Context, in *GetAttachmentDownloadInput) (*GetAttachmentDownloadOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
 		// The attachment must belong to an event in the resolved calendar.
 		// Without this scoping check any member could download another tenant's
 		// files by passing a foreign attachment UUID (cross-tenant IDOR).
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -352,7 +338,7 @@ func GetAttachmentDownload(deps Deps) func(context.Context, *GetAttachmentDownlo
 func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 	return func(ctx context.Context, in *DeleteAttachmentInput) (*DeleteAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -377,7 +363,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 		// Only the delete that actually retired the row logs it: a second one
 		// racing it read the same live row, but its update finds it retired.
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			if _, err := lockEventEdit(ctx, q, cal, evt.ID, userID); err != nil {
+			if _, err := lockDetailEdit(ctx, q, cal, evt.ID, userID); err != nil {
 				if errors.Is(err, apierrors.EventNotFound) {
 					return apierrors.AttachmentNotFound
 				}
@@ -413,7 +399,7 @@ func DeleteAttachment(deps Deps) func(context.Context, *DeleteAttachmentInput) (
 func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 	return func(ctx context.Context, in *ConfirmAttachmentInput) (*ConfirmAttachmentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -421,7 +407,7 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		// Refused callers are told so before anything about the reservation or
 		// the bytes is looked at; the confirm's own transaction decides again.
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			_, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			_, err := lockDetailEdit(ctx, q, cal, evt.ID, userID)
 			return err
 		}); err != nil {
 			return nil, toAPIError(err)
@@ -456,17 +442,6 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		if !sent {
 			key = att.StorageKey
 		}
-		info, exists, err := deps.Storage.StatObject(ctx, key)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
-		}
-		if !exists {
-			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
-		}
-		if info.Size > maxAttachmentSize {
-			discardReservation(ctx, deps, att, key)
-			return nil, apierrors.ToHuma(apierrors.AttachmentTooLarge)
-		}
 		// The digest decided which object these bytes are stored as, so it has
 		// to be checked against them rather than taken on trust. Without this
 		// an upload can put anything at a key it names, and every later
@@ -474,13 +449,22 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		// check: the declared size on an unverified object is whatever the
 		// first reservation said, and the bytes that match the digest are the
 		// ones whose size is recorded below.
-		stored, err := deps.Storage.SHA256(ctx, key)
+		stored, exists, err := deps.Storage.Open(ctx, key)
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
-		if !bytes.Equal(stored, att.Sha256) {
-			discardReservation(ctx, deps, att, key)
-			return nil, apierrors.ToHuma(apierrors.AttachmentDigestMismatch)
+		if !exists {
+			return nil, apierrors.ToHuma(apierrors.AttachmentNotFound)
+		}
+		info := stored.Info
+		verr := blobref.VerifyReadBack(stored, att.Sha256, maxAttachmentSize)
+		stored.Close()
+		if verr != nil {
+			if spec, ok := apierrors.FromBlobref(verr); ok {
+				discardReservation(ctx, deps, att, key)
+				return nil, apierrors.ToHuma(spec)
+			}
+			return nil, apierrors.ToHuma(apierrors.StorageUnavailable)
 		}
 
 		var (
@@ -489,11 +473,18 @@ func ConfirmAttachment(deps Deps) func(context.Context, *ConfirmAttachmentInput)
 		)
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			queued = nil
-			if _, err := lockEventEdit(ctx, q, cal, evt.ID, userID); err != nil {
+			if _, err := lockDetailEdit(ctx, q, cal, evt.ID, userID); err != nil {
 				if errors.Is(err, apierrors.EventNotFound) {
 					return apierrors.AttachmentNotFound
 				}
 				return err
+			}
+			count, err := q.CountEventAttachments(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
+			if err != nil {
+				return err
+			}
+			if count >= maxEventAttachments {
+				return apierrors.AttachmentLimitReached
 			}
 			// Verified bytes at the object's key are somebody's stored file:
 			// confirming against them without having sent them takes being able

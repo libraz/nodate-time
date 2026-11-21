@@ -283,12 +283,6 @@ ALLOWED = {
     "ListOAuthProviderConfigs",
     "SetOAuthProviderEnabled",
 
-    # This deployment is single-tenant: the workspace is resolved once at
-    # startup by slug, and every handler carries the id it got. Reading a
-    # workspace by id is the shape a multi-tenant writer on this schema
-    # needs; it has no question to answer here.
-    "GetWorkspaceByID",
-
     # The tail side of the append-only log, which another process on this
     # database reads. This application is the writer; the query is here
     # because the log is a shared channel, not because a handler wants it.

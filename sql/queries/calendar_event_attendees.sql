@@ -73,3 +73,22 @@ UPDATE calendar_event_attendees SET rsvp = ? WHERE event_id = ? AND user_id = ? 
 
 -- name: SetEventAttendeeCanEdit :exec
 UPDATE calendar_event_attendees SET can_edit = ? WHERE event_id = ? AND user_id = ? AND enabled = TRUE;
+
+-- CountEventAttendeeRows counts every attendee row of an event, enabled or
+-- not: an override with any row replaces the series' attendees, and one with
+-- none inherits them.
+-- name: CountEventAttendeeRows :one
+SELECT COUNT(*) FROM calendar_event_attendees WHERE event_id = ?;
+
+-- ListEventIDsWithAttendeeRows names which of the events have an attendee row
+-- of any state.
+-- name: ListEventIDsWithAttendeeRows :many
+SELECT DISTINCT event_id FROM calendar_event_attendees
+WHERE event_id IN (sqlc.slice('event_ids'));
+
+-- AddDisabledOverrideAttendee records that somebody on the series does not
+-- attend an override created in this transaction. Such a row is what keeps the
+-- override from inheriting the series' attendees.
+-- name: AddDisabledOverrideAttendee :exec
+INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id, enabled)
+VALUES (?, ?, ?, ?, FALSE);

@@ -7,6 +7,7 @@ package generated
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 )
 
@@ -28,6 +29,42 @@ func (q *Queries) GetCalendarCoverObjectID(ctx context.Context, calendarID uint3
 	var storage_object_id uint32
 	err := row.Scan(&storage_object_id)
 	return storage_object_id, err
+}
+
+const getStorageObjectByPublicID = `-- name: GetStorageObjectByPublicID :one
+SELECT id, public_id, workspace_id, owner_user_id, sha256, byte_size, content_type, storage_key, ref_count, uploaded_at, sort_weight, notes, enabled, updated_at, created_at FROM storage_objects
+WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
+FOR UPDATE
+`
+
+type GetStorageObjectByPublicIDParams struct {
+	WorkspaceID sql.NullInt32 `json:"workspaceId"`
+	PublicID    []byte        `json:"publicId"`
+}
+
+// GetStorageObjectByPublicID finds the object a cover reservation named, within
+// the workspace and under its row lock: the confirm decides on its state.
+func (q *Queries) GetStorageObjectByPublicID(ctx context.Context, arg GetStorageObjectByPublicIDParams) (StorageObject, error) {
+	row := q.db.QueryRowContext(ctx, getStorageObjectByPublicID, arg.WorkspaceID, arg.PublicID)
+	var i StorageObject
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.WorkspaceID,
+		&i.OwnerUserID,
+		&i.Sha256,
+		&i.ByteSize,
+		&i.ContentType,
+		&i.StorageKey,
+		&i.RefCount,
+		&i.UploadedAt,
+		&i.SortWeight,
+		&i.Notes,
+		&i.Enabled,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const listCalendarCoverKeys = `-- name: ListCalendarCoverKeys :many

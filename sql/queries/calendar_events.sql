@@ -316,6 +316,14 @@ WHERE id = ? AND task_id IS NOT NULL;
 -- name: SetRecurrenceExceptions :exec
 UPDATE calendar_events SET recurrence_exceptions = ? WHERE id = ?;
 
+-- SetCancelledOccurrences is SetRecurrenceExceptions for one more cancelled
+-- occurrence. It leaves the series' revision alone: a copy of a sibling
+-- occurrence says nothing about the one cancelled, so it stays valid to write
+-- from, and a writer of the whole series cannot undo a cancellation it does
+-- not carry.
+-- name: SetCancelledOccurrences :exec
+UPDATE calendar_events SET recurrence_exceptions = ?, updated_at = updated_at WHERE id = ?;
+
 -- name: SoftDeleteCalendarEvent :exec
 UPDATE calendar_events SET enabled = FALSE WHERE id = ? AND task_id IS NULL;
 
@@ -350,3 +358,22 @@ WHERE u.id IN (sqlc.slice('user_ids'));
 -- name: AddOverrideAttendee :exec
 INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id, rsvp, can_edit)
 VALUES (?, ?, ?, ?, ?, ?);
+
+-- ListAttendeeRowsByEvents reads every attendee row of the events asked about,
+-- disabled ones included. An override with any row at all, enabled or not,
+-- replaces the series' attendees for its occurrence, so the presence of a row
+-- is itself the answer to "does this occurrence inherit".
+-- name: ListAttendeeRowsByEvents :many
+SELECT event_id, user_id, enabled FROM calendar_event_attendees
+WHERE event_id IN (sqlc.slice('event_ids'));
+
+-- SetCalendarEventBlockLabel writes the free-text label a block carries.
+-- name: SetCalendarEventBlockLabel :exec
+UPDATE calendar_events SET block_label = ? WHERE id = ? AND kind = 'block';
+
+-- ListLiveAttachmentPublicIDsByEvent names the attachments a deletion is about
+-- to retire, so the deletion's log row can say which ones a restore brings back.
+-- name: ListLiveAttachmentPublicIDsByEvent :many
+SELECT public_id FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE
+ORDER BY id;

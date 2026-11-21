@@ -10,45 +10,40 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
-// TestBuildICSAllDayUsesEventTimezone verifies an all-day event is rendered on
-// its local calendar day, not shifted by UTC conversion.
-func TestBuildICSAllDayUsesEventTimezone(t *testing.T) {
-	// Midnight 2025-06-24 in Asia/Tokyo == 2025-06-23T15:00:00Z.
-	startUTC := time.Date(2025, 6, 23, 15, 0, 0, 0, time.UTC)
-	endUTC := startUTC.AddDate(0, 0, 1)
+// An all-day event is dates: its UTC bounds are its dates, whatever zone it
+// records.
+func TestBuildICSAllDayWritesTheUTCDates(t *testing.T) {
+	start := time.Date(2025, 6, 24, 0, 0, 0, 0, time.UTC)
 	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Concert",
 		AllDay:   true,
-		Timezone: "Asia/Tokyo",
+		Timezone: "America/Los_Angeles",
 	}
-	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}})
-	if !strings.Contains(out, "DTSTART;VALUE=DATE:20250624") {
-		t.Errorf("all-day DTSTART should be local 20250624, got:\n%s", out)
+	out := buildICS("Nodate Time", "Cal", []exportEvent{{event: ev, startAt: start, endAt: start.AddDate(0, 0, 1)}})
+	for _, want := range []string{"DTSTART;VALUE=DATE:20250624", "DTEND;VALUE=DATE:20250625"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
 	}
-	if strings.Contains(out, "20250623") {
-		t.Errorf("all-day date must not shift to the UTC day 20250623:\n%s", out)
+	if strings.Contains(out, "20250623") || strings.Contains(out, "TZID") {
+		t.Errorf("an all-day event must not shift to the zone's day or name a zone:\n%s", out)
 	}
 }
 
-// TestBuildCSVAllDayEndDateIsInclusive verifies a one-day all-day event reads as
-// the same start/end date in CSV, since the stored end is the exclusive midnight
-// after the last day.
+// A one-day all-day event reads as the same start and end date in CSV, since
+// the stored end is the exclusive midnight after the last day.
 func TestBuildCSVAllDayEndDateIsInclusive(t *testing.T) {
-	startUTC := time.Date(2025, 6, 23, 15, 0, 0, 0, time.UTC) // 2025-06-24 JST
-	endUTC := startUTC.AddDate(0, 0, 1)                       // exclusive: 2025-06-25 JST midnight
+	start := time.Date(2025, 6, 24, 0, 0, 0, 0, time.UTC)
 	ev := generated.CalendarEvent{
 		PublicID: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 		Title:    "Concert",
 		AllDay:   true,
 		Timezone: "Asia/Tokyo",
 	}
-	out := string(buildCSV([]exportEvent{{event: ev, startAt: startUTC, endAt: endUTC}}))
-	if !strings.Contains(out, "Concert,2025-06-24,") {
-		t.Errorf("all-day start date should be 2025-06-24, got:\n%s", out)
-	}
-	if !strings.Contains(out, ",2025-06-24,00:00:00,true,") {
-		t.Errorf("one-day all-day end date should be inclusive (2025-06-24), got:\n%s", out)
+	out := string(buildCSV([]exportEvent{{event: ev, startAt: start, endAt: start.AddDate(0, 0, 1)}}))
+	if !strings.Contains(out, "Concert,2025-06-24,00:00:00,2025-06-24,00:00:00,true,") {
+		t.Errorf("a one-day all-day event should read as 2025-06-24 to 2025-06-24, got:\n%s", out)
 	}
 	if strings.Contains(out, "2025-06-25") {
 		t.Errorf("all-day end date must not show the exclusive midnight day 2025-06-25:\n%s", out)
@@ -121,7 +116,7 @@ func TestBuildICSWritesASeriesAsOneVEventWithItsRule(t *testing.T) {
 		startAt:    base,
 		endAt:      base.Add(time.Hour),
 		rule:       &recurrence.Rule{Freq: "daily", Interval: 1, Count: 30},
-		exceptions: recurrence.Exceptions{base.AddDate(0, 0, 2)},
+		exceptions: exceptionsOf(base.AddDate(0, 0, 2).Format(time.RFC3339)),
 	}}
 	out := buildICS("Nodate Time", "Cal", rows)
 	if n := strings.Count(out, "BEGIN:VEVENT"); n != 1 {

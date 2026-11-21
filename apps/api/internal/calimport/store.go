@@ -15,6 +15,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
@@ -31,8 +32,9 @@ type importedSeries struct {
 	start      time.Time
 	end        time.Time
 	timezone   string
+	allDay     bool
 	rule       *json.RawMessage
-	exceptions recurrence.Exceptions
+	exceptions recurrence.ExceptionList
 	// recognised marks a series the calendar already held, which this import
 	// left alone. Its changed occurrences have to be left alone with it: the
 	// override write applies itself in place, so taking those while the series
@@ -298,24 +300,68 @@ func validateImported(e Event) (time.Time, importOutcome, bool) {
 		(e.HasRecurrenceID && !storableInstant(e.RecurrenceID)) {
 		return time.Time{}, importRejected, false
 	}
+	if e.AllDay {
+		// A DTEND on the start day of a date event is a one-day event; one
+		// before it is not a range the calendar can hold.
+		if endAt.Equal(e.Start) {
+			endAt = e.Start.AddDate(0, 0, 1)
+		}
+		if !endAt.After(e.Start) {
+			return time.Time{}, importRejected, false
+		}
+	}
 	return endAt, importCreated, true
 }
 
 // convertRRule maps an RFC 5545 RRULE value onto the stored rule JSON, or
 // reports false for a rule the expander would expand to other dates, so the
 // caller skips the event instead of importing a different series. start is
-// DTSTART in the event's zone.
-func convertRRule(value string, start time.Time) (*json.RawMessage, bool) {
+// DTSTART in the zone the series expands in.
+func convertRRule(value string, start time.Time, allDay bool) (*json.RawMessage, bool) {
 	rule, ok := recurrence.ParseRRule(value, start)
 	if !ok {
 		return nil, false
 	}
+	rule.Until = untilInSeriesForm(rule.Until, start.Location(), allDay)
 	data, err := json.Marshal(rule)
 	if err != nil {
 		return nil, false
 	}
 	raw := json.RawMessage(data)
 	return &raw, true
+}
+
+// untilInSeriesForm writes an until in the form its series takes: a date for
+// an all-day series, an instant for a timed one. A date on a timed series ends
+// at the close of that day in loc.
+func untilInSeriesForm(until *string, loc *time.Location, allDay bool) *string {
+	if until == nil {
+		return nil
+	}
+	var out string
+	if t, err := time.Parse(time.RFC3339, *until); err == nil {
+		if !allDay {
+			return until
+		}
+		out = t.UTC().Format("2006-01-02")
+	} else if d, err := time.ParseInLocation("2006-01-02", *until, loc); err == nil {
+		if allDay {
+			return until
+		}
+		out = d.AddDate(0, 0, 1).Add(-time.Second).UTC().Format(time.RFC3339)
+	} else {
+		return until
+	}
+	return &out
+}
+
+// exceptionList is the cancellations of a series in the form it writes them.
+func exceptionList(exdates []time.Time, allDay bool, tz string) recurrence.ExceptionList {
+	var list recurrence.ExceptionList
+	for _, x := range exdates {
+		list = list.With(x, allDay, tz)
+	}
+	return list
 }
 
 // head is one series head after validation and conversion: what an insert
@@ -354,7 +400,8 @@ func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 		attendees: e.Attendees,
 	}
 	if e.RRule != "" {
-		converted, ok := convertRRule(e.RRule, e.Start.In(recurrence.LoadLocation(h.tz)))
+		zone := recurrence.ExpansionZone(e.AllDay, h.tz)
+		converted, ok := convertRRule(e.RRule, e.Start.In(recurrence.LoadLocation(zone)), e.AllDay)
 		if !ok {
 			// An unsupported RRULE must not silently collapse a recurring
 			// event into a single occurrence.
@@ -366,13 +413,12 @@ func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 			return head{}, importFailed
 		}
 		h.recEnd = sql.NullTime{
-			Time:  recurrence.ComputeEndInZone(rule, e.Start, endAt, h.tz),
+			Time:  recurrence.ComputeEndInZone(rule, e.Start, endAt, zone),
 			Valid: true,
 		}
 		// EXDATE says which occurrences the series does not have. Dropping it
 		// hands back every occurrence its author cancelled.
-		// The parser already made them distinct.
-		column, err := recurrence.Exceptions(e.Exdates).MarshalColumn()
+		column, err := exceptionList(e.Exdates, e.AllDay, h.tz).MarshalColumn()
 		if err != nil {
 			return head{}, importFailed
 		}
@@ -470,6 +516,15 @@ func importSeriesHead(
 			generated.FindCalendarEventBySourceUIDParams{CalendarID: cal.ID, SourceUid: identity})
 		switch {
 		case err == nil:
+			// A row the importer cannot see is not theirs to learn of or to
+			// touch: it counts as a UID that is not theirs, like any skip.
+			visible, err := visibleToImporter(ctx, q, cal, userID, existing)
+			if err != nil {
+				return importedSeries{}, importFailed, err
+			}
+			if !visible {
+				return importedSeries{}, importSkipped, nil
+			}
 			return importedSeries{
 				id:         existing.ID,
 				publicID:   existing.PublicID,
@@ -477,8 +532,9 @@ func importSeriesHead(
 				start:      existing.StartAt.Time,
 				end:        existing.EndAt.Time,
 				timezone:   existing.Timezone,
+				allDay:     existing.AllDay,
 				rule:       existing.RecurrenceRule,
-				exceptions: recurrence.ParseExceptions(existing.RecurrenceExceptions),
+				exceptions: recurrence.ParseExceptionList(existing.RecurrenceExceptions),
 				recognised: true,
 			}, importDuplicate, nil
 		case !errors.Is(err, sql.ErrNoRows):
@@ -496,8 +552,23 @@ func importSeriesHead(
 	}
 	return importedSeries{
 		id: created.ID, publicID: pubID[:], title: e.Title, start: e.Start, end: h.end,
-		timezone: h.tz, rule: h.rule, exceptions: e.Exdates,
+		timezone: h.tz, allDay: h.allDay, rule: h.rule, exceptions: exceptionList(e.Exdates, h.allDay, h.tz),
 	}, importCreated, nil
+}
+
+// visibleToImporter reports whether the importing member may see a stored row,
+// by the same rule that decides what a listing shows them.
+func visibleToImporter(ctx context.Context, q *generated.Queries, cal generated.Calendar, userID uint32, row generated.CalendarEvent) (bool, error) {
+	attendeeIDs, err := q.ListEnabledEventAttendeeIDs(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
+	if err != nil {
+		return false, err
+	}
+	return eventacl.Decide(eventacl.Event{
+		Visibility:      eventacl.Visibility(row.Visibility),
+		CalendarDefault: eventacl.Visibility(cal.DefaultEventVisibility),
+		OwnerUserID:     row.OwnerUserID,
+		CreatedByUserID: row.CreatedByUserID,
+	}, eventacl.Reader{UserID: userID, IsMember: true}, attendeeIDs).Exists, nil
 }
 
 // importChangedOccurrence writes a VEVENT carrying a RECURRENCE-ID as an
@@ -523,9 +594,9 @@ func importChangedOccurrence(
 	if err != nil {
 		return importFailed, nil
 	}
-	if parent.exceptions.Contains(e.RecurrenceID) ||
+	if parent.exceptions.Cancels(e.RecurrenceID, parent.allDay, parent.timezone) ||
 		!recurrence.OccursAt(parentRule, parent.start, parent.end,
-			parent.timezone, e.RecurrenceID) {
+			recurrence.ExpansionZone(parent.allDay, parent.timezone), e.RecurrenceID) {
 		return importSkipped, nil
 	}
 	overridePubID, err := uuid.NewV7()

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/http/daterange"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
@@ -41,10 +43,7 @@ type ExportOutput struct {
 	// short of it: "full" for the whole calendar, else "from/to" with an open
 	// end left empty.
 	ExportWindow string `header:"X-Export-Window"`
-	// Truncated says the body stopped at exportMaxEntries, so the window is
-	// not fully covered.
-	Truncated string `header:"X-Result-Truncated" required:"false"`
-	Body      []byte
+	Body         []byte
 }
 
 // csvWindow bounds the CSV export, which lists one row per occurrence and so
@@ -61,8 +60,12 @@ const (
 
 // exportMaxEntries bounds one export: VEVENTs for iCalendar, rows for CSV. A
 // CSV series expands per occurrence and nothing bounds how many series a
-// calendar holds, so the bound is on the output.
+// calendar holds, so the bound is on the output. A range holding more is
+// refused rather than cut short.
 const exportMaxEntries = 20000
+
+// attendeeLoadChunk is how many events one attendee query names.
+const attendeeLoadChunk = 5000
 
 // exportEvent is a single row to render as one VEVENT.
 //
@@ -76,7 +79,7 @@ type exportEvent struct {
 	endAt   time.Time
 	// rule and exceptions are set for a series head.
 	rule       *recurrence.Rule
-	exceptions recurrence.Exceptions
+	exceptions recurrence.ExceptionList
 	// originalStart is set for a changed occurrence, which shares the series'
 	// UID and names the occurrence it replaces. RECURRENCE-ID has to take the
 	// series' value type and zone rather than the override's own, so those
@@ -85,6 +88,9 @@ type exportEvent struct {
 	isOverride     bool
 	parentAllDay   bool
 	parentTimezone string
+	// masked is set when the reader sees the event with its details withheld:
+	// the title and times leave, the location, description and URL do not.
+	masked bool
 }
 
 // exportWindow is the range an export covers. A zero bound means unbounded.
@@ -175,23 +181,86 @@ func ExportEvents(deps Deps) func(context.Context, *ExportInput) (*ExportOutput,
 			return nil, apierrors.ToHuma(apierrors.BadRequest)
 		}
 
+		viewer := exportViewer{userID: userID, calendarDefault: eventacl.Visibility(cal.DefaultEventVisibility)}
 		if in.Format == "csv" {
-			return exportCSV(ctx, deps, cal, window)
+			return exportCSV(ctx, deps, cal, viewer, window)
 		}
-		return exportICS(ctx, deps, cal, window)
+		return exportICS(ctx, deps, cal, viewer, window)
 	}
 }
 
+// exportViewer is the member an export is for. What each row shows of itself
+// follows from the same rule that decides what a listing shows them.
+type exportViewer struct {
+	userID          uint32
+	calendarDefault eventacl.Visibility
+}
+
+func (v exportViewer) decide(e generated.CalendarEvent, attendees []uint32) eventacl.Decision {
+	return eventacl.Decide(eventacl.Event{
+		Visibility:      eventacl.Visibility(e.Visibility),
+		CalendarDefault: v.calendarDefault,
+		OwnerUserID:     e.OwnerUserID,
+		CreatedByUserID: e.CreatedByUserID,
+	}, eventacl.Reader{UserID: v.userID, IsMember: true}, attendees)
+}
+
+// exportAttendees holds the attendees of the rows an export reads, so every
+// occurrence is judged without a query of its own.
+type exportAttendees struct {
+	byEvent  map[uint32][]eventacl.Attendee
+	withRows map[uint32]bool
+}
+
+func loadExportAttendees(ctx context.Context, q *generated.Queries, ids []uint32) (exportAttendees, error) {
+	out := exportAttendees{byEvent: map[uint32][]eventacl.Attendee{}, withRows: map[uint32]bool{}}
+	for lo := 0; lo < len(ids); lo += attendeeLoadChunk {
+		keys := make([]sql.NullInt32, 0, attendeeLoadChunk)
+		for _, id := range ids[lo:min(lo+attendeeLoadChunk, len(ids))] {
+			keys = append(keys, sql.NullInt32{Int32: int32(id), Valid: true})
+		}
+		rows, err := q.ListEventAttendeesByEvents(ctx, keys)
+		if err != nil {
+			return out, err
+		}
+		for _, r := range rows {
+			out.byEvent[uint32(r.EventID.Int32)] = append(out.byEvent[uint32(r.EventID.Int32)],
+				eventacl.Attendee{UserID: r.UserID, Enabled: true})
+		}
+		held, err := q.ListEventIDsWithAttendeeRows(ctx, keys)
+		if err != nil {
+			return out, err
+		}
+		for _, id := range held {
+			out.withRows[uint32(id.Int32)] = true
+		}
+	}
+	return out, nil
+}
+
+// of returns who attends an occurrence: an override that has attendee rows of
+// its own replaces the series' attendees, one with none inherits them.
+func (a exportAttendees) of(series uint32, override *generated.CalendarEvent) []uint32 {
+	var replacement []eventacl.Attendee
+	if override != nil && a.withRows[override.ID] {
+		replacement = a.byEvent[override.ID]
+		if len(replacement) == 0 {
+			replacement = []eventacl.Attendee{{}}
+		}
+	}
+	return eventacl.OccurrenceAttendees(a.byEvent[series], replacement)
+}
+
 // loadExportEvents reads what an export renders. Every series' changed
-// occurrences come from one query, and the output is capped once at
-// exportMaxEntries, with truncated reporting whether the cap was hit.
+// occurrences come from one query, rows the reader may not see are left out,
+// and a range holding more than exportMaxEntries is refused.
 //
 // With expand set each series becomes its occurrences inside the window (CSV);
 // otherwise it stays one entry carrying its rule, followed by its changed
 // occurrences (iCalendar).
 func loadExportEvents(
-	ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow, expand bool,
-) (entries []exportEvent, truncated bool, err error) {
+	ctx context.Context, deps Deps, cal generated.Calendar, viewer exportViewer, window exportWindow, expand bool,
+) ([]exportEvent, error) {
 	var heads []generated.CalendarEvent
 	if expand || !window.start.IsZero() || !window.end.IsZero() {
 		// The same selection the listing makes, so a series whose changed
@@ -203,7 +272,7 @@ func loadExportEvents(
 			RangeStart: rangeStart,
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		series, err := deps.Queries.ListRecurringCalendarEventsByCalendarAndRange(ctx, generated.ListRecurringCalendarEventsByCalendarAndRangeParams{
 			CalendarID: cal.ID,
@@ -211,13 +280,13 @@ func loadExportEvents(
 			RangeStart: rangeStart,
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		heads = append(plain, series...)
 	} else {
 		rows, err := deps.Queries.ListCalendarEventsForExport(ctx, cal.ID)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		for _, e := range rows {
 			// An undated row has nothing to render as DTSTART. The shared
@@ -239,7 +308,7 @@ func loadExportEvents(
 	if len(seriesKeys) > 0 {
 		rows, err := deps.Queries.ListRecurrenceOverridesByParents(ctx, seriesKeys)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		for _, r := range rows {
 			parent := uint32(r.RecurrenceParentID.Int32)
@@ -247,13 +316,31 @@ func loadExportEvents(
 		}
 	}
 
-	add := func(x exportEvent) bool {
-		if len(entries) >= exportMaxEntries {
-			truncated = true
-			return false
+	ids := make([]uint32, 0, len(heads))
+	for _, e := range heads {
+		ids = append(ids, e.ID)
+		for _, child := range overrides[e.ID] {
+			ids = append(ids, child.ID)
 		}
+	}
+	attendees, err := loadExportAttendees(ctx, deps.Queries, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []exportEvent
+	// add keeps x if the reader may see it. d is the decision for the row x
+	// stands for.
+	add := func(x exportEvent, d eventacl.Decision) error {
+		if !d.Exists {
+			return nil
+		}
+		if len(entries) >= exportMaxEntries {
+			return apierrors.ExportRangeTooLarge
+		}
+		x.masked = d.DetailsHidden
 		entries = append(entries, x)
-		return true
+		return nil
 	}
 	for _, e := range heads {
 		if !e.StartAt.Valid || !e.EndAt.Valid {
@@ -265,14 +352,16 @@ func loadExportEvents(
 			// carry their override's values, matching what the app displays.
 			for _, inst := range eventexpand.ExpandWithOverrides(e, overrides[e.ID], window.start, window.end) {
 				x := exportEvent{event: e, startAt: inst.Occurrence.StartAt, endAt: inst.Occurrence.EndAt}
+				var override *generated.CalendarEvent
 				if inst.IsOverride {
 					if !inst.Event.StartAt.Valid || !inst.Event.EndAt.Valid {
 						continue
 					}
 					x = exportEvent{event: inst.Event, startAt: inst.Event.StartAt.Time, endAt: inst.Event.EndAt.Time}
+					override = &inst.Event
 				}
-				if !add(x) {
-					return entries, truncated, nil
+				if err := add(x, viewer.decide(x.event, attendees.of(e.ID, override))); err != nil {
+					return nil, err
 				}
 			}
 			continue
@@ -282,13 +371,13 @@ func loadExportEvents(
 		if !expand && e.RecurrenceRule != nil {
 			rule, err := recurrence.ParseRule(*e.RecurrenceRule)
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 			entry.rule = rule
-			entry.exceptions = recurrence.ParseExceptions(e.RecurrenceExceptions)
+			entry.exceptions = recurrence.ParseExceptionList(e.RecurrenceExceptions)
 		}
-		if !add(entry) {
-			return entries, truncated, nil
+		if err := add(entry, viewer.decide(e, attendees.of(e.ID, nil))); err != nil {
+			return nil, err
 		}
 		if entry.rule == nil {
 			continue
@@ -300,7 +389,7 @@ func loadExportEvents(
 			if !child.StartAt.Valid || !child.EndAt.Valid || !child.RecurrenceOriginalStart.Valid {
 				continue
 			}
-			if entry.exceptions.Contains(child.RecurrenceOriginalStart.Time) {
+			if entry.exceptions.Cancels(child.RecurrenceOriginalStart.Time, e.AllDay, e.Timezone) {
 				continue
 			}
 			x := exportEvent{
@@ -313,34 +402,26 @@ func loadExportEvents(
 				parentTimezone: e.Timezone,
 			}
 			// The series' identity is what ties the occurrence to it.
+			decision := viewer.decide(child, attendees.of(e.ID, &child))
 			x.event.PublicID = e.PublicID
-			if !add(x) {
-				return entries, truncated, nil
+			if err := add(x, decision); err != nil {
+				return nil, err
 			}
 		}
 	}
-	return entries, truncated, nil
-}
-
-// truncatedHeader renders the X-Result-Truncated value.
-func truncatedHeader(truncated bool) string {
-	if truncated {
-		return "true"
-	}
-	return ""
+	return entries, nil
 }
 
 // exportICS writes the calendar as iCalendar, series as series.
-func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow) (*ExportOutput, error) {
-	exports, truncated, err := loadExportEvents(ctx, deps, cal, window, false)
+func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, viewer exportViewer, window exportWindow) (*ExportOutput, error) {
+	exports, err := loadExportEvents(ctx, deps, cal, viewer, window, false)
 	if err != nil {
-		return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		return nil, toAPIError(err)
 	}
 	return &ExportOutput{
 		ContentType:        "text/calendar; charset=utf-8",
 		ContentDisposition: exportDisposition(cal.Name, "ics"),
 		ExportWindow:       window.header(),
-		Truncated:          truncatedHeader(truncated),
 		Body:               []byte(buildICS(deps.AppName, cal.Name, exports)),
 	}, nil
 }
@@ -348,7 +429,7 @@ func exportICS(ctx context.Context, deps Deps, cal generated.Calendar, window ex
 // exportCSV writes one row per occurrence, which means a series has to be
 // expanded and so bounded. The bound is whatever the caller asked for, and the
 // response says what it was.
-func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, window exportWindow) (*ExportOutput, error) {
+func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, viewer exportViewer, window exportWindow) (*ExportOutput, error) {
 	// One reading of the clock, so the default window is exactly csvMaxWindow wide.
 	now := time.Now().In(window.loc)
 	if window.start.IsZero() {
@@ -361,15 +442,14 @@ func exportCSV(ctx context.Context, deps Deps, cal generated.Calendar, window ex
 		return nil, apierrors.ToHuma(apierrors.BadRequest)
 	}
 
-	exports, truncated, err := loadExportEvents(ctx, deps, cal, window, true)
+	exports, err := loadExportEvents(ctx, deps, cal, viewer, window, true)
 	if err != nil {
-		return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
+		return nil, toAPIError(err)
 	}
 	return &ExportOutput{
 		ContentType:        "text/csv; charset=utf-8",
 		ContentDisposition: exportDisposition(cal.Name, "csv"),
 		ExportWindow:       window.header(),
-		Truncated:          truncatedHeader(truncated),
 		Body:               buildCSV(exports),
 	}, nil
 }
@@ -460,11 +540,10 @@ func icsTime(t time.Time) string {
 	return t.UTC().Format("20060102T150405Z")
 }
 
-// icsDate renders an all-day date in the event's own timezone so the calendar
-// day does not shift for non-UTC users. Falls back to UTC on an unknown zone.
-func icsDate(t time.Time, tz string) string {
-	loc := loadLocationOrUTC(tz)
-	return t.In(loc).Format("20060102")
+// icsDate renders an all-day bound as its date. An all-day event is dates, not
+// instants: the UTC date of its bound is the date, whatever zone it records.
+func icsDate(t time.Time) string {
+	return t.UTC().Format("20060102")
 }
 
 // loadLocationOrUTC resolves an IANA timezone name, falling back to UTC.
@@ -555,24 +634,41 @@ func icsTimeProp(name string, t time.Time, zone string) string {
 	return name + ";TZID=" + zone + ":" + t.In(loadLocationOrUTC(zone)).Format("20060102T150405")
 }
 
-// icsExdate renders the series' cancellations. They are stored as the instants
-// the occurrences would have started at, which is exactly what EXDATE names,
-// written in the value type and zone DTSTART uses.
-func icsExdate(ex recurrence.Exceptions, allDay bool, tz string) string {
-	if len(ex) == 0 {
-		return ""
-	}
+// icsExdate renders the series' cancellations as EXDATE, in the value type and
+// zone DTSTART uses. start is the series' first occurrence. An element names
+// an occurrence in the form it was written in; one nothing here can read is
+// left out of the file, though it stays in the stored list.
+func icsExdate(ex recurrence.ExceptionList, allDay bool, tz string, start time.Time) string {
 	zone := icsZone(tz)
-	values := make([]string, 0, len(ex))
-	for _, t := range ex {
-		switch {
-		case allDay:
-			values = append(values, icsDate(t, tz))
-		case zone != "":
-			values = append(values, t.In(loadLocationOrUTC(zone)).Format("20060102T150405"))
-		default:
-			values = append(values, icsTime(t))
+	loc := loadLocationOrUTC(zone)
+	clock := start.In(loc)
+	var values []string
+	for _, el := range ex {
+		var s string
+		if json.Unmarshal(el, &s) != nil {
+			continue
 		}
+		date, isDate := parseExceptionDate(s)
+		instant, instantErr := time.Parse(time.RFC3339Nano, s)
+		floating, floatingErr := time.ParseInLocation("2006-01-02T15:04:05", s, loc)
+		switch {
+		case allDay && isDate:
+			values = append(values, icsDate(date))
+		case allDay && instantErr == nil:
+			values = append(values, icsDate(instant))
+		case allDay && floatingErr == nil:
+			values = append(values, floating.Format("20060102"))
+		case allDay:
+		case isDate:
+			values = append(values, exdateClock(time.Date(date.Year(), date.Month(), date.Day(), clock.Hour(), clock.Minute(), clock.Second(), 0, loc), zone))
+		case instantErr == nil:
+			values = append(values, exdateClock(instant, zone))
+		case floatingErr == nil:
+			values = append(values, exdateClock(floating, zone))
+		}
+	}
+	if len(values) == 0 {
+		return ""
 	}
 	switch {
 	case allDay:
@@ -583,12 +679,27 @@ func icsExdate(ex recurrence.Exceptions, allDay bool, tz string) string {
 	return "EXDATE:" + strings.Join(values, ",")
 }
 
+// parseExceptionDate reads a YYYY-MM-DD element.
+func parseExceptionDate(s string) (time.Time, bool) {
+	t, err := time.Parse("2006-01-02", s)
+	return t, err == nil
+}
+
+// exdateClock renders one cancelled instant as a wall clock in zone, or as a
+// UTC instant when the series has no zone.
+func exdateClock(t time.Time, zone string) string {
+	if zone != "" {
+		return t.In(loadLocationOrUTC(zone)).Format("20060102T150405")
+	}
+	return icsTime(t)
+}
+
 // icsRecurrenceID names the occurrence an override replaces. RFC 5545 requires
 // it to match the series' DTSTART in value type and zone, whatever the
 // override itself has become.
 func icsRecurrenceID(x exportEvent) string {
 	if x.parentAllDay {
-		return "RECURRENCE-ID;VALUE=DATE:" + icsDate(x.originalStart, x.parentTimezone)
+		return "RECURRENCE-ID;VALUE=DATE:" + icsDate(x.originalStart)
 	}
 	return icsTimeProp("RECURRENCE-ID", x.originalStart, icsZone(x.parentTimezone))
 }
@@ -647,8 +758,8 @@ func buildICS(appName, calName string, rows []exportEvent) string {
 		writeFolded(&b, "UID:"+hex.EncodeToString(e.PublicID)+"@nodate-time")
 		writeFolded(&b, "DTSTAMP:"+stamp)
 		if e.AllDay {
-			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt, e.Timezone))
-			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt, e.Timezone))
+			writeFolded(&b, "DTSTART;VALUE=DATE:"+icsDate(x.startAt))
+			writeFolded(&b, "DTEND;VALUE=DATE:"+icsDate(x.endAt))
 		} else {
 			// Written in the event's own zone, which the VTIMEZONE above
 			// defines, so a rule expands where the server expands it.
@@ -659,21 +770,23 @@ func buildICS(appName, calName string, rows []exportEvent) string {
 		if x.isOverride {
 			writeFolded(&b, icsRecurrenceID(x))
 		}
-		if rrule := recurrence.FormatRRule(x.rule, x.startAt.In(loadLocationOrUTC(e.Timezone)), e.AllDay); rrule != "" {
+		if rrule := recurrence.FormatRRule(x.rule, x.startAt.In(loadLocationOrUTC(recurrence.ExpansionZone(e.AllDay, e.Timezone))), e.AllDay); rrule != "" {
 			writeFolded(&b, "RRULE:"+rrule)
-			if exdate := icsExdate(x.exceptions, e.AllDay, e.Timezone); exdate != "" {
+			if exdate := icsExdate(x.exceptions, e.AllDay, e.Timezone, x.startAt); exdate != "" {
 				writeFolded(&b, exdate)
 			}
 		}
 		writeFolded(&b, "SUMMARY:"+icsEscape(e.Title))
-		if e.Location.Valid && e.Location.String != "" {
-			writeFolded(&b, "LOCATION:"+icsEscape(e.Location.String))
-		}
-		if e.Memo.Valid && e.Memo.String != "" {
-			writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Memo.String))
-		}
-		if e.URL.Valid && e.URL.String != "" {
-			writeFolded(&b, "URL:"+icsURI(e.URL.String))
+		if !x.masked {
+			if e.Location.Valid && e.Location.String != "" {
+				writeFolded(&b, "LOCATION:"+icsEscape(e.Location.String))
+			}
+			if e.Memo.Valid && e.Memo.String != "" {
+				writeFolded(&b, "DESCRIPTION:"+icsEscape(e.Memo.String))
+			}
+			if e.URL.Valid && e.URL.String != "" {
+				writeFolded(&b, "URL:"+icsURI(e.URL.String))
+			}
 		}
 		if class := icsClass(e.Visibility); class != "" {
 			writeFolded(&b, "CLASS:"+class)
@@ -760,9 +873,12 @@ func buildCSV(rows []exportEvent) []byte {
 	b.WriteString("Subject,Start Date,Start Time,End Date,End Time,All Day,Location,Description,URL\r\n")
 	for _, x := range rows {
 		e := x.event
-		// Render dates/times in the event's own timezone so all-day events do
-		// not shift a day for non-UTC users.
+		// Timed events render in their own zone; an all-day event is dates, so
+		// its bounds are read as UTC dates.
 		loc := loadLocationOrUTC(e.Timezone)
+		if e.AllDay {
+			loc = time.UTC
+		}
 		start := x.startAt.In(loc)
 		end := x.endAt.In(loc)
 		// All-day end is stored exclusively (midnight after the last day); show the
@@ -772,6 +888,10 @@ func buildCSV(rows []exportEvent) []byte {
 		if e.AllDay && end.After(start) {
 			endDate = end.AddDate(0, 0, -1).Format("2006-01-02")
 		}
+		location, memo, url := nullStringValue(e.Location), nullStringValue(e.Memo), nullStringValue(e.URL)
+		if x.masked {
+			location, memo, url = "", "", ""
+		}
 		fields := []string{
 			csvEscape(e.Title),
 			start.Format("2006-01-02"),
@@ -779,9 +899,9 @@ func buildCSV(rows []exportEvent) []byte {
 			endDate,
 			end.Format("15:04:05"),
 			fmt.Sprintf("%t", e.AllDay),
-			csvEscape(nullStringValue(e.Location)),
-			csvEscape(nullStringValue(e.Memo)),
-			csvEscape(nullStringValue(e.URL)),
+			csvEscape(location),
+			csvEscape(memo),
+			csvEscape(url),
 		}
 		b.WriteString(strings.Join(fields, ","))
 		b.WriteString("\r\n")

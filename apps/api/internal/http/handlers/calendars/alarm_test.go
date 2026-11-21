@@ -126,17 +126,17 @@ func TestAlarmDescriptionStaysOutOfTheMemo(t *testing.T) {
 	}
 }
 
-// TestOnlyShowableRemindersAreImported verifies an offset the picker cannot
-// display is dropped on the way in. Kept, it would be invisible to its owner
-// and cleared by their next edit without them choosing to.
-func TestOnlyShowableRemindersAreImported(t *testing.T) {
-	shown := int32(15)
-	if got := importAlarm(&shown); !got.Valid || got.Int32 != 15 {
-		t.Errorf("a reminder the picker offers should be kept, got %v", got)
+// TestRemindersInRangeAreImported verifies a reminder is kept whenever the
+// calendar can store it, and dropped when it is longer than that.
+func TestRemindersInRangeAreImported(t *testing.T) {
+	for _, minutes := range []int32{0, 15, 45, maxNotificationOffset} {
+		if got := importAlarm(&minutes); !got.Valid || got.Int32 != minutes {
+			t.Errorf("a reminder of %d minutes should be kept, got %v", minutes, got)
+		}
 	}
-	odd := int32(45)
-	if got := importAlarm(&odd); got.Valid {
-		t.Errorf("a reminder the picker cannot show should be dropped, got %v", got)
+	long := int32(maxNotificationOffset + 1)
+	if got := importAlarm(&long); got.Valid {
+		t.Errorf("a reminder longer than the calendar stores should be dropped, got %v", got)
 	}
 	if got := importAlarm(nil); got.Valid {
 		t.Errorf("no alarm should stay no reminder, got %v", got)

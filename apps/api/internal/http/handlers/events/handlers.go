@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"log/slog"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,10 +16,13 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -161,10 +164,11 @@ func flexibilityOrDefault(s string) generated.CalendarEventsFlexibility {
 }
 
 func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
-	return EventResponse{
+	resp := EventResponse{
 		ID:                 pubIDToHex(e.PublicID),
 		CalendarID:         pubIDToHex(calPubID),
 		Title:              e.Title,
+		Kind:               string(e.Kind),
 		AllDay:             e.AllDay,
 		StartAt:            nullTimeValue(e.StartAt),
 		EndAt:              nullTimeValue(e.EndAt),
@@ -182,27 +186,47 @@ func mapEvent(e generated.CalendarEvent, calPubID []byte) EventResponse {
 		TaskOwned:          e.TaskID.Valid,
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          nullTimeValue(e.UpdatedAt),
+		Etag:               eventETag(e),
 	}
+	if e.Kind == generated.CalendarEventsKindBlock && e.BlockLabel.Valid {
+		resp.BlockLabel = &e.BlockLabel.String
+	}
+	setDates(&resp)
+	return resp
+}
+
+const dateLayout = "2006-01-02"
+
+// setDates fills the date pair of an all-day response from its instants, which
+// sit on UTC midnights.
+func setDates(resp *EventResponse) {
+	if !resp.AllDay {
+		resp.StartDate, resp.EndDate = nil, nil
+		return
+	}
+	start, end := resp.StartAt.UTC().Format(dateLayout), resp.EndAt.UTC().Format(dateLayout)
+	resp.StartDate, resp.EndDate = &start, &end
 }
 
 // occurrenceDateKey renders the date half of a recurring instance's composite
-// id. The day is read in the event's own timezone, which is the zone the rule
-// is anchored in: a series that fires at the same wall-clock time every day
-// lands on a different UTC date either side of a DST transition, so two
-// neighbouring occurrences would share a key and one of them would be
-// impossible to address, edit or cancel.
-func occurrenceDateKey(t time.Time, tz string) string {
-	return t.In(recurrence.LoadLocation(tz)).Format("20060102")
+// id. The day is read in the zone the series expands in (recurrence.ExpansionZone):
+// a series that fires at the same wall-clock time every day lands on a different
+// UTC date either side of a DST transition, so two neighbouring occurrences would
+// share a key and one of them would be impossible to address, edit or cancel.
+func occurrenceDateKey(t time.Time, zone string) string {
+	return t.In(recurrence.LoadLocation(zone)).Format("20060102")
 }
 
 func mapRecurringInstance(e generated.CalendarEvent, calPubID []byte, occ recurrence.Occurrence) EventResponse {
 	resp := mapEvent(e, calPubID)
-	dateStr := occurrenceDateKey(occ.StartAt, e.Timezone)
+	dateStr := occurrenceDateKey(occ.StartAt, recurrence.ExpansionZone(e.AllDay, e.Timezone))
 	resp.ID = fmt.Sprintf("%s_%s", pubIDToHex(e.PublicID), dateStr)
 	resp.StartAt = occ.StartAt
 	resp.EndAt = occ.EndAt
+	setDates(&resp)
 	resp.IsRecurrence = true
 	resp.RecurrenceDate = &dateStr
+	resp.SeriesEtag = resp.Etag
 	return resp
 }
 
@@ -214,13 +238,14 @@ func mapOverrideInstance(master, child generated.CalendarEvent, calPubID []byte,
 	// The master's zone, not the override's: the override may have been moved
 	// into a different timezone, and the id has to keep naming the occurrence
 	// the series produced.
-	dateStr := occurrenceDateKey(originalStart, master.Timezone)
+	dateStr := occurrenceDateKey(originalStart, recurrence.ExpansionZone(master.AllDay, master.Timezone))
 	resp.ID = fmt.Sprintf("%s_%s", pubIDToHex(master.PublicID), dateStr)
 	// The rule belongs to the series; the override row deliberately carries
 	// none of its own, so read it off the master.
 	resp.RecurrenceRule = mapRecurrenceRule(master.RecurrenceRule)
 	resp.IsRecurrence = true
 	resp.RecurrenceDate = &dateStr
+	resp.SeriesEtag = eventETag(master)
 	return resp
 }
 
@@ -240,26 +265,6 @@ func eventETag(e generated.CalendarEvent) string {
 	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
 }
 
-// matchesETag reports whether a caller's If-Match names the revision on hand.
-// An empty header means the caller made no claim, which stays allowed: the
-// contract before this existed was last-write-wins, and refusing every
-// unconditional update would break callers that never sent one.
-func matchesETag(ifMatch string, e generated.CalendarEvent) bool {
-	ifMatch = strings.TrimSpace(ifMatch)
-	if ifMatch == "" || ifMatch == "*" {
-		return true
-	}
-	current := eventETag(e)
-	for _, tag := range strings.Split(ifMatch, ",") {
-		tag = strings.TrimSpace(tag)
-		tag = strings.TrimPrefix(tag, "W/")
-		if tag == current {
-			return true
-		}
-	}
-	return false
-}
-
 // parseCompositeID splits a recurring instance ID ("uuid_YYYYMMDD") into parent UUID and date.
 // Returns empty strings if the ID is not composite.
 func parseCompositeID(eventID string) (parentUUID string, dateStr string) {
@@ -272,36 +277,6 @@ func parseCompositeID(eventID string) (parentUUID string, dateStr string) {
 func validateTimezone(tz string) *apierrors.Spec {
 	if _, err := time.LoadLocation(tz); err != nil {
 		return apierrors.BadRequest
-	}
-	return nil
-}
-
-// supportedNotificationOffsets is the set of reminder offsets, in minutes
-// before the start, that a stored event may carry. Anything else is a value no
-// client can show or edit: the pickers offer exactly these, and an iCalendar
-// import drops an alarm that does not land on one.
-var supportedNotificationOffsets = map[int]bool{
-	0: true, 5: true, 10: true, 15: true, 30: true,
-	60: true, 120: true, 1440: true, 2880: true,
-}
-
-// SupportedNotificationOffset reports whether a reminder offset, in minutes
-// before the start, is one the clients can show and edit. Importers use it to
-// drop an alarm that does not land on one.
-func SupportedNotificationOffset(minutes int) bool {
-	return supportedNotificationOffsets[minutes]
-}
-
-// validateNotificationOffset rejects a reminder the product has no way to
-// represent. Checking it here rather than only in the picker is what keeps a
-// direct API caller from storing an offset that the event modal then silently
-// reads back as "no reminder". Returns nil when no reminder is set.
-func validateNotificationOffset(offset *int) *apierrors.Spec {
-	if offset == nil {
-		return nil
-	}
-	if !SupportedNotificationOffset(*offset) {
-		return apierrors.EventNotificationOffsetInvalid
 	}
 	return nil
 }
@@ -456,13 +431,14 @@ func occurrenceForDate(rule *recurrence.Rule, evt generated.CalendarEvent, dateS
 	if !evt.StartAt.Valid || !evt.EndAt.Valid {
 		return recurrence.Occurrence{}, fmt.Errorf("event has no dates to expand")
 	}
-	dayStart, err := occurrenceDayStart(dateStr, evt.Timezone)
+	zone := recurrence.ExpansionZone(evt.AllDay, evt.Timezone)
+	dayStart, err := occurrenceDayStart(dateStr, zone)
 	if err != nil {
 		return recurrence.Occurrence{}, err
 	}
 	dayEnd := dayStart.AddDate(0, 0, 1)
-	for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt.Time, evt.EndAt.Time, dayStart, dayEnd, evt.Timezone) {
-		if occurrenceDateKey(occ.StartAt, evt.Timezone) == dateStr {
+	for _, occ := range recurrence.ExpandInZone(rule, evt.StartAt.Time, evt.EndAt.Time, dayStart, dayEnd, zone) {
+		if occurrenceDateKey(occ.StartAt, zone) == dateStr {
 			return occ, nil
 		}
 	}
@@ -470,10 +446,10 @@ func occurrenceForDate(rule *recurrence.Rule, evt generated.CalendarEvent, dateS
 }
 
 // occurrenceDayStart turns the date half of a composite id back into the
-// instant the day begins in the event's timezone, which is the window the
+// instant the day begins in the series' expansion zone, which is the window the
 // occurrence it names can be found in.
-func occurrenceDayStart(dateStr, tz string) (time.Time, error) {
-	loc := recurrence.LoadLocation(tz)
+func occurrenceDayStart(dateStr, zone string) (time.Time, error) {
+	loc := recurrence.LoadLocation(zone)
 	day, err := time.ParseInLocation("20060102", dateStr, loc)
 	if err != nil {
 		return time.Time{}, err
@@ -493,7 +469,9 @@ func loadEventInCalendar(ctx context.Context, deps Deps, calID uint32, eventPubl
 		WorkspaceID: deps.WorkspaceID,
 		PublicID:    evtPub,
 	})
-	if err != nil || evt.CalendarID != calID {
+	// A row with no dates is a placeholder some other product keeps; no
+	// surface of this one returns it.
+	if err != nil || evt.CalendarID != calID || !evt.StartAt.Valid || !evt.EndAt.Valid {
 		return generated.CalendarEvent{}, apierrors.EventNotFound
 	}
 	return evt, nil
@@ -631,6 +609,72 @@ func requireEventEdit(ctx context.Context, q *generated.Queries, w eventAccess, 
 	return nil
 }
 
+// dateOnly matches the date form of a series bound and of a wire date.
+var dateOnly = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// Years an all-day date may name. The stored instant must stay representable
+// in the shared schema, and a date outside this range is a typo, not a plan.
+const (
+	minDateYear = 1000
+	maxDateYear = 9999
+)
+
+// parseDate reads a wire date and checks it names a real day in range.
+func parseDate(s string) (time.Time, *apierrors.Spec) {
+	d, err := time.Parse(dateLayout, s)
+	if err != nil || d.Year() < minDateYear || d.Year() > maxDateYear {
+		return time.Time{}, apierrors.EventDateInvalid
+	}
+	return d, nil
+}
+
+// allDayBounds turns an all-day date pair (end exclusive) into the UTC
+// midnights that are stored. A milestone is a point, so its end may equal its
+// start; every other event ends after it starts.
+func allDayBounds(startDate, endDate string, milestone bool) (time.Time, time.Time, *apierrors.Spec) {
+	start, spec := parseDate(startDate)
+	if spec != nil {
+		return time.Time{}, time.Time{}, spec
+	}
+	end, spec := parseDate(endDate)
+	if spec != nil {
+		return time.Time{}, time.Time{}, spec
+	}
+	if end.Before(start) || (end.Equal(start) && !milestone) {
+		return time.Time{}, time.Time{}, apierrors.EventDateRangeInvalid
+	}
+	return start, end, nil
+}
+
+// timedBounds parses the instants of a timed event.
+func timedBounds(startAt, endAt string) (time.Time, time.Time, *apierrors.Spec) {
+	start, err := time.Parse(time.RFC3339, startAt)
+	if err != nil {
+		return time.Time{}, time.Time{}, apierrors.BadRequest
+	}
+	end, err := time.Parse(time.RFC3339, endAt)
+	if err != nil || end.Before(start) {
+		return time.Time{}, time.Time{}, apierrors.BadRequest
+	}
+	return start, end, nil
+}
+
+// checkUntilForm refuses a series bound in the other kind's form: an all-day
+// series is bounded by a date, a timed one by an instant.
+func checkUntilForm(rule *json.RawMessage, allDay bool) *apierrors.Spec {
+	if rule == nil || len(*rule) == 0 || string(*rule) == "null" {
+		return nil
+	}
+	parsed, err := recurrence.ParseRule(*rule)
+	if err != nil || parsed == nil || parsed.Until == nil {
+		return nil
+	}
+	if dateOnly.MatchString(*parsed.Until) != allDay {
+		return apierrors.EventOccurrenceForm
+	}
+	return nil
+}
+
 func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEventOutput, error) {
 	return func(ctx context.Context, in *CreateEventInput) (*CreateEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -639,18 +683,22 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			return nil, toAPIError(err)
 		}
 
-		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
+		var startAt, endAt time.Time
+		var spec *apierrors.Spec
+		hasInstants := in.Body.StartAt != "" || in.Body.EndAt != ""
+		hasDates := in.Body.StartDate != "" || in.Body.EndDate != ""
+		if in.Body.AllDay {
+			if hasInstants || in.Body.StartDate == "" || in.Body.EndDate == "" {
+				return nil, apierrors.ToHuma(apierrors.EventAllDayShape)
+			}
+			startAt, endAt, spec = allDayBounds(in.Body.StartDate, in.Body.EndDate, false)
+		} else {
+			if hasDates {
+				return nil, apierrors.ToHuma(apierrors.EventAllDayShape)
+			}
+			startAt, endAt, spec = timedBounds(in.Body.StartAt, in.Body.EndAt)
 		}
-		endAt, err := time.Parse(time.RFC3339, in.Body.EndAt)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		if endAt.Before(startAt) {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
+		if spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
 
@@ -666,11 +714,15 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		if spec := validateTimezone(tz); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
-		if spec := checkRecurrenceRule(in.Body.RecurrenceRule, startAt, tz); spec != nil {
+		if spec := checkUntilForm(in.Body.RecurrenceRule, in.Body.AllDay); spec != nil {
+			return nil, apierrors.ToHuma(spec)
+		}
+		zone := recurrence.ExpansionZone(in.Body.AllDay, tz)
+		if spec := checkRecurrenceRule(in.Body.RecurrenceRule, startAt, zone); spec != nil {
 			return nil, apierrors.ToHuma(spec)
 		}
 
-		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, tz)
+		ruleData, recEnd := prepareRecurrence(in.Body.RecurrenceRule, startAt, endAt, zone)
 
 		var created generated.CalendarEvent
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
@@ -729,62 +781,249 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 		}
 		decorate(ctx, deps, &resp, created, cal.ID)
 
-		return &CreateEventOutput{ETag: eventETag(created), Body: resp}, nil
+		return &CreateEventOutput{ETag: resp.Etag, Body: resp}, nil
 	}
 }
 
-func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEventOutput, error) {
-	return func(ctx context.Context, in *UpdateEventInput) (*UpdateEventOutput, error) {
+// touchesHiddenField reports whether a patch names a field a reader with
+// hidden details may not write. Naming one is enough: a value equal to the
+// stored one would still confirm what it is.
+func touchesHiddenField(b *PatchEventInput) bool {
+	body := &b.Body
+	return body.Location.Present() || body.Memo.Present() || body.URL.Present() ||
+		body.Visibility != "" || body.OwnerID != nil || body.ParticipantIDs != nil
+}
+
+// checkTag compares the caller's If-Match with the revision the write is
+// measured against: the occurrence's own row when the write is confined to an
+// edited occurrence, else the series.
+func checkTag(ifMatch precondition.IfMatch, w eventAccess) error {
+	current := eventETag(w.evt)
+	if w.scope.confined && w.scope.override != nil {
+		current = eventETag(*w.scope.override)
+	}
+	switch err := ifMatch.Check(current); {
+	case err == nil:
+		return nil
+	case errors.Is(err, precondition.ErrStale):
+		return apierrors.EventStale
+	default:
+		return err
+	}
+}
+
+// resolvedPatch is a patch laid over the row it changes.
+type resolvedPatch struct {
+	edit  eventEdit
+	label patch.Field[string]
+}
+
+// resolvePatch lays a patch over the stored row and checks everything the
+// result must satisfy. w must come from lockEventAccess in q's transaction.
+func resolvePatch(ctx context.Context, q *generated.Queries, in *PatchEventInput, w eventAccess, userID uint32) (resolvedPatch, error) {
+	body := &in.Body
+	base := w.evt
+	if w.scope.confined && w.scope.override != nil {
+		base = *w.scope.override
+	}
+	baseStart, baseEnd := base.StartAt.Time, base.EndAt.Time
+	if w.scope.occurrence != nil {
+		baseStart, baseEnd = w.scope.shown()
+	}
+
+	allDay := base.AllDay
+	if body.AllDay != nil {
+		allDay = *body.AllDay
+	}
+	switching := allDay != base.AllDay
+	hasInstants := body.StartAt != "" || body.EndAt != ""
+	hasDates := body.StartDate != "" || body.EndDate != ""
+
+	var startAt, endAt time.Time
+	var spec *apierrors.Spec
+	if allDay {
+		if hasInstants || (switching && (body.StartDate == "" || body.EndDate == "")) {
+			return resolvedPatch{}, apierrors.EventAllDayShape
+		}
+		startDate, endDate := body.StartDate, body.EndDate
+		if startDate == "" {
+			startDate = baseStart.UTC().Format(dateLayout)
+		}
+		if endDate == "" {
+			endDate = baseEnd.UTC().Format(dateLayout)
+		}
+		startAt, endAt, spec = allDayBounds(startDate, endDate, base.Kind == generated.CalendarEventsKindMilestone)
+	} else {
+		if hasDates || (switching && (body.StartAt == "" || body.EndAt == "")) {
+			return resolvedPatch{}, apierrors.EventAllDayShape
+		}
+		startS, endS := body.StartAt, body.EndAt
+		if startS == "" {
+			startS = baseStart.Format(time.RFC3339)
+		}
+		if endS == "" {
+			endS = baseEnd.Format(time.RFC3339)
+		}
+		startAt, endAt, spec = timedBounds(startS, endS)
+	}
+	if spec != nil {
+		return resolvedPatch{}, spec
+	}
+
+	if body.Timezone != "" {
+		if spec := validateTimezone(body.Timezone); spec != nil {
+			return resolvedPatch{}, spec
+		}
+	}
+	if body.BlockLabel.Present() && base.Kind != generated.CalendarEventsKindBlock {
+		return resolvedPatch{}, apierrors.BadRequest
+	}
+
+	var rule *json.RawMessage
+	switch raw, ok := body.RecurrenceRule.Get(); {
+	case ok:
+		rule = &raw
+		if spec := checkUntilForm(rule, allDay); spec != nil {
+			return resolvedPatch{}, spec
+		}
+	case body.RecurrenceRule.IsNull():
+	case w.evt.TaskID.Valid:
+		// A projected event's rule belongs to its task; leaving it out is not
+		// a request to change it.
+	default:
+		rule = w.evt.RecurrenceRule
+	}
+
+	ownerID, spec := resolveOwner(ctx, q, w.cal.ID, body.OwnerID, 0, w.row.OwnerUserID)
+	if spec != nil {
+		return resolvedPatch{}, spec
+	}
+	participants, err := patchedParticipants(ctx, q, w, body.ParticipantIDs)
+	if err != nil {
+		return resolvedPatch{}, err
+	}
+
+	resolved := &UpdateEventInput{Scope: in.Scope}
+	r := &resolved.Body
+	r.Title = body.Title
+	if r.Title == "" {
+		r.Title = base.Title
+	}
+	r.AllDay = allDay
+	r.Timezone = body.Timezone
+	r.ShowAs, r.Flexibility, r.Visibility = body.ShowAs, body.Flexibility, body.Visibility
+	r.Location = patchedText(body.Location, base.Location)
+	r.Memo = patchedText(body.Memo, base.Memo)
+	r.URL = patchedText(body.URL, base.URL)
+	switch v, ok := body.NotificationOffset.Get(); {
+	case ok:
+		r.NotificationOffset = &v
+	case body.NotificationOffset.IsNull():
+	default:
+		r.NotificationOffset = nullInt32ToPtr(base.NotificationOffset)
+	}
+	r.RecurrenceRule = rule
+
+	return resolvedPatch{
+		edit: eventEdit{
+			body:         resolved,
+			actorID:      userID,
+			cal:          w.cal,
+			startAt:      startAt,
+			endAt:        endAt,
+			ownerID:      ownerID,
+			participants: participants,
+		},
+		label: body.BlockLabel,
+	}, nil
+}
+
+// patchedText is a text member after a patch: its value, empty for a null, the
+// stored one when left out.
+func patchedText(f patch.Field[string], stored sql.NullString) string {
+	if v, ok := f.Get(); ok {
+		return v
+	}
+	if f.IsNull() {
+		return ""
+	}
+	return nullStringValue(stored)
+}
+
+// patchedParticipants is the participant list after a patch: the one sent, or
+// the occurrence's current attendees when none was.
+func patchedParticipants(ctx context.Context, q *generated.Queries, w eventAccess, sent []string) ([]attendees.Person, error) {
+	if sent != nil {
+		people, spec := validateEventParticipants(ctx, q, w.cal.ID, sent)
+		if spec != nil {
+			return nil, spec
+		}
+		return people, nil
+	}
+	source := w.evt.ID
+	if w.scope.confined && w.scope.override != nil {
+		rows, err := q.ListAttendeeRowsByEvents(ctx, []sql.NullInt32{{Int32: int32(w.scope.override.ID), Valid: true}})
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) > 0 {
+			source = w.scope.override.ID
+		}
+	}
+	current, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(source), Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	people := make([]attendees.Person, 0, len(current))
+	for _, a := range current {
+		people = append(people, attendees.Person{PublicID: pubIDToHex(a.UserPublicID), UserID: a.UserID, Name: a.DisplayName})
+	}
+	return people, nil
+}
+
+func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEventOutput, error) {
+	return func(ctx context.Context, in *PatchEventInput) (*PatchEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, occurrenceDate, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
-		startAt, err := time.Parse(time.RFC3339, in.Body.StartAt)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		endAt, err := time.Parse(time.RFC3339, in.Body.EndAt)
-		if err != nil {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		if endAt.Before(startAt) {
-			return nil, apierrors.ToHuma(apierrors.BadRequest)
-		}
-		if spec := validateNotificationOffset(in.Body.NotificationOffset); spec != nil {
-			return nil, apierrors.ToHuma(spec)
-		}
-		if in.Body.Timezone != "" {
-			if spec := validateTimezone(in.Body.Timezone); spec != nil {
-				return nil, apierrors.ToHuma(spec)
-			}
-		}
-
 		var edited editedRows
+		var seen eventacl.Decision
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			w, err := lockEventAccess(ctx, q, cal, evt.ID, userID, occurrenceDate, in.Scope)
 			if err != nil {
 				return err
+			}
+			// What the reader may not see does not exist for them, and what is
+			// only masked may not be written through the mask. Both come before
+			// the version is compared: a refused field is refused whether the
+			// copy is fresh or old.
+			d, err := decideForWrite(ctx, q, w, userID)
+			if err != nil {
+				return err
+			}
+			if !d.Exists {
+				return apierrors.EventNotFound
+			}
+			seen = d
+			if d.DetailsHidden && touchesHiddenField(in) {
+				return apierrors.EventDetailsHidden
 			}
 			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
 				return err
 			}
 			// A stale copy is reported as stale before its contents are judged:
 			// what it names may have changed since, a member who has left included.
-			// The tag names the series row, which every scope writes.
-			if !matchesETag(in.IfMatch, w.evt) {
-				return apierrors.EventStale
+			if err := checkTag(in.IfMatch, w); err != nil {
+				return err
 			}
-			ownerID, spec := resolveOwner(ctx, q, cal.ID, in.Body.OwnerID, 0, w.row.OwnerUserID)
-			if spec != nil {
-				return spec
+			resolved, err := resolvePatch(ctx, q, in, w, userID)
+			if err != nil {
+				return err
 			}
-			participants, spec := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
-			if spec != nil {
-				return spec
-			}
-			regrants, err := changesGrants(ctx, q, w.row, ownerID, participants)
+			regrants, err := changesGrants(ctx, q, w.row, resolved.edit.ownerID, resolved.edit.participants)
 			if err != nil {
 				return err
 			}
@@ -793,19 +1032,16 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 					return err
 				}
 			}
-			edit := eventEdit{
-				body:         in,
-				actorID:      userID,
-				cal:          cal,
-				startAt:      startAt,
-				endAt:        endAt,
-				ownerID:      ownerID,
-				participants: participants,
-			}
 			if w.scope.confined {
-				edited, err = editOccurrence(ctx, q, deps, edit, w)
+				edited, err = editOccurrence(ctx, q, deps, resolved.edit, w)
 			} else {
-				edited, err = editSeries(ctx, q, deps, edit, w)
+				edited, err = editSeries(ctx, q, deps, resolved.edit, w)
+			}
+			if err != nil {
+				return err
+			}
+			if resolved.label.Present() {
+				edited, err = setBlockLabel(ctx, q, edited, resolved.label)
 			}
 			return err
 		})
@@ -821,15 +1057,43 @@ func UpdateEvent(deps Deps) func(context.Context, *UpdateEventInput) (*UpdateEve
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		// The tag names the series row, which every edit touches.
-		return &UpdateEventOutput{ETag: eventETag(edited.series), Body: resp}, nil
+		withhold(&resp, seen)
+		return &PatchEventOutput{ETag: resp.Etag, Body: resp}, nil
 	}
+}
+
+// setBlockLabel writes a block's label on the row the edit produced and
+// re-reads the rows the response is rendered from.
+func setBlockLabel(ctx context.Context, q *generated.Queries, edited editedRows, label patch.Field[string]) (editedRows, error) {
+	target := &edited.series
+	if edited.override != nil {
+		target = edited.override
+	}
+	value, _ := label.Get()
+	if err := q.SetCalendarEventBlockLabel(ctx, generated.SetCalendarEventBlockLabelParams{
+		BlockLabel: nullString(value), ID: target.ID,
+	}); err != nil {
+		return edited, err
+	}
+	series, err := q.GetCalendarEventByID(ctx, edited.series.ID)
+	if err != nil {
+		return edited, err
+	}
+	edited.series = series
+	if edited.override != nil {
+		override, err := q.GetCalendarEventByID(ctx, edited.override.ID)
+		if err != nil {
+			return edited, err
+		}
+		edited.override = &override
+	}
+	return edited, nil
 }
 
 func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEventOutput, error) {
 	return func(ctx context.Context, in *DeleteEventInput) (*DeleteEventOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, occurrenceDate, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, occurrenceDate, err := eventTarget(ctx, deps, in.CalendarID, in.EventID, userID, resolveCalendar)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -839,7 +1103,23 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 			if err != nil {
 				return err
 			}
-			if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
+			d, err := decideForWrite(ctx, q, w, userID)
+			if err != nil {
+				return err
+			}
+			if !d.Exists {
+				return apierrors.EventNotFound
+			}
+			// Removing a whole series takes every occurrence with it, which an
+			// attendee holding an edit grant may not do to the owner's plans.
+			need := editFields
+			if !w.scope.confined && w.evt.RecurrenceRule != nil {
+				need = editGrants
+			}
+			if err := requireEventEdit(ctx, q, w, userID, need); err != nil {
+				return err
+			}
+			if err := checkTag(in.IfMatch, w); err != nil {
 				return err
 			}
 			// A task-projected event goes with its task (PROTOCOL.md
@@ -873,11 +1153,12 @@ func DeleteEvent(deps Deps) func(context.Context, *DeleteEventInput) (*DeleteEve
 // other's.
 func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
 	originalStart := w.scope.occurrence.StartAt
-	column, err := recurrence.ParseExceptions(w.evt.RecurrenceExceptions).With(originalStart).MarshalColumn()
+	column, err := recurrence.ParseExceptionList(w.evt.RecurrenceExceptions).
+		With(originalStart, w.evt.AllDay, w.evt.Timezone).MarshalColumn()
 	if err != nil {
 		return err
 	}
-	if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
+	if err := q.SetCancelledOccurrences(ctx, generated.SetCancelledOccurrencesParams{
 		RecurrenceExceptions: column,
 		ID:                   w.evt.ID,
 	}); err != nil {
@@ -899,9 +1180,19 @@ func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, acto
 
 // deleteWholeEvent retires a one-off event or a whole series with its
 // attachments. A retired attachment keeps its reference on the blob until the
-// cleanup sweep removes the row, so no count changes here.
+// cleanup sweep removes the row, so no count changes here. The attachments are
+// named in the log row, so a restore brings back exactly the ones this
+// deletion took.
 func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
-	return eventstore.SoftDelete(ctx, q, deps.WorkspaceID, w.cal.ID, actorID, w.evt, nil)
+	live, err := q.ListLiveAttachmentPublicIDsByEvent(ctx, sql.NullInt32{Int32: int32(w.evt.ID), Valid: true})
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(live))
+	for _, id := range live {
+		ids = append(ids, pubIDToHex(id))
+	}
+	return eventstore.SoftDelete(ctx, q, deps.WorkspaceID, w.cal.ID, actorID, w.evt, map[string]any{"attachmentIds": ids})
 }
 
 // logEventActivity records something that happened to an event -- a comment, a

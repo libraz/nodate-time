@@ -8,6 +8,12 @@ INNER JOIN storage_objects so ON so.id = a.storage_object_id
 WHERE a.event_id = ? AND a.enabled = TRUE
 ORDER BY a.created_at;
 
+-- CountEventAttachments is the number of live attachments of an event, read
+-- under the event's row lock by the write that would add one.
+-- name: CountEventAttachments :one
+SELECT COUNT(*) FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE;
+
 -- name: GetAttachmentByPublicID :one
 SELECT a.*, so.storage_key, so.content_type, so.byte_size
 FROM calendar_event_attachments a

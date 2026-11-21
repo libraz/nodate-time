@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/events"
 )
 
@@ -18,6 +19,7 @@ func registerEvents(g apiGroups, deps Deps) {
 		Path:        "/calendars/{calendarId}/events",
 		Summary:     "List events in a calendar",
 		Tags:        []string{"Event"},
+		Errors:      errorStatuses(apierrors.BadRequest, apierrors.Validation),
 	}, events.ListEvents(evtDeps))
 
 	huma.Register(api, huma.Operation{
@@ -26,6 +28,7 @@ func registerEvents(g apiGroups, deps Deps) {
 		Path:        "/calendars/{calendarId}/events/{eventId}",
 		Summary:     "Get an event",
 		Tags:        []string{"Event"},
+		Errors:      errorStatuses(apierrors.EventNotFound),
 	}, events.GetEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{
@@ -35,22 +38,31 @@ func registerEvents(g apiGroups, deps Deps) {
 		Summary:       "Create an event",
 		Tags:          []string{"Event"},
 		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.BadRequest, apierrors.EventAllDayShape, apierrors.Validation,
+			apierrors.EventDateInvalid, apierrors.EventDateRangeInvalid, apierrors.EventOccurrenceForm),
 	}, events.CreateEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{
 		OperationID: "update-event",
-		Method:      http.MethodPut,
+		Method:      http.MethodPatch,
 		Path:        "/calendars/{calendarId}/events/{eventId}",
 		Summary:     "Update an event",
 		Tags:        []string{"Event"},
+		Errors: preconditionedErrors(apierrors.EventNotFound, apierrors.EventDetailsHidden, apierrors.EventEditDenied,
+			apierrors.EventStale, apierrors.Validation,
+			apierrors.EventAllDayShape, apierrors.EventDateInvalid, apierrors.EventDateRangeInvalid,
+			apierrors.EventOccurrenceForm, apierrors.EventTaskOwned),
 	}, events.UpdateEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "delete-event",
-		Method:      http.MethodDelete,
-		Path:        "/calendars/{calendarId}/events/{eventId}",
-		Summary:     "Delete an event",
-		Tags:        []string{"Event"},
+		OperationID:   "delete-event",
+		Method:        http.MethodDelete,
+		Path:          "/calendars/{calendarId}/events/{eventId}",
+		Summary:       "Delete an event",
+		Tags:          []string{"Event"},
+		DefaultStatus: http.StatusNoContent,
+		Errors: preconditionedErrors(apierrors.EventNotFound, apierrors.EventEditDenied, apierrors.EventStale,
+			apierrors.EventTaskOwned),
 	}, events.DeleteEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{

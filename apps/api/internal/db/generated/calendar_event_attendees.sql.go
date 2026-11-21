@@ -11,6 +11,31 @@ import (
 	"strings"
 )
 
+const addDisabledOverrideAttendee = `-- name: AddDisabledOverrideAttendee :exec
+INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id, enabled)
+VALUES (?, ?, ?, ?, FALSE)
+`
+
+type AddDisabledOverrideAttendeeParams struct {
+	PublicID    []byte        `json:"publicId"`
+	WorkspaceID uint32        `json:"workspaceId"`
+	EventID     sql.NullInt32 `json:"eventId"`
+	UserID      uint32        `json:"userId"`
+}
+
+// AddDisabledOverrideAttendee records that somebody on the series does not
+// attend an override created in this transaction. Such a row is what keeps the
+// override from inheriting the series' attendees.
+func (q *Queries) AddDisabledOverrideAttendee(ctx context.Context, arg AddDisabledOverrideAttendeeParams) error {
+	_, err := q.db.ExecContext(ctx, addDisabledOverrideAttendee,
+		arg.PublicID,
+		arg.WorkspaceID,
+		arg.EventID,
+		arg.UserID,
+	)
+	return err
+}
+
 const addEventAttendee = `-- name: AddEventAttendee :exec
 INSERT INTO calendar_event_attendees (public_id, workspace_id, event_id, user_id)
 VALUES (?, ?, ?, ?)
@@ -36,6 +61,20 @@ func (q *Queries) AddEventAttendee(ctx context.Context, arg AddEventAttendeePara
 		arg.UserID,
 	)
 	return err
+}
+
+const countEventAttendeeRows = `-- name: CountEventAttendeeRows :one
+SELECT COUNT(*) FROM calendar_event_attendees WHERE event_id = ?
+`
+
+// CountEventAttendeeRows counts every attendee row of an event, enabled or
+// not: an override with any row replaces the series' attendees, and one with
+// none inherits them.
+func (q *Queries) CountEventAttendeeRows(ctx context.Context, eventID sql.NullInt32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countEventAttendeeRows, eventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const disableCalendarAttendee = `-- name: DisableCalendarAttendee :exec
@@ -281,6 +320,46 @@ func (q *Queries) ListEventAttendeesByEvents(ctx context.Context, eventIds []sql
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventIDsWithAttendeeRows = `-- name: ListEventIDsWithAttendeeRows :many
+SELECT DISTINCT event_id FROM calendar_event_attendees
+WHERE event_id IN (/*SLICE:event_ids*/?)
+`
+
+// ListEventIDsWithAttendeeRows names which of the events have an attendee row
+// of any state.
+func (q *Queries) ListEventIDsWithAttendeeRows(ctx context.Context, eventIds []sql.NullInt32) ([]sql.NullInt32, error) {
+	query := listEventIDsWithAttendeeRows
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []sql.NullInt32
+	for rows.Next() {
+		var event_id sql.NullInt32
+		if err := rows.Scan(&event_id); err != nil {
+			return nil, err
+		}
+		items = append(items, event_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

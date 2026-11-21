@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/blobref"
@@ -12,13 +13,40 @@ import (
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
 )
 
-// maxChecklistItemsListed caps one event's checklist. The list is read as a
-// whole -- it is what somebody ticks off -- so splitting it across pages
-// would be a worse answer than the ceiling; this only keeps a runaway writer
-// from making one modal unbounded.
-const maxChecklistItemsListed = 500
+// maxChecklistItems is the most live items one event's checklist holds. The
+// list is read as a whole -- it is what somebody ticks off -- so it is bounded
+// when an item is added rather than paged.
+const maxChecklistItems = 500
+
+// rowETag names one revision of a row from its last write, in the same form
+// as an event's tag.
+func rowETag(updated sql.NullTime, created time.Time) string {
+	stamp := created
+	if updated.Valid {
+		stamp = updated.Time
+	}
+	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
+}
+
+// checkIfMatch compares an If-Match with the current tag of a row, answering
+// with the resource's own stale error when it names another revision.
+func checkIfMatch(h precondition.IfMatch, current string, stale *apierrors.Spec) error {
+	err := h.Check(current)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, precondition.ErrStale):
+		return stale
+	}
+	return apierrors.BadIfMatch
+}
+
+func checklistETag(item generated.CalendarEventChecklistItem) string {
+	return rowETag(item.UpdatedAt, item.CreatedAt)
+}
 
 func mapChecklistItem(item generated.CalendarEventChecklistItem) ChecklistItemResponse {
 	return ChecklistItemResponse{
@@ -26,6 +54,7 @@ func mapChecklistItem(item generated.CalendarEventChecklistItem) ChecklistItemRe
 		Title:     item.Title,
 		Done:      item.Done,
 		SortOrder: int(item.SortWeight),
+		ETag:      checklistETag(item),
 		CreatedAt: item.CreatedAt,
 	}
 }
@@ -34,12 +63,7 @@ func mapChecklistItem(item generated.CalendarEventChecklistItem) ChecklistItemRe
 func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*ListChecklistOutput, error) {
 	return func(ctx context.Context, in *ListChecklistInput) (*ListChecklistOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -47,7 +71,6 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 		rows, err := deps.Queries.ListChecklistItems(ctx, generated.ListChecklistItemsParams{
 			WorkspaceID: deps.WorkspaceID,
 			EventID:     evt.ID,
-			Limit:       maxChecklistItemsListed,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -65,7 +88,7 @@ func ListChecklistItems(deps Deps) func(context.Context, *ListChecklistInput) (*
 func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *CreateChecklistItemInput) (*CreateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -76,9 +99,19 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 		}
 		var item generated.CalendarEventChecklistItem
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			w, err := lockDetailEdit(ctx, q, cal, evt.ID, userID)
 			if err != nil {
 				return err
+			}
+			count, err := q.CountChecklistItems(ctx, generated.CountChecklistItemsParams{
+				WorkspaceID: deps.WorkspaceID,
+				EventID:     w.evt.ID,
+			})
+			if err != nil {
+				return err
+			}
+			if count >= maxChecklistItems {
+				return apierrors.ChecklistLimitReached
 			}
 			if _, err := q.CreateChecklistItem(ctx, generated.CreateChecklistItemParams{
 				PublicID:        pubID[:],
@@ -101,7 +134,8 @@ func CreateChecklistItem(deps Deps) func(context.Context, *CreateChecklistItemIn
 			return nil, toAPIError(err)
 		}
 
-		return &CreateChecklistItemOutput{Body: mapChecklistItem(item)}, nil
+		resp := mapChecklistItem(item)
+		return &CreateChecklistItemOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
@@ -125,14 +159,20 @@ func lockChecklistItem(ctx context.Context, q *generated.Queries, eventID uint32
 func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 	return func(ctx context.Context, in *UpdateChecklistItemInput) (*UpdateChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		// No member is nullable: there is no empty title, state or position
+		// to clear it to.
+		title, hasTitle := in.Body.Title.Get()
+		if in.Body.Title.IsNull() || in.Body.Done.IsNull() || in.Body.SortOrder.IsNull() {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
 		var updated generated.CalendarEventChecklistItem
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			w, err := lockDetailEdit(ctx, q, cal, evt.ID, userID)
 			if err != nil {
 				return err
 			}
@@ -140,19 +180,21 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			if err != nil {
 				return err
 			}
+			if err := checkIfMatch(in.IfMatch, checklistETag(item), apierrors.ChecklistStale); err != nil {
+				return err
+			}
 			// Every field keeps its stored value when omitted, merged over the
 			// row as it stands under the lock rather than as it was first read.
-			title := item.Title
-			if in.Body.Title != nil {
-				title = *in.Body.Title
+			if !hasTitle {
+				title = item.Title
 			}
 			done := item.Done
-			if in.Body.Done != nil {
-				done = *in.Body.Done
+			if v, ok := in.Body.Done.Get(); ok {
+				done = v
 			}
 			sortOrder := item.SortWeight
-			if in.Body.SortOrder != nil {
-				sortOrder = int32(*in.Body.SortOrder)
+			if v, ok := in.Body.SortOrder.Get(); ok {
+				sortOrder = int32(v)
 			}
 			if err := q.UpdateChecklistItem(ctx, generated.UpdateChecklistItemParams{
 				Title:      title,
@@ -172,7 +214,8 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 			return nil, toAPIError(err)
 		}
 
-		return &UpdateChecklistItemOutput{Body: mapChecklistItem(updated)}, nil
+		resp := mapChecklistItem(updated)
+		return &UpdateChecklistItemOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
@@ -182,18 +225,21 @@ func UpdateChecklistItem(deps Deps) func(context.Context, *UpdateChecklistItemIn
 func DeleteChecklistItem(deps Deps) func(context.Context, *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 	return func(ctx context.Context, in *DeleteChecklistItemInput) (*DeleteChecklistItemOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
 
 		if err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
-			w, err := lockEventEdit(ctx, q, cal, evt.ID, userID)
+			w, err := lockDetailEdit(ctx, q, cal, evt.ID, userID)
 			if err != nil {
 				return err
 			}
 			item, err := lockChecklistItem(ctx, q, w.evt.ID, in.ItemID)
 			if err != nil {
+				return err
+			}
+			if err := checkIfMatch(in.IfMatch, checklistETag(item), apierrors.ChecklistStale); err != nil {
 				return err
 			}
 			res, err := q.SoftDeleteChecklistItem(ctx, item.ID)

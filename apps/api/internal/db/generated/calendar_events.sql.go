@@ -510,6 +510,54 @@ func (q *Queries) IsCalendarEventFromSource(ctx context.Context, arg IsCalendarE
 	return from_source, err
 }
 
+const listAttendeeRowsByEvents = `-- name: ListAttendeeRowsByEvents :many
+SELECT event_id, user_id, enabled FROM calendar_event_attendees
+WHERE event_id IN (/*SLICE:event_ids*/?)
+`
+
+type ListAttendeeRowsByEventsRow struct {
+	EventID sql.NullInt32 `json:"eventId"`
+	UserID  uint32        `json:"userId"`
+	Enabled bool          `json:"enabled"`
+}
+
+// ListAttendeeRowsByEvents reads every attendee row of the events asked about,
+// disabled ones included. An override with any row at all, enabled or not,
+// replaces the series' attendees for its occurrence, so the presence of a row
+// is itself the answer to "does this occurrence inherit".
+func (q *Queries) ListAttendeeRowsByEvents(ctx context.Context, eventIds []sql.NullInt32) ([]ListAttendeeRowsByEventsRow, error) {
+	query := listAttendeeRowsByEvents
+	var queryParams []interface{}
+	if len(eventIds) > 0 {
+		for _, v := range eventIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", strings.Repeat(",?", len(eventIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:event_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAttendeeRowsByEventsRow
+	for rows.Next() {
+		var i ListAttendeeRowsByEventsRow
+		if err := rows.Scan(&i.EventID, &i.UserID, &i.Enabled); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCalendarEventsByCalendarAndRange = `-- name: ListCalendarEventsByCalendarAndRange :many
 SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, source_uid, source_uid_key, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events
 WHERE calendar_id = ?
@@ -759,6 +807,37 @@ func (q *Queries) ListEventPeople(ctx context.Context, arg ListEventPeopleParams
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiveAttachmentPublicIDsByEvent = `-- name: ListLiveAttachmentPublicIDsByEvent :many
+SELECT public_id FROM calendar_event_attachments
+WHERE event_id = ? AND enabled = TRUE
+ORDER BY id
+`
+
+// ListLiveAttachmentPublicIDsByEvent names the attachments a deletion is about
+// to retire, so the deletion's log row can say which ones a restore brings back.
+func (q *Queries) ListLiveAttachmentPublicIDsByEvent(ctx context.Context, eventID sql.NullInt32) ([][]byte, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveAttachmentPublicIDsByEvent, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items [][]byte
+	for rows.Next() {
+		var public_id []byte
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -1215,6 +1294,40 @@ func (q *Queries) RetimeRecurrenceOverride(ctx context.Context, arg RetimeRecurr
 		arg.EndAt,
 		arg.ID,
 	)
+	return err
+}
+
+const setCalendarEventBlockLabel = `-- name: SetCalendarEventBlockLabel :exec
+UPDATE calendar_events SET block_label = ? WHERE id = ? AND kind = 'block'
+`
+
+type SetCalendarEventBlockLabelParams struct {
+	BlockLabel sql.NullString `json:"blockLabel"`
+	ID         uint32         `json:"id"`
+}
+
+// SetCalendarEventBlockLabel writes the free-text label a block carries.
+func (q *Queries) SetCalendarEventBlockLabel(ctx context.Context, arg SetCalendarEventBlockLabelParams) error {
+	_, err := q.db.ExecContext(ctx, setCalendarEventBlockLabel, arg.BlockLabel, arg.ID)
+	return err
+}
+
+const setCancelledOccurrences = `-- name: SetCancelledOccurrences :exec
+UPDATE calendar_events SET recurrence_exceptions = ?, updated_at = updated_at WHERE id = ?
+`
+
+type SetCancelledOccurrencesParams struct {
+	RecurrenceExceptions *json.RawMessage `json:"recurrenceExceptions"`
+	ID                   uint32           `json:"id"`
+}
+
+// SetCancelledOccurrences is SetRecurrenceExceptions for one more cancelled
+// occurrence. It leaves the series' revision alone: a copy of a sibling
+// occurrence says nothing about the one cancelled, so it stays valid to write
+// from, and a writer of the whole series cannot undo a cancellation it does
+// not carry.
+func (q *Queries) SetCancelledOccurrences(ctx context.Context, arg SetCancelledOccurrencesParams) error {
+	_, err := q.db.ExecContext(ctx, setCancelledOccurrences, arg.RecurrenceExceptions, arg.ID)
 	return err
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
 	"github.com/libraz/nodate-time/apps/api/internal/memberpalette"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
@@ -29,12 +31,6 @@ type Deps struct {
 	// is what the importing client reports as the file's source.
 	AppName string
 }
-
-// maxMembersListed caps one membership response. Callers want the whole list
-// -- a participant picker that cannot offer somebody who is in the calendar
-// is worse than a ceiling -- so this is a ceiling on cost rather than a page
-// size, set well above any membership a shared calendar plausibly has.
-const maxMembersListed = 500
 
 // maxCandidatesListed is one screen of a picker; a larger workspace is
 // narrowed by searching rather than scrolled.
@@ -79,12 +75,37 @@ func nullString(s string) sql.NullString {
 func mapCalendar(c generated.Calendar, role generated.CalendarMembersRole, memberColor string) CalendarResponse {
 	return CalendarResponse{
 		ID:          pubIDToHex(c.PublicID),
+		ETag:        calendarETag(c),
 		Name:        c.Name,
 		Color:       c.Color,
 		CreatedAt:   c.CreatedAt,
 		Role:        string(role),
 		MemberColor: memberColor,
 	}
+}
+
+// calendarETag is the strong tag of a calendar's current revision, the time of
+// its last write at the millisecond the column holds.
+func calendarETag(c generated.Calendar) string {
+	stamp := c.CreatedAt
+	if c.UpdatedAt.Valid {
+		stamp = c.UpdatedAt.Time
+	}
+	return `"` + stamp.UTC().Format("20060102T150405.000") + `"`
+}
+
+// checkIfMatch compares the caller's If-Match with the calendar's current tag.
+func checkIfMatch(header precondition.IfMatch, c generated.Calendar) error {
+	err := header.Check(calendarETag(c))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, precondition.ErrStale):
+		return apierrors.CalendarStale
+	case errors.Is(err, precondition.ErrMalformed):
+		return apierrors.BadIfMatch
+	}
+	return err
 }
 
 // publicShared reports whether the calendar currently exposes an active
@@ -185,6 +206,7 @@ func ListCalendars(deps Deps) func(context.Context, *ListCalendarsInput) (*ListC
 				Name:        c.Name,
 				Color:       c.Color,
 				OwnerUserID: c.OwnerUserID,
+				UpdatedAt:   c.UpdatedAt,
 				CreatedAt:   c.CreatedAt,
 			}
 			response := mapCalendarWithCover(deps, calendar, c.MemberRole, c.MemberColor, coverKeys[c.ID])
@@ -211,7 +233,7 @@ func GetCalendar(deps Deps) func(context.Context, *GetCalendarInput) (*GetCalend
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &GetCalendarOutput{Body: resp}, nil
+		return &GetCalendarOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
@@ -221,6 +243,9 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 
 		var created generated.Calendar
 		err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			if err := calresolve.RequireRoomForCalendar(ctx, q, deps.WorkspaceID, userID); err != nil {
+				return err
+			}
 			var err error
 			created, err = calresolve.SetUp(ctx, q, deps.WorkspaceID, userID, in.Body.Name, in.Body.Color)
 			return err
@@ -241,6 +266,9 @@ func CreateCalendar(deps Deps) func(context.Context, *CreateCalendarInput) (*Cre
 func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 	return func(ctx context.Context, in *UpdateCalendarInput) (*UpdateCalendarOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
+		if in.Body.Name.IsNull() || in.Body.Color.IsNull() {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
 		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
@@ -263,16 +291,19 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 			if err != nil {
 				return err
 			}
+			if err := checkIfMatch(in.IfMatch, current); err != nil {
+				return err
+			}
 
-			// All fields are optional: when omitted, keep the current values so a
-			// partial update does not blank out other fields.
+			// Absent members keep the current values so a partial update does
+			// not blank out other fields; neither member can be cleared.
 			name := current.Name
-			if in.Body.Name != nil {
-				name = *in.Body.Name
+			if v, ok := in.Body.Name.Get(); ok {
+				name = v
 			}
 			color := current.Color
-			if in.Body.Color != nil {
-				color = *in.Body.Color
+			if v, ok := in.Body.Color.Get(); ok {
+				color = v
 			}
 			if err := q.UpdateCalendar(ctx, generated.UpdateCalendarParams{
 				Name:  name,
@@ -310,7 +341,7 @@ func UpdateCalendar(deps Deps) func(context.Context, *UpdateCalendarInput) (*Upd
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
 		}
-		return &UpdateCalendarOutput{Body: resp}, nil
+		return &UpdateCalendarOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
@@ -334,6 +365,13 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 			}
 			if !calresolve.CanOwn(owner.Role) {
 				return apierrors.CalendarRoleRequired
+			}
+			current, err := q.GetCalendarByIDForUpdate(ctx, cal.ID)
+			if err != nil {
+				return err
+			}
+			if err := checkIfMatch(in.IfMatch, current); err != nil {
+				return err
 			}
 			// Retire this calendar's attachments. A retired row keeps its
 			// reference on the blob until the cleanup sweep removes it, so the
@@ -371,7 +409,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 
 		rows, err := deps.Queries.ListCalendarMembers(ctx, generated.ListCalendarMembersParams{
 			CalendarID: cal.ID,
-			Limit:      maxMembersListed,
+			Limit:      math.MaxInt32,
 		})
 		if err != nil {
 			return nil, apierrors.ToHuma(apierrors.InternalUnexpected)
@@ -457,6 +495,17 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 
 		var color string
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// The calendar is locked before either count is taken, so two
+			// additions cannot both find room for the last place.
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
+				return err
+			}
+			if err := calresolve.RequireRoomForMember(ctx, q, cal.ID); err != nil {
+				return err
+			}
+			if err := calresolve.RequireRoomForCalendar(ctx, q, deps.WorkspaceID, target.ID); err != nil {
+				return err
+			}
 			var err error
 			color, err = calresolve.AddMember(ctx, q, cal, actorID, target, role)
 			return err
@@ -743,7 +792,7 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 			}); err != nil {
 				return err
 			}
-			if err := releaseMemberEvents(ctx, q, cal.ID, target.ID); err != nil {
+			if err := releaseMemberEvents(ctx, q, deps.WorkspaceID, cal.ID, actorID, target.ID); err != nil {
 				return err
 			}
 			return eventlog.Append(ctx, q, eventlog.Entry{
@@ -768,7 +817,7 @@ func RemoveMember(deps Deps) func(context.Context, *RemoveMemberInput) (*RemoveM
 // so leaving either behind would make the event impossible to save as read.
 // The series touched get a new revision, so a copy read before the departure
 // is refused as stale rather than as invalid.
-func releaseMemberEvents(ctx context.Context, q *generated.Queries, calendarID, userID uint32) error {
+func releaseMemberEvents(ctx context.Context, q *generated.Queries, workspaceID, calendarID, actorID, userID uint32) error {
 	series, err := q.ListSeriesTouchingMember(ctx, generated.ListSeriesTouchingMemberParams{
 		UserID:     userID,
 		CalendarID: calendarID,
@@ -777,6 +826,14 @@ func releaseMemberEvents(ctx context.Context, q *generated.Queries, calendarID, 
 		return err
 	}
 	heir, err := q.GetLongestStandingOwner(ctx, calendarID)
+	if err != nil {
+		return err
+	}
+	// Read before the hand-over: afterwards nothing names the previous owner.
+	handedOver, err := q.ListEventsOwnedBy(ctx, generated.ListEventsOwnedByParams{
+		CalendarID:  calendarID,
+		OwnerUserID: userID,
+	})
 	if err != nil {
 		return err
 	}
@@ -793,7 +850,32 @@ func releaseMemberEvents(ctx context.Context, q *generated.Queries, calendarID, 
 	}); err != nil {
 		return err
 	}
-	return q.TouchCalendarEvents(ctx, series)
+	if err := q.TouchCalendarEvents(ctx, series); err != nil {
+		return err
+	}
+	return logOwnerReassigned(ctx, q, workspaceID, calendarID, actorID, handedOver)
+}
+
+// logOwnerReassigned records, for each event that changed hands, that its
+// owner changed, so the event's history shows why its owner is someone else.
+func logOwnerReassigned(
+	ctx context.Context, q *generated.Queries, workspaceID, calendarID, actorID uint32,
+	events []generated.ListEventsOwnedByRow,
+) error {
+	for _, e := range events {
+		if err := eventlog.Append(ctx, q, eventlog.Entry{
+			WorkspaceID: workspaceID,
+			CalendarID:  calendarID,
+			ActorUserID: actorID,
+			Type:        eventlog.TypeEventUpdated,
+			Title:       e.Title,
+			Subject:     e.PublicID,
+			Extra:       map[string]any{"changes": []string{"owner"}},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // labelPalette builds the colour list, one entry per colour, with the name as

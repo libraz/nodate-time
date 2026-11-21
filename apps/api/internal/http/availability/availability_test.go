@@ -1,6 +1,7 @@
 package availability
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
@@ -37,7 +38,7 @@ func TestAllDaySeriesEndsAtLocalMidnightAcrossSpringForward(t *testing.T) {
 		StartAt: sql.NullTime{Time: day(1).UTC(), Valid: true}, EndAt: sql.NullTime{Time: day(2).UTC(), Valid: true},
 	}
 	scan := calendarScan{window: Slot{day(8), day(10)}}
-	require.NoError(t, scan.series(parent, nil, map[uint32]bool{1: true}))
+	require.NoError(t, scan.series(context.Background(), parent, nil, map[uint32]bool{1: true}))
 	require.Equal(t, []State{Hard, Open}, scan.busy.states([]Slot{
 		{day(9).Add(-time.Minute), day(9)}, {day(9), day(9).Add(time.Minute)},
 	}))
@@ -48,8 +49,21 @@ func TestAvailabilityFailsClosedForUncheckedRecurrence(t *testing.T) {
 	rule := json.RawMessage(`{"freq":"hourly"}`)
 	parent := generated.CalendarEvent{ID: 1, RecurrenceRule: &rule, StartAt: sql.NullTime{Time: start, Valid: true}}
 	scan := calendarScan{window: Slot{start, start.Add(time.Hour)}}
-	require.ErrorIs(t, scan.series(parent, nil, nil), ErrLimit)
+	require.ErrorIs(t, scan.series(context.Background(), parent, nil, nil), ErrLimit)
 	rule = json.RawMessage(`{"freq":"daily"}`)
 	parent.EndAt = sql.NullTime{Time: start.AddDate(35, 0, 0), Valid: true}
-	require.ErrorIs(t, scan.series(parent, nil, nil), ErrLimit)
+	require.ErrorIs(t, scan.series(context.Background(), parent, nil, nil), ErrLimit)
+}
+
+func TestAllDayRowOccupiesLocalDaysOfTheOwnersZone(t *testing.T) {
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	require.NoError(t, err)
+	scan := calendarScan{zones: map[uint32]*time.Location{7: zone}}
+	event := generated.CalendarEvent{AllDay: true, OwnerUserID: 7}
+	// The 5th, stored as UTC midnights with an exclusive end.
+	slot, err := scan.slotOf(context.Background(), event,
+		time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC), time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Equal(t, time.Date(2026, 8, 5, 0, 0, 0, 0, zone), slot.Start)
+	require.Equal(t, time.Date(2026, 8, 6, 0, 0, 0, 0, zone), slot.End)
 }

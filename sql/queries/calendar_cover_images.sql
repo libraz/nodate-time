@@ -12,3 +12,10 @@ ON DUPLICATE KEY UPDATE storage_object_id = VALUES(storage_object_id);
 
 -- name: DeleteCalendarCoverImage :exec
 DELETE FROM calendar_cover_images WHERE calendar_id = ?;
+
+-- GetStorageObjectByPublicID finds the object a cover reservation named, within
+-- the workspace and under its row lock: the confirm decides on its state.
+-- name: GetStorageObjectByPublicID :one
+SELECT * FROM storage_objects
+WHERE workspace_id = ? AND public_id = ? AND enabled = TRUE
+FOR UPDATE;

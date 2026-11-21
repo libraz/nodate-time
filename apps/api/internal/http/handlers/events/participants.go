@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/attendees"
@@ -93,6 +94,50 @@ func (s attendeeSet) apply(resp *EventResponse, eventID uint32) {
 		return
 	}
 	resp.ParticipantIDs, resp.Attendees = entry.ids, entry.attendees
+}
+
+// setOccurrenceAttendees is setAttendees for an override, which shows the
+// series' participants until it has attendee rows of its own.
+func setOccurrenceAttendees(ctx context.Context, deps Deps, resp *EventResponse, seriesID, overrideID uint32) error {
+	set, err := loadOccurrenceAttendees(ctx, deps, []uint32{overrideID}, map[uint32]uint32{overrideID: seriesID})
+	if err != nil {
+		return err
+	}
+	set.apply(resp, overrideID)
+	return nil
+}
+
+// loadOccurrenceAttendees is loadAttendees for a listing that includes
+// overrides. parentOf maps each override's id to its series' id; an override
+// with no attendee row of its own is answered with its series' participants.
+func loadOccurrenceAttendees(ctx context.Context, deps Deps, eventIDs []uint32, parentOf map[uint32]uint32) (attendeeSet, error) {
+	if len(parentOf) == 0 {
+		return loadAttendees(ctx, deps, eventIDs)
+	}
+	all := slices.Clone(eventIDs)
+	overrides := make([]sql.NullInt32, 0, len(parentOf))
+	for override, series := range parentOf {
+		all = append(all, override, series)
+		overrides = append(overrides, sql.NullInt32{Int32: int32(override), Valid: true})
+	}
+	set, err := loadAttendees(ctx, deps, all)
+	if err != nil {
+		return nil, err
+	}
+	withRows, err := deps.Queries.ListEventIDsWithAttendeeRows(ctx, overrides)
+	if err != nil {
+		return nil, err
+	}
+	own := make(map[uint32]struct{}, len(withRows))
+	for _, id := range withRows {
+		own[uint32(id.Int32)] = struct{}{}
+	}
+	for override, series := range parentOf {
+		if _, ok := own[override]; !ok {
+			set[override] = set[series]
+		}
+	}
+	return set, nil
 }
 
 // setAttendees fills both attendee-derived fields of a response from one read.

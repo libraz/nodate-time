@@ -41,6 +41,9 @@ const (
 	// The final wall-clock day in a recurring all-day event may be longer
 	// than the absolute duration used to compute its stored recurrence_end.
 	wallClockMargin = 48 * time.Hour
+	// dayMargin widens a search so an all-day row, stored as UTC midnights,
+	// is found whichever zone its dates are read in (offsets reach 14 hours).
+	dayMargin = 24 * time.Hour
 )
 
 // Check returns one aggregate state per slot in input order. A transaction's
@@ -68,7 +71,7 @@ func Check(ctx context.Context, q *generated.Queries, workspaceID, calendarID ui
 		return nil, ErrLimit
 	}
 
-	scan := calendarScan{q: q, workspaceID: workspaceID, window: window, remainingRows: maxRows}
+	scan := calendarScan{q: q, workspaceID: workspaceID, window: window, remainingRows: maxRows, zones: map[uint32]*time.Location{}}
 	if len(memberIDs) == 0 {
 		return scan.busy.states(slots), nil
 	}
@@ -111,6 +114,70 @@ type calendarScan struct {
 	remainingRows int
 	instances     int
 	busy          busyIntervals
+	zones         map[uint32]*time.Location
+	workspaceZone *time.Location
+}
+
+// zoneOf is the zone an all-day row of this owner is read in: the owner's own
+// setting, then the workspace's, then UTC.
+func (s *calendarScan) zoneOf(ctx context.Context, ownerID uint32) (*time.Location, error) {
+	if loc, ok := s.zones[ownerID]; ok {
+		return loc, nil
+	}
+	var loc *time.Location
+	user, err := s.q.GetUserByID(ctx, ownerID)
+	switch {
+	case err == nil:
+		loc = loadZone(user.Timezone)
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return nil, err
+	}
+	if loc == nil {
+		if s.workspaceZone == nil {
+			s.workspaceZone = time.UTC
+			ws, err := s.q.GetWorkspaceByID(ctx, s.workspaceID)
+			switch {
+			case err == nil:
+				if z := loadZone(ws.Timezone); z != nil {
+					s.workspaceZone = z
+				}
+			case errors.Is(err, sql.ErrNoRows):
+			default:
+				return nil, err
+			}
+		}
+		loc = s.workspaceZone
+	}
+	s.zones[ownerID] = loc
+	return loc, nil
+}
+
+func loadZone(name string) *time.Location {
+	if name == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil
+	}
+	return loc
+}
+
+// slotOf is the span a row occupies. An all-day row names dates by its UTC
+// midnights and occupies each of those days from midnight to midnight in the
+// owner's zone; any other row occupies its instants.
+func (s *calendarScan) slotOf(ctx context.Context, e generated.CalendarEvent, start, end time.Time) (Slot, error) {
+	if !e.AllDay {
+		return Slot{start, end}, nil
+	}
+	loc, err := s.zoneOf(ctx, e.OwnerUserID)
+	if err != nil {
+		return Slot{}, err
+	}
+	sy, sm, sd := start.UTC().Date()
+	ey, em, ed := end.UTC().Date()
+	return Slot{time.Date(sy, sm, sd, 0, 0, 0, 0, loc), time.Date(ey, em, ed, 0, 0, 0, 0, loc)}, nil
 }
 
 func (s *calendarScan) countRows(n int) error {
@@ -125,7 +192,7 @@ type eventRow = generated.ListScheduleAvailabilityEventsRow
 
 func eventForExpansion(r eventRow) generated.CalendarEvent {
 	return generated.CalendarEvent{
-		ID: r.ID, ShowAs: r.ShowAs, Flexibility: r.Flexibility, StartAt: r.StartAt, EndAt: r.EndAt,
+		ID: r.ID, AllDay: r.AllDay, OwnerUserID: r.OwnerUserID, ShowAs: r.ShowAs, Flexibility: r.Flexibility, StartAt: r.StartAt, EndAt: r.EndAt,
 		Timezone: r.Timezone, RecurrenceRule: r.RecurrenceRule, RecurrenceExceptions: r.RecurrenceExceptions,
 		RecurrenceParentID: r.RecurrenceParentID, RecurrenceOriginalStart: r.RecurrenceOriginalStart,
 	}
@@ -134,9 +201,9 @@ func eventForExpansion(r eventRow) generated.CalendarEvent {
 func (s *calendarScan) calendar(ctx context.Context, calendarID uint32, members []uint32) error {
 	rows, err := s.q.ListScheduleAvailabilityEvents(ctx, generated.ListScheduleAvailabilityEventsParams{
 		WorkspaceID: s.workspaceID, CalendarID: calendarID, OwnerIds: members, AttendeeIds: members,
-		RangeStart:      sql.NullTime{Time: s.window.Start.UTC(), Valid: true},
-		RecurrenceFloor: sql.NullTime{Time: s.window.Start.UTC().Add(-wallClockMargin), Valid: true},
-		RangeEnd:        sql.NullTime{Time: s.window.End.UTC(), Valid: true}, Limit: int32(s.remainingRows + 1),
+		RangeStart:      sql.NullTime{Time: s.window.Start.UTC().Add(-dayMargin), Valid: true},
+		RecurrenceFloor: sql.NullTime{Time: s.window.Start.UTC().Add(-wallClockMargin - dayMargin), Valid: true},
+		RangeEnd:        sql.NullTime{Time: s.window.End.UTC().Add(dayMargin), Valid: true}, Limit: int32(s.remainingRows + 1),
 	})
 	if err != nil {
 		return err
@@ -156,7 +223,11 @@ func (s *calendarScan) calendar(ctx context.Context, calendarID uint32, members 
 			parents[row.ID] = eventForExpansion(row)
 			eligible[row.ID] = true
 		default:
-			s.busy.add(row.ShowAs, row.Flexibility, Slot{row.StartAt.Time, row.EndAt.Time})
+			slot, err := s.slotOf(ctx, eventForExpansion(row), row.StartAt.Time, row.EndAt.Time)
+			if err != nil {
+				return err
+			}
+			s.busy.add(row.ShowAs, row.Flexibility, slot)
 		}
 	}
 	// A moved occurrence or an occurrence inviting a different member can
@@ -206,16 +277,16 @@ func (s *calendarScan) calendar(ctx context.Context, calendarID uint32, members 
 		if err = ctx.Err(); err != nil {
 			return err
 		}
-		if err = s.series(parent, byParent[id], eligible); err != nil {
+		if err = s.series(ctx, parent, byParent[id], eligible); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *calendarScan) series(parent generated.CalendarEvent, overrides []generated.CalendarEvent, eligible map[uint32]bool) error {
+func (s *calendarScan) series(ctx context.Context, parent generated.CalendarEvent, overrides []generated.CalendarEvent, eligible map[uint32]bool) error {
 	rule, err := recurrence.ParseRule(*parent.RecurrenceRule)
-	if err != nil || rule == nil || rule.Validate(parent.StartAt.Time.In(recurrence.LoadLocation(parent.Timezone))) != nil {
+	if err != nil || rule == nil || rule.Validate(parent.StartAt.Time.In(recurrence.LoadLocation(recurrence.ExpansionZone(parent.AllDay, parent.Timezone)))) != nil {
 		return ErrLimit
 	}
 	// The existing expander limits each call to 10,000 occurrences. A
@@ -226,7 +297,7 @@ func (s *calendarScan) series(parent generated.CalendarEvent, overrides []genera
 		(parent.RecurrenceExceptions != nil && len(*parent.RecurrenceExceptions) > 128*1024) {
 		return ErrLimit
 	}
-	instances := eventexpand.ExpandWithOverrides(parent, overrides, s.window.Start.Add(-wallClockMargin), s.window.End)
+	instances := eventexpand.ExpandWithOverrides(parent, overrides, s.window.Start.Add(-wallClockMargin-dayMargin), s.window.End.Add(dayMargin))
 	s.instances += len(instances)
 	if s.instances > maxInstances {
 		return ErrLimit
@@ -236,9 +307,13 @@ func (s *calendarScan) series(parent generated.CalendarEvent, overrides []genera
 		if !eligible[event.ID] {
 			continue
 		}
-		slot := Slot{instance.Occurrence.StartAt, instance.Occurrence.EndAt}
+		start, end := instance.Occurrence.StartAt, instance.Occurrence.EndAt
 		if instance.IsOverride {
-			slot = Slot{event.StartAt.Time, event.EndAt.Time}
+			start, end = event.StartAt.Time, event.EndAt.Time
+		}
+		slot, err := s.slotOf(ctx, event, start, end)
+		if err != nil {
+			return err
 		}
 		s.busy.add(event.ShowAs, event.Flexibility, slot)
 	}

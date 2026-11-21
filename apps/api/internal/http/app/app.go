@@ -46,15 +46,14 @@ type Options struct {
 func corsOptions(allowedOrigins []string) cors.Options {
 	opts := cors.Options{
 		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		// If-Match carries the revision an event save was built on.
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "If-Match"},
 		// ETag names that revision, Content-Disposition the export's file
-		// name, X-Result-Truncated a capped listing or import, X-Export-Window
-		// the date range an export covers.
+		// name, X-Export-Window the date range an export covers.
 		ExposedHeaders: []string{
 			"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset",
-			"ETag", "Content-Disposition", "X-Result-Truncated", "X-Export-Window",
+			"ETag", "Content-Disposition", "X-Export-Window",
 		},
 		AllowCredentials: true,
 		MaxAge:           300,

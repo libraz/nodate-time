@@ -1,9 +1,16 @@
 package calendars
 
-import "time"
+import (
+	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/http/patch"
+	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
+)
 
 type CalendarResponse struct {
-	ID    string `json:"id"`
+	ID string `json:"id"`
+	// ETag names this revision of the calendar; send it as If-Match to change or delete it.
+	ETag  string `json:"etag"`
 	Name  string `json:"name"`
 	Color string `json:"color"`
 	// CoverImageURL is a short-lived, signed URL for an uploaded cover image.
@@ -56,6 +63,7 @@ type GetCalendarInput struct {
 	CalendarID string `path:"calendarId"`
 }
 type GetCalendarOutput struct {
+	ETag string `header:"ETag"`
 	Body CalendarResponse
 }
 
@@ -73,24 +81,49 @@ type CreateCalendarOutput struct {
 }
 
 type UpdateCalendarInput struct {
-	CalendarID string `path:"calendarId"`
+	CalendarID string               `path:"calendarId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 	Body       struct {
-		Name  *string `json:"name,omitempty" minLength:"1" maxLength:"200" required:"false"`
-		Color *string `json:"color,omitempty" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
+		Name  patch.Field[string] `json:"name,omitzero" minLength:"1" maxLength:"200" required:"false"`
+		Color patch.Field[string] `json:"color,omitzero" maxLength:"7" pattern:"^#[0-9A-Fa-f]{6}$" required:"false"`
 	}
 }
 type UpdateCalendarOutput struct {
+	ETag string `header:"ETag"`
 	Body CalendarResponse
 }
 
 type DeleteCalendarInput struct {
-	CalendarID string `path:"calendarId"`
+	CalendarID string               `path:"calendarId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
 }
 type DeleteCalendarOutput struct{}
 
+type PresignCalendarCoverInput struct {
+	CalendarID string `path:"calendarId"`
+	Body       struct {
+		SHA256      string `json:"sha256" pattern:"^[0-9a-f]{64}$" doc:"Lowercase hex SHA-256 of the image bytes"`
+		ContentType string `json:"contentType" enum:"image/jpeg,image/png,image/webp"`
+		ByteSize    int64  `json:"byteSize" minimum:"1" maximum:"5242880"`
+	}
+}
+type PresignCalendarCoverResult struct {
+	// CoverID is the opaque ID to send back to the confirm.
+	CoverID string `json:"coverId"`
+	// UploadURL is where to PUT the image. It is absent when the identical
+	// bytes are already stored, in which case the confirm can follow at once.
+	UploadURL string `json:"uploadUrl,omitempty"`
+}
+type PresignCalendarCoverOutput struct {
+	Body PresignCalendarCoverResult
+}
+
+// PutCalendarCoverInput confirms an uploaded image as the calendar's cover.
 type PutCalendarCoverInput struct {
 	CalendarID string `path:"calendarId"`
-	RawBody    []byte `contentType:"application/octet-stream"`
+	Body       struct {
+		CoverID string `json:"coverId" minLength:"1" doc:"The ID the presign returned"`
+	}
 }
 type PutCalendarCoverOutput struct {
 	Body CalendarResponse
@@ -99,9 +132,7 @@ type PutCalendarCoverOutput struct {
 type DeleteCalendarCoverInput struct {
 	CalendarID string `path:"calendarId"`
 }
-type DeleteCalendarCoverOutput struct {
-	Body CalendarResponse
-}
+type DeleteCalendarCoverOutput struct{}
 
 // Members
 

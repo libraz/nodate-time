@@ -100,3 +100,25 @@ func TestParseICSCutsTheDescriptionToTheMemoLimit(t *testing.T) {
 		t.Error("a description within the limit must arrive whole")
 	}
 }
+
+// A date is a day, not an instant: the zone a file names for it does not move
+// it off UTC midnight.
+func TestAllDayDatesParseAsUTCMidnight(t *testing.T) {
+	ics := strings.Join([]string{
+		"BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:a", "SUMMARY:Holiday",
+		"DTSTART;VALUE=DATE;TZID=America/Los_Angeles:20260704",
+		"DTEND;VALUE=DATE;TZID=America/Los_Angeles:20260705",
+		"EXDATE;VALUE=DATE;TZID=America/Los_Angeles:20260711",
+		"END:VEVENT", "END:VCALENDAR"}, "\r\n")
+	got := parseICS(ics)
+	if len(got) != 1 {
+		t.Fatalf("want one event, got %d", len(got))
+	}
+	want := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
+	if !got[0].start.Equal(want) || !got[0].end.Equal(want.AddDate(0, 0, 1)) {
+		t.Errorf("bounds = %s..%s, want UTC dates", got[0].start, got[0].end)
+	}
+	if len(got[0].exdates) != 1 || !got[0].exdates[0].Equal(want.AddDate(0, 0, 7)) {
+		t.Errorf("exdates = %v", got[0].exdates)
+	}
+}

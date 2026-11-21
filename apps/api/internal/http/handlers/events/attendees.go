@@ -36,6 +36,9 @@ func SetRsvp(deps Deps) func(context.Context, *SetRsvpInput) (*SetRsvpOutput, er
 			if err != nil {
 				return err
 			}
+			if err := requireVisible(ctx, q, w, userID); err != nil {
+				return err
+			}
 			att, err = lockAttendee(ctx, q, w.row.ID, userID)
 			if err != nil {
 				return err
@@ -90,6 +93,9 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			if err != nil {
 				return err
 			}
+			if err := requireVisible(ctx, q, w, actorID); err != nil {
+				return err
+			}
 			if err := requireEventEdit(ctx, q, w, actorID, editGrants); err != nil {
 				return err
 			}
@@ -117,6 +123,19 @@ func SetAttendeeCanEdit(deps Deps) func(context.Context, *SetAttendeeCanEditInpu
 			CanEdit: att.CanEdit,
 		}}, nil
 	}
+}
+
+// requireVisible answers 404 for an event the caller may not see, before any
+// right or participant check can tell them it exists.
+func requireVisible(ctx context.Context, q *generated.Queries, w eventAccess, userID uint32) error {
+	d, err := decideForWrite(ctx, q, w, userID)
+	if err != nil {
+		return err
+	}
+	if !d.Exists {
+		return apierrors.EventNotFound
+	}
+	return nil
 }
 
 // attendeeScope is the scope an attendee write takes: an occurrence id answers
@@ -160,6 +179,9 @@ func logAttendeeChange(ctx context.Context, q *generated.Queries, deps Deps, act
 	kind := eventlog.TypeAttendeeUpdated
 	if field == "rsvp" {
 		kind = eventlog.TypeRSVPUpdated
+	} else {
+		extra["changes"] = []string{"attendee." + field}
+		extra["attendeeUserId"] = extra["userId"]
 	}
 	return eventlog.Append(ctx, q, eventlog.Entry{
 		WorkspaceID: deps.WorkspaceID,

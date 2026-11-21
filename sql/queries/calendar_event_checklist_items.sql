@@ -2,15 +2,18 @@
 -- (workspace_id, event_id, sort_weight), and a query that skips its leading
 -- column cannot use it at all.
 --
--- The LIMIT is a cap rather than a page. A checklist belongs to one event and
--- is read as a whole -- it is the list somebody ticks off, so splitting it
--- across pages would be a worse answer than the ceiling. The cap only exists
--- so a runaway writer cannot make one event's modal unbounded.
+-- It has no LIMIT: a checklist is read as a whole -- it is the list somebody
+-- ticks off -- and CountChecklistItems is what bounds it at write time.
 -- name: ListChecklistItems :many
 SELECT * FROM calendar_event_checklist_items
 WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE
-ORDER BY sort_weight, id
-LIMIT ?;
+ORDER BY sort_weight, id;
+
+-- CountChecklistItems is the size of an event's live checklist, read under the
+-- event's row lock by the write that would add to it.
+-- name: CountChecklistItems :one
+SELECT COUNT(*) FROM calendar_event_checklist_items
+WHERE workspace_id = ? AND event_id = ? AND enabled = TRUE;
 
 -- name: GetChecklistItemByPublicID :one
 SELECT * FROM calendar_event_checklist_items

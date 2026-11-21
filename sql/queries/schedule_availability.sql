@@ -34,7 +34,7 @@ WHERE cm.workspace_id = ? AND cm.calendar_id = ? AND cm.enabled = TRUE
 -- SERIALIZABLE holds the ranges this statement scans. A workspace index
 -- can look cheap for a sparse calendar but would lock unrelated events.
 -- name: ListScheduleAvailabilityEvents :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (idx_calendar_events_calendar_range)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
@@ -49,7 +49,7 @@ WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
 LIMIT ?;
 
 -- name: ListScheduleAvailabilityParents :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (PRIMARY)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
@@ -58,7 +58,7 @@ WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE
 -- Read even overrides whose own dates or participants are outside the
 -- search. They suppress the original occurrence on its original date.
 -- name: ListScheduleAvailabilityOverrides :many
-SELECT e.id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
+SELECT e.id, e.all_day, e.owner_user_id, e.show_as, e.flexibility, e.start_at, e.end_at, e.timezone,
        e.recurrence_rule, e.recurrence_exceptions, e.recurrence_parent_id, e.recurrence_original_start
 FROM calendar_events e FORCE INDEX (uniq_calendar_events_recurrence_override)
 WHERE e.workspace_id = ? AND e.calendar_id = ? AND e.enabled = TRUE

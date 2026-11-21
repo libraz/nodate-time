@@ -28,7 +28,7 @@ type PresignUploadInput struct {
 		// blob is content-addressed, so the same file attached twice is
 		// stored once; the digest is also what the storage key is built
 		// from, which keeps the client's filename out of the key entirely.
-		SHA256 string `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-fA-F]{64}$" doc:"lowercase hex SHA-256 of the file contents"`
+		SHA256 string `json:"sha256" minLength:"64" maxLength:"64" pattern:"^[0-9a-f]{64}$" doc:"lowercase hex SHA-256 of the file contents"`
 	}
 }
 type PresignUploadOutput struct {

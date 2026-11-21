@@ -157,7 +157,7 @@ type editedRows struct {
 func (r editedRows) render(ctx context.Context, deps Deps, cal generated.Calendar) (EventResponse, error) {
 	if r.override != nil {
 		resp := mapOverrideInstance(r.series, *r.override, cal.PublicID, r.original)
-		if err := setAttendees(ctx, deps, &resp, r.override.ID); err != nil {
+		if err := setOccurrenceAttendees(ctx, deps, &resp, r.series.ID, r.override.ID); err != nil {
 			return EventResponse{}, err
 		}
 		decorate(ctx, deps, &resp, *r.override, cal.ID)
@@ -207,7 +207,7 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 	original := w.scope.occurrence.StartAt
 	// The body's rule does not apply to one occurrence, but a rule the
 	// series could not carry is still a malformed request.
-	if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, current.StartAt.Time, current.Timezone); spec != nil {
+	if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, current.StartAt.Time, recurrence.ExpansionZone(current.AllDay, current.Timezone)); spec != nil {
 		return editedRows{}, spec
 	}
 
@@ -276,7 +276,13 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
 		Title: e.body.Body.Title, Extra: participantLogExtra(w),
 	}
-	if bytes.Equal(child.PublicID, overridePubID[:]) {
+	// An override with no attendee row inherits the series', so replacing
+	// its list must write the rows that say who is left out.
+	rowCount, err := q.CountEventAttendeeRows(ctx, sql.NullInt32{Int32: int32(child.ID), Valid: true})
+	if err != nil {
+		return editedRows{}, err
+	}
+	if bytes.Equal(child.PublicID, overridePubID[:]) || rowCount == 0 {
 		err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants, pl)
 	} else {
 		err = attendees.Replace(ctx, q, deps.WorkspaceID, child.ID, e.participants, pl)
@@ -308,11 +314,13 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 	return editedRows{series: master, override: &child, original: original}, nil
 }
 
-// addOverrideParticipants adds the participants of an override created by
-// this transaction, each with the answer and edit grant they had on the
+// addOverrideParticipants adds the participants of an override that has no
+// attendee row yet, each with the answer and edit grant they had on the
 // series. Until it was edited the occurrence showed the series' attendees;
 // editing its title must not reset an answer already given or take back a
-// grant.
+// grant. Everyone on the series who is not kept gets a disabled row: an
+// override with any row replaces the series' attendees, so without those rows
+// removing everyone would read as inheriting everyone.
 func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspaceID, seriesID, overrideID uint32, participants []attendees.Person, log attendees.Log) error {
 	rows, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(seriesID), Valid: true})
 	if err != nil {
@@ -346,6 +354,31 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 			return err
 		}
 	}
+	kept := make(map[uint32]struct{}, len(participants))
+	for _, p := range participants {
+		kept[p.UserID] = struct{}{}
+	}
+	live, err := q.ListEnabledEventAttendeeIDs(ctx, sql.NullInt32{Int32: int32(seriesID), Valid: true})
+	if err != nil {
+		return err
+	}
+	for _, userID := range live {
+		if _, ok := kept[userID]; ok {
+			continue
+		}
+		pubID, err := uuid.NewV7()
+		if err != nil {
+			return err
+		}
+		if err := q.AddDisabledOverrideAttendee(ctx, generated.AddDisabledOverrideAttendeeParams{
+			PublicID:    pubID[:],
+			WorkspaceID: workspaceID,
+			EventID:     sql.NullInt32{Int32: int32(overrideID), Valid: true},
+			UserID:      userID,
+		}); err != nil {
+			return err
+		}
+	}
 	return attendees.LogDiff(ctx, q, workspaceID, log, rows, participants)
 }
 
@@ -366,10 +399,15 @@ func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdi
 		startAt, endAt = ontoSlot(occ, shownStart, shownEnd, startAt, endAt, f.timezone)
 		startAt, endAt = reanchor(current, occ, startAt, endAt, f.timezone)
 	}
-	if spec := checkRecurrenceRule(e.body.Body.RecurrenceRule, startAt, f.timezone); spec != nil {
+	rule := e.body.Body.RecurrenceRule
+	if current.AllDay != e.body.Body.AllDay {
+		rule = retargetUntil(rule, current, e.body.Body.AllDay, startAt, f.timezone)
+	}
+	zone := recurrence.ExpansionZone(e.body.Body.AllDay, f.timezone)
+	if spec := checkRecurrenceRule(rule, startAt, zone); spec != nil {
 		return editedRows{}, spec
 	}
-	ruleData, recEnd := prepareRecurrence(e.body.Body.RecurrenceRule, startAt, endAt, f.timezone)
+	ruleData, recEnd := prepareRecurrence(rule, startAt, endAt, zone)
 
 	if err := q.UpdateCalendarEvent(ctx, generated.UpdateCalendarEventParams{
 		Kind:               current.Kind,
@@ -549,29 +587,41 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 	if err != nil {
 		return err
 	}
-	exceptions := recurrence.ParseExceptions(after.RecurrenceExceptions)
-	exceptionsChanged := false
+	exceptions := recurrence.ParseExceptionList(after.RecurrenceExceptions)
+	oldZone := recurrence.ExpansionZone(before.AllDay, before.Timezone)
+	newZone := recurrence.ExpansionZone(after.AllDay, after.Timezone)
+	toggled := before.AllDay != after.AllDay
 
 	gridChanged := before.RecurrenceRule == nil ||
 		!bytes.Equal(*before.RecurrenceRule, *after.RecurrenceRule) ||
 		!before.StartAt.Time.Equal(after.StartAt.Time) ||
-		before.Timezone != after.Timezone
-	if before.RecurrenceRule != nil && before.StartAt.Valid {
-		shift := newWallShift(before.StartAt.Time, after.StartAt.Time, before.Timezone, after.Timezone)
+		oldZone != newZone || toggled
+	// move maps an occurrence's instant on the grid the series had to the
+	// same occurrence on the grid it has now; nil leaves every instant alone.
+	var move func(time.Time) time.Time
+	if toggled {
+		move = allDayRetarget(before, after)
+	} else if before.RecurrenceRule != nil && before.StartAt.Valid {
+		shift := newWallShift(before.StartAt.Time, after.StartAt.Time, oldZone, newZone)
 		if !shift.identity() {
-			if err := shiftOverrides(ctx, q, overrides, shift); err != nil {
+			move = shift.apply
+		}
+	}
+	if move != nil {
+		if err := moveOverrides(ctx, q, overrides, move, !toggled); err != nil {
+			return err
+		}
+		if toggled {
+			if err := moveReminderKeys(ctx, q, after.ID, move); err != nil {
 				return err
 			}
-			for i, ex := range exceptions {
-				exceptions[i] = shift.apply(ex)
-			}
-			exceptionsChanged = len(exceptions) > 0
 		}
 	}
 
+	var occurs func(time.Time) bool
 	if gridChanged {
-		occurs := func(t time.Time) bool {
-			return recurrence.OccursAt(rule, after.StartAt.Time, after.EndAt.Time, after.Timezone, t)
+		occurs = func(t time.Time) bool {
+			return recurrence.OccursAt(rule, after.StartAt.Time, after.EndAt.Time, newZone, t)
 		}
 		var orphans []uint32
 		kept := overrides[:0]
@@ -586,21 +636,25 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 		if err := eventstore.DeleteOverrides(ctx, q, parentRef, orphans); err != nil {
 			return err
 		}
-		live := slices.DeleteFunc(slices.Clone(exceptions), func(t time.Time) bool { return !occurs(t) })
-		exceptionsChanged = exceptionsChanged || len(live) != len(exceptions)
-		exceptions = live
 	}
 
-	if exceptionsChanged {
-		column, err := exceptions.MarshalColumn()
+	if move != nil || occurs != nil {
+		rewritten := remapExceptions(exceptions, before, after, move, occurs)
+		stored, err := exceptions.MarshalColumn()
 		if err != nil {
 			return err
 		}
-		if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
-			RecurrenceExceptions: column,
-			ID:                   after.ID,
-		}); err != nil {
+		column, err := rewritten.MarshalColumn()
+		if err != nil {
 			return err
+		}
+		if !equalColumns(stored, column) {
+			if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
+				RecurrenceExceptions: column,
+				ID:                   after.ID,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -621,14 +675,15 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 	})
 }
 
-// shiftOverrides moves every override row of a series by the same wall-clock
-// shift as the series itself, so each keeps naming the occurrence it replaces
-// and keeps the time of day the user gave it. rows are updated in place.
+// moveOverrides re-keys every override row of a series with move, so each
+// keeps naming the occurrence it replaces. A wall-clock shift also carries the
+// override's own dates, so it keeps the time of day the user gave it; a change
+// of all-day shape leaves them. rows are updated in place.
 //
 // Rows are moved in the order that never lands one on an instant another still
 // holds: a shift of exactly one period would otherwise collide with the unique
 // key on (parent, original start) halfway through.
-func shiftOverrides(ctx context.Context, q *generated.Queries, rows []generated.CalendarEvent, shift wallShift) error {
+func moveOverrides(ctx context.Context, q *generated.Queries, rows []generated.CalendarEvent, move func(time.Time) time.Time, withDates bool) error {
 	order := make([]int, len(rows))
 	for i := range order {
 		order[i] = i
@@ -638,20 +693,20 @@ func shiftOverrides(ctx context.Context, q *generated.Queries, rows []generated.
 	})
 	if len(rows) > 0 {
 		probe := rows[order[0]].RecurrenceOriginalStart.Time
-		if shift.apply(probe).After(probe) {
+		if move(probe).After(probe) {
 			slices.Reverse(order)
 		}
 	}
 	for _, i := range order {
 		row := &rows[i]
 		if row.RecurrenceOriginalStart.Valid {
-			row.RecurrenceOriginalStart.Time = shift.apply(row.RecurrenceOriginalStart.Time)
+			row.RecurrenceOriginalStart.Time = move(row.RecurrenceOriginalStart.Time)
 		}
-		if row.StartAt.Valid {
-			row.StartAt.Time = shift.apply(row.StartAt.Time)
+		if withDates && row.StartAt.Valid {
+			row.StartAt.Time = move(row.StartAt.Time)
 		}
-		if row.EndAt.Valid {
-			row.EndAt.Time = shift.apply(row.EndAt.Time)
+		if withDates && row.EndAt.Valid {
+			row.EndAt.Time = move(row.EndAt.Time)
 		}
 		if err := q.RetimeRecurrenceOverride(ctx, generated.RetimeRecurrenceOverrideParams{
 			RecurrenceOriginalStart: row.RecurrenceOriginalStart,
@@ -659,6 +714,160 @@ func shiftOverrides(ctx context.Context, q *generated.Queries, rows []generated.
 			EndAt:                   row.EndAt,
 			ID:                      row.ID,
 		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// allDayRetarget maps an occurrence's instant when a series changes between
+// timed and all-day. A timed occurrence becomes the UTC midnight of its date
+// in the series' zone; an all-day one becomes that date's wall-clock start,
+// the series' new time of day, read in the series' new zone.
+func allDayRetarget(before, after generated.CalendarEvent) func(time.Time) time.Time {
+	if after.AllDay {
+		loc := recurrence.LoadLocation(before.Timezone)
+		return func(t time.Time) time.Time {
+			y, m, d := t.In(loc).Date()
+			return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		}
+	}
+	loc := recurrence.LoadLocation(after.Timezone)
+	tod := timeOfDay(after.StartAt.Time.In(loc))
+	return func(t time.Time) time.Time {
+		return atWall(t.UTC(), tod, loc).UTC()
+	}
+}
+
+// atWall is the wall time tod on day's calendar date in loc.
+func atWall(day time.Time, tod time.Duration, loc *time.Location) time.Time {
+	y, m, d := day.Date()
+	return time.Date(y, m, d, int(tod/time.Hour), int(tod/time.Minute)%60, int(tod/time.Second)%60, int(tod%time.Second), loc)
+}
+
+// retargetUntil rewrites a rule's until into the form the series' new shape
+// reads: a date for all-day, an instant for timed. An until already in that
+// form, and a rule without one, are returned as they are.
+func retargetUntil(rule *json.RawMessage, current generated.CalendarEvent, toAllDay bool, start time.Time, tz string) *json.RawMessage {
+	parsed, err := recurrence.ParseRule(derefRaw(rule))
+	if err != nil || parsed == nil || parsed.Until == nil {
+		return rule
+	}
+	var out string
+	if toAllDay {
+		t, err := time.Parse(time.RFC3339, *parsed.Until)
+		if err != nil {
+			return rule
+		}
+		out = t.In(recurrence.LoadLocation(current.Timezone)).Format("2006-01-02")
+	} else {
+		day, err := time.Parse("2006-01-02", *parsed.Until)
+		if err != nil {
+			return rule
+		}
+		loc := recurrence.LoadLocation(tz)
+		out = atWall(day, timeOfDay(start.In(loc)), loc).UTC().Format(time.RFC3339)
+	}
+	parsed.Until = &out
+	body, err := json.Marshal(parsed)
+	if err != nil {
+		return rule
+	}
+	msg := json.RawMessage(body)
+	return &msg
+}
+
+func derefRaw(r *json.RawMessage) []byte {
+	if r == nil {
+		return nil
+	}
+	return *r
+}
+
+// elementStart reads one stored exclusion as the occurrence start it names in
+// a series shaped like ev. An element that cannot be read, or that names a
+// date on a timed series, is reported as not found and left alone.
+func elementStart(el json.RawMessage, ev generated.CalendarEvent) (time.Time, bool) {
+	var str string
+	if err := json.Unmarshal(el, &str); err != nil {
+		return time.Time{}, false
+	}
+	loc := recurrence.LoadLocation(recurrence.ExpansionZone(ev.AllDay, ev.Timezone))
+	utcMidnight := func(t time.Time) time.Time {
+		y, m, d := t.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	if t, err := time.Parse("2006-01-02", str); err == nil {
+		if ev.AllDay {
+			return t, true
+		}
+		return atWall(t, timeOfDay(ev.StartAt.Time.In(loc)), loc).UTC(), true
+	}
+	if t, err := time.Parse(time.RFC3339Nano, str); err == nil {
+		if ev.AllDay {
+			return utcMidnight(t.UTC()), true
+		}
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05", str); err == nil {
+		if ev.AllDay {
+			return utcMidnight(t), true
+		}
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, loc).UTC(), true
+	}
+	return time.Time{}, false
+}
+
+// remapExceptions carries an exclusion list onto the series as it now is.
+// Each readable element is moved by move (nil keeps its instant) and dropped
+// when live (nil keeps everything) says the new grid has no occurrence there;
+// one that stays where it was keeps its spelling. Unreadable elements are kept
+// as they are.
+func remapExceptions(list recurrence.ExceptionList, before, after generated.CalendarEvent, move func(time.Time) time.Time, live func(time.Time) bool) recurrence.ExceptionList {
+	out := make(recurrence.ExceptionList, 0, len(list))
+	for _, el := range list {
+		at, ok := elementStart(el, before)
+		if !ok {
+			out = append(out, el)
+			continue
+		}
+		moved := at
+		if move != nil {
+			moved = move(at)
+		}
+		if live != nil && !live(moved) {
+			continue
+		}
+		if moved.Equal(at) && before.AllDay == after.AllDay {
+			out = append(out, el)
+			continue
+		}
+		out = out.With(moved, after.AllDay, after.Timezone)
+	}
+	return out
+}
+
+func equalColumns(a, b *json.RawMessage) bool {
+	return bytes.Equal(derefRaw(a), derefRaw(b))
+}
+
+// moveReminderKeys re-keys the send records of a series with move, so a
+// reminder already sent for an occurrence is not sent again under its new
+// instant.
+func moveReminderKeys(ctx context.Context, q *generated.Queries, eventID uint32, move func(time.Time) time.Time) error {
+	rows, err := q.ListEventReminderStarts(ctx, eventID)
+	if err != nil {
+		return err
+	}
+	if len(rows) > 0 && move(rows[0].OccurrenceStart).After(rows[0].OccurrenceStart) {
+		slices.Reverse(rows)
+	}
+	for _, r := range rows {
+		moved := move(r.OccurrenceStart)
+		if moved.Equal(r.OccurrenceStart) {
+			continue
+		}
+		if err := q.SetEventReminderStart(ctx, generated.SetEventReminderStartParams{OccurrenceStart: moved, ID: r.ID}); err != nil {
 			return err
 		}
 	}

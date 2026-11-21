@@ -12,6 +12,7 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
+	"github.com/libraz/nodate-time/apps/api/internal/eventacl"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 	"github.com/libraz/nodate-time/apps/api/internal/http/avatars"
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
@@ -34,6 +35,7 @@ type commentListRow struct {
 	userAvatarURL        sql.NullString
 	userAvatarStorageKey sql.NullString
 	body                 string
+	updatedAt            sql.NullTime
 	createdAt            time.Time
 }
 
@@ -60,12 +62,7 @@ func resolveCommentCursor(ctx context.Context, deps Deps, eventID uint32, cursor
 func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCommentsOutput, error) {
 	return func(ctx context.Context, in *ListCommentsInput) (*ListCommentsOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, err := resolveCalendar(ctx, deps, in.CalendarID, userID)
-		if err != nil {
-			return nil, toAPIError(err)
-		}
-
-		evt, err := resolveCommentEvent(ctx, deps, cal.ID, in.EventID)
+		_, evt, err := readableSubresourceEvent(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -96,7 +93,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
 					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
 					userAvatarStorageKey: c.UserAvatarStorageKey,
-					body:                 c.Body, createdAt: c.CreatedAt,
+					body:                 c.Body, updatedAt: c.UpdatedAt, createdAt: c.CreatedAt,
 				})
 			}
 		} else {
@@ -118,7 +115,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 					id: c.ID, publicID: c.PublicID, userPublicID: c.UserPublicID,
 					userName: c.UserDisplayName, userAvatarURL: c.UserAvatarURL,
 					userAvatarStorageKey: c.UserAvatarStorageKey,
-					body:                 c.Body, createdAt: c.CreatedAt,
+					body:                 c.Body, updatedAt: c.UpdatedAt, createdAt: c.CreatedAt,
 				})
 			}
 		}
@@ -151,6 +148,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 				AuthorName:      c.userName,
 				AuthorAvatarURL: av.FromKey(ctx, c.userAvatarStorageKey, c.userAvatarURL),
 				Body:            c.body,
+				ETag:            rowETag(c.updatedAt, c.createdAt),
 				CreatedAt:       c.createdAt,
 			})
 		}
@@ -161,7 +159,7 @@ func ListComments(deps Deps) func(context.Context, *ListCommentsInput) (*ListCom
 func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*CreateCommentOutput, error) {
 	return func(ctx context.Context, in *CreateCommentInput) (*CreateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -195,7 +193,8 @@ func CreateComment(deps Deps) func(context.Context, *CreateCommentInput) (*Creat
 			return nil, toAPIError(err)
 		}
 
-		return &CreateCommentOutput{Body: mapComment(ctx, deps, stored)}, nil
+		resp := mapComment(ctx, deps, stored)
+		return &CreateCommentOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
@@ -207,14 +206,93 @@ func mapComment(ctx context.Context, deps Deps, c generated.GetEventCommentByPub
 		AuthorName:      c.UserDisplayName,
 		AuthorAvatarURL: avatars.New(deps.Queries, deps.Storage).FromKey(ctx, c.UserAvatarStorageKey, c.UserAvatarURL),
 		Body:            c.Body,
+		ETag:            rowETag(c.UpdatedAt, c.CreatedAt),
 		CreatedAt:       c.CreatedAt,
 	}
 }
 
-// lockCommentWrite is lockEventAccess for a comment: anyone who may write to
-// the calendar may comment on any event in it, so the role is the whole check.
-func lockCommentWrite(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
+// subresourceVisible reports whether the member may see the comments,
+// checklist and attachments of the event. They hang off the series, so the
+// series row and its own attendees decide.
+func subresourceVisible(ctx context.Context, q *generated.Queries, cal generated.Calendar, evt generated.CalendarEvent, userID uint32) (bool, error) {
+	attendees, err := q.ListEnabledEventAttendeeIDs(ctx, sql.NullInt32{Int32: int32(evt.ID), Valid: true})
+	if err != nil {
+		return false, err
+	}
+	d := eventacl.Decide(eventacl.Event{
+		Visibility:      eventacl.Visibility(evt.Visibility),
+		CalendarDefault: eventacl.Visibility(cal.DefaultEventVisibility),
+		OwnerUserID:     evt.OwnerUserID,
+		CreatedByUserID: evt.CreatedByUserID,
+	}, eventacl.Reader{UserID: userID, IsMember: true}, attendees)
+	return d.Subresource, nil
+}
+
+// readableSubresourceEvent resolves the event whose comments, checklist or
+// attachments a member reads. An event the member cannot see the details of
+// does not exist for them: it answers as not found.
+func readableSubresourceEvent(ctx context.Context, deps Deps, calPubID, eventID string, userID uint32) (generated.Calendar, generated.CalendarEvent, error) {
+	cal, err := resolveCalendar(ctx, deps, calPubID, userID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	evt, err := resolveCommentEvent(ctx, deps, cal.ID, eventID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	visible, err := subresourceVisible(ctx, deps.Queries, cal, evt, userID)
+	if err != nil {
+		return generated.Calendar{}, generated.CalendarEvent{}, err
+	}
+	if !visible {
+		return generated.Calendar{}, generated.CalendarEvent{}, apierrors.EventNotFound
+	}
+	return cal, evt, nil
+}
+
+// subresourceWriteTarget is eventWriteTarget for a write to a row hanging off
+// an event. It gates on membership only: a member for whom the event does not
+// exist is told so before being told their role could not write, and that
+// is decided in the transaction by lockSubresourceAccess.
+func subresourceWriteTarget(ctx context.Context, deps Deps, calPubID, eventID string, userID uint32) (generated.Calendar, generated.CalendarEvent, string, error) {
+	return eventTarget(ctx, deps, calPubID, eventID, userID, resolveCalendar)
+}
+
+// lockSubresourceAccess is lockEventAccess followed by the visibility check: an
+// event whose sub-resources the member may not see is not found.
+func lockSubresourceAccess(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
 	w, err := lockEventAccess(ctx, q, cal, eventID, userID, "", scopeAll)
+	if err != nil {
+		return eventAccess{}, err
+	}
+	visible, err := subresourceVisible(ctx, q, w.cal, w.evt, userID)
+	if err != nil {
+		return eventAccess{}, err
+	}
+	if !visible {
+		return eventAccess{}, apierrors.EventNotFound
+	}
+	return w, nil
+}
+
+// lockDetailEdit is lockEventEdit for a row hanging off the event: checklist
+// items and attachments need the right to change the event's fields.
+func lockDetailEdit(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
+	w, err := lockSubresourceAccess(ctx, q, cal, eventID, userID)
+	if err != nil {
+		return eventAccess{}, err
+	}
+	if err := requireEventEdit(ctx, q, w, userID, editFields); err != nil {
+		return eventAccess{}, err
+	}
+	return w, nil
+}
+
+// lockCommentWrite is lockSubresourceAccess for a comment: anyone who may write
+// to the calendar may comment on any event they can see, so the role is the
+// whole check.
+func lockCommentWrite(ctx context.Context, q *generated.Queries, cal generated.Calendar, eventID, userID uint32) (eventAccess, error) {
+	w, err := lockSubresourceAccess(ctx, q, cal, eventID, userID)
 	if err != nil {
 		return eventAccess{}, err
 	}
@@ -260,7 +338,11 @@ func resolveCommentEvent(ctx context.Context, deps Deps, calID uint32, eventID s
 func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*UpdateCommentOutput, error) {
 	return func(ctx context.Context, in *UpdateCommentInput) (*UpdateCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		text, hasText := in.Body.Body.Get()
+		if in.Body.Body.IsNull() {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -278,14 +360,19 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			if comment.AuthorID != userID {
 				return apierrors.CommentAccessDenied
 			}
-			if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
-				Body: in.Body.Body,
-				ID:   comment.ID,
-			}); err != nil {
+			if err := checkIfMatch(in.IfMatch, rowETag(comment.UpdatedAt, comment.CreatedAt), apierrors.CommentStale); err != nil {
 				return err
 			}
-			if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentUpdated, comment.PublicID); err != nil {
-				return err
+			if hasText {
+				if err := q.UpdateEventComment(ctx, generated.UpdateEventCommentParams{
+					Body: text,
+					ID:   comment.ID,
+				}); err != nil {
+					return err
+				}
+				if err := logCommentActivity(ctx, q, deps, userID, w, eventlog.TypeCommentUpdated, comment.PublicID); err != nil {
+					return err
+				}
 			}
 			stored, err = q.GetEventCommentByPublicID(ctx, comment.PublicID)
 			return err
@@ -293,14 +380,15 @@ func UpdateComment(deps Deps) func(context.Context, *UpdateCommentInput) (*Updat
 			return nil, toAPIError(err)
 		}
 
-		return &UpdateCommentOutput{Body: mapComment(ctx, deps, stored)}, nil
+		resp := mapComment(ctx, deps, stored)
+		return &UpdateCommentOutput{ETag: resp.ETag, Body: resp}, nil
 	}
 }
 
 func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*DeleteCommentOutput, error) {
 	return func(ctx context.Context, in *DeleteCommentInput) (*DeleteCommentOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, evt, _, err := eventWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
+		cal, evt, _, err := subresourceWriteTarget(ctx, deps, in.CalendarID, in.EventID, userID)
 		if err != nil {
 			return nil, toAPIError(err)
 		}
@@ -321,6 +409,9 @@ func DeleteComment(deps Deps) func(context.Context, *DeleteCommentInput) (*Delet
 			// mouth while a removal only takes them off the wall.
 			if comment.AuthorID != userID && !calresolve.CanManage(w.member.Role) {
 				return apierrors.CommentAccessDenied
+			}
+			if err := checkIfMatch(in.IfMatch, rowETag(comment.UpdatedAt, comment.CreatedAt), apierrors.CommentStale); err != nil {
+				return err
 			}
 			res, err := q.SoftDeleteEventComment(ctx, comment.ID)
 			if err != nil {

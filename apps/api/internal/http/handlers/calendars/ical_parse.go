@@ -91,16 +91,17 @@ func resolveTZID(tzid string) (string, bool) {
 
 // parseICSTime parses a DTSTART/DTEND value. Wall-clock values carrying a TZID
 // are anchored in that zone; UTC values end in Z; floating values (no TZID, no
-// Z) are treated as UTC. A TZID nothing can resolve falls back to UTC.
+// Z) are treated as UTC. A TZID nothing can resolve falls back to UTC. A date
+// is a day, not an instant, so it is UTC midnight whatever zone is named.
 func parseICSTime(value, tzid string, allDay bool) (time.Time, error) {
 	// The T and Z separators are read in either case, like the names around
 	// them.
 	value = strings.ToUpper(strings.TrimSpace(value))
+	if allDay {
+		return time.Parse("20060102", value)
+	}
 	name, _ := resolveTZID(tzid)
 	loc := loadLocationOrUTC(name)
-	if allDay {
-		return time.ParseInLocation("20060102", value, loc)
-	}
 	if strings.HasSuffix(value, "Z") {
 		return time.Parse("20060102T150405Z", value)
 	}
