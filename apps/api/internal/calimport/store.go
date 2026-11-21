@@ -373,7 +373,7 @@ type head struct {
 	visibility                     generated.CalendarEventsVisibility // insert only
 	showAs                         generated.CalendarEventsShowAs     // insert only
 	notification                   sql.NullInt32                      // insert only
-	owner                          uint32
+	owner, creator                 uint32
 	rule                           *json.RawMessage
 	recEnd                         sql.NullTime
 	exceptions                     *json.RawMessage // nil unless the event recurs
@@ -383,9 +383,9 @@ type head struct {
 // buildHead validates and converts one VEVENT that is not a changed
 // occurrence. importCreated means it can be written.
 //
-// The event is owned by the actor unless it names an owner. A .ics file has no
-// notion of one, and filing the events under whoever ran the import is the
-// honest answer -- they are who put them there.
+// The event is owned and created by the actor unless it names an owner or a
+// creator. A .ics file has no notion of either, and filing the events under
+// whoever ran the import is the honest answer -- they are who put them there.
 func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 	endAt, outcome, ok := validateImported(e)
 	if !ok {
@@ -397,6 +397,7 @@ func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 		allDay: e.AllDay, start: e.Start, end: endAt,
 		visibility: e.Visibility, showAs: e.ShowAs, notification: e.NotificationOffset,
 		owner:     cmp.Or(e.OwnerUserID, actorUserID),
+		creator:   cmp.Or(e.CreatedByUserID, actorUserID),
 		attendees: e.Attendees,
 	}
 	if e.RRule != "" {
@@ -433,7 +434,7 @@ func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
 }
 
 // createParams is the insert of h as a new row known by identity.
-func (h head) createParams(pubID []byte, workspaceID, calendarID, actorUserID uint32, identity sql.NullString) generated.CreateCalendarEventParams {
+func (h head) createParams(pubID []byte, workspaceID, calendarID uint32, identity sql.NullString) generated.CreateCalendarEventParams {
 	return generated.CreateCalendarEventParams{
 		PublicID:           pubID,
 		WorkspaceID:        workspaceID,
@@ -451,7 +452,7 @@ func (h head) createParams(pubID []byte, workspaceID, calendarID, actorUserID ui
 		Memo:               nullString(h.memo),
 		URL:                nullString(h.url),
 		OwnerUserID:        h.owner,
-		CreatedByUserID:    actorUserID,
+		CreatedByUserID:    h.creator,
 		NotificationOffset: h.notification,
 		RecurrenceRule:     h.rule,
 		RecurrenceEnd:      h.recEnd,
@@ -465,7 +466,7 @@ func insertHead(
 	ctx context.Context, s session, q *generated.Queries, cal generated.Calendar, userID uint32,
 	h head, pubID []byte, identity sql.NullString,
 ) (generated.CalendarEvent, error) {
-	created, err := eventstore.Insert(ctx, q, h.createParams(pubID, s.workspaceID, cal.ID, userID, identity),
+	created, err := eventstore.Insert(ctx, q, h.createParams(pubID, s.workspaceID, cal.ID, identity),
 		userIDs(h.attendees), map[string]any{"source": s.source})
 	if err != nil {
 		return generated.CalendarEvent{}, err
@@ -629,7 +630,7 @@ func importChangedOccurrence(
 		Memo:                    nullString(e.Memo),
 		URL:                     nullString(e.URL),
 		OwnerUserID:             cmp.Or(e.OwnerUserID, userID),
-		CreatedByUserID:         userID,
+		CreatedByUserID:         cmp.Or(e.CreatedByUserID, userID),
 		NotificationOffset:      e.NotificationOffset,
 		RecurrenceParentID:      parentRef,
 		RecurrenceOriginalStart: originalRef,

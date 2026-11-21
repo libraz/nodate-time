@@ -49,6 +49,9 @@ type Event struct {
 	// OwnerUserID 0 means the actor; otherwise the caller guarantees the
 	// user is a member of the calendar.
 	OwnerUserID uint32
+	// CreatedByUserID 0 means the actor; otherwise the caller guarantees the
+	// user is a member of the calendar.
+	CreatedByUserID uint32
 	// Attendees are the event's participants, distinct and each a member of
 	// the calendar; the caller guarantees both.
 	Attendees []attendees.Person

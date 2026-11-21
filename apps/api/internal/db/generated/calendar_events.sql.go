@@ -1312,6 +1312,25 @@ func (q *Queries) SetCalendarEventBlockLabel(ctx context.Context, arg SetCalenda
 	return err
 }
 
+const setCalendarEventCreator = `-- name: SetCalendarEventCreator :exec
+UPDATE calendar_events SET created_by_user_id = ? WHERE id = ? AND task_id IS NULL
+`
+
+type SetCalendarEventCreatorParams struct {
+	CreatedByUserID uint32 `json:"createdByUserId"`
+	ID              uint32 `json:"id"`
+}
+
+// SetRecurrenceExceptions replaces the whole exclusion list. Cancelling one
+// occurrence is a read-modify-write of this column inside the caller's
+// transaction, not a tombstone row.
+// SetCalendarEventCreator rewrites the creator of an imported row to the one
+// its source names. Edits made here never change who created a row.
+func (q *Queries) SetCalendarEventCreator(ctx context.Context, arg SetCalendarEventCreatorParams) error {
+	_, err := q.db.ExecContext(ctx, setCalendarEventCreator, arg.CreatedByUserID, arg.ID)
+	return err
+}
+
 const setCancelledOccurrences = `-- name: SetCancelledOccurrences :exec
 UPDATE calendar_events SET recurrence_exceptions = ?, updated_at = updated_at WHERE id = ?
 `
@@ -1340,9 +1359,6 @@ type SetRecurrenceExceptionsParams struct {
 	ID                   uint32           `json:"id"`
 }
 
-// SetRecurrenceExceptions replaces the whole exclusion list. Cancelling one
-// occurrence is a read-modify-write of this column inside the caller's
-// transaction, not a tombstone row.
 func (q *Queries) SetRecurrenceExceptions(ctx context.Context, arg SetRecurrenceExceptionsParams) error {
 	_, err := q.db.ExecContext(ctx, setRecurrenceExceptions, arg.RecurrenceExceptions, arg.ID)
 	return err

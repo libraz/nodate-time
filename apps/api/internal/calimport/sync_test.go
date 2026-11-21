@@ -29,7 +29,7 @@ func syncEvent() Event {
 // stored is the row an insert of h writes, read back.
 func stored(t *testing.T, h head) generated.CalendarEvent {
 	t.Helper()
-	p := h.createParams([]byte("0123456789abcdef"), 1, 2, syncActor, sql.NullString{String: "tt-1", Valid: true})
+	p := h.createParams([]byte("0123456789abcdef"), 1, 2, sql.NullString{String: "tt-1", Valid: true})
 	return generated.CalendarEvent{
 		ID: 10, PublicID: p.PublicID, WorkspaceID: p.WorkspaceID, CalendarID: p.CalendarID,
 		Kind: p.Kind, Visibility: p.Visibility, ShowAs: p.ShowAs, Flexibility: p.Flexibility,
@@ -72,6 +72,7 @@ func TestSyncDiff(t *testing.T) {
 			"url":      func(e *Event) { e.URL = "https://example.org" },
 			"tz":       func(e *Event) { e.Timezone = "Europe/Paris" },
 			"owner":    func(e *Event) { e.OwnerUserID = 5 },
+			"creator":  func(e *Event) { e.CreatedByUserID = 5 },
 			"start":    func(e *Event) { e.Start = e.Start.Add(-time.Minute) },
 			"end":      func(e *Event) { e.End = e.End.Add(time.Minute) },
 			"rule":     func(e *Event) { e.RRule = "FREQ=DAILY;COUNT=5" },

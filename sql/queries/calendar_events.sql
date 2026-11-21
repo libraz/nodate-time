@@ -313,6 +313,11 @@ WHERE id = ? AND task_id IS NOT NULL;
 -- SetRecurrenceExceptions replaces the whole exclusion list. Cancelling one
 -- occurrence is a read-modify-write of this column inside the caller's
 -- transaction, not a tombstone row.
+-- SetCalendarEventCreator rewrites the creator of an imported row to the one
+-- its source names. Edits made here never change who created a row.
+-- name: SetCalendarEventCreator :exec
+UPDATE calendar_events SET created_by_user_id = ? WHERE id = ? AND task_id IS NULL;
+
 -- name: SetRecurrenceExceptions :exec
 UPDATE calendar_events SET recurrence_exceptions = ? WHERE id = ?;
 

@@ -333,6 +333,12 @@ func updateHead(
 	}); err != nil {
 		return err
 	}
+	if err := q.SetCalendarEventCreator(ctx, generated.SetCalendarEventCreatorParams{
+		CreatedByUserID: h.creator,
+		ID:              row.ID,
+	}); err != nil {
+		return err
+	}
 	if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
 		RecurrenceExceptions: h.exceptions,
 		ID:                   row.ID,
@@ -464,7 +470,7 @@ func keptUnconverted(ctx context.Context, q *generated.Queries, cal generated.Ca
 func diff(row generated.CalendarEvent, h head, attendeeIDs []uint32, overrides int) bool {
 	if row.Title != h.title || row.AllDay != h.allDay ||
 		row.Location.String != h.location || row.Memo.String != h.memo || row.URL.String != h.url ||
-		row.Timezone != h.tz || row.OwnerUserID != h.owner {
+		row.Timezone != h.tz || row.OwnerUserID != h.owner || row.CreatedByUserID != h.creator {
 		return true
 	}
 	if !sameInstant(row.StartAt, sql.NullTime{Time: h.start, Valid: true}) ||
