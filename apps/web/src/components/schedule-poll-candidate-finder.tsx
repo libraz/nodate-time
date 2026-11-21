@@ -1,10 +1,6 @@
 import { DateTime } from 'luxon';
 import { type InputHTMLAttributes, useEffect, useRef, useState } from 'react';
-import {
-  formatSchedulePollSlotTime,
-  SlotDayTile,
-  slotTimeRange,
-} from '@/components/schedule-poll-ui';
+import { formatSchedulePollSlotTime, slotTimeRange } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/client';
 import {
@@ -31,7 +27,6 @@ export function SchedulePollCandidateFinder({
 }) {
   const t = useT();
   const timezone = useUiStore((state) => state.timezone);
-  const locale = useUiStore((state) => state.locale);
   const memberKey = memberIds.join('|');
   const requestIdentity = `${calendarId}\u0000${memberKey}`;
   const memberKeyRef = useRef(memberKey);
@@ -58,6 +53,8 @@ export function SchedulePollCandidateFinder({
   const [suggestions, setSuggestions] = useState<SchedulePollCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
+  // Grid rows are ordered from the searched window's start, so an overnight window reads top-down.
+  const [searchedStartTime, setSearchedStartTime] = useState(startTime);
 
   useEffect(() => {
     if (previousIdentity.current !== requestIdentity) {
@@ -117,6 +114,7 @@ export function SchedulePollCandidateFinder({
 
   const findCandidates = async () => {
     if (!calendarId || memberIds.length === 0 || !fromDate || !toDate) return;
+    setSearchedStartTime(startTime);
     void runSearch(
       {
         timezone,
@@ -179,27 +177,6 @@ export function SchedulePollCandidateFinder({
       onChange([...selected, candidate]);
     }
   };
-
-  const days = (() => {
-    const byDay = new Map<
-      string,
-      Array<{ candidate: SchedulePollCandidate; key: string; start: DateTime; end: DateTime }>
-    >();
-    for (const candidate of suggestions) {
-      const start = DateTime.fromISO(candidate.startAt, { setZone: true })
-        .setZone(timezone)
-        .setLocale(locale);
-      const end = DateTime.fromISO(candidate.endAt, { setZone: true })
-        .setZone(timezone)
-        .setLocale(locale);
-      const day = start.toISODate() ?? candidate.startAt;
-      const entry = { candidate, key: candidateKey(candidate), start, end };
-      const group = byDay.get(day);
-      if (group) group.push(entry);
-      else byDay.set(day, [entry]);
-    }
-    return [...byDay.entries()];
-  })();
 
   return (
     <div className="page-card p-4 sm:p-5">
@@ -286,71 +263,14 @@ export function SchedulePollCandidateFinder({
               {t('schedulePoll.noCandidates')}
             </p>
           ) : (
-            <>
-              <p
-                role="status"
-                className={`mb-2.5 text-footnote font-semibold tabular-nums ${selected.length > 0 ? 'text-[var(--color-accent-ink)]' : 'text-[var(--color-text-tertiary)]'}`}
-              >
-                {t('schedulePoll.selectedCandidates', { count: selected.length })}
-              </p>
-              <div className="max-h-[440px] overflow-y-auto pr-1">
-                <ul className="divide-y divide-[var(--color-separator)]">
-                  {days.map(([day, group]) => (
-                    <li key={day} className="flex gap-3 py-2.5 first:pt-0 last:pb-0">
-                      <SlotDayTile date={group[0]?.start ?? DateTime.fromISO(day)} dense />
-                      <ul className="flex min-w-0 flex-1 flex-wrap content-center gap-1.5">
-                        {group.map(({ candidate, key, start, end }) => {
-                          const unavailable =
-                            !candidate.active || candidate.availability === 'hard';
-                          const label = formatSchedulePollSlotTime(
-                            candidate.startAt,
-                            candidate.endAt,
-                            timezone,
-                            locale,
-                          );
-                          return (
-                            <li key={key}>
-                              <label
-                                title={
-                                  unavailable
-                                    ? t('schedulePoll.unavailable')
-                                    : candidate.availability === 'soft'
-                                      ? t('schedulePoll.availabilitySoft')
-                                      : undefined
-                                }
-                                className={`choice-row choice-chip flex h-8 cursor-pointer items-center gap-1.5 px-2.5 text-footnote font-medium tabular-nums ${unavailable ? 'text-[var(--color-text-tertiary)] line-through opacity-60' : 'text-[var(--color-text-primary)]'}`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedKeys.has(key)}
-                                  disabled={unavailable || searching}
-                                  onChange={() => toggle(candidate)}
-                                  aria-label={`${label}${
-                                    unavailable
-                                      ? ` (${t('schedulePoll.unavailable')})`
-                                      : candidate.availability === 'soft'
-                                        ? ` (${t('schedulePoll.availabilitySoft')})`
-                                        : ''
-                                  }`}
-                                  className="sr-only"
-                                />
-                                {!unavailable && candidate.availability === 'soft' && (
-                                  <span
-                                    aria-hidden
-                                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-warning)]"
-                                  />
-                                )}
-                                {slotTimeRange(start, end)}
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </>
+            <SlotGrid
+              suggestions={suggestions}
+              selected={selected}
+              selectedKeys={selectedKeys}
+              anchorTime={searchedStartTime}
+              disabled={searching}
+              onToggle={toggle}
+            />
           )}
         </div>
       )}
@@ -411,6 +331,271 @@ export function SchedulePollCandidateFinder({
         </div>
       </details>
     </div>
+  );
+}
+
+type GridEntry = {
+  candidate: SchedulePollCandidate;
+  key: string;
+  start: DateTime;
+  end: DateTime;
+};
+
+const minuteOfDay = (time: DateTime) => time.hour * 60 + time.minute;
+const durationOf = (entry: GridEntry) => Math.round(entry.end.diff(entry.start, 'minutes').minutes);
+
+/**
+ * Candidates as a day-by-start-time grid: one column per day, one row per start time, so the
+ * same time lines up across days and a time taken by someone's plans shows as a hatched gap.
+ */
+function SlotGrid({
+  suggestions,
+  selected,
+  selectedKeys,
+  anchorTime,
+  disabled,
+  onToggle,
+}: {
+  suggestions: SchedulePollCandidate[];
+  selected: SchedulePollCandidate[];
+  selectedKeys: Set<string>;
+  anchorTime: string;
+  disabled: boolean;
+  onToggle: (candidate: SchedulePollCandidate) => void;
+}) {
+  const t = useT();
+  const timezone = useUiStore((state) => state.timezone);
+  const locale = useUiStore((state) => state.locale);
+  const toLocal = (iso: string) =>
+    DateTime.fromISO(iso, { setZone: true }).setZone(timezone).setLocale(locale);
+
+  const entries: GridEntry[] = suggestions.map((candidate) => ({
+    candidate,
+    key: candidateKey(candidate),
+    start: toLocal(candidate.startAt),
+    end: toLocal(candidate.endAt),
+  }));
+  const [anchorHour = 0, anchorMinute = 0] = anchorTime.split(':').map(Number);
+  const anchor = anchorHour * 60 + anchorMinute;
+  const rowOrder = (minute: number) => (minute - anchor + 1440) % 1440;
+  const rows = [...new Set(entries.map((entry) => minuteOfDay(entry.start)))].sort(
+    (a, b) => rowOrder(a) - rowOrder(b),
+  );
+  const days = [...new Set(entries.map((entry) => entry.start.toISODate() ?? ''))].sort();
+  const cells = new Map<string, GridEntry[]>();
+  const durations = new Map<number, number>();
+  for (const entry of entries) {
+    const cellKey = `${entry.start.toISODate()}|${minuteOfDay(entry.start)}`;
+    const cell = cells.get(cellKey);
+    if (cell) cell.push(entry);
+    else cells.set(cellKey, [entry]);
+    durations.set(durationOf(entry), (durations.get(durationOf(entry)) ?? 0) + 1);
+  }
+  const usualDuration = [...durations.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+  const selectedEntries = selected
+    .map((candidate) => ({
+      candidate,
+      start: toLocal(candidate.startAt),
+      end: toLocal(candidate.endAt),
+    }))
+    .sort((a, b) => a.start.toMillis() - b.start.toMillis());
+
+  return (
+    <div>
+      <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-footnote text-[var(--color-text-secondary)]">
+          {t('schedulePoll.slotGridHint', { minutes: usualDuration })}
+        </p>
+        <ul className="flex items-center gap-3 text-micro text-[var(--color-text-tertiary)]">
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden className="slot-grid-cell h-3 w-4" data-availability="open" />
+            {t('schedulePoll.availabilityOpen')}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden className="slot-grid-cell h-3 w-4" data-availability="soft" />
+            {t('schedulePoll.availabilitySoft')}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden className="slot-grid-busy h-3 w-4 rounded-[3px]" />
+            {t('schedulePoll.availabilityHard')}
+          </li>
+        </ul>
+      </div>
+
+      <div className="slot-grid-panel max-h-[460px] overflow-auto rounded-[var(--radius-control)] border border-[var(--color-separator)]">
+        <div
+          className="grid min-w-max pb-2"
+          style={{ gridTemplateColumns: `3.25rem repeat(${days.length}, minmax(4.5rem, 1fr))` }}
+        >
+          <div className="slot-grid-sticky sticky top-0 left-0 z-20 border-b border-[var(--color-separator)]" />
+          {days.map((day) => {
+            const date = DateTime.fromISO(day, { zone: timezone }).setLocale(locale);
+            const weekdayColor =
+              date.weekday === 7
+                ? 'text-[var(--color-sunday)]'
+                : date.weekday === 6
+                  ? 'text-[var(--color-saturday)]'
+                  : 'text-[var(--color-text-tertiary)]';
+            return (
+              <div
+                key={day}
+                className="slot-grid-sticky sticky top-0 z-10 flex items-baseline justify-center gap-1 border-b border-[var(--color-separator)] py-2 tabular-nums"
+              >
+                <span className="text-default font-semibold text-[var(--color-text-primary)]">
+                  {date.toFormat('M/d')}
+                </span>
+                <span className={`text-micro font-medium ${weekdayColor}`}>
+                  {date.toFormat('ccc')}
+                </span>
+              </div>
+            );
+          })}
+          {rows.map((minute, rowIndex) => {
+            const onHour = minute % 60 === 0;
+            const rowSpacing =
+              rowIndex === 0
+                ? 'pt-2'
+                : onHour
+                  ? 'mt-1 border-t border-[var(--color-separator)] pt-1.5'
+                  : 'pt-0.5';
+            const time = DateTime.fromObject({ hour: Math.floor(minute / 60), minute: minute % 60 })
+              .setLocale(locale)
+              .toLocaleString(DateTime.TIME_SIMPLE);
+            return [
+              <div
+                key={`axis|${minute}`}
+                className={`slot-grid-sticky sticky left-0 z-[5] flex items-start justify-end pr-2 tabular-nums ${rowSpacing}`}
+              >
+                <span
+                  className={`leading-6 ${onHour ? 'text-footnote font-semibold text-[var(--color-text-secondary)]' : 'text-micro text-[var(--color-text-tertiary)]'}`}
+                >
+                  {time}
+                </span>
+              </div>,
+              ...days.map((day) => {
+                const cell = cells.get(`${day}|${minute}`);
+                return (
+                  <div
+                    key={`${day}|${minute}`}
+                    className={`flex flex-col gap-0.5 px-0.5 ${rowSpacing}`}
+                  >
+                    {cell ? (
+                      cell.map((entry) => (
+                        <SlotCell
+                          key={entry.key}
+                          entry={entry}
+                          showEnd={
+                            durationOf(entry) !== usualDuration ||
+                            !entry.start.hasSame(entry.end, 'day')
+                          }
+                          checked={selectedKeys.has(entry.key)}
+                          disabled={disabled}
+                          onToggle={onToggle}
+                        />
+                      ))
+                    ) : (
+                      <span
+                        aria-hidden
+                        className="slot-grid-busy h-6 rounded-[var(--radius-control)]"
+                      />
+                    )}
+                  </div>
+                );
+              }),
+            ];
+          })}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <p
+          role="status"
+          className={`text-footnote font-semibold tabular-nums ${selected.length > 0 ? 'text-[var(--color-accent-ink)]' : 'text-[var(--color-text-tertiary)]'}`}
+        >
+          {t('schedulePoll.selectedCandidates', { count: selected.length })}
+        </p>
+        {selectedEntries.length > 0 && (
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {selectedEntries.map(({ candidate, start, end }) => (
+              <li key={candidateKey(candidate)}>
+                <button
+                  type="button"
+                  onClick={() => onToggle(candidate)}
+                  disabled={disabled}
+                  aria-label={`${formatSchedulePollSlotTime(candidate.startAt, candidate.endAt, timezone, locale)} ${t('schedulePoll.removeCandidate')}`}
+                  className="choice-row flex h-7 items-center gap-1.5 pl-2.5 pr-2 text-footnote font-medium tabular-nums text-[var(--color-text-primary)]"
+                >
+                  <span className="text-[var(--color-text-secondary)]">
+                    {start.toFormat('M/d ccc')}
+                  </span>
+                  {slotTimeRange(start, end)}
+                  <svg
+                    aria-hidden
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    className="ml-0.5 text-[var(--color-text-tertiary)]"
+                  >
+                    <path d="m2.5 2.5 5 5m0-5-5 5" />
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SlotCell({
+  entry,
+  showEnd,
+  checked,
+  disabled,
+  onToggle,
+}: {
+  entry: GridEntry;
+  showEnd: boolean;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: (candidate: SchedulePollCandidate) => void;
+}) {
+  const t = useT();
+  const timezone = useUiStore((state) => state.timezone);
+  const locale = useUiStore((state) => state.locale);
+  const { candidate, start, end } = entry;
+  const unavailable = !candidate.active || candidate.availability === 'hard';
+  const soft = !unavailable && candidate.availability === 'soft';
+  const note = unavailable
+    ? t('schedulePoll.unavailable')
+    : soft
+      ? t('schedulePoll.availabilitySoft')
+      : undefined;
+  const label = formatSchedulePollSlotTime(candidate.startAt, candidate.endAt, timezone, locale);
+  return (
+    <label
+      title={note ? `${slotTimeRange(start, end)} (${note})` : slotTimeRange(start, end)}
+      data-availability={unavailable ? 'hard' : soft ? 'soft' : 'open'}
+      className="slot-grid-cell flex h-6 cursor-pointer items-center justify-center gap-1 px-1.5 text-micro font-semibold tabular-nums"
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={unavailable || disabled}
+        onChange={() => onToggle(candidate)}
+        aria-label={note ? `${label} (${note})` : label}
+        className="sr-only"
+      />
+      {(checked || showEnd) && (
+        <span className="truncate">
+          {showEnd ? slotTimeRange(start, end) : start.toLocaleString(DateTime.TIME_SIMPLE)}
+        </span>
+      )}
+    </label>
   );
 }
 

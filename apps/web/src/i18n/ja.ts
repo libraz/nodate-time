@@ -703,6 +703,8 @@ export const ja = {
   'schedulePoll.availabilitySoft': '要調整',
   'schedulePoll.availabilityHard': '予定あり',
   'schedulePoll.selectedCandidates': '候補 {count} 件を選択中',
+  'schedulePoll.slotGridHint': '開始時刻を選んでください。1 枠 {minutes} 分です。',
+  'schedulePoll.removeCandidate': '候補から外す',
   'schedulePoll.pollName': '日程調整の名前',
   'schedulePoll.pollNamePlaceholder': '例：次回の打ち合わせ',
   'schedulePoll.createReview': '「{calendar}」の {members} 人に、候補 {candidates} 件を送ります。',

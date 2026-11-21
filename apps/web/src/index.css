@@ -2942,3 +2942,49 @@ textarea,
     transition: none;
   }
 }
+
+/* Schedule poll candidate grid: a start time someone's plans already take. */
+.slot-grid-busy {
+  display: block;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--color-text-tertiary) 22%, transparent) 0 4px,
+    transparent 4px 8px
+  );
+}
+/* The grid panel and its sticky header/axis share one opaque surface so scrolled slots never show through. */
+.slot-grid-panel,
+.slot-grid-sticky {
+  background: rgb(from var(--color-surface-elevated) r g b / 1);
+}
+.slot-grid-cell {
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent-ink);
+  transition: background-color 0.12s ease;
+}
+.slot-grid-cell[data-availability="soft"] {
+  background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+  color: var(--color-text-primary);
+}
+.slot-grid-cell[data-availability="hard"] {
+  cursor: not-allowed;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--color-text-tertiary) 22%, transparent) 0 4px,
+    transparent 4px 8px
+  );
+}
+.slot-grid-cell:has(input:checked) {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+.slot-grid-cell:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .slot-grid-cell:not(:has(input:checked)):not(:has(input:disabled)):hover {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+}

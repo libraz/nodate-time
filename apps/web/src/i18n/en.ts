@@ -686,6 +686,8 @@ export const en: Record<TranslationKey, string> = {
   'schedulePoll.availabilitySoft': 'Needs review',
   'schedulePoll.availabilityHard': 'Busy',
   'schedulePoll.selectedCandidates': '{count} candidate(s) selected',
+  'schedulePoll.slotGridHint': 'Pick start times. Each slot is {minutes} minutes.',
+  'schedulePoll.removeCandidate': 'Remove from candidates',
   'schedulePoll.pollName': 'Schedule poll name',
   'schedulePoll.pollNamePlaceholder': 'For example, next team meeting',
   'schedulePoll.createReview':
