@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
@@ -33,10 +34,10 @@ func TestCalimportWritesAttendeesOnSeriesAndChangedOccurrence(t *testing.T) {
 	require.NoError(t, err)
 
 	start := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	people := []uint32{userID(s.hanako), userID(s.mgr)}
+	people := []attendees.Person{{UserID: userID(s.hanako)}, {UserID: userID(s.mgr)}}
 	base := calimport.Event{
 		SourceUID: "att-series", Visibility: generated.CalendarEventsVisibilityDefault,
-		ShowAs: generated.CalendarEventsShowAsBusy, AttendeeUserIDs: people,
+		ShowAs: generated.CalendarEventsShowAsBusy, Attendees: people,
 	}
 	head, changed := base, base
 	head.Title, head.Start, head.End, head.RRule = "weekly", start, start.Add(time.Hour), "FREQ=WEEKLY;COUNT=3"

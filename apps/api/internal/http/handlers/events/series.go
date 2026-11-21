@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
+	"github.com/libraz/nodate-time/apps/api/internal/eventstore"
 	"github.com/libraz/nodate-time/apps/api/internal/http/eventexpand"
 	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
@@ -26,7 +28,7 @@ type eventEdit struct {
 	startAt      time.Time
 	endAt        time.Time
 	ownerID      uint32 // 0 keeps the current owner
-	participants []eventParticipant
+	participants []attendees.Person
 }
 
 // editedFields are the columns whose omission keeps what the replaced row
@@ -270,14 +272,14 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 	// Edits of one series cannot reach this: they queue on the parent row
 	// first. That is why it needs its own test, and why that test puts
 	// every series on its own calendar.
-	pl := participantLog{
+	pl := attendees.Log{
 		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
 		Title: e.body.Body.Title, Extra: participantLogExtra(w),
 	}
 	if bytes.Equal(child.PublicID, overridePubID[:]) {
 		err = addOverrideParticipants(ctx, q, deps.WorkspaceID, current.ID, child.ID, e.participants, pl)
 	} else {
-		err = replaceEventParticipants(ctx, q, deps.WorkspaceID, child.ID, e.participants, pl)
+		err = attendees.Replace(ctx, q, deps.WorkspaceID, child.ID, e.participants, pl)
 	}
 	if err != nil {
 		return editedRows{}, err
@@ -311,7 +313,7 @@ func editOccurrence(ctx context.Context, q *generated.Queries, deps Deps, e even
 // series. Until it was edited the occurrence showed the series' attendees;
 // editing its title must not reset an answer already given or take back a
 // grant.
-func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspaceID, seriesID, overrideID uint32, participants []eventParticipant, log participantLog) error {
+func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspaceID, seriesID, overrideID uint32, participants []attendees.Person, log attendees.Log) error {
 	rows, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(seriesID), Valid: true})
 	if err != nil {
 		return err
@@ -325,7 +327,7 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 		onSeries[a.UserID] = state{rsvp: a.Rsvp, canEdit: a.CanEdit}
 	}
 	for _, p := range participants {
-		st, ok := onSeries[p.userID]
+		st, ok := onSeries[p.UserID]
 		if !ok {
 			st = state{rsvp: generated.CalendarEventAttendeesRsvpPending}
 		}
@@ -337,14 +339,14 @@ func addOverrideParticipants(ctx context.Context, q *generated.Queries, workspac
 			PublicID:    pubID[:],
 			WorkspaceID: workspaceID,
 			EventID:     sql.NullInt32{Int32: int32(overrideID), Valid: true},
-			UserID:      p.userID,
+			UserID:      p.UserID,
 			Rsvp:        st.rsvp,
 			CanEdit:     st.canEdit,
 		}); err != nil {
 			return err
 		}
 	}
-	return logParticipantDiff(ctx, q, workspaceID, log, rows, participants)
+	return attendees.LogDiff(ctx, q, workspaceID, log, rows, participants)
 }
 
 // editSeries rewrites the series row itself. w must come from
@@ -391,11 +393,11 @@ func editSeries(ctx context.Context, q *generated.Queries, deps Deps, e eventEdi
 	}); err != nil {
 		return editedRows{}, err
 	}
-	pl := participantLog{
+	pl := attendees.Log{
 		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
 		Title: e.body.Body.Title, Extra: participantLogExtra(w),
 	}
-	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
+	if err := attendees.Replace(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
 		return editedRows{}, err
 	}
 	after, err := q.GetCalendarEventByID(ctx, current.ID)
@@ -451,11 +453,11 @@ func editProjected(ctx context.Context, q *generated.Queries, deps Deps, e event
 	}); err != nil {
 		return editedRows{}, err
 	}
-	pl := participantLog{
+	pl := attendees.Log{
 		ActorUserID: e.actorID, CalendarID: e.cal.ID, Subject: current.PublicID,
 		Title: current.Title, Extra: participantLogExtra(w),
 	}
-	if err := replaceEventParticipants(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
+	if err := attendees.Replace(ctx, q, deps.WorkspaceID, current.ID, e.participants, pl); err != nil {
 		return editedRows{}, err
 	}
 	updated, err := q.GetCalendarEventByID(ctx, current.ID)
@@ -530,7 +532,7 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 		if err != nil {
 			return err
 		}
-		if err := deleteOverrides(ctx, q, parentRef, ids); err != nil {
+		if err := eventstore.DeleteOverrides(ctx, q, parentRef, ids); err != nil {
 			return err
 		}
 		if after.RecurrenceExceptions == nil {
@@ -581,7 +583,7 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 			orphans = append(orphans, o.ID)
 		}
 		overrides = kept
-		if err := deleteOverrides(ctx, q, parentRef, orphans); err != nil {
+		if err := eventstore.DeleteOverrides(ctx, q, parentRef, orphans); err != nil {
 			return err
 		}
 		live := slices.DeleteFunc(slices.Clone(exceptions), func(t time.Time) bool { return !occurs(t) })
@@ -616,27 +618,6 @@ func reconcileOverrides(ctx context.Context, q *generated.Queries, before, after
 		RecurrenceEnd: bound,
 		ID:            after.ID,
 		Boundary:      bound,
-	})
-}
-
-// deleteOverrides hard-deletes override rows together with their attendee
-// rows. The attendee foreign key would otherwise null the event out of each
-// row, and the unique key over IFNULL(event_id, 0) refuses a second such row
-// for the same person.
-func deleteOverrides(ctx context.Context, q *generated.Queries, parentRef sql.NullInt32, ids []uint32) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	refs := make([]sql.NullInt32, 0, len(ids))
-	for _, id := range ids {
-		refs = append(refs, sql.NullInt32{Int32: int32(id), Valid: true})
-	}
-	if err := q.DeleteAttendeesOfEvents(ctx, refs); err != nil {
-		return err
-	}
-	return q.DeleteRecurrenceOverrides(ctx, generated.DeleteRecurrenceOverridesParams{
-		ParentID: parentRef,
-		Ids:      ids,
 	})
 }
 

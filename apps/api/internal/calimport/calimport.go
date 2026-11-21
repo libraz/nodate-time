@@ -6,8 +6,10 @@ package calimport
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 )
 
@@ -47,9 +49,9 @@ type Event struct {
 	// OwnerUserID 0 means the actor; otherwise the caller guarantees the
 	// user is a member of the calendar.
 	OwnerUserID uint32
-	// AttendeeUserIDs are the event's participants, distinct and each a
-	// member of the calendar; the caller guarantees both.
-	AttendeeUserIDs []uint32
+	// Attendees are the event's participants, distinct and each a member of
+	// the calendar; the caller guarantees both.
+	Attendees []attendees.Person
 }
 
 // Result counts what became of the events handed to Run. Rejected is the part
@@ -71,6 +73,8 @@ func Run(
 	// whose fault that was.
 	count := func(outcome importOutcome) {
 		switch outcome {
+		case importCreated:
+			res.Imported++
 		case importSkipped:
 			res.Skipped++
 		case importRejected:
@@ -81,7 +85,7 @@ func Run(
 		case importDuplicate:
 			res.Duplicates++
 		default:
-			res.Imported++
+			panic(fmt.Sprintf("calimport: outcome %d is not one Run produces", outcome))
 		}
 	}
 
@@ -104,7 +108,7 @@ func Run(
 		}
 	}
 
-	written := importChunked(ctx, s, cal.ID, actorUserID, heads,
+	written := chunked(ctx, s, cal.ID, actorUserID, heads,
 		func(q *generated.Queries, e Event, earlier []importResult) (importResult, error) {
 			series, outcome, err := importSeriesHead(ctx, s, q, cal, actorUserID, e,
 				importIdentity(e.SourceUID, seriesByUID, earlier))
@@ -118,7 +122,8 @@ func Run(
 			if r.registers() {
 				seriesByUID[r.e.SourceUID] = r.series
 			}
-		})
+		},
+		failedImport)
 	res.Failed += len(heads) - written
 
 	var overrides []Event
@@ -142,12 +147,12 @@ func Run(
 		overrides = append(overrides, e)
 	}
 
-	written = importChunked(ctx, s, cal.ID, actorUserID, overrides,
+	written = chunked(ctx, s, cal.ID, actorUserID, overrides,
 		func(q *generated.Queries, e Event, _ []importResult) (importResult, error) {
 			outcome, err := importChangedOccurrence(ctx, s, q, cal, actorUserID, e, seriesByUID[e.SourceUID])
 			return importResult{e: e, outcome: outcome}, err
 		},
-		record)
+		record, failedImport)
 	res.Failed += len(overrides) - written
 	return res
 }

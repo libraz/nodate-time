@@ -19,6 +19,7 @@ import (
 	"io"
 
 	"github.com/libraz/nodate-time/apps/api/internal/accounts"
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/config"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -280,7 +281,10 @@ func write(ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res r
 				ev := cv.Event
 				ev.OwnerUserID = users[cv.Owner].ID
 				for _, email := range cv.Attendees {
-					ev.AttendeeUserIDs = append(ev.AttendeeUserIDs, users[email].ID)
+					u := users[email]
+					ev.Attendees = append(ev.Attendees, attendees.Person{
+						UserID: u.ID, PublicID: calresolve.PublicIDString(u.PublicID), Name: u.DisplayName,
+					})
 				}
 				events = append(events, ev)
 			}

@@ -43,6 +43,20 @@ func (q *Queries) AddOverrideAttendee(ctx context.Context, arg AddOverrideAttend
 	return err
 }
 
+const countCalendarEventsWithSourceUID = `-- name: CountCalendarEventsWithSourceUID :one
+SELECT COUNT(*) FROM calendar_events
+WHERE calendar_id = ? AND source_uid_key IS NOT NULL AND recurrence_parent_id IS NULL AND task_id IS NULL
+`
+
+// CountCalendarEventsWithSourceUID is ListSourcedCalendarEvents without the
+// origin test, so the difference counts identified rows no source claims.
+func (q *Queries) CountCalendarEventsWithSourceUID(ctx context.Context, calendarID uint32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countCalendarEventsWithSourceUID, calendarID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCalendarEvent = `-- name: CreateCalendarEvent :execresult
 INSERT INTO calendar_events (
   public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility,
@@ -466,6 +480,34 @@ func (q *Queries) GetRecurrenceOverride(ctx context.Context, arg GetRecurrenceOv
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const isCalendarEventFromSource = `-- name: IsCalendarEventFromSource :one
+SELECT EXISTS (SELECT 1 FROM events ev WHERE ev.workspace_id = ?
+  AND ev.calendar_id = ? AND ev.subject_public_id = ?
+  AND ev.type = 'calendar.event.created'
+  AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.source')) = ?) AS from_source
+`
+
+type IsCalendarEventFromSourceParams struct {
+	WorkspaceID uint32          `json:"workspaceId"`
+	CalendarID  sql.NullInt32   `json:"calendarId"`
+	PublicID    []byte          `json:"publicId"`
+	Source      json.RawMessage `json:"source"`
+}
+
+// IsCalendarEventFromSource is the origin test of ListSourcedCalendarEvents
+// for one event, asked again under the event's row lock.
+func (q *Queries) IsCalendarEventFromSource(ctx context.Context, arg IsCalendarEventFromSourceParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isCalendarEventFromSource,
+		arg.WorkspaceID,
+		arg.CalendarID,
+		arg.PublicID,
+		arg.Source,
+	)
+	var from_source bool
+	err := row.Scan(&from_source)
+	return from_source, err
 }
 
 const listCalendarEventsByCalendarAndRange = `-- name: ListCalendarEventsByCalendarAndRange :many
@@ -1037,6 +1079,84 @@ func (q *Queries) ListSeriesTouchingMember(ctx context.Context, arg ListSeriesTo
 			return nil, err
 		}
 		items = append(items, series_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSourcedCalendarEvents = `-- name: ListSourcedCalendarEvents :many
+SELECT id, public_id, workspace_id, calendar_id, kind, visibility, show_as, flexibility, title, all_day, start_at, end_at, timezone, location, memo, url, source_uid, source_uid_key, owner_user_id, created_by_user_id, block_label, recurrence_rule, recurrence_end, recurrence_exceptions, recurrence_parent_id, recurrence_original_start, notification_offset, task_id, task_role, task_singleton_role, sort_weight, notes, flags, enabled, updated_at, created_at FROM calendar_events ce
+WHERE ce.calendar_id = ? AND ce.source_uid_key IS NOT NULL
+  AND ce.recurrence_parent_id IS NULL AND ce.task_id IS NULL
+  AND EXISTS (SELECT 1 FROM events ev
+              WHERE ev.workspace_id = ce.workspace_id AND ev.calendar_id = ce.calendar_id
+                AND ev.subject_public_id = ce.public_id AND ev.type = 'calendar.event.created'
+                AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.source')) = ?)
+`
+
+type ListSourcedCalendarEventsParams struct {
+	CalendarID uint32          `json:"calendarId"`
+	Source     json.RawMessage `json:"source"`
+}
+
+// ListSourcedCalendarEvents is every live series head on a calendar that an
+// importer created under source, told apart by the source its creation entry
+// in the event log carries. A sync updates and deletes only these.
+func (q *Queries) ListSourcedCalendarEvents(ctx context.Context, arg ListSourcedCalendarEventsParams) ([]CalendarEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listSourcedCalendarEvents, arg.CalendarID, arg.Source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CalendarEvent
+	for rows.Next() {
+		var i CalendarEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.WorkspaceID,
+			&i.CalendarID,
+			&i.Kind,
+			&i.Visibility,
+			&i.ShowAs,
+			&i.Flexibility,
+			&i.Title,
+			&i.AllDay,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Timezone,
+			&i.Location,
+			&i.Memo,
+			&i.URL,
+			&i.SourceUid,
+			&i.SourceUidKey,
+			&i.OwnerUserID,
+			&i.CreatedByUserID,
+			&i.BlockLabel,
+			&i.RecurrenceRule,
+			&i.RecurrenceEnd,
+			&i.RecurrenceExceptions,
+			&i.RecurrenceParentID,
+			&i.RecurrenceOriginalStart,
+			&i.NotificationOffset,
+			&i.TaskID,
+			&i.TaskRole,
+			&i.TaskSingletonRole,
+			&i.SortWeight,
+			&i.Notes,
+			&i.Flags,
+			&i.Enabled,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

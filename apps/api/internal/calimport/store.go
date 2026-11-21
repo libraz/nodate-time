@@ -89,19 +89,20 @@ type importLockError struct{ err error }
 func (e *importLockError) Error() string { return e.err.Error() }
 func (e *importLockError) Unwrap() error { return e.err }
 
-// importChunked writes events importChunkSize to a transaction, each under the
+// chunked writes items importChunkSize to a transaction, each under the
 // importer's write lock. A chunk any write fails in is rolled back and written
-// again one event per transaction, so a row the store refuses costs only
-// itself.
+// again one item per transaction, so a row the store refuses costs only
+// itself; fail names what became of that item.
 //
 // write is handed the results earlier in its chunk, which are exactly what its
 // transaction will keep; keep is handed each result, in order, once it has
-// committed. It returns how many events were dealt with, which falls short of
-// len(events) only when the write lock was lost and the rest were left alone.
-func importChunked(
-	ctx context.Context, s session, calendarID, userID uint32, events []Event,
-	write func(q *generated.Queries, e Event, earlier []importResult) (importResult, error),
-	keep func(importResult),
+// committed. It returns how many items were dealt with, which falls short of
+// len(items) only when the write lock was lost and the rest were left alone.
+func chunked[T, R any](
+	ctx context.Context, s session, calendarID, userID uint32, items []T,
+	write func(q *generated.Queries, item T, earlier []R) (R, error),
+	keep func(R),
+	fail func(T, error) R,
 ) int {
 	lock := func(q *generated.Queries) error {
 		if _, err := calresolve.LockWrite(ctx, q, calendarID, userID); err != nil {
@@ -110,16 +111,16 @@ func importChunked(
 		return nil
 	}
 	var lockErr *importLockError
-	for lo := 0; lo < len(events); lo += importChunkSize {
-		chunk := events[lo:min(lo+importChunkSize, len(events))]
-		var batch []importResult
+	for lo := 0; lo < len(items); lo += importChunkSize {
+		chunk := items[lo:min(lo+importChunkSize, len(items))]
+		var batch []R
 		err := dbtx.Run(ctx, s.db, func(q *generated.Queries) error {
 			batch = batch[:0]
 			if err := lock(q); err != nil {
 				return err
 			}
-			for _, e := range chunk {
-				r, err := write(q, e, batch)
+			for _, item := range chunk {
+				r, err := write(q, item, batch)
 				if err != nil {
 					return err
 				}
@@ -132,14 +133,14 @@ func importChunked(
 		}
 		if err != nil {
 			batch = batch[:0]
-			for _, e := range chunk {
-				var r importResult
+			for _, item := range chunk {
+				var r R
 				err := dbtx.Run(ctx, s.db, func(q *generated.Queries) error {
 					if err := lock(q); err != nil {
 						return err
 					}
 					var err error
-					r, err = write(q, e, batch)
+					r, err = write(q, item, batch)
 					return err
 				})
 				if errors.As(err, &lockErr) {
@@ -149,7 +150,7 @@ func importChunked(
 					return lo + len(batch)
 				}
 				if err != nil {
-					r = importResult{e: e, outcome: storeOutcome(err)}
+					r = fail(item, err)
 				}
 				batch = append(batch, r)
 			}
@@ -158,7 +159,13 @@ func importChunked(
 			keep(r)
 		}
 	}
-	return len(events)
+	return len(items)
+}
+
+// failedImport is the result of an event whose own transaction the store
+// refused.
+func failedImport(e Event, err error) importResult {
+	return importResult{e: e, outcome: storeOutcome(err)}
 }
 
 type importOutcome int
@@ -175,6 +182,11 @@ const (
 	// importDuplicate is an event this calendar already holds under the name
 	// the file gave it. Nothing was written and nothing was wrong.
 	importDuplicate
+	// importUpdated is a synced event rewritten to the source's current values.
+	importUpdated
+	// importKept is an event a sync left as it was: the row is not the
+	// source's to change, or the source's version could not be written.
+	importKept
 )
 
 // mysqlDataErrors are the codes MySQL answers with when the value is what it
@@ -306,16 +318,136 @@ func convertRRule(value string, start time.Time) (*json.RawMessage, bool) {
 	return &raw, true
 }
 
-// importSeriesHead writes one VEVENT that is not a changed occurrence.
-//
-// It runs in the transaction importChunked hands it, which keeps one bad row
-// from discarding the rest of the file. Each event carries its own log entry:
-// an import is a state change like any other, and a feed that skipped it would
-// be missing however many events landed.
+// head is one series head after validation and conversion: what an insert
+// writes and what a sync compares against.
+type head struct {
+	title, location, memo, url, tz string
+	allDay                         bool
+	start, end                     time.Time
+	visibility                     generated.CalendarEventsVisibility // insert only
+	showAs                         generated.CalendarEventsShowAs     // insert only
+	notification                   sql.NullInt32                      // insert only
+	owner                          uint32
+	rule                           *json.RawMessage
+	recEnd                         sql.NullTime
+	exceptions                     *json.RawMessage // nil unless the event recurs
+	attendees                      []attendees.Person
+}
+
+// buildHead validates and converts one VEVENT that is not a changed
+// occurrence. importCreated means it can be written.
 //
 // The event is owned by the actor unless it names an owner. A .ics file has no
 // notion of one, and filing the events under whoever ran the import is the
 // honest answer -- they are who put them there.
+func buildHead(e Event, actorUserID uint32) (head, importOutcome) {
+	endAt, outcome, ok := validateImported(e)
+	if !ok {
+		return head{}, outcome
+	}
+	h := head{
+		title: e.Title, location: e.Location, memo: e.Memo, url: e.URL,
+		tz:     cmp.Or(e.Timezone, "UTC"),
+		allDay: e.AllDay, start: e.Start, end: endAt,
+		visibility: e.Visibility, showAs: e.ShowAs, notification: e.NotificationOffset,
+		owner:     cmp.Or(e.OwnerUserID, actorUserID),
+		attendees: e.Attendees,
+	}
+	if e.RRule != "" {
+		converted, ok := convertRRule(e.RRule, e.Start.In(recurrence.LoadLocation(h.tz)))
+		if !ok {
+			// An unsupported RRULE must not silently collapse a recurring
+			// event into a single occurrence.
+			return head{}, importSkipped
+		}
+		h.rule = converted
+		rule, err := recurrence.ParseRule(*h.rule)
+		if err != nil {
+			return head{}, importFailed
+		}
+		h.recEnd = sql.NullTime{
+			Time:  recurrence.ComputeEndInZone(rule, e.Start, endAt, h.tz),
+			Valid: true,
+		}
+		// EXDATE says which occurrences the series does not have. Dropping it
+		// hands back every occurrence its author cancelled.
+		// The parser already made them distinct.
+		column, err := recurrence.Exceptions(e.Exdates).MarshalColumn()
+		if err != nil {
+			return head{}, importFailed
+		}
+		h.exceptions = column
+	}
+	if h.recEnd.Valid && !storableInstant(h.recEnd.Time) {
+		return head{}, importRejected
+	}
+	return h, importCreated
+}
+
+// createParams is the insert of h as a new row known by identity.
+func (h head) createParams(pubID []byte, workspaceID, calendarID, actorUserID uint32, identity sql.NullString) generated.CreateCalendarEventParams {
+	return generated.CreateCalendarEventParams{
+		PublicID:           pubID,
+		WorkspaceID:        workspaceID,
+		CalendarID:         calendarID,
+		Kind:               generated.CalendarEventsKindEvent,
+		Visibility:         h.visibility,
+		ShowAs:             h.showAs,
+		Flexibility:        generated.CalendarEventsFlexibilityFixed,
+		Title:              h.title,
+		AllDay:             h.allDay,
+		StartAt:            sql.NullTime{Time: h.start, Valid: true},
+		EndAt:              sql.NullTime{Time: h.end, Valid: true},
+		Timezone:           h.tz,
+		Location:           nullString(h.location),
+		Memo:               nullString(h.memo),
+		URL:                nullString(h.url),
+		OwnerUserID:        h.owner,
+		CreatedByUserID:    actorUserID,
+		NotificationOffset: h.notification,
+		RecurrenceRule:     h.rule,
+		RecurrenceEnd:      h.recEnd,
+		SourceUid:          identity,
+	}
+}
+
+// insertHead writes h as a new row with its attendees, creation entry and
+// exclusion list.
+func insertHead(
+	ctx context.Context, s session, q *generated.Queries, cal generated.Calendar, userID uint32,
+	h head, pubID []byte, identity sql.NullString,
+) (generated.CalendarEvent, error) {
+	created, err := eventstore.Insert(ctx, q, h.createParams(pubID, s.workspaceID, cal.ID, userID, identity),
+		userIDs(h.attendees), map[string]any{"source": s.source})
+	if err != nil {
+		return generated.CalendarEvent{}, err
+	}
+	if h.exceptions != nil {
+		if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
+			RecurrenceExceptions: h.exceptions,
+			ID:                   created.ID,
+		}); err != nil {
+			return generated.CalendarEvent{}, err
+		}
+	}
+	return created, nil
+}
+
+// userIDs is the row keys of people, in order.
+func userIDs(people []attendees.Person) []uint32 {
+	ids := make([]uint32, 0, len(people))
+	for _, p := range people {
+		ids = append(ids, p.UserID)
+	}
+	return ids
+}
+
+// importSeriesHead writes one VEVENT that is not a changed occurrence.
+//
+// It runs in the transaction chunked hands it, which keeps one bad row from
+// discarding the rest of the file. Each event carries its own log entry: an
+// import is a state change like any other, and a feed that skipped it would be
+// missing however many events landed.
 //
 // identity is what the event will be known by, and an event this calendar
 // already holds under it is left exactly as it is. An import that overwrote
@@ -325,42 +457,9 @@ func importSeriesHead(
 	ctx context.Context, s session, q *generated.Queries, cal generated.Calendar, userID uint32,
 	e Event, identity sql.NullString,
 ) (importedSeries, importOutcome, error) {
-	endAt, outcome, ok := validateImported(e)
-	if !ok {
+	h, outcome := buildHead(e, userID)
+	if outcome != importCreated {
 		return importedSeries{}, outcome, nil
-	}
-	tz := cmp.Or(e.Timezone, "UTC")
-
-	var ruleData *json.RawMessage
-	var exceptions *json.RawMessage
-	recEnd := sql.NullTime{}
-	if e.RRule != "" {
-		converted, ok := convertRRule(e.RRule, e.Start.In(recurrence.LoadLocation(tz)))
-		if !ok {
-			// An unsupported RRULE must not silently collapse a recurring
-			// event into a single occurrence.
-			return importedSeries{}, importSkipped, nil
-		}
-		ruleData = converted
-		rule, err := recurrence.ParseRule(*ruleData)
-		if err != nil {
-			return importedSeries{}, importFailed, nil
-		}
-		recEnd = sql.NullTime{
-			Time:  recurrence.ComputeEndInZone(rule, e.Start, endAt, tz),
-			Valid: true,
-		}
-		// EXDATE says which occurrences the series does not have. Dropping it
-		// hands back every occurrence its author cancelled.
-		// The parser already made them distinct.
-		column, err := recurrence.Exceptions(e.Exdates).MarshalColumn()
-		if err != nil {
-			return importedSeries{}, importFailed, nil
-		}
-		exceptions = column
-	}
-	if recEnd.Valid && !storableInstant(recEnd.Time) {
-		return importedSeries{}, importRejected, nil
 	}
 
 	// Asked after the event is known to be one this import would write, so an
@@ -391,45 +490,13 @@ func importSeriesHead(
 	if err != nil {
 		return importedSeries{}, importFailed, nil
 	}
-
-	created, err := eventstore.Insert(ctx, q, generated.CreateCalendarEventParams{
-		PublicID:           pubID[:],
-		WorkspaceID:        s.workspaceID,
-		CalendarID:         cal.ID,
-		Kind:               generated.CalendarEventsKindEvent,
-		Visibility:         e.Visibility,
-		ShowAs:             e.ShowAs,
-		Flexibility:        generated.CalendarEventsFlexibilityFixed,
-		Title:              e.Title,
-		AllDay:             e.AllDay,
-		StartAt:            sql.NullTime{Time: e.Start, Valid: true},
-		EndAt:              sql.NullTime{Time: endAt, Valid: true},
-		Timezone:           tz,
-		Location:           nullString(e.Location),
-		Memo:               nullString(e.Memo),
-		URL:                nullString(e.URL),
-		OwnerUserID:        cmp.Or(e.OwnerUserID, userID),
-		CreatedByUserID:    userID,
-		NotificationOffset: e.NotificationOffset,
-		RecurrenceRule:     ruleData,
-		RecurrenceEnd:      recEnd,
-		SourceUid:          identity,
-	}, e.AttendeeUserIDs, map[string]any{"source": s.source})
+	created, err := insertHead(ctx, s, q, cal, userID, h, pubID[:], identity)
 	if err != nil {
 		return importedSeries{}, importFailed, err
 	}
-	newID := created.ID
-	if exceptions != nil {
-		if err := q.SetRecurrenceExceptions(ctx, generated.SetRecurrenceExceptionsParams{
-			RecurrenceExceptions: exceptions,
-			ID:                   newID,
-		}); err != nil {
-			return importedSeries{}, importFailed, err
-		}
-	}
 	return importedSeries{
-		id: newID, publicID: pubID[:], title: e.Title, start: e.Start, end: endAt,
-		timezone: tz, rule: ruleData, exceptions: e.Exdates,
+		id: created.ID, publicID: pubID[:], title: e.Title, start: e.Start, end: h.end,
+		timezone: h.tz, rule: h.rule, exceptions: e.Exdates,
 	}, importCreated, nil
 }
 
@@ -506,7 +573,7 @@ func importChangedOccurrence(
 		if err != nil {
 			return importFailed, err
 		}
-		if err := attendees.AddToNew(ctx, q, s.workspaceID, uint32(id), e.AttendeeUserIDs); err != nil {
+		if err := attendees.AddToNew(ctx, q, s.workspaceID, uint32(id), userIDs(e.Attendees)); err != nil {
 			return importFailed, err
 		}
 	}

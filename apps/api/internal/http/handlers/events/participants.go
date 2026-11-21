@@ -4,13 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
-	"github.com/libraz/nodate-time/apps/api/internal/eventlog"
 )
 
 // eventAttendees reads the participant rows once and returns both shapes the
@@ -30,17 +28,17 @@ func eventAttendees(ctx context.Context, deps Deps, eventID uint32) ([]string, [
 		return []string{}, []AttendeeResponse{}, nil
 	}
 	ids := make([]string, 0, len(rows))
-	attendees := make([]AttendeeResponse, 0, len(rows))
+	states := make([]AttendeeResponse, 0, len(rows))
 	for _, p := range rows {
 		id := pubIDToHex(p.UserPublicID)
 		ids = append(ids, id)
-		attendees = append(attendees, AttendeeResponse{
+		states = append(states, AttendeeResponse{
 			UserID:  id,
 			Rsvp:    string(p.Rsvp),
 			CanEdit: p.CanEdit,
 		})
 	}
-	return ids, attendees, nil
+	return ids, states, nil
 }
 
 // attendeeSet is every event's participants in a listing, read together.
@@ -107,14 +105,8 @@ func setAttendees(ctx context.Context, deps Deps, resp *EventResponse, eventID u
 	return nil
 }
 
-type eventParticipant struct {
-	publicID string
-	userID   uint32
-	name     string
-}
-
-func validateEventParticipants(ctx context.Context, q *generated.Queries, calID uint32, participantIDs []string) ([]eventParticipant, *apierrors.Spec) {
-	participants := make([]eventParticipant, 0, len(participantIDs))
+func validateEventParticipants(ctx context.Context, q *generated.Queries, calID uint32, participantIDs []string) ([]attendees.Person, *apierrors.Spec) {
+	participants := make([]attendees.Person, 0, len(participantIDs))
 	seen := make(map[uint32]struct{}, len(participantIDs))
 	for _, pUUID := range participantIDs {
 		pPub, err := parseUUID(pUUID)
@@ -139,21 +131,9 @@ func validateEventParticipants(ctx context.Context, q *generated.Queries, calID 
 			continue
 		}
 		seen[u.ID] = struct{}{}
-		participants = append(participants, eventParticipant{publicID: pubIDToHex(u.PublicID), userID: u.ID, name: u.DisplayName})
+		participants = append(participants, attendees.Person{PublicID: pubIDToHex(u.PublicID), UserID: u.ID, Name: u.DisplayName})
 	}
 	return participants, nil
-}
-
-// participantLog is what the attendee rows of one participant edit are
-// recorded against.
-type participantLog struct {
-	ActorUserID uint32
-	CalendarID  uint32
-	// Subject is the public id of the event the log rows name, which for an
-	// occurrence is its series.
-	Subject []byte
-	Title   string
-	Extra   map[string]any
 }
 
 // participantLogExtra is the payload every attendee row of an edit shares: an
@@ -166,103 +146,4 @@ func participantLogExtra(w eventAccess) map[string]any {
 		extra["originalStart"] = w.scope.occurrence.StartAt.Format(time.RFC3339)
 	}
 	return extra
-}
-
-// logParticipantDiff records one attendee.added row for everyone in wanted who
-// was not in before and one attendee.removed row per person in before who is
-// not in wanted. before is what the reader showed ahead of the edit, so rows
-// the reader hides are never reported.
-func logParticipantDiff(ctx context.Context, q *generated.Queries, workspaceID uint32, log participantLog, before []generated.ListEventAttendeesRow, wanted []eventParticipant) error {
-	shown := make(map[uint32]struct{}, len(before))
-	for _, b := range before {
-		shown[b.UserID] = struct{}{}
-	}
-	keep := make(map[uint32]struct{}, len(wanted))
-	var addedIDs, addedNames []string
-	for _, p := range wanted {
-		keep[p.userID] = struct{}{}
-		if _, ok := shown[p.userID]; !ok {
-			addedIDs = append(addedIDs, p.publicID)
-			addedNames = append(addedNames, p.name)
-		}
-	}
-	entry := func(kind string, extra map[string]any, summary string) eventlog.Entry {
-		row := make(map[string]any, len(log.Extra)+len(extra))
-		for k, v := range log.Extra {
-			row[k] = v
-		}
-		for k, v := range extra {
-			row[k] = v
-		}
-		return eventlog.Entry{
-			WorkspaceID: workspaceID,
-			CalendarID:  log.CalendarID,
-			ActorUserID: log.ActorUserID,
-			Type:        kind,
-			Title:       log.Title,
-			Summary:     summary,
-			Subject:     log.Subject,
-			Extra:       row,
-		}
-	}
-	if len(addedIDs) > 0 {
-		if err := eventlog.Append(ctx, q, entry(eventlog.TypeAttendeeAdded,
-			map[string]any{"count": len(addedIDs), "userIds": addedIDs}, strings.Join(addedNames, ", "))); err != nil {
-			return err
-		}
-	}
-	for _, b := range before {
-		if _, ok := keep[b.UserID]; ok {
-			continue
-		}
-		if err := eventlog.Append(ctx, q, entry(eventlog.TypeAttendeeRemoved,
-			map[string]any{"userId": pubIDToHex(b.UserPublicID)}, b.DisplayName)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func replaceEventParticipants(ctx context.Context, q *generated.Queries, workspaceID, eventID uint32, participants []eventParticipant, log participantLog) error {
-	// Only the people leaving are disabled, and only the people arriving are
-	// added. Somebody kept keeps their row untouched -- answer and edit grant
-	// both -- while a removed row loses its grant, so re-adding a participant
-	// cannot hand back an edit right the owner's side did not give again.
-	//
-	// Only for an event that can already have attendees. Creation calls
-	// attendees.AddToNew directly, and the difference is not tidiness --
-	// see there before routing the two back through one function.
-	eventRef := sql.NullInt32{Int32: int32(eventID), Valid: true}
-	before, err := q.ListEventAttendees(ctx, eventRef)
-	if err != nil {
-		return err
-	}
-	current, err := q.ListEnabledEventAttendeeIDs(ctx, eventRef)
-	if err != nil {
-		return err
-	}
-	wanted := make(map[uint32]struct{}, len(participants))
-	for _, p := range participants {
-		wanted[p.userID] = struct{}{}
-	}
-	present := make(map[uint32]struct{}, len(current))
-	for _, userID := range current {
-		present[userID] = struct{}{}
-		if _, keep := wanted[userID]; keep {
-			continue
-		}
-		if err := q.DisableEventAttendee(ctx, generated.DisableEventAttendeeParams{EventID: eventRef, UserID: userID}); err != nil {
-			return err
-		}
-	}
-	arriving := make([]uint32, 0, len(participants))
-	for _, p := range participants {
-		if _, ok := present[p.userID]; !ok {
-			arriving = append(arriving, p.userID)
-		}
-	}
-	if err := attendees.AddToNew(ctx, q, workspaceID, eventID, arriving); err != nil {
-		return err
-	}
-	return logParticipantDiff(ctx, q, workspaceID, log, before, participants)
 }

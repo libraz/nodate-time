@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	"github.com/libraz/nodate-time/apps/api/internal/dbtx"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
@@ -351,19 +352,19 @@ func resolveOwner(ctx context.Context, q *generated.Queries, calID uint32, owner
 // changesGrants reports whether an update reaches past the event's fields:
 // handing it to another owner, or dropping an attendee who holds an edit grant,
 // which takes that grant away. row is the row the update replaces.
-func changesGrants(ctx context.Context, q *generated.Queries, row generated.CalendarEvent, ownerID uint32, participants []eventParticipant) (bool, error) {
+func changesGrants(ctx context.Context, q *generated.Queries, row generated.CalendarEvent, ownerID uint32, participants []attendees.Person) (bool, error) {
 	if ownerID != 0 && ownerID != row.OwnerUserID {
 		return true, nil
 	}
-	attendees, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
+	current, err := q.ListEventAttendees(ctx, sql.NullInt32{Int32: int32(row.ID), Valid: true})
 	if err != nil {
 		return false, err
 	}
 	kept := make(map[uint32]struct{}, len(participants))
 	for _, p := range participants {
-		kept[p.userID] = struct{}{}
+		kept[p.UserID] = struct{}{}
 	}
-	for _, a := range attendees {
+	for _, a := range current {
 		if _, ok := kept[a.UserID]; a.CanEdit && !ok {
 			return true, nil
 		}
@@ -696,7 +697,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			}
 			attendeeUserIDs := make([]uint32, 0, len(participants))
 			for _, participant := range participants {
-				attendeeUserIDs = append(attendeeUserIDs, participant.userID)
+				attendeeUserIDs = append(attendeeUserIDs, participant.UserID)
 			}
 			var err error
 			created, err = eventstore.Insert(ctx, q, generated.CreateCalendarEventParams{
@@ -910,23 +911,7 @@ func cancelOccurrence(ctx context.Context, q *generated.Queries, deps Deps, acto
 // attachments. A retired attachment keeps its reference on the blob until the
 // cleanup sweep removes the row, so no count changes here.
 func deleteWholeEvent(ctx context.Context, q *generated.Queries, deps Deps, actorID uint32, w eventAccess) error {
-	eventRef := sql.NullInt32{Int32: int32(w.evt.ID), Valid: true}
-	if err := q.SoftDeleteAttachmentsByEvent(ctx, eventRef); err != nil {
-		return err
-	}
-	// Soft delete keeps the row, so its override rows keep their parent and the
-	// history stays readable.
-	if err := q.SoftDeleteCalendarEvent(ctx, w.evt.ID); err != nil {
-		return err
-	}
-	return eventlog.Append(ctx, q, eventlog.Entry{
-		WorkspaceID: deps.WorkspaceID,
-		CalendarID:  w.cal.ID,
-		ActorUserID: actorID,
-		Type:        eventlog.TypeEventDeleted,
-		Title:       w.evt.Title,
-		Subject:     w.evt.PublicID,
-	})
+	return eventstore.SoftDelete(ctx, q, deps.WorkspaceID, w.cal.ID, actorID, w.evt, nil)
 }
 
 // logEventActivity records something that happened to an event -- a comment, a

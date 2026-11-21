@@ -262,6 +262,32 @@ INSERT INTO calendar_events (
 SELECT * FROM calendar_events
 WHERE calendar_id = ? AND source_uid_key = sqlc.arg(source_uid);
 
+-- ListSourcedCalendarEvents is every live series head on a calendar that an
+-- importer created under source, told apart by the source its creation entry
+-- in the event log carries. A sync updates and deletes only these.
+-- name: ListSourcedCalendarEvents :many
+SELECT * FROM calendar_events ce
+WHERE ce.calendar_id = sqlc.arg(calendar_id) AND ce.source_uid_key IS NOT NULL
+  AND ce.recurrence_parent_id IS NULL AND ce.task_id IS NULL
+  AND EXISTS (SELECT 1 FROM events ev
+              WHERE ev.workspace_id = ce.workspace_id AND ev.calendar_id = ce.calendar_id
+                AND ev.subject_public_id = ce.public_id AND ev.type = 'calendar.event.created'
+                AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.source')) = sqlc.arg(source));
+
+-- CountCalendarEventsWithSourceUID is ListSourcedCalendarEvents without the
+-- origin test, so the difference counts identified rows no source claims.
+-- name: CountCalendarEventsWithSourceUID :one
+SELECT COUNT(*) FROM calendar_events
+WHERE calendar_id = ? AND source_uid_key IS NOT NULL AND recurrence_parent_id IS NULL AND task_id IS NULL;
+
+-- IsCalendarEventFromSource is the origin test of ListSourcedCalendarEvents
+-- for one event, asked again under the event's row lock.
+-- name: IsCalendarEventFromSource :one
+SELECT EXISTS (SELECT 1 FROM events ev WHERE ev.workspace_id = sqlc.arg(workspace_id)
+  AND ev.calendar_id = sqlc.arg(calendar_id) AND ev.subject_public_id = sqlc.arg(public_id)
+  AND ev.type = 'calendar.event.created'
+  AND JSON_UNQUOTE(JSON_EXTRACT(ev.payload_json, '$.source')) = sqlc.arg(source)) AS from_source;
+
 -- UpdateCalendarEvent and SoftDeleteCalendarEvent never touch a row a task
 -- projects (PROTOCOL.md obligation 3): its synced columns belong to the
 -- projection engine, and the handler refuses with EVENT.TASK_OWNED before
