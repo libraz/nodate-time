@@ -36,6 +36,21 @@
         "required": ["items"],
         "type": "object"
       },
+      "AddInstanceAdminInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/AddInstanceAdminInputBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "email": { "format": "email", "maxLength": 255, "type": "string" }
+        },
+        "required": ["email"],
+        "type": "object"
+      },
       "AddMemberInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -70,7 +85,8 @@
           "caption": { "type": "string" },
           "contentType": { "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
-          "eventId": { "type": "string" },
+          "etag": { "type": "string" },
+          "eventId": { "type": ["string", "null"] },
           "height": { "format": "int64", "type": "integer" },
           "id": { "type": "string" },
           "imageUrl": { "type": "string" },
@@ -87,6 +103,8 @@
           "caption",
           "contentType",
           "byteSize",
+          "eventId",
+          "etag",
           "takenAt",
           "createdAt",
           "uploaderId",
@@ -196,6 +214,7 @@
           "coverImageUrl": { "type": "string" },
           "coverUploadAllowed": { "type": "boolean" },
           "createdAt": { "format": "date-time", "type": "string" },
+          "etag": { "type": "string" },
           "id": { "type": "string" },
           "memberColor": { "type": "string" },
           "memberCount": { "format": "int64", "type": "integer" },
@@ -205,6 +224,7 @@
         },
         "required": [
           "id",
+          "etag",
           "name",
           "color",
           "coverUploadAllowed",
@@ -214,21 +234,6 @@
           "role",
           "memberColor"
         ],
-        "type": "object"
-      },
-      "CancelPollInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": ["https://example.com/schemas/CancelPollInputBody.json"],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "version": { "format": "int32", "minimum": 0, "type": "integer" }
-        },
-        "required": ["version"],
         "type": "object"
       },
       "CandidateSlotResponse": {
@@ -295,11 +300,15 @@
           },
           "createdAt": { "format": "date-time", "type": "string" },
           "done": { "type": "boolean" },
+          "etag": {
+            "description": "Version of this item; send it as If-Match on a change",
+            "type": "string"
+          },
           "id": { "type": "string" },
           "sortOrder": { "format": "int64", "type": "integer" },
           "title": { "type": "string" }
         },
-        "required": ["id", "title", "done", "sortOrder", "createdAt"],
+        "required": ["id", "title", "done", "sortOrder", "etag", "createdAt"],
         "type": "object"
       },
       "CommentResponse": {
@@ -317,9 +326,13 @@
           "authorName": { "type": "string" },
           "body": { "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
+          "etag": {
+            "description": "Version of this comment; send it as If-Match on a change",
+            "type": "string"
+          },
           "id": { "type": "string" }
         },
-        "required": ["id", "authorId", "authorName", "body", "createdAt"],
+        "required": ["id", "authorId", "authorName", "body", "etag", "createdAt"],
         "type": "object"
       },
       "ConfirmAvatarInputBody": {
@@ -476,7 +489,12 @@
             "type": "string"
           },
           "allDay": { "type": "boolean" },
-          "endAt": { "description": "ISO 8601 datetime", "type": "string" },
+          "endAt": { "description": "ISO 8601 datetime; timed events only", "type": "string" },
+          "endDate": {
+            "description": "day after the last day (exclusive), YYYY-MM-DD; all-day events only",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
           "flexibility": {
             "description": "defaults to fixed",
             "enum": ["fixed", "negotiable", "conditional"],
@@ -484,35 +502,46 @@
           },
           "location": { "maxLength": 500, "type": "string" },
           "memo": { "maxLength": 16000, "type": "string" },
-          "notificationOffset": { "format": "int64", "type": "integer" },
+          "notificationOffset": {
+            "description": "minutes before the start",
+            "format": "int64",
+            "maximum": 10080,
+            "minimum": 0,
+            "type": "integer"
+          },
           "ownerId": {
             "description": "public user ID of the owning member; defaults to the caller",
             "type": "string"
           },
           "participantIds": { "items": { "type": "string" }, "type": ["array", "null"] },
           "recurrenceRule": {
-            "description": "Weekly rules with interval \u003e 1 use a fixed Sunday week start (WKST=SU)."
+            "description": "Weekly rules with interval \u003e 1 use a fixed Sunday week start (WKST=SU). until is YYYY-MM-DD for an all-day series and an RFC 3339 instant otherwise."
           },
           "showAs": {
             "description": "defaults to busy",
             "enum": ["busy", "free", "tentative", "oof"],
             "type": "string"
           },
-          "startAt": { "description": "ISO 8601 datetime", "type": "string" },
+          "startAt": { "description": "ISO 8601 datetime; timed events only", "type": "string" },
+          "startDate": {
+            "description": "first day, YYYY-MM-DD; all-day events only",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
           "timezone": {
-            "description": "IANA timezone (defaults to UTC)",
+            "description": "IANA timezone (defaults to UTC); a record of the author's zone for an all-day event",
             "maxLength": 64,
             "type": "string"
           },
           "title": { "maxLength": 500, "minLength": 1, "type": "string" },
           "url": { "maxLength": 2000, "type": "string" },
           "visibility": {
-            "description": "defaults to the calendar's setting; omitted on update keeps the current value",
+            "description": "defaults to the calendar's setting",
             "enum": ["default", "public", "private", "confidential"],
             "type": "string"
           }
         },
-        "required": ["title", "allDay", "startAt", "endAt"],
+        "required": ["title", "allDay"],
         "type": "object"
       },
       "CreateInviteInputBody": {
@@ -616,6 +645,10 @@
             "items": { "$ref": "#/components/schemas/AttendeeResponse" },
             "type": ["array", "null"]
           },
+          "blockLabel": {
+            "description": "free-text label of a block; absent on any other kind",
+            "type": "string"
+          },
           "calendarId": { "type": "string" },
           "color": {
             "description": "read-only; the owner's colour on this calendar",
@@ -625,10 +658,14 @@
           "creatorAvatarUrl": { "type": "string" },
           "creatorId": { "description": "public user ID of the creator", "type": "string" },
           "creatorName": { "type": "string" },
+          "detailsHidden": { "type": "boolean" },
           "endAt": { "format": "date-time", "type": "string" },
+          "endDate": { "type": "string" },
+          "etag": { "type": "string" },
           "flexibility": { "enum": ["fixed", "negotiable", "conditional"], "type": "string" },
           "id": { "type": "string" },
           "isRecurrence": { "type": "boolean" },
+          "kind": { "enum": ["event", "block", "free", "milestone"], "type": "string" },
           "location": { "type": "string" },
           "memo": { "type": "string" },
           "notificationOffset": { "format": "int64", "type": ["integer", "null"] },
@@ -644,8 +681,10 @@
           "participantIds": { "items": { "type": "string" }, "type": ["array", "null"] },
           "recurrenceDate": { "type": "string" },
           "recurrenceRule": { "$ref": "#/components/schemas/RecurrenceRuleResponse" },
+          "seriesEtag": { "type": "string" },
           "showAs": { "enum": ["busy", "free", "tentative", "oof"], "type": "string" },
           "startAt": { "format": "date-time", "type": "string" },
+          "startDate": { "type": "string" },
           "taskOwned": {
             "description": "true when a task projects this event; its title, dates and recurrence then change on the task",
             "type": "boolean"
@@ -663,6 +702,7 @@
           "id",
           "calendarId",
           "title",
+          "kind",
           "allDay",
           "startAt",
           "endAt",
@@ -685,7 +725,9 @@
           "creatorId",
           "creatorName",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "detailsHidden",
+          "etag"
         ],
         "type": "object"
       },
@@ -700,6 +742,7 @@
           "entityId": { "type": "string" },
           "entityType": { "type": "string" },
           "id": { "type": "string" },
+          "originalStart": { "type": "string" },
           "summary": { "type": "string" },
           "systemActor": { "type": "boolean" }
         },
@@ -718,11 +761,9 @@
           },
           "acknowledged": { "type": "boolean" },
           "ownerId": { "type": "string" },
-          "reviewVersion": { "format": "int32", "minimum": 0, "type": "integer" },
-          "slotId": { "type": "string" },
-          "version": { "format": "int32", "minimum": 0, "type": "integer" }
+          "slotId": { "type": "string" }
         },
-        "required": ["version", "reviewVersion", "slotId"],
+        "required": ["slotId"],
         "type": "object"
       },
       "GetAttachmentDownloadOutputBody": {
@@ -749,10 +790,30 @@
           "actorName": { "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "id": { "type": "string" },
+          "originalStart": { "type": "string" },
           "summary": { "type": "string" },
           "systemActor": { "type": "boolean" }
         },
         "required": ["id", "action", "summary", "createdAt"],
+        "type": "object"
+      },
+      "HistoryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/HistoryPage.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": { "$ref": "#/components/schemas/HistoryItem" },
+            "type": ["array", "null"]
+          },
+          "nextCursor": { "type": "string" }
+        },
+        "required": ["items"],
         "type": "object"
       },
       "HumaError": {
@@ -806,6 +867,7 @@
             "readOnly": true,
             "type": "string"
           },
+          "droppedReminders": { "format": "int64", "type": "integer" },
           "duplicates": { "format": "int64", "type": "integer" },
           "failed": { "format": "int64", "type": "integer" },
           "imported": { "format": "int64", "type": "integer" },
@@ -823,6 +885,7 @@
           "duplicates",
           "truncated",
           "unknownTimezones",
+          "droppedReminders",
           "unreadable"
         ],
         "type": "object"
@@ -830,6 +893,13 @@
       "InstanceAdmin": {
         "additionalProperties": false,
         "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/InstanceAdmin.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
           "email": { "type": "string" },
           "grantedAt": { "format": "date-time", "type": "string" },
           "name": { "type": "string" },
@@ -907,6 +977,25 @@
           "nextCursor": { "type": "string" }
         },
         "required": ["items"],
+        "type": "object"
+      },
+      "ListEventsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/ListEventsBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "hasMore": { "type": "boolean" },
+          "items": {
+            "items": { "$ref": "#/components/schemas/EventResponse" },
+            "type": ["array", "null"]
+          }
+        },
+        "required": ["items", "hasMore"],
         "type": "object"
       },
       "ListMemberCandidatesPage": {
@@ -1043,12 +1132,13 @@
           "body": { "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "done": { "type": "boolean" },
+          "etag": { "type": "string" },
           "id": { "type": "string" },
           "sortOrder": { "format": "int32", "type": "integer" },
           "title": { "type": "string" },
           "updatedAt": { "format": "date-time", "type": "string" }
         },
-        "required": ["id", "title", "body", "done", "sortOrder", "createdAt", "updatedAt"],
+        "required": ["id", "title", "body", "done", "sortOrder", "createdAt", "updatedAt", "etag"],
         "type": "object"
       },
       "OAuthProvidersOutputBody": {
@@ -1082,6 +1172,68 @@
           "state": { "type": "string" }
         },
         "required": ["authorizeUrl", "state"],
+        "type": "object"
+      },
+      "PatchEventInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PatchEventInputBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "allDay": {
+            "description": "switching needs both ends of the new form",
+            "type": "boolean"
+          },
+          "blockLabel": {
+            "description": "label of a block; refused on any other kind",
+            "maxLength": 200,
+            "type": ["string", "null"]
+          },
+          "endAt": { "description": "ISO 8601 datetime; timed events only", "type": "string" },
+          "endDate": {
+            "description": "day after the last day (exclusive), YYYY-MM-DD; all-day events only",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "flexibility": { "enum": ["fixed", "negotiable", "conditional"], "type": "string" },
+          "location": { "maxLength": 500, "type": ["string", "null"] },
+          "memo": { "maxLength": 16000, "type": ["string", "null"] },
+          "notificationOffset": {
+            "description": "minutes before the start; null clears it",
+            "format": "int64",
+            "maximum": 10080,
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "ownerId": { "description": "public user ID of the owning member", "type": "string" },
+          "participantIds": {
+            "description": "full participant list; an empty array removes all participants",
+            "items": { "type": "string" },
+            "type": ["array", "null"]
+          },
+          "recurrenceRule": {
+            "description": "full recurrence rule; null makes the event non-recurring. until is YYYY-MM-DD for an all-day series and an RFC 3339 instant otherwise.",
+            "type": ["", "null"]
+          },
+          "showAs": { "enum": ["busy", "free", "tentative", "oof"], "type": "string" },
+          "startAt": { "description": "ISO 8601 datetime; timed events only", "type": "string" },
+          "startDate": {
+            "description": "first day, YYYY-MM-DD; all-day events only",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "timezone": { "description": "IANA timezone", "maxLength": 64, "type": "string" },
+          "title": { "maxLength": 500, "minLength": 1, "type": "string" },
+          "url": { "maxLength": 2000, "type": ["string", "null"] },
+          "visibility": {
+            "enum": ["default", "public", "private", "confidential"],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "PersonResponse": {
@@ -1134,12 +1286,12 @@
             "readOnly": true,
             "type": "string"
           },
-          "answerVersion": { "format": "int32", "minimum": 0, "type": "integer" },
           "calendarId": { "type": "string" },
           "canManage": { "type": "boolean" },
           "canRespond": { "type": "boolean" },
           "canTakeOver": { "type": "boolean" },
           "confirmedEventId": { "type": "string" },
+          "etag": { "type": "string" },
           "id": { "type": "string" },
           "memberCount": { "format": "int64", "type": "integer" },
           "members": {
@@ -1155,7 +1307,6 @@
             "items": { "$ref": "#/components/schemas/PollMemberAnswersResponse" },
             "type": ["array", "null"]
           },
-          "reviewVersion": { "format": "int32", "minimum": 0, "type": "integer" },
           "selectedSlotId": { "type": "string" },
           "slots": {
             "items": { "$ref": "#/components/schemas/PollSlotResponse" },
@@ -1163,8 +1314,7 @@
           },
           "status": { "enum": ["open", "finalized", "cancelled"], "type": "string" },
           "timezone": { "type": "string" },
-          "title": { "type": "string" },
-          "version": { "format": "int32", "minimum": 0, "type": "integer" }
+          "title": { "type": "string" }
         },
         "required": [
           "id",
@@ -1172,8 +1322,7 @@
           "title",
           "timezone",
           "status",
-          "version",
-          "reviewVersion",
+          "etag",
           "canManage",
           "canRespond",
           "slots",
@@ -1193,6 +1342,25 @@
           "memberId": { "type": "string" }
         },
         "required": ["memberId", "answers"],
+        "type": "object"
+      },
+      "PollResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PollResponseBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "answers": {
+            "items": { "$ref": "#/components/schemas/PollAnswerResponse" },
+            "type": ["array", "null"]
+          },
+          "etag": { "type": "string" }
+        },
+        "required": ["etag", "answers"],
         "type": "object"
       },
       "PollSlotInput": {
@@ -1238,7 +1406,7 @@
             "description": "lowercase hex SHA-256 of the file contents",
             "maxLength": 64,
             "minLength": 64,
-            "pattern": "^[0-9a-fA-F]{64}$",
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           }
         },
@@ -1267,6 +1435,43 @@
         "required": ["avatarId", "uploadUrl"],
         "type": "object"
       },
+      "PresignCalendarCoverInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PresignCalendarCoverInputBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "byteSize": { "format": "int64", "maximum": 5242880, "minimum": 1, "type": "integer" },
+          "contentType": { "enum": ["image/jpeg", "image/png", "image/webp"], "type": "string" },
+          "sha256": {
+            "description": "Lowercase hex SHA-256 of the image bytes",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": ["sha256", "contentType", "byteSize"],
+        "type": "object"
+      },
+      "PresignCalendarCoverResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PresignCalendarCoverResult.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "coverId": { "type": "string" },
+          "uploadUrl": { "type": "string" }
+        },
+        "required": ["coverId"],
+        "type": "object"
+      },
       "PresignPhotoBody": {
         "additionalProperties": false,
         "properties": {
@@ -1282,6 +1487,13 @@
           "contentType": { "description": "MIME type, must be image/*", "type": "string" },
           "eventId": { "description": "Optional event public ID", "type": "string" },
           "height": { "format": "int64", "minimum": 1, "type": "integer" },
+          "sha256": {
+            "description": "lowercase hex SHA-256 of the photo bytes",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
           "takenAt": {
             "description": "EXIF capture time. Defaults to upload time.",
             "format": "date-time",
@@ -1292,9 +1504,16 @@
             "description": "MIME type of the thumbnail, must be image/*",
             "type": "string"
           },
+          "thumbnailSha256": {
+            "description": "lowercase hex SHA-256 of the thumbnail bytes",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
           "width": { "format": "int64", "minimum": 1, "type": "integer" }
         },
-        "required": ["contentType", "byteSize"],
+        "required": ["contentType", "byteSize", "sha256"],
         "type": "object"
       },
       "PresignPhotoResult": {
@@ -1336,7 +1555,7 @@
             "description": "lowercase hex SHA-256 of the file contents",
             "maxLength": 64,
             "minLength": 64,
-            "pattern": "^[0-9a-fA-F]{64}$",
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           }
         },
@@ -1401,20 +1620,69 @@
         "required": ["calendarId", "name", "color", "joinable", "spent"],
         "type": "object"
       },
+      "PublicEventList": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PublicEventList.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "hasMore": { "type": "boolean" },
+          "items": {
+            "items": { "$ref": "#/components/schemas/PublicEventResponse" },
+            "type": ["array", "null"]
+          }
+        },
+        "required": ["items", "hasMore"],
+        "type": "object"
+      },
       "PublicEventResponse": {
         "additionalProperties": false,
         "properties": {
           "allDay": { "type": "boolean" },
           "color": { "type": "string" },
+          "detailsHidden": { "type": "boolean" },
           "endAt": { "format": "date-time", "type": "string" },
+          "endDate": { "type": "string" },
           "id": { "type": "string" },
           "location": { "type": "string" },
-          "private": { "type": "boolean" },
           "startAt": { "format": "date-time", "type": "string" },
+          "startDate": { "type": "string" },
           "timezone": { "type": "string" },
-          "title": { "type": "string" }
+          "title": { "type": ["string", "null"] }
         },
-        "required": ["id", "title", "allDay", "startAt", "endAt", "timezone", "color", "private"],
+        "required": [
+          "id",
+          "title",
+          "allDay",
+          "startAt",
+          "endAt",
+          "timezone",
+          "color",
+          "detailsHidden"
+        ],
+        "type": "object"
+      },
+      "PutCalendarCoverInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/PutCalendarCoverInputBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "coverId": {
+            "description": "The ID the presign returned",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": ["coverId"],
         "type": "object"
       },
       "RecurrenceRuleResponse": {
@@ -1622,14 +1890,12 @@
             "readOnly": true,
             "type": "string"
           },
-          "answerVersion": { "format": "int32", "minimum": 0, "type": "integer" },
           "answers": {
             "items": { "$ref": "#/components/schemas/PollAnswerInput" },
             "type": ["array", "null"]
-          },
-          "version": { "format": "int32", "minimum": 0, "type": "integer" }
+          }
         },
-        "required": ["version", "answerVersion", "answers"],
+        "required": ["answers"],
         "type": "object"
       },
       "SetRsvpInputBody": {
@@ -1657,8 +1923,8 @@
             "readOnly": true,
             "type": "string"
           },
-          "color": { "maxLength": 7, "pattern": "^#[0-9A-Fa-f]{6}$", "type": "string" },
-          "name": { "maxLength": 200, "minLength": 1, "type": "string" }
+          "color": { "maxLength": 7, "pattern": "^#[0-9A-Fa-f]{6}$", "type": ["string", "null"] },
+          "name": { "maxLength": 200, "minLength": 1, "type": ["string", "null"] }
         },
         "type": "object"
       },
@@ -1672,17 +1938,17 @@
             "readOnly": true,
             "type": "string"
           },
-          "done": { "description": "omit to keep the current state", "type": "boolean" },
+          "done": { "description": "omit to keep the current state", "type": ["boolean", "null"] },
           "sortOrder": {
             "description": "omit to keep the current position",
             "format": "int64",
-            "type": "integer"
+            "type": ["integer", "null"]
           },
           "title": {
             "description": "omit to keep the current title",
             "maxLength": 500,
             "minLength": 1,
-            "type": "string"
+            "type": ["string", "null"]
           }
         },
         "type": "object"
@@ -1697,96 +1963,13 @@
             "readOnly": true,
             "type": "string"
           },
-          "body": { "maxLength": 16000, "minLength": 1, "type": "string" }
-        },
-        "required": ["body"],
-        "type": "object"
-      },
-      "UpdateEventInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": ["https://example.com/schemas/UpdateEventInputBody.json"],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "allDay": { "type": "boolean" },
-          "endAt": { "type": "string" },
-          "flexibility": {
-            "description": "omitted keeps the current value",
-            "enum": ["fixed", "negotiable", "conditional"],
-            "type": "string"
-          },
-          "location": { "maxLength": 500, "type": "string" },
-          "memo": { "maxLength": 16000, "type": "string" },
-          "notificationOffset": {
-            "description": "null clears the notification",
-            "format": "int64",
-            "type": ["integer", "null"]
-          },
-          "ownerId": {
-            "description": "public user ID of the owning member; null leaves the owner unchanged",
+          "body": {
+            "description": "omit to keep the current text",
+            "maxLength": 16000,
+            "minLength": 1,
             "type": ["string", "null"]
-          },
-          "participantIds": {
-            "description": "full participant list; an empty array removes all participants",
-            "items": { "type": "string" },
-            "type": ["array", "null"]
-          },
-          "recurrenceRule": {
-            "description": "full recurrence rule; null makes the event non-recurring. Weekly rules with interval \u003e 1 use a fixed Sunday week start (WKST=SU)."
-          },
-          "showAs": {
-            "description": "omitted keeps the current value",
-            "enum": ["busy", "free", "tentative", "oof"],
-            "type": "string"
-          },
-          "startAt": { "type": "string" },
-          "timezone": {
-            "description": "IANA timezone (defaults to the event's current zone)",
-            "maxLength": 64,
-            "type": "string"
-          },
-          "title": { "maxLength": 500, "minLength": 1, "type": "string" },
-          "url": { "maxLength": 2000, "type": "string" },
-          "visibility": {
-            "description": "omitted keeps the current value",
-            "enum": ["default", "public", "private", "confidential"],
-            "type": "string"
           }
         },
-        "required": [
-          "title",
-          "allDay",
-          "startAt",
-          "endAt",
-          "location",
-          "memo",
-          "url",
-          "notificationOffset",
-          "participantIds",
-          "ownerId",
-          "recurrenceRule"
-        ],
-        "type": "object"
-      },
-      "UpdateMeInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": ["https://example.com/schemas/UpdateMeInputBody.json"],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "locale": { "maxLength": 35, "type": "string" },
-          "name": { "maxLength": 100, "minLength": 1, "type": "string" },
-          "timezone": { "description": "IANA timezone", "maxLength": 64, "type": "string" }
-        },
-        "required": ["name"],
         "type": "object"
       },
       "UpdateMemberColorInputBody": {
@@ -1829,14 +2012,14 @@
             "readOnly": true,
             "type": "string"
           },
-          "body": { "maxLength": 16000, "type": "string" },
-          "done": { "type": "boolean" },
+          "body": { "maxLength": 16000, "type": ["string", "null"] },
+          "done": { "type": ["boolean", "null"] },
           "sortOrder": {
-            "description": "Position in the list, ascending; equal values keep creation order. Omitted keeps the stored value.",
+            "description": "Position in the list, ascending; equal values keep creation order.",
             "format": "int32",
-            "type": "integer"
+            "type": ["integer", "null"]
           },
-          "title": { "maxLength": 500, "minLength": 1, "type": "string" }
+          "title": { "maxLength": 500, "minLength": 1, "type": ["string", "null"] }
         },
         "type": "object"
       },
@@ -1850,8 +2033,12 @@
             "readOnly": true,
             "type": "string"
           },
-          "caption": { "maxLength": 500, "type": ["string", "null"] },
-          "eventId": { "description": "Empty string clears the link", "type": ["string", "null"] }
+          "caption": {
+            "description": "null clears the caption",
+            "maxLength": 500,
+            "type": ["string", "null"]
+          },
+          "eventId": { "description": "null removes the event link", "type": ["string", "null"] }
         },
         "type": "object"
       },
@@ -1871,10 +2058,8 @@
             "type": ["array", "null"]
           },
           "takeOver": { "type": "boolean" },
-          "title": { "maxLength": 500, "minLength": 1, "type": "string" },
-          "version": { "format": "int32", "minimum": 0, "type": "integer" }
+          "title": { "maxLength": 500, "minLength": 1, "type": "string" }
         },
-        "required": ["version"],
         "type": "object"
       },
       "UpdateProviderInputBody": {
@@ -1887,11 +2072,32 @@
             "readOnly": true,
             "type": "string"
           },
-          "clientId": { "maxLength": 255, "minLength": 0, "type": "string" },
-          "clientSecret": { "maxLength": 512, "minLength": 0, "type": "string" },
-          "enabled": { "type": "boolean" }
+          "clientId": { "description": "at most 255 characters", "type": ["string", "null"] },
+          "clientSecret": {
+            "description": "1 to 512 characters; null removes the stored secret",
+            "type": ["string", "null"]
+          },
+          "enabled": { "type": ["boolean", "null"] }
         },
-        "required": ["clientId", "clientSecret", "enabled"],
+        "type": "object"
+      },
+      "UpdateUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": ["https://example.com/schemas/UpdateUserInputBody.json"],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "locale": {
+            "description": "BCP 47 tag, at most 35 characters",
+            "type": ["string", "null"]
+          },
+          "name": { "description": "1 to 100 characters", "type": ["string", "null"] },
+          "timezone": { "description": "IANA timezone", "type": ["string", "null"] }
+        },
         "type": "object"
       },
       "UserResponse": {
@@ -1966,17 +2172,35 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/AllowedEmail" } }
             },
-            "description": "OK"
+            "description": "Created"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Allow an individual email to sign in via OAuth (admin only)",
@@ -2025,6 +2249,51 @@
           }
         },
         "summary": "List instance administrators (admin only)",
+        "tags": ["Admin"]
+      },
+      "post": {
+        "operationId": "add-instance-admin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AddInstanceAdminInputBody" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/InstanceAdmin" } }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Grant a user instance administrator rights (admin only)",
         "tags": ["Admin"]
       }
     },
@@ -2096,7 +2365,7 @@
         "summary": "Delete OAuth provider configuration (admin only)",
         "tags": ["Admin"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-oauth-provider",
         "parameters": [
           {
@@ -2121,11 +2390,29 @@
             },
             "description": "OK"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Update OAuth provider credentials (admin only)",
@@ -2373,13 +2660,13 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/RegisterOutputBody" }
               }
             },
-            "description": "OK"
+            "description": "Created"
           },
           "default": {
             "content": {
@@ -2460,17 +2747,29 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/CalendarResponse" } }
             },
-            "description": "OK"
+            "description": "Created"
           },
-          "default": {
+          "409": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a calendar",
@@ -2481,15 +2780,46 @@
       "delete": {
         "operationId": "delete-calendar",
         "parameters": [
-          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a calendar",
@@ -2505,7 +2835,8 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/CalendarResponse" } }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
           "default": {
             "content": {
@@ -2517,10 +2848,11 @@
         "summary": "Get a calendar",
         "tags": ["Calendar"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-calendar",
         "parameters": [
-          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -2535,13 +2867,44 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/CalendarResponse" } }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update a calendar",
@@ -2647,13 +3010,13 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/PresignPhotoResult" }
               }
             },
-            "description": "OK"
+            "description": "Created"
           },
           "default": {
             "content": {
@@ -2671,25 +3034,57 @@
         "operationId": "delete-album-photo",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "photoId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "photoId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete an album photo",
         "tags": ["Album"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-album-photo",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "photoId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "photoId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -2704,13 +3099,44 @@
                 "schema": { "$ref": "#/components/schemas/AlbumPhotoResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update an album photo's caption or linked event",
@@ -2733,11 +3159,23 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Confirm a previously uploaded album photo",
@@ -2776,35 +3214,38 @@
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/CalendarResponse" } }
-            },
-            "description": "OK"
-          },
-          "default": {
+          "204": { "description": "No Content" },
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Remove a calendar cover image",
         "tags": ["Calendar"]
       },
       "put": {
-        "operationId": "put-calendar-cover",
+        "operationId": "confirm-calendar-cover",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
-            "application/octet-stream": {
-              "schema": {
-                "contentMediaType": "application/octet-stream",
-                "format": "binary",
-                "type": "string"
-              }
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PutCalendarCoverInputBody" }
             }
           },
           "required": true
@@ -2816,14 +3257,120 @@
             },
             "description": "OK"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
-        "summary": "Upload a shared calendar cover image",
+        "summary": "Confirm an uploaded image as the shared calendar cover",
+        "tags": ["Calendar"]
+      }
+    },
+    "/calendars/{calendarId}/cover/presign": {
+      "post": {
+        "operationId": "presign-calendar-cover",
+        "parameters": [
+          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PresignCalendarCoverInputBody" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PresignCalendarCoverResult" }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Reserve an upload for a shared calendar cover image",
         "tags": ["Calendar"]
       }
     },
@@ -2864,6 +3411,20 @@
             }
           },
           {
+            "description": "Most events to return; the earliest are kept",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 5000,
+              "description": "Most events to return; the earliest are kept",
+              "format": "int64",
+              "maximum": 5000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
             "description": "IANA timezone the dates are read in",
             "explode": false,
             "in": "query",
@@ -2874,21 +3435,27 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "items": { "$ref": "#/components/schemas/EventResponse" },
-                  "type": ["array", "null"]
-                }
-              }
+              "application/json": { "schema": { "$ref": "#/components/schemas/ListEventsBody" } }
             },
-            "description": "OK",
-            "headers": { "X-Result-Truncated": { "schema": { "type": "string" } } }
+            "description": "OK"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List events in a calendar",
@@ -2915,11 +3482,23 @@
             "description": "Created",
             "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create an event",
@@ -2943,15 +3522,58 @@
               "enum": ["this", "all"],
               "type": "string"
             }
-          }
+          },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete an event",
@@ -2971,17 +3593,29 @@
             "description": "OK",
             "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get an event",
         "tags": ["Event"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-event",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
@@ -2998,21 +3632,11 @@
               "type": "string"
             }
           },
-          {
-            "description": "entity tag from the copy being replaced; a mismatch answers 409",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "description": "entity tag from the copy being replaced; a mismatch answers 409",
-              "type": "string"
-            }
-          }
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
-              "schema": { "$ref": "#/components/schemas/UpdateEventInputBody" }
-            }
+            "application/json": { "schema": { "$ref": "#/components/schemas/PatchEventInputBody" } }
           },
           "required": true
         },
@@ -3024,11 +3648,53 @@
             "description": "OK",
             "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update an event",
@@ -3071,11 +3737,23 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List event comments",
@@ -3096,17 +3774,36 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/CommentResponse" } }
             },
-            "description": "OK"
+            "description": "Created",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a comment on an event",
@@ -3119,26 +3816,76 @@
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
           { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "commentId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "commentId", "required": true, "schema": { "type": "string" } },
+          {
+            "description": "etag of the comment being deleted",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": { "description": "etag of the comment being deleted", "type": "string" }
+          }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a comment",
         "tags": ["Comment"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-comment",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
           { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "commentId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "commentId", "required": true, "schema": { "type": "string" } },
+          {
+            "description": "etag of the comment being changed",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": { "description": "etag of the comment being changed", "type": "string" }
+          }
         ],
         "requestBody": {
           "content": {
@@ -3153,13 +3900,50 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/CommentResponse" } }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update a comment",
@@ -3185,11 +3969,23 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List event attachments",
@@ -3212,19 +4008,55 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/PresignUploadOutputBody" }
               }
             },
-            "description": "OK"
+            "description": "Created"
           },
-          "default": {
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Get a presigned URL for uploading a file",
@@ -3241,11 +4073,29 @@
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete an attachment",
@@ -3269,11 +4119,47 @@
             },
             "description": "OK"
           },
-          "default": {
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Confirm a previously uploaded attachment",
@@ -3297,11 +4183,29 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Get a presigned download URL",
@@ -3361,11 +4265,23 @@
             },
             "description": "OK"
           },
-          "default": {
+          "404": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List checklist items for an event",
@@ -3386,19 +4302,44 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ChecklistItemResponse" }
               }
             },
-            "description": "OK"
+            "description": "Created",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "403": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a checklist item",
@@ -3411,26 +4352,76 @@
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
           { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "itemId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "itemId", "required": true, "schema": { "type": "string" } },
+          {
+            "description": "etag of the item being deleted",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": { "description": "etag of the item being deleted", "type": "string" }
+          }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a checklist item",
         "tags": ["Checklist"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-checklist-item",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
           { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "itemId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "itemId", "required": true, "schema": { "type": "string" } },
+          {
+            "description": "etag of the item being changed",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": { "description": "etag of the item being changed", "type": "string" }
+          }
         ],
         "requestBody": {
           "content": {
@@ -3447,13 +4438,50 @@
                 "schema": { "$ref": "#/components/schemas/ChecklistItemResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update a checklist item",
@@ -3465,17 +4493,31 @@
         "operationId": "get-event-history",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "eventId", "required": true, "schema": { "type": "string" } },
+          {
+            "description": "Opaque cursor from a previous response",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": { "description": "Opaque cursor from a previous response", "type": "string" }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "items": { "$ref": "#/components/schemas/HistoryItem" },
-                  "type": ["array", "null"]
-                }
-              }
+              "application/json": { "schema": { "$ref": "#/components/schemas/HistoryPage" } }
             },
             "description": "OK"
           },
@@ -3566,15 +4608,20 @@
             "headers": {
               "Content-Disposition": { "schema": { "type": "string" } },
               "Content-Type": { "schema": { "type": "string" } },
-              "X-Export-Window": { "schema": { "type": "string" } },
-              "X-Result-Truncated": { "schema": { "type": "string" } }
+              "X-Export-Window": { "schema": { "type": "string" } }
             }
           },
-          "default": {
+          "422": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Export calendar events as iCal/CSV",
@@ -3653,11 +4700,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/InviteResponse" } }
             },
-            "description": "OK"
+            "description": "Created"
           },
           "default": {
             "content": {
@@ -3802,11 +4849,23 @@
             },
             "description": "Created"
           },
-          "default": {
+          "409": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Add a workspace member to a calendar",
@@ -3953,11 +5012,12 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MemoResponse" } }
             },
-            "description": "OK"
+            "description": "Created",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
           "default": {
             "content": {
@@ -3975,25 +5035,57 @@
         "operationId": "delete-memo",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "memoId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "memoId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
           "204": { "description": "No Content" },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a memo",
         "tags": ["Memo"]
       },
-      "put": {
+      "patch": {
         "operationId": "update-memo",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "memoId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "memoId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -4006,13 +5098,44 @@
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/MemoResponse" } }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update a memo",
@@ -4217,7 +5340,8 @@
                 "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
           "default": {
             "content": {
@@ -4233,7 +5357,8 @@
         "operationId": "update-schedule-poll",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -4248,13 +5373,56 @@
                 "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Change the recipients or candidate times",
@@ -4266,14 +5434,9 @@
         "operationId": "cancel-schedule-poll",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": { "schema": { "$ref": "#/components/schemas/CancelPollInputBody" } }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -4281,13 +5444,56 @@
                 "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Cancel an open schedule poll",
@@ -4299,7 +5505,8 @@
         "operationId": "finalize-schedule-poll",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -4316,13 +5523,56 @@
                 "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a calendar event from the selected candidate",
@@ -4343,7 +5593,8 @@
                 "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
           "default": {
             "content": {
@@ -4357,11 +5608,36 @@
       }
     },
     "/calendars/{calendarId}/schedule-polls/{pollId}/response": {
+      "get": {
+        "operationId": "get-schedule-poll-response",
+        "parameters": [
+          { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
+          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PollResponseBody" } }
+            },
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
+          },
+          "default": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Get the caller's response",
+        "tags": ["Schedule poll"]
+      },
       "put": {
         "operationId": "set-schedule-poll-response",
         "parameters": [
           { "in": "path", "name": "calendarId", "required": true, "schema": { "type": "string" } },
-          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } }
+          { "in": "path", "name": "pollId", "required": true, "schema": { "type": "string" } },
+          { "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "content": {
@@ -4374,17 +5650,58 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/PollDetailResponse" }
-              }
+              "application/json": { "schema": { "$ref": "#/components/schemas/PollResponseBody" } }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": { "ETag": { "schema": { "type": "string" } } }
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Save the caller's response",
@@ -4415,32 +5732,6 @@
         },
         "summary": "Accept a calendar invite",
         "tags": ["Invite"]
-      }
-    },
-    "/me/schedule-poll-actions": {
-      "get": {
-        "operationId": "list-my-schedule-poll-actions",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": { "$ref": "#/components/schemas/PollAction" },
-                  "type": ["array", "null"]
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "List the caller's pending schedule poll actions",
-        "tags": ["Schedule poll"]
       }
     },
     "/share/{token}": {
@@ -4499,15 +5790,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "items": { "$ref": "#/components/schemas/PublicEventResponse" },
-                  "type": ["array", "null"]
-                }
-              }
+              "application/json": { "schema": { "$ref": "#/components/schemas/PublicEventList" } }
             },
-            "description": "OK",
-            "headers": { "X-Result-Truncated": { "schema": { "type": "string" } } }
+            "description": "OK"
           },
           "default": {
             "content": {
@@ -4540,11 +5825,11 @@
         "summary": "Get current user",
         "tags": ["User"]
       },
-      "put": {
-        "operationId": "update-me",
+      "patch": {
+        "operationId": "update-user",
         "requestBody": {
           "content": {
-            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateMeInputBody" } }
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateUserInputBody" } }
           },
           "required": true
         },
@@ -4555,11 +5840,17 @@
             },
             "description": "OK"
           },
-          "default": {
+          "422": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Update current user",
@@ -4570,12 +5861,7 @@
       "delete": {
         "operationId": "delete-avatar",
         "responses": {
-          "200": {
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/UserResponse" } }
-            },
-            "description": "OK"
-          },
+          "204": { "description": "No Content" },
           "default": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
@@ -4603,11 +5889,41 @@
             },
             "description": "OK"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Confirm a previously uploaded avatar",
@@ -4626,19 +5942,49 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/PresignAvatarOutputBody" }
               }
             },
-            "description": "OK"
+            "description": "Created"
           },
-          "default": {
+          "400": {
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
             },
-            "description": "Error"
+            "description": "Bad Request"
+          },
+          "413": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Get a presigned URL for uploading a profile avatar",
@@ -4674,6 +6020,32 @@
         },
         "summary": "Change current user password",
         "tags": ["User"]
+      }
+    },
+    "/user/schedule-poll-actions": {
+      "get": {
+        "operationId": "list-my-schedule-poll-actions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": { "$ref": "#/components/schemas/PollAction" },
+                  "type": ["array", "null"]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HumaError" } }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the caller's pending schedule poll actions",
+        "tags": ["Schedule poll"]
       }
     },
     "/user/sessions": {

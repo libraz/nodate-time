@@ -105,10 +105,6 @@ var (
 	// If-Match names, so applying the write would silently undo whatever the
 	// other writer just saved.
 	EventStale = &Spec{Status: 412, Code: "EVENT.STALE", Message: "This event changed since you opened it"}
-	// EventNotificationOffsetInvalid rejects a reminder offset outside the set
-	// the clients can display, rather than storing one the event modal would
-	// read back as no reminder at all.
-	EventNotificationOffsetInvalid = &Spec{Status: 400, Code: "EVENT.NOTIFICATION_OFFSET_INVALID", Message: "Notification offset must be 0, 5, 10, 15, 30, 60, 120, 1440, or 2880 minutes"}
 	// EventTaskOwned refuses a change to the synced columns of an event that a
 	// task projects onto the calendar: the task owns them, and an edit made
 	// here would be overwritten on the next sync.
@@ -147,13 +143,10 @@ var (
 // --- Attachment errors ---
 
 var (
-	AttachmentNotFound = &Spec{Status: 404, Code: "ATTACHMENT.NOT_FOUND", Message: "Attachment not found"}
-	AttachmentTooLarge = &Spec{Status: 413, Code: "ATTACHMENT.TOO_LARGE", Message: "File exceeds maximum size of 100MB"}
-	// AttachmentDigestMismatch reports that the uploaded bytes are not the
-	// ones the reservation declared.
-	AttachmentDigestMismatch = &Spec{Status: 400, Code: "ATTACHMENT.DIGEST_MISMATCH", Message: "Uploaded file does not match the declared checksum"}
-	AttachmentLimitReached   = &Spec{Status: 409, Code: "ATTACHMENT.LIMIT_REACHED", Message: "This event has the maximum number of attachments"}
-	StorageUnavailable       = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
+	AttachmentNotFound     = &Spec{Status: 404, Code: "ATTACHMENT.NOT_FOUND", Message: "Attachment not found"}
+	AttachmentTooLarge     = &Spec{Status: 413, Code: "ATTACHMENT.TOO_LARGE", Message: "File exceeds maximum size of 100MB"}
+	AttachmentLimitReached = &Spec{Status: 409, Code: "ATTACHMENT.LIMIT_REACHED", Message: "This event has the maximum number of attachments"}
+	StorageUnavailable     = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
 )
 
 // --- Avatar errors ---

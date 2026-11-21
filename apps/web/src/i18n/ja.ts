@@ -841,7 +841,6 @@ export const ja = {
   'apiError.EVENT.EDIT_DENIED': 'この予定を編集する権限がありません',
   'apiError.EVENT.NOT_ATTENDEE': 'この予定の参加者ではありません',
   'apiError.EVENT.STALE': '開いている間に他の人がこの予定を変更しました。読み込み直してください',
-  'apiError.EVENT.NOTIFICATION_OFFSET_INVALID': 'この通知タイミングには対応していません',
   'apiError.EVENT.TASK_OWNED':
     'この予定はタスクから作られています。タイトルや日時などはタスク側で変更してください',
   'apiError.COMMENT.NOT_FOUND': 'コメントが見つかりません',
@@ -849,7 +848,6 @@ export const ja = {
   'apiError.CHECKLIST.NOT_FOUND': 'チェックリストの項目が見つかりません',
   'apiError.ATTACHMENT.NOT_FOUND': '添付ファイルが見つかりません',
   'apiError.ATTACHMENT.TOO_LARGE': 'ファイルが上限の 100MB を超えています',
-  'apiError.ATTACHMENT.DIGEST_MISMATCH': 'アップロードされたファイルが申告された内容と一致しません',
   'apiError.STORAGE.UNAVAILABLE': 'ファイル保管庫に接続できません',
   'apiError.AVATAR.NOT_FOUND': 'アイコンのアップロードセッションが見つかりません',
   'apiError.AVATAR.TOO_LARGE': 'アイコンが上限の 5MB を超えています',

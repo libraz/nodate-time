@@ -835,7 +835,6 @@ export const en: Record<TranslationKey, string> = {
   'apiError.EVENT.EDIT_DENIED': 'You cannot edit this event',
   'apiError.EVENT.NOT_ATTENDEE': 'You are not a participant of this event',
   'apiError.EVENT.STALE': 'Someone else changed this event while you had it open. Reload it first',
-  'apiError.EVENT.NOTIFICATION_OFFSET_INVALID': 'That reminder time is not one this app supports',
   'apiError.EVENT.TASK_OWNED':
     'This event comes from a task. Change its title and times on the task instead',
   'apiError.COMMENT.NOT_FOUND': 'Comment not found',
@@ -843,7 +842,6 @@ export const en: Record<TranslationKey, string> = {
   'apiError.CHECKLIST.NOT_FOUND': 'Checklist item not found',
   'apiError.ATTACHMENT.NOT_FOUND': 'Attachment not found',
   'apiError.ATTACHMENT.TOO_LARGE': 'File exceeds maximum size of 100MB',
-  'apiError.ATTACHMENT.DIGEST_MISMATCH': 'Uploaded file does not match the declared checksum',
   'apiError.STORAGE.UNAVAILABLE': 'File storage is not available',
   'apiError.AVATAR.NOT_FOUND': 'Avatar upload session not found',
   'apiError.AVATAR.TOO_LARGE': 'Avatar exceeds maximum size of 5MB',

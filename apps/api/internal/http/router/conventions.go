@@ -101,10 +101,11 @@ const (
 // operationConventions lists every operation the API documents.
 var operationConventions = []convention{
 	// Admin
-	read("list-allowed-emails", "/admin/allowed-emails", listArray),
+	read("list-allowed-emails", "/admin/allowed-emails", listNone),
 	create("create-allowed-email", "/admin/allowed-emails"),
 	removeUnguarded("delete-allowed-email", "/admin/allowed-emails/{emailId}", reasonByID),
 	read("list-instance-admins", "/admin/instance-admins", listArray),
+	create("add-instance-admin", "/admin/instance-admins"),
 	removeUnguarded("revoke-instance-admin", "/admin/instance-admins/{userId}", reasonByID),
 	read("list-oauth-providers", "/admin/oauth-providers", listNone),
 	removeUnguarded("delete-oauth-provider", "/admin/oauth-providers/{provider}", reasonByID),
@@ -131,7 +132,8 @@ var operationConventions = []convention{
 	read("get-calendar-activity", calPath+"/activity", listCursor),
 	read("export-events", calPath+"/export", listNone),
 	action("import-events", calPath+"/import", http.StatusOK, reasonNewRow),
-	put("put-calendar-cover", calPath+"/cover", reasonUnused),
+	put("confirm-calendar-cover", calPath+"/cover", reasonUnused),
+	create("presign-calendar-cover", calPath+"/cover/presign"),
 	removeUnguarded("delete-calendar-cover", calPath+"/cover", reasonUnused),
 	read("list-labels", calPath+"/labels", listNone),
 
@@ -204,6 +206,7 @@ var operationConventions = []convention{
 	actionIf("cancel-schedule-poll", pollPath+"/cancel"),
 	actionIf("finalize-schedule-poll", pollPath+"/finalize"),
 	action("refresh-schedule-poll-availability", pollPath+"/refresh-availability", http.StatusOK, reasonQuery),
+	read("get-schedule-poll-response", pollPath+"/response", listNone),
 	putIf("set-schedule-poll-response", pollPath+"/response"),
 	read("list-my-schedule-poll-actions", "/user/schedule-poll-actions", listNone),
 
