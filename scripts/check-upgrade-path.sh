@@ -9,8 +9,12 @@
 #   1. load that schema, plus scripts/fixtures/v0.1.0-data.sql for the states
 #      that run from-v0.1.0.sql
 #   2. apply sql/core/upgrades/*.sql in number order, then the time-layer
-#      upgrades in operator order -- twice, to prove a re-run is harmless
-#   3. check the rewritten rows (fixture states), run the conformance suite
+#      upgrades in operator order -- twice, to prove a re-run is harmless.
+#      Just before 0004 the first pass loads scripts/fixtures/pre-0004-data.sql
+#      (all-day rows in the old shapes and the operator's decisions) and runs
+#      classify-all-day.sql over them
+#   3. check the rewritten rows (fixture states) and the values 0004 gives
+#      the pre-0004 rows (every state), run the conformance suite
 #      (--mode all), and compare the schema against a fresh load of the
 #      working tree's sql/schema.sql
 # Every scratch database is dropped on exit, pass or fail.
@@ -32,6 +36,8 @@ export LC_ALL=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="${ROOT}/scripts/fixtures/v0.1.0-data.sql"
+PRE_0004_FIXTURE="${ROOT}/scripts/fixtures/pre-0004-data.sql"
+CLASSIFY="${ROOT}/sql/core/tools/classify-all-day.sql"
 RELEASE_FILE="${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
 # Feature files in operator order, then the generated triggers last.
 FEATURE_FILES=(
@@ -77,7 +83,7 @@ if [[ ${#CORE_FILES[@]} -eq 0 ]]; then
   echo "check-upgrade-path.sh: no core upgrades under ${CORE_UPGRADES}" >&2
   exit 2
 fi
-for f in "${FIXTURE}" "${RELEASE_FILE}" "${FEATURE_FILES[@]}"; do
+for f in "${FIXTURE}" "${PRE_0004_FIXTURE}" "${CLASSIFY}" "${RELEASE_FILE}" "${FEATURE_FILES[@]}"; do
   if [[ ! -f "${f}" ]]; then
     echo "check-upgrade-path.sh: missing ${f}" >&2
     exit 2
@@ -106,7 +112,10 @@ create_db() {
   CREATED+=("$1")
 }
 
-# apply_upgrades DB RELEASE: the order an operator follows, core first.
+# apply_upgrades DB RELEASE PASS: the order an operator follows, core first.
+# On the first pass the pre-0004 rows and decisions go in just before 0004,
+# and the classification report runs over them, as it does before 0004 in
+# production.
 apply_upgrades() {
   local f files=("${CORE_FILES[@]}")
   if [[ "$2" == run ]]; then
@@ -114,6 +123,11 @@ apply_upgrades() {
   fi
   files+=("${FEATURE_FILES[@]}")
   for f in "${files[@]}"; do
+    if [[ "$3" == 1 && "$(basename "${f}")" == 0004-* ]]; then
+      sql "$1" <"${PRE_0004_FIXTURE}" >/dev/null || { echo "  failed: $(basename "${PRE_0004_FIXTURE}")" >&2; return 1; }
+      { echo "SET @nf_http_cutoff = '2026-01-01 00:00:00';"; cat "${CLASSIFY}"; } | sql "$1" >/dev/null \
+        || { echo "  failed: $(basename "${CLASSIFY}")" >&2; return 1; }
+    fi
     sql "$1" <"${f}" >/dev/null || { echo "  failed: $(basename "${f}")" >&2; return 1; }
   done
 }
@@ -183,6 +197,57 @@ check_rows() {
   return 1
 }
 
+# Each query counts the pre-0004 fixture rows 0004 left with the wrong value;
+# every count must be 0. The expectation tables hold one row per fixture row.
+ALL_DAY_CHECKS=$(cat <<'SQL'
+SET time_zone = '+00:00';
+SELECT 'pre-0004 events missing', (SELECT COUNT(*) FROM fx_0004_expect_event) - COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id;
+SELECT 'event start_at / end_at not converted', COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id
+ WHERE NOT (ce.start_at <=> x.start_at AND ce.end_at <=> x.end_at);
+SELECT 'series until not converted', COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id
+ WHERE NOT (ce.recurrence_rule->>'$.until' <=> x.until_v);
+SELECT 'recurrence_end not widened', COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id
+ WHERE NOT (ce.recurrence_end <=> x.recurrence_end);
+SELECT 'recurrence_exceptions not converted', COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id
+ WHERE NOT (ce.recurrence_exceptions <=> x.exceptions);
+SELECT 'override recurrence_original_start not converted', COUNT(*)
+  FROM calendar_events ce JOIN fx_0004_expect_event x ON x.id = ce.id
+ WHERE NOT (ce.recurrence_original_start <=> x.original_start);
+SELECT 'converted event lost its updated_at', COUNT(*)
+  FROM calendar_events WHERE id BETWEEN 9100 AND 9199 AND updated_at <> '2020-01-01 00:00:00';
+SELECT 'sent-reminder occurrence_start not converted', COUNT(*)
+  FROM calendar_event_reminders r JOIN fx_0004_expect_reminder x ON x.id = r.id
+ WHERE r.occurrence_start <> x.occurrence_start;
+SELECT 'sent-reminder rows missing', (SELECT COUNT(*) FROM fx_0004_expect_reminder) - COUNT(*)
+  FROM calendar_event_reminders r JOIN fx_0004_expect_reminder x ON x.id = r.id;
+SELECT 'log calendar_id not filled from the event', COUNT(*)
+  FROM events e JOIN fx_0004_expect_log x ON x.id = e.id
+ WHERE NOT (e.calendar_id <=> x.calendar_id);
+SELECT 'all-day or notification CHECK missing', 2 - COUNT(*)
+  FROM information_schema.TABLE_CONSTRAINTS
+ WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'calendar_events' AND CONSTRAINT_TYPE = 'CHECK'
+   AND CONSTRAINT_NAME IN ('chk_calendar_events_all_day_canonical', 'chk_calendar_events_notification_offset_range');
+SELECT 'conversion helper table left behind', COUNT(*)
+  FROM information_schema.TABLES
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'core\_upgrade\_0004\_%';
+SQL
+)
+
+# check_all_day DB: print every all-day expectation 0004 missed, then drop
+# the expectation tables so the schema comparison sees only the schema.
+check_all_day() {
+  local out rc=0
+  out="$(sql "$1" <<<"${ALL_DAY_CHECKS}")" || return 1
+  awk -F'\t' '$2 != 0 { print "  " $1 ": " $2; bad = 1 } END { exit bad }' <<<"${out}" || rc=1
+  sql "$1" <<<"DROP TABLE IF EXISTS fx_0004_expect_event, fx_0004_expect_reminder, fx_0004_expect_log;" || return 1
+  return "${rc}"
+}
+
 failed=0
 fresh="${PREFIX}fresh"
 
@@ -207,11 +272,15 @@ for state in "${STATES[@]}"; do
   ok=1
   for pass in 1 2; do
     echo "  upgrade pass ${pass}"
-    apply_upgrades "${db}" "${release}" || { ok=0; break; }
+    apply_upgrades "${db}" "${release}" "${pass}" || { ok=0; break; }
   done
   if [[ ${ok} -eq 1 && "${release}" == run ]]; then
     echo "  rewritten rows"
     check_rows "${db}" || ok=0
+  fi
+  if [[ ${ok} -eq 1 ]]; then
+    echo "  all-day rows"
+    check_all_day "${db}" || ok=0
   fi
   if [[ ${ok} -eq 1 ]]; then
     echo "  conformance"

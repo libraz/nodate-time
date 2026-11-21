@@ -75,7 +75,14 @@ with the writers of every product on the database stopped:
 
 1. `core/upgrades/NNNN-<slug>.sql`, all of them in number order. They
    reshape the shared tables and are vendored from upstream with the rest
-   of `core/`.
+   of `core/`. `0004-all-day-canonical.sql` converts every all-day row to
+   the canonical form and adds the CHECKs that enforce it. Before it,
+   run `core/tools/classify-all-day.sql` against the database (read-only,
+   with `@nf_http_cutoff` set) and resolve its undecidable rows:
+   fill `core_upgrade_0004_decisions` with the `INSERT` statements it
+   prints. 0004 stops, listing the rows by `public_id`, while any row is
+   undecided or any other finding remains; re-run it once they are
+   settled. It is applied without `--force`.
 2. `time/upgrades/from-v0.1.0.sql`, only when its marker is absent: it has
    been applied iff `album_photos.retired_at` exists. It changes this
    layer's tables, rewrites the rows this application wrote, and refuses to
@@ -83,7 +90,8 @@ with the writers of every product on the database stopped:
 3. The feature files, in this order: `time/upgrades/schedule-polls.sql`,
    `time/upgrades/calendar-covers.sql`.
 4. `time/upgrades/triggers.sql`, last.
-5. `bash sql/core/conformance/run.sh --mode schema` against the database.
+5. `bash sql/core/conformance/run.sh --mode all` against the database; its
+   data checks need 0004 applied.
 
 A release file (`from-<release>.sql`) is the step from that tag. It is
 applied once, never re-run after the new API has served, and frozen once a
@@ -106,9 +114,13 @@ keeps its `DROP` through the generator's `RETIRED` list.
 schemas: v0.1.0 and the one main carried before the core upgrades existed,
 each with `scripts/fixtures/v0.1.0-data.sql`, and f3c4d681, a database
 already past `from-v0.1.0.sql`, which skips it. It applies the upgrades
-twice, checks the rewritten rows on the fixture states, runs the
-conformance suite and compares `information_schema` against a fresh load of
-the working tree's `schema.sql`.
+twice. On the first pass, just before 0004, it plants
+`scripts/fixtures/pre-0004-data.sql` (all-day rows in the old shapes, with
+the operator's decisions for the rows no rule settles) in every state and
+runs `classify-all-day.sql` over it. It then checks the rewritten rows on
+the fixture states, asserts the values 0004 gives the pre-0004 rows on all
+three, runs the conformance suite and compares `information_schema` against
+a fresh load of the working tree's `schema.sql`.
 
 ## Queries
 
