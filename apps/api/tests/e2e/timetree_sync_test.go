@@ -129,14 +129,14 @@ func (s *ttScenario) editOccurrence(t *testing.T, seriesTitle string) {
 	t.Helper()
 	calURL := testServerURL + "/calendars/" + s.calendarID(t)
 	var occ []recInstance
-	helpers.DoJSON(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-06-30&tz=Asia/Tokyo", s.token, nil, &occ)
+	getItems(t, http.MethodGet, calURL+"/events?start=2026-05-01&end=2026-06-30&tz=Asia/Tokyo", s.token, nil, &occ)
 	for _, o := range occ {
 		if o.Title != seriesTitle || !strings.Contains(o.ID, "_") {
 			continue
 		}
 		start, err := time.Parse(time.RFC3339, o.StartAt)
 		require.NoError(t, err)
-		status, raw := helpers.DoJSONStatus(t, http.MethodPut, calURL+"/events/"+o.ID+"?scope=this", s.token,
+		status, raw := sendAnyVersion(t, http.MethodPatch, calURL+"/events/"+o.ID+"?scope=this", s.token,
 			eventBody("changed here", o.StartAt, start.Add(30*time.Minute).Format(time.RFC3339)))
 		require.Equal(t, http.StatusOK, status, "%s", raw)
 		return
@@ -232,7 +232,7 @@ func TestTimeTreeSync(t *testing.T) {
 		timed := s.row(t, "s-timed")
 		body := eventBody("renamed here", "2026-05-01T10:00:00+09:00", "2026-05-01T11:00:00+09:00")
 		body["visibility"] = "private"
-		status, raw := helpers.DoJSONStatus(t, http.MethodPut,
+		status, raw := sendAnyVersion(t, http.MethodPatch,
 			testServerURL+"/calendars/"+s.calendarID(t)+"/events/"+timed.publicID, s.token, body)
 		require.Equal(t, http.StatusOK, status, "%s", raw)
 		s.editOccurrence(t, "weekly")
