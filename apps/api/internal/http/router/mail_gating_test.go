@@ -26,7 +26,7 @@ var mailOnlyRoutes = []struct{ method, path string }{
 
 func documentedPaths(t *testing.T, m mailer.Mailer) map[string]map[string]json.RawMessage {
 	t.Helper()
-	h := Build(Deps{Mailer: m, PasswordLoginEnabled: true, AuthRateLimit: -1, ShareRateLimit: -1})
+	h, _ := BuildResult(Deps{Mailer: m, PasswordLoginEnabled: true, AuthRateLimit: -1, ShareRateLimit: -1})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
 	require.Equal(t, http.StatusOK, rec.Code)

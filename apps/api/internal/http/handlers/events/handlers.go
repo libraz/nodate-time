@@ -59,16 +59,6 @@ func resolveCalendarWrite(ctx context.Context, deps Deps, calPubID string, userI
 	return calresolve.Write(ctx, deps.Queries, deps.WorkspaceID, calPubID, userID)
 }
 
-// toAPIError maps an apierrors.Spec returned by a helper onto a huma error,
-// falling back to an internal error for anything unexpected.
-func toAPIError(err error) error {
-	var spec *apierrors.Spec
-	if errors.As(err, &spec) {
-		return apierrors.ToHuma(spec)
-	}
-	return apierrors.ToHuma(apierrors.InternalUnexpected)
-}
-
 func mapRecurrenceRule(data *json.RawMessage) *RecurrenceRuleResponse {
 	if data == nil {
 		return nil

@@ -7,7 +7,8 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/schedulepolls"
 )
 
-func registerSchedulePolls(api huma.API, deps Deps) {
+func registerSchedulePolls(g apiGroups, deps Deps) {
+	api := g.protected
 	polls := schedulepolls.Deps{DB: deps.DB, Queries: deps.Queries, WorkspaceID: deps.WorkspaceID, Storage: deps.Storage}
 	const base = "/calendars/{calendarId}/schedule-polls"
 	const detail = base + "/{pollId}"

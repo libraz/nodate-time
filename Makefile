@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up mail-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen openapi web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up mail-up format lint
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -82,6 +82,12 @@ verify-codegen:
 	@bash scripts/gen-layer-triggers-upgrade.sh time | diff -u sql/time/upgrades/triggers.sql - \
 		|| { echo "sql/time/upgrades/triggers.sql is out of date: run make db-schema"; exit 1; }
 	bash scripts/check-error-messages.sh
+	bash scripts/check-openapi-drift.sh
+
+# Write the OpenAPI document, then the web types generated from it.
+openapi:
+	cd apps/api && go run ./cmd/openapi -o openapi.json
+	tools/openapi-ts/gen.sh apps/api/openapi.json apps/web/src/lib/api-schema.d.ts
 
 # API
 api: $(DEV_JWT_SECRET_FILE)

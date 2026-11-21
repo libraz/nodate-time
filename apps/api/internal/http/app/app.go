@@ -83,6 +83,7 @@ func NewHandler(deps router.Deps, opts Options) http.Handler {
 	outer.Use(middleware.Recoverer())
 	outer.Use(middleware.SecurityHeaders())
 	outer.Use(cors.Handler(corsOptions(opts.CORSAllowedOrigins)))
-	outer.Mount("/", router.Build(deps))
+	handler, _ := router.BuildResult(deps)
+	outer.Mount("/", handler)
 	return outer
 }
