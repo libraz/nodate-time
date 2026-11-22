@@ -88,7 +88,7 @@ with the writers of every product on the database stopped:
    layer's tables, rewrites the rows this application wrote, and refuses to
    run before the core upgrades.
 3. The feature files, in this order: `time/upgrades/schedule-polls.sql`,
-   `time/upgrades/calendar-covers.sql`.
+   `time/upgrades/calendar-covers.sql`, `time/upgrades/caldav.sql`.
 4. `time/upgrades/triggers.sql`, last.
 5. `bash sql/core/conformance/run.sh --mode all` against the database; its
    data checks need 0004 applied.

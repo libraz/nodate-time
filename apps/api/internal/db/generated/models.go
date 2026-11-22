@@ -1696,6 +1696,43 @@ type CalendarSubscription struct {
 	CreatedAt time.Time    `json:"createdAt"`
 }
 
+// Per-device CalDAV passwords
+type DavAppPassword struct {
+	// Internal PK, never exposed
+	ID uint32 `json:"id"`
+	// UUID v7, the only externally visible ID
+	PublicID []byte `json:"publicId"`
+	// Internal FK to workspaces.id
+	WorkspaceID uint32 `json:"workspaceId"`
+	// Internal FK to users.id
+	UserID uint32 `json:"userId"`
+	// Label chosen by the user, usually the device
+	Name string `json:"name"`
+	// SHA-256 hex of the password. The plaintext is shown once at creation and never stored.
+	TokenHash string `json:"tokenHash"`
+	// Leading characters of the plaintext, shown in lists so a user can tell passwords apart
+	TokenPrefix string `json:"tokenPrefix"`
+	// Last successful authentication; NULL = never used
+	LastUsedAt sql.NullTime `json:"lastUsedAt"`
+	// Revocation time; a non-NULL value makes the password unusable
+	RevokedAt sql.NullTime `json:"revokedAt"`
+	// Enabled flag
+	Enabled   bool         `json:"enabled"`
+	UpdatedAt sql.NullTime `json:"updatedAt"`
+	CreatedAt time.Time    `json:"createdAt"`
+}
+
+// CalDAV resource name and UID per event
+type DavEventResource struct {
+	// Internal FK to calendar_events.id
+	EventID uint32 `json:"eventId"`
+	// Resource name chosen by the client; compared case-sensitively
+	HrefName string `json:"hrefName"`
+	// iCalendar UID chosen by the client; compared case-sensitively
+	Uid       string    `json:"uid"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // Single-use email ownership proofs
 type EmailVerification struct {
 	// Internal PK, never exposed

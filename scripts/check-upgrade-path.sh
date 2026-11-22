@@ -43,6 +43,7 @@ RELEASE_FILE="${ROOT}/sql/time/upgrades/from-v0.1.0.sql"
 FEATURE_FILES=(
   "${ROOT}/sql/time/upgrades/schedule-polls.sql"
   "${ROOT}/sql/time/upgrades/calendar-covers.sql"
+  "${ROOT}/sql/time/upgrades/caldav.sql"
   "${ROOT}/sql/time/upgrades/triggers.sql"
 )
 CORE_UPGRADES="${TC_CORE_UPGRADES_DIR:-${ROOT}/sql/core/upgrades}"
