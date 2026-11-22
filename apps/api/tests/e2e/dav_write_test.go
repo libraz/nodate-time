@@ -124,8 +124,8 @@ func TestDAVWriteSingleEventLifecycle(t *testing.T) {
 
 // TestDAVWriteKeepsWhatICalendarDoesNotCarry verifies that a PUT through the
 // default name of a REST-created event changes only what the body changed:
-// participants, a TENTATIVE show-as and an alarm the client cannot express
-// stay as stored.
+// participants, an out-of-office show-as and an alarm the client cannot
+// express stay as stored.
 func TestDAVWriteKeepsWhatICalendarDoesNotCarry(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
@@ -135,7 +135,7 @@ func TestDAVWriteKeepsWhatICalendarDoesNotCarry(t *testing.T) {
 	calURL := testServerURL + "/calendars/" + owner.CalendarID
 	joinAs(t, calURL, owner.AccessToken, member, "editor")
 	id := davCreate(t, calURL, owner.AccessToken, map[string]any{
-		"title": "Review", "showAs": "tentative", "notificationOffset": 15,
+		"title": "Review", "showAs": "oof", "notificationOffset": 15,
 		"participantIds": []string{member.UserID},
 	})
 
@@ -152,7 +152,7 @@ func TestDAVWriteKeepsWhatICalendarDoesNotCarry(t *testing.T) {
 	evts := davJune(t, calURL, owner.AccessToken)
 	require.Len(t, evts, 1)
 	require.Equal(t, "Review notes", evts[0].Title)
-	require.Equal(t, "tentative", evts[0].ShowAs)
+	require.Equal(t, "oof", evts[0].ShowAs)
 	require.Equal(t, []string{member.UserID}, evts[0].ParticipantIDs)
 	require.NotNil(t, evts[0].NotificationOffset, "an alarm the calendar cannot store leaves the stored one")
 	require.Equal(t, 15, *evts[0].NotificationOffset)
@@ -175,7 +175,7 @@ func TestDAVWriteKeepsWhatICalendarDoesNotCarry(t *testing.T) {
 	status, _, resp = a.put(t, p, strings.Join(kept, "\r\n"), nil)
 	require.Less(t, status, 300, resp)
 	evts = davJune(t, calURL, owner.AccessToken)
-	require.Equal(t, "tentative", evts[0].ShowAs)
+	require.Equal(t, "oof", evts[0].ShowAs)
 	require.Nil(t, evts[0].NotificationOffset)
 
 	// CLASS sent is CLASS written.
@@ -338,4 +338,129 @@ DTEND;TZID=Asia/Tokyo:20260619T160000`
 	status, _, _ = a.do(t, http.MethodDelete, p, nil, "")
 	require.Equal(t, http.StatusNoContent, status)
 	require.Empty(t, davJune(t, calURL, owner.AccessToken))
+}
+
+// TestDAVWriteShowAsThroughStatus verifies that STATUS:TENTATIVE carries the
+// tentative show-as both ways, and that a body saying only OPAQUE keeps
+// whichever taken value is stored.
+func TestDAVWriteShowAsThroughStatus(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	a := newDAVAccount(t, owner)
+	cal := a.calendar(owner.CalendarID)
+	id := davCreate(t, calURL, owner.AccessToken, map[string]any{"title": "Hold", "showAs": "tentative"})
+	p := davObjectPath(cal, id)
+	showAsOf := func(id string) string {
+		t.Helper()
+		for _, e := range davJune(t, calURL, owner.AccessToken) {
+			if e.ID == id {
+				return e.ShowAs
+			}
+		}
+		t.Fatalf("event %s not listed", id)
+		return ""
+	}
+	showAs := func() string { return showAsOf(id) }
+	put := func(body string) {
+		t.Helper()
+		status, _, resp := a.put(t, p, body, nil)
+		require.Less(t, status, 300, resp)
+	}
+
+	_, body := a.etag(t, p)
+	require.Contains(t, body, "TRANSP:OPAQUE")
+	require.Contains(t, body, "STATUS:TENTATIVE")
+
+	// A client that drops STATUS but echoes OPAQUE has not changed it.
+	put(strings.Replace(body, "STATUS:TENTATIVE\r\n", "", 1))
+	require.Equal(t, "tentative", showAs())
+
+	_, body = a.etag(t, p)
+	put(strings.Replace(body, "STATUS:TENTATIVE", "STATUS:CONFIRMED", 1))
+	require.Equal(t, "busy", showAs())
+	_, body = a.etag(t, p)
+	require.NotContains(t, body, "STATUS:")
+
+	put(strings.Replace(body, "TRANSP:OPAQUE", "TRANSP:OPAQUE\r\nSTATUS:TENTATIVE", 1))
+	require.Equal(t, "tentative", showAs())
+
+	// Out of office has no STATUS; echoing OPAQUE keeps it.
+	away := davCreate(t, calURL, owner.AccessToken, map[string]any{"title": "Away", "showAs": "oof"})
+	ap := davObjectPath(cal, away)
+	_, ab := a.etag(t, ap)
+	require.NotContains(t, ab, "STATUS:")
+	status, _, resp := a.put(t, ap, strings.Replace(ab, "SUMMARY:Away", "SUMMARY:Away all day", 1), nil)
+	require.Less(t, status, 300, resp)
+	require.Equal(t, "oof", showAsOf(away))
+
+	// OPAQUE moves a free event to busy.
+	_, body = a.etag(t, p)
+	put(strings.Replace(body, "TRANSP:OPAQUE", "TRANSP:TRANSPARENT", 1))
+	require.Equal(t, "free", showAs())
+	_, body = a.etag(t, p)
+	put(strings.Replace(body, "TRANSP:TRANSPARENT", "TRANSP:OPAQUE", 1))
+	require.Equal(t, "busy", showAs())
+
+	// A new event written with STATUS:TENTATIVE is tentative.
+	status, _, resp = a.put(t, cal+"held.ics", davICS(davSingle+"\nTRANSP:OPAQUE\nSTATUS:TENTATIVE"), map[string]string{"If-None-Match": "*"})
+	require.Equal(t, http.StatusCreated, status, resp)
+	var held string
+	for _, e := range davJune(t, calURL, owner.AccessToken) {
+		if e.Title == "Lunch" {
+			held = e.ShowAs
+		}
+	}
+	require.Equal(t, "tentative", held)
+}
+
+// TestDAVWriteSplitsASeriesFromAnOccurrence verifies the writes a client
+// sends to edit "this and all future events": the original series is cut
+// short with UNTIL, dropping a changed occurrence past the cut, and the rest
+// arrives as a new series under a new UID.
+func TestDAVWriteSplitsASeriesFromAnOccurrence(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	a := newDAVAccount(t, owner)
+	cal := a.calendar(owner.CalendarID)
+	p := cal + "standup.ics"
+
+	late := `UID:fridays@client
+RECURRENCE-ID;TZID=Asia/Tokyo:20260626T100000
+SUMMARY:Standup (late)
+DTSTART;TZID=Asia/Tokyo:20260626T150000
+DTEND;TZID=Asia/Tokyo:20260626T160000`
+	status, _, body := a.put(t, p, davICS(davFridays, late), map[string]string{"If-None-Match": "*"})
+	require.Equal(t, http.StatusCreated, status, body)
+	etag, _ := a.etag(t, p)
+
+	// Cut the series before 19 June 10:00 Tokyo (01:00 UTC).
+	cut := strings.Replace(davFridays, "UNTIL=20260630T145959Z", "UNTIL=20260619T005959Z", 1)
+	status, _, body = a.put(t, p, davICS(cut), map[string]string{"If-Match": etag})
+	require.Less(t, status, 300, body)
+
+	rest := strings.NewReplacer(
+		"UID:fridays@client", "UID:fridays-2@client",
+		"SUMMARY:Standup", "SUMMARY:Retro",
+		"20260605T100000", "20260619T100000",
+		"20260605T110000", "20260619T110000",
+	).Replace(davFridays)
+	status, _, body = a.put(t, cal+"standup-2.ics", davICS(rest), map[string]string{"If-None-Match": "*"})
+	require.Equal(t, http.StatusCreated, status, body)
+
+	got := map[string]string{}
+	for _, e := range davJune(t, calURL, owner.AccessToken) {
+		require.NotNil(t, e.RecurrenceDate, e.ID)
+		_, dup := got[*e.RecurrenceDate]
+		require.False(t, dup, "two events on %s", *e.RecurrenceDate)
+		got[*e.RecurrenceDate] = e.Title
+	}
+	require.Equal(t, map[string]string{
+		"20260605": "Standup", "20260612": "Standup", "20260619": "Retro", "20260626": "Retro",
+	}, got)
 }

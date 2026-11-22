@@ -125,7 +125,7 @@ func createBody(v vevent) events.CreateEventInput {
 	}
 	b.Timezone = v.zone
 	b.Location, b.Memo, b.URL = v.location, v.description, v.url
-	if s, ok := showAsOf(v.transp); ok {
+	if s, ok := newShowAs(v); ok {
 		b.ShowAs = s
 	}
 	if vis, ok := visibilityOf(v.class); ok {
@@ -192,7 +192,7 @@ func everything(v vevent) change {
 	if vis, ok := visibilityOf(v.class); ok {
 		c.visibility = vis
 	}
-	if s, ok := showAsOf(v.transp); ok {
+	if s, ok := newShowAs(v); ok {
 		c.showAs = s
 	}
 	return c

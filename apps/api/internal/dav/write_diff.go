@@ -63,9 +63,13 @@ func diffEvent(cur, in vevent, withRule bool) change {
 			c.visibility = v
 		}
 	}
-	if s, ok := showAsOf(in.transp); ok {
-		if cs, _ := showAsOf(cur.transp); cs != s {
+	if s, ok := showAsOf(in); ok {
+		cs, _ := showAsOf(cur)
+		switch {
+		case s != showAsTaken && s != cs:
 			c.showAs = s
+		case s == showAsTaken && cs == "free":
+			c.showAs = "busy"
 		}
 	}
 	if !in.alarm.keep && !sameOffset(cur.alarm.minutes, in.alarm.minutes) {
@@ -96,17 +100,38 @@ func visibilityOf(class string) (string, bool) {
 	return "", false
 }
 
-// showAsOf reads TRANSP. It tells only free from taken, so a stored value the
-// server draws as OPAQUE (tentative, out of office) is not reset by a client
-// sending OPAQUE back.
-func showAsOf(transp string) (string, bool) {
-	switch transp {
-	case "TRANSPARENT":
+// showAsTaken is what OPAQUE alone says: the time is taken, without saying
+// whether busy, tentative or out of office. A client echoing it back keeps
+// any of those; it moves only a free event, to busy.
+const showAsTaken = "taken"
+
+// showAsOf reads TRANSP and STATUS onto the show-as axis. STATUS:TENTATIVE
+// says tentative and STATUS:CONFIRMED says busy unless TRANSP says free;
+// other STATUS values say nothing here. ok is false when neither property
+// does.
+func showAsOf(v vevent) (string, bool) {
+	if v.transp == "TRANSPARENT" {
 		return "free", true
-	case "OPAQUE":
+	}
+	switch v.status {
+	case "TENTATIVE":
+		return "tentative", true
+	case "CONFIRMED":
 		return "busy", true
 	}
+	if v.transp == "OPAQUE" {
+		return showAsTaken, true
+	}
 	return "", false
+}
+
+// newShowAs is the show-as a new event takes from v; taken creates busy.
+func newShowAs(v vevent) (string, bool) {
+	s, ok := showAsOf(v)
+	if s == showAsTaken {
+		s = "busy"
+	}
+	return s, ok
 }
 
 func sameOffset(a, b *int32) bool {

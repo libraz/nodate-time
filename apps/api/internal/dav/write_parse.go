@@ -42,10 +42,10 @@ type alarmIntent struct {
 // vevent is one VEVENT reduced to what the calendar stores.
 type vevent struct {
 	title, location, description, url string
-	// class and transp are as written, "" when absent.
-	class, transp string
-	start, end    time.Time
-	allDay        bool
+	// class, transp and status are as written, "" when absent.
+	class, transp, status string
+	start, end            time.Time
+	allDay                bool
 	// zone is the IANA zone of a timed event, "UTC" when the file named none.
 	// An all-day event's is what the file named, possibly "".
 	zone string
@@ -152,7 +152,7 @@ func fromParsed(p ical.ParsedEvent) (vevent, error) {
 	}
 	v := vevent{
 		title: p.Summary, location: p.Location, description: p.Description, url: p.URL,
-		class: p.Class, transp: p.Transp,
+		class: p.Class, transp: p.Transp, status: p.Status,
 		start: p.Start, allDay: p.AllDay,
 		exdates:      p.Exdates,
 		recurrenceID: p.RecurrenceID, hasRecurrenceID: p.HasRecurrenceID,

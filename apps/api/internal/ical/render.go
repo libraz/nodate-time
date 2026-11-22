@@ -23,7 +23,7 @@ import (
 // RendererVersion names the renderer's output. Any change to what Render or
 // ContentHash produce for the same input raises it, which invalidates every
 // CalDAV sync token and ETag derived from the old output.
-const RendererVersion = "1"
+const RendererVersion = "2"
 
 // Event is one VEVENT's worth of values: a series' master or one changed
 // occurrence.
@@ -38,6 +38,8 @@ type Event struct {
 	// Class is the CLASS value to write, or "" to write none.
 	Class       string
 	Transparent bool
+	// Tentative writes STATUS:TENTATIVE: the time is held but not settled.
+	Tentative bool
 	// AlarmMinutes is how long before the start the reminder fires; nil
 	// writes no VALARM.
 	AlarmMinutes *int32
@@ -190,6 +192,9 @@ func writeEvent(b *strings.Builder, s Series, e Event, override bool, uid string
 		transp = "TRANSPARENT"
 	}
 	writeFolded(b, "TRANSP:"+transp)
+	if e.Tentative {
+		writeFolded(b, "STATUS:TENTATIVE")
+	}
 	if e.AlarmMinutes != nil {
 		// A reminder left out of the file is one the person who set it never
 		// receives: only the client holding the calendar can raise it.

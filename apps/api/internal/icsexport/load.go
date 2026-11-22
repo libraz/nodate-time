@@ -327,10 +327,11 @@ func event(e generated.CalendarEvent, start, end time.Time, masked bool) ical.Ev
 		AllDay:      e.AllDay,
 		Timezone:    e.Timezone,
 		Class:       class(e.Visibility),
-		// iCalendar tells only taken from free, so tentative and out of
-		// office read as taken: the answer that does not offer time its owner
-		// has not.
+		// TRANSP tells only taken from free, so tentative and out of office
+		// read as taken: the answer that does not offer time its owner has
+		// not. STATUS carries tentative; out of office has no standard value.
 		Transparent: e.ShowAs == generated.CalendarEventsShowAsFree,
+		Tentative:   e.ShowAs == generated.CalendarEventsShowAsTentative,
 		Masked:      masked,
 		UpdatedAt:   e.UpdatedAt.Time,
 	}

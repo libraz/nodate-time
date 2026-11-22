@@ -36,11 +36,11 @@ type ParseOptions struct {
 // ParsedEvent is one VEVENT as read from a file.
 type ParsedEvent struct {
 	UID, Summary, Location, Description, URL string
-	// Class and Transp are upper-cased as written; unrecognised values are
-	// left for the caller to map.
-	Class, Transp string
-	Start, End    time.Time
-	AllDay        bool
+	// Class, Transp and Status are upper-cased as written; unrecognised
+	// values are left for the caller to map.
+	Class, Transp, Status string
+	Start, End            time.Time
+	AllDay                bool
 	// TZID is the zone DTSTART (else DTEND) named, as written.
 	TZID string
 	// TZUnknown records that a dated property named a zone nothing here could
@@ -231,6 +231,8 @@ func readProperty(cur *ParsedEvent, line string, exdateSeen map[int64]bool, stri
 		cur.Class = strings.ToUpper(strings.TrimSpace(val))
 	case "TRANSP":
 		cur.Transp = strings.ToUpper(strings.TrimSpace(val))
+	case "STATUS":
+		cur.Status = strings.ToUpper(strings.TrimSpace(val))
 	case "RRULE":
 		cur.RRule = val
 	case "DTSTART":

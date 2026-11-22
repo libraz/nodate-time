@@ -62,12 +62,15 @@ type ImportOutput struct {
 	}
 }
 
-// importTransp reads TRANSP back. Only the free end of the axis is carried,
-// because that is all the property can say; the finer values survive only in
-// events this product wrote.
-func importTransp(transp string) generated.CalendarEventsShowAs {
-	if transp == "TRANSPARENT" {
+// importShowAs reads TRANSP and STATUS back: TRANSPARENT is free,
+// STATUS:TENTATIVE is tentative, anything else is busy. Out of office has no
+// standard property and comes back as busy.
+func importShowAs(transp, status string) generated.CalendarEventsShowAs {
+	switch {
+	case transp == "TRANSPARENT":
 		return generated.CalendarEventsShowAsFree
+	case status == "TENTATIVE":
+		return generated.CalendarEventsShowAsTentative
 	}
 	return generated.CalendarEventsShowAsBusy
 }
@@ -148,7 +151,7 @@ func importEvent(e ical.ParsedEvent) calimport.Event {
 		Timezone:           e.Zone(),
 		TimezoneUnknown:    e.TZUnknown,
 		Visibility:         importVisibility(e.Class),
-		ShowAs:             importTransp(e.Transp),
+		ShowAs:             importShowAs(e.Transp, e.Status),
 		NotificationOffset: importAlarm(e.Alarms),
 		RRule:              e.RRule,
 		Exdates:            e.Exdates,

@@ -38,11 +38,11 @@ func goldenCompare(t *testing.T, name string, got []byte) {
 
 func minutes(m int32) *int32 { return &m }
 
-// goldenSeries covers every shape the renderer writes: all-day, zoned, UTC,
-// a zoned series with a moved and an all-day changed occurrence and every
-// stored EXDATE form, an all-day series with a timed changed occurrence,
-// masked details, folding of long and non-ASCII lines, and a series rendered
-// from its changed occurrence alone.
+// goldenSeries covers every shape the renderer writes: all-day, zoned, a
+// tentative UTC event, a zoned series with a moved and an all-day changed
+// occurrence and every stored EXDATE form, an all-day series with a timed
+// changed occurrence, masked details, folding of long and non-ASCII lines,
+// and a series rendered from its changed occurrence alone.
 func goldenSeries() []Series {
 	tokyo, _ := time.LoadLocation("Asia/Tokyo")
 	ny, _ := time.LoadLocation("America/New_York")
@@ -79,7 +79,7 @@ func goldenSeries() []Series {
 			PublicID: goldenID(3), Timezone: "UTC",
 			Master: &Event{
 				Title: "UTC call", Timezone: "UTC", Start: utcStart, End: utcStart.Add(time.Hour),
-				Class: "CONFIDENTIAL", AlarmMinutes: minutes(0),
+				Class: "CONFIDENTIAL", AlarmMinutes: minutes(0), Tentative: true,
 			},
 		},
 		{
