@@ -42,7 +42,7 @@ const MountPath = "/dav"
 const maxReportBody = 1 << 20
 
 // allowedMethods is what OPTIONS advertises.
-const allowedMethods = "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, REPORT"
+const allowedMethods = "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, REPORT"
 
 func init() {
 	// chi answers 405 to any method it has not been told about.
@@ -128,6 +128,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req.URL.Path = b.canonical(t)
 	req.URL.RawPath = ""
 
+	if r.Method == "PROPPATCH" {
+		propPatchForbidden(w, req, req.URL.Path)
+		return
+	}
 	if r.Method == "REPORT" {
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxReportBody+1))
 		if err != nil {

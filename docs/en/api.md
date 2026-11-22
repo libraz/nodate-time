@@ -200,7 +200,7 @@ A `PUT` is turned into the REST operations that make the same change, so permiss
 
 ### Not supported
 
-- `MKCALENDAR`, `MKCOL`, `COPY` and `MOVE` are 403, and `PROPPATCH` is 501: calendars are created, renamed, recolored and deleted in the web app, and an event cannot be moved between calendars from a client.
+- `MKCALENDAR`, `MKCOL`, `COPY` and `MOVE` are 403, and `PROPPATCH` is a 207 refusing each property it names with 403: calendars are created, renamed, recolored and deleted in the web app, and an event cannot be moved between calendars from a client.
 - Scheduling (invitations, free-busy), to-dos, notes, address books, push notifications and `CS:getctag`.
 - A read-only scope per password: every password carries its user's full access.
 

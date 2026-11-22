@@ -224,3 +224,37 @@ func davSystemCalendar(t *testing.T, tt *helpers.TestTenant) string {
 	require.NoError(t, err)
 	return id.String()
 }
+
+// TestDAVDiscoveryRefusesEachPropertyPatch verifies that a PROPPATCH, which
+// Apple's clients send for a calendar's order and colour, is answered with
+// each property refused and nothing changed.
+func TestDAVDiscoveryRefusesEachPropertyPatch(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	a := newDAVAccount(t, owner)
+	calPath := a.calendar(owner.CalendarID)
+	before, err := a.client.FindCalendars(context.Background(), a.home())
+	require.NoError(t, err)
+
+	body := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<A:propertyupdate xmlns:A="DAV:"><A:set><A:prop>` +
+		`<B:calendar-order xmlns:B="http://apple.com/ns/ical/">3</B:calendar-order>` +
+		`<B:calendar-color xmlns:B="http://apple.com/ns/ical/">#FF0000FF</B:calendar-color>` +
+		`</A:prop></A:set><A:remove><A:prop><A:displayname/></A:prop></A:remove></A:propertyupdate>`
+	status, _, resp := a.do(t, "PROPPATCH", calPath, nil, body)
+	require.Equal(t, http.StatusMultiStatus, status, resp)
+	require.Contains(t, resp, calPath)
+	require.Contains(t, resp, "HTTP/1.1 403 Forbidden")
+	for _, name := range []string{"calendar-order", "calendar-color", "displayname"} {
+		require.Contains(t, resp, name)
+	}
+
+	after, err := a.client.FindCalendars(context.Background(), a.home())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+
+	status, _, _ = a.do(t, "PROPPATCH", calPath, nil, `<A:propertyupdate xmlns:A="DAV:"><A:set>`)
+	require.Equal(t, http.StatusBadRequest, status)
+}
