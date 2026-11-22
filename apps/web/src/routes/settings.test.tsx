@@ -1156,3 +1156,29 @@ describe('ProviderCard', () => {
     );
   });
 });
+
+describe('calendar app sync placement', () => {
+  it('puts the app password section below the sessions on the profile tab', async () => {
+    const { container } = render(<ProfileSection />);
+    const section = container.querySelector('#app-passwords');
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByText('settings.appPasswords')).toBeInTheDocument();
+    await waitFor(() => expect(askedUrls()).toContain('/user/app-passwords'));
+
+    const sessions = screen.getByText('settings.sessions');
+    expect(
+      sessions.compareDocumentPosition(section as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('says in the sessions area that app passwords are revoked separately', () => {
+    render(<ProfileSection />);
+    expect(screen.getByText(/appPasswords\.sessionsNote/)).toBeInTheDocument();
+    expect(screen.getByText(/appPasswords\.sessionsLink/)).toBeInTheDocument();
+  });
+
+  it('links to the section from the calendar settings', () => {
+    render(<CalendarsSection />);
+    expect(screen.getByText('appPasswords.calendarsLink')).toBeInTheDocument();
+  });
+});

@@ -168,4 +168,7 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'help.faqLeaveQ': 'I want to leave a calendar',
   'help.faqLeaveA':
     'Use "Leave calendar" under "Members". Plans you added stay for the other members.',
+  'help.faqCalendarSyncQ': 'Can I see my plans in the iPhone or Mac Calendar app?',
+  'help.faqCalendarSyncA':
+    'Yes. Under Settings, create an app password in "Calendar app sync", then add a CalDAV account in the Calendar app with the server and username shown there. Labels, checklists, attachments, participants and comments are not shown in the Calendar app.',
 };

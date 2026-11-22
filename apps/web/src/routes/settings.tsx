@@ -1,7 +1,8 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppPasswords } from '@/components/app-passwords';
 import { CalendarCoverImage } from '@/components/calendar-cover-image';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { ImageUploadTile } from '@/components/image-upload-tile';
@@ -277,6 +278,8 @@ function SettingsPage() {
 }
 
 interface SectionProps {
+  /** Anchor for links that jump straight to the section. */
+  id?: string;
   title: string;
   description?: string;
   children: React.ReactNode;
@@ -285,9 +288,9 @@ interface SectionProps {
 /** The image types the avatar and cover endpoints accept. */
 const IMAGE_UPLOAD_TYPES = 'image/jpeg,image/png,image/webp';
 
-function Section({ title, description, children }: SectionProps) {
+function Section({ id, title, description, children }: SectionProps) {
   return (
-    <section className="mb-6">
+    <section id={id} className="mb-6">
       <header className="mb-3">
         <h2 className="text-subhead font-semibold text-[var(--color-text-primary)]">{title}</h2>
         {description && (
@@ -584,6 +587,14 @@ export function ProfileSection() {
       )}
 
       <SessionsSection />
+
+      <Section
+        id="app-passwords"
+        title={t('settings.appPasswords')}
+        description={t('appPasswords.description')}
+      >
+        <AppPasswords />
+      </Section>
     </>
   );
 }
@@ -659,6 +670,17 @@ function SessionsSection() {
           ))}
         </ul>
       )}
+      <p className="mt-3 text-footnote text-[var(--color-text-secondary)]">
+        {t('appPasswords.sessionsNote')}{' '}
+        <Link
+          to="/settings"
+          search={{ tab: undefined }}
+          hash="app-passwords"
+          className="font-medium text-[var(--color-accent)] underline"
+        >
+          {t('appPasswords.sessionsLink')}
+        </Link>
+      </p>
       <ConfirmSheet
         open={pendingRevokeId !== null}
         title={t('confirm.revokeSession')}
@@ -1179,6 +1201,14 @@ export function CalendarsSection() {
             options={calendars.map((c) => ({ value: c.id, label: c.name }))}
           />
         </FieldRow>
+        <Link
+          to="/settings"
+          search={{ tab: undefined }}
+          hash="app-passwords"
+          className="text-body font-medium text-[var(--color-accent)] underline"
+        >
+          {t('appPasswords.calendarsLink')}
+        </Link>
       </Section>
 
       {isAdmin && selectedId && <CalendarDetailsSection key={selectedId} calendarId={selectedId} />}

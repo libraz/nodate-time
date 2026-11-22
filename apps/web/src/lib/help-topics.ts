@@ -143,6 +143,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           { q: 'help.faqNotVisibleQ', a: 'help.faqNotVisibleA' },
           { q: 'help.faqMissingQ', a: 'help.faqMissingA' },
           { q: 'help.faqDevicesQ', a: 'help.faqDevicesA' },
+          { q: 'help.faqCalendarSyncQ', a: 'help.faqCalendarSyncA' },
           { q: 'help.faqLeaveQ', a: 'help.faqLeaveA' },
         ],
       },
