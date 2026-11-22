@@ -176,6 +176,38 @@ func (q *Queries) GetDavAppPasswordByHash(ctx context.Context, tokenHash string)
 	return i, err
 }
 
+const getDavAppPasswordByPublicIDAny = `-- name: GetDavAppPasswordByPublicIDAny :one
+SELECT enabled, revoked_at, last_used_at, token_hash FROM dav_app_passwords
+WHERE public_id = ? AND workspace_id = ? AND user_id = ?
+`
+
+type GetDavAppPasswordByPublicIDAnyParams struct {
+	PublicID    []byte `json:"publicId"`
+	WorkspaceID uint32 `json:"workspaceId"`
+	UserID      uint32 `json:"userId"`
+}
+
+type GetDavAppPasswordByPublicIDAnyRow struct {
+	Enabled    bool         `json:"enabled"`
+	RevokedAt  sql.NullTime `json:"revokedAt"`
+	LastUsedAt sql.NullTime `json:"lastUsedAt"`
+	TokenHash  string       `json:"tokenHash"`
+}
+
+// GetDavAppPasswordByPublicIDAny reads one of a user's app passwords whatever
+// its state, so a caller can tell a revoked or used row from a missing one.
+func (q *Queries) GetDavAppPasswordByPublicIDAny(ctx context.Context, arg GetDavAppPasswordByPublicIDAnyParams) (GetDavAppPasswordByPublicIDAnyRow, error) {
+	row := q.db.QueryRowContext(ctx, getDavAppPasswordByPublicIDAny, arg.PublicID, arg.WorkspaceID, arg.UserID)
+	var i GetDavAppPasswordByPublicIDAnyRow
+	err := row.Scan(
+		&i.Enabled,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.TokenHash,
+	)
+	return i, err
+}
+
 const getDavEventResourceByEvent = `-- name: GetDavEventResourceByEvent :one
 SELECT event_id, href_name, uid, created_at FROM dav_event_resources WHERE event_id = ?
 `

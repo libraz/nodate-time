@@ -1,14 +1,18 @@
 // Package apppasswords serves the signed-in user's CalDAV app passwords: a
-// per-device credential shown once at creation and revocable on its own.
+// per-device credential shown once at creation and revocable on its own. A
+// password set up through a profile link is the exception: the link hands out
+// the same password again until the device first syncs.
 package apppasswords
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/apppassword"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
@@ -26,6 +30,82 @@ type Deps struct {
 	// APIPublicURL is the address clients reach the API at; its host is what a
 	// calendar app takes as the server.
 	APIPublicURL string
+	// ProfileKeys mint and open profile links.
+	ProfileKeys *ProfileKeys
+	// AppName names the configuration profile and the account it sets up.
+	AppName string
+}
+
+// errUserGone means the user an app password would belong to no longer exists
+// or is disabled.
+var errUserGone = errors.New("app password owner is gone")
+
+func isDuplicateKey(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+// checkUser refuses an account an app password would not work for.
+func checkUser(ctx context.Context, deps Deps, userID uint32) error {
+	state, err := deps.Queries.GetUserForAppPasswordCreate(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errUserGone
+	}
+	if err != nil {
+		return err
+	}
+	if state.HasLocalIdentity && !state.EmailVerifiedAt.Valid {
+		return apierrors.AppPasswordEmailUnverified
+	}
+	if state.HasLocalMfa {
+		return apierrors.AppPasswordMFAEnabled
+	}
+	return nil
+}
+
+// checkLimit refuses a user who already holds MaxLivePasswords.
+func checkLimit(ctx context.Context, deps Deps, userID uint32) error {
+	live, err := deps.Queries.CountLiveDavAppPasswords(ctx, generated.CountLiveDavAppPasswordsParams{
+		WorkspaceID: deps.WorkspaceID, UserID: userID,
+	})
+	if err != nil {
+		return err
+	}
+	if live >= MaxLivePasswords {
+		return apierrors.AppPasswordLimitReached
+	}
+	return nil
+}
+
+// createPassword checks the user and the limit, then stores the password. It
+// returns errUserGone, an app password Spec, or the store's own error.
+func createPassword(
+	ctx context.Context, deps Deps, userID uint32, name string, pub []byte, plain, prefix, hash string,
+) error {
+	if err := checkUser(ctx, deps, userID); err != nil {
+		return err
+	}
+	if err := checkLimit(ctx, deps, userID); err != nil {
+		return err
+	}
+	_, err := deps.Queries.CreateDavAppPassword(ctx, generated.CreateDavAppPasswordParams{
+		PublicID:    pub,
+		WorkspaceID: deps.WorkspaceID,
+		UserID:      userID,
+		Name:        name,
+		TokenHash:   hash,
+		TokenPrefix: prefix,
+	})
+	return err
+}
+
+// respondCreate answers an error from createPassword, checkUser or checkLimit,
+// with gone as the answer for errUserGone.
+func respondCreate(ctx context.Context, err error, gone *apierrors.Spec) error {
+	if errors.Is(err, errUserGone) {
+		return apierrors.ToHuma(gone)
+	}
+	return apierrors.Respond(ctx, err)
 }
 
 // AppPasswordResponse is one live app password. The secret itself is never
@@ -132,30 +212,6 @@ func CreateAppPassword(deps Deps) func(context.Context, *CreateInput) (*CreateOu
 			return nil, apierrors.ToHuma(apierrors.Validation)
 		}
 
-		state, err := deps.Queries.GetUserForAppPasswordCreate(ctx, userID)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, apierrors.ToHuma(apierrors.AuthTokenInvalid)
-			}
-			return nil, apierrors.Internal(ctx, err)
-		}
-		if state.HasLocalIdentity && !state.EmailVerifiedAt.Valid {
-			return nil, apierrors.ToHuma(apierrors.AppPasswordEmailUnverified)
-		}
-		if state.HasLocalMfa {
-			return nil, apierrors.ToHuma(apierrors.AppPasswordMFAEnabled)
-		}
-
-		live, err := deps.Queries.CountLiveDavAppPasswords(ctx, generated.CountLiveDavAppPasswordsParams{
-			WorkspaceID: deps.WorkspaceID, UserID: userID,
-		})
-		if err != nil {
-			return nil, apierrors.Internal(ctx, err)
-		}
-		if live >= MaxLivePasswords {
-			return nil, apierrors.ToHuma(apierrors.AppPasswordLimitReached)
-		}
-
 		plain, prefix, hash, err := apppassword.Generate()
 		if err != nil {
 			return nil, apierrors.Internal(ctx, err)
@@ -164,15 +220,8 @@ func CreateAppPassword(deps Deps) func(context.Context, *CreateInput) (*CreateOu
 		if err != nil {
 			return nil, apierrors.Internal(ctx, err)
 		}
-		if _, err := deps.Queries.CreateDavAppPassword(ctx, generated.CreateDavAppPasswordParams{
-			PublicID:    pub[:],
-			WorkspaceID: deps.WorkspaceID,
-			UserID:      userID,
-			Name:        name,
-			TokenHash:   hash,
-			TokenPrefix: prefix,
-		}); err != nil {
-			return nil, apierrors.Internal(ctx, err)
+		if err := createPassword(ctx, deps, userID, name, pub[:], plain, prefix, hash); err != nil {
+			return nil, respondCreate(ctx, err, apierrors.AuthTokenInvalid)
 		}
 
 		// Re-read for the stored created_at, and the email the apps sign in with.

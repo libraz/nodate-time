@@ -183,6 +183,17 @@ func (q *Queries) GetSessionByRotatedFromHash(ctx context.Context, rotatedFromHa
 	return i, err
 }
 
+const getSessionPublicIDByID = `-- name: GetSessionPublicIDByID :one
+SELECT public_id FROM sessions WHERE id = ?
+`
+
+func (q *Queries) GetSessionPublicIDByID(ctx context.Context, id uint32) ([]byte, error) {
+	row := q.db.QueryRowContext(ctx, getSessionPublicIDByID, id)
+	var public_id []byte
+	err := row.Scan(&public_id)
+	return public_id, err
+}
+
 const listSessionsForUser = `-- name: ListSessionsForUser :many
 SELECT id, public_id, user_id, audience, refresh_hash, user_agent, ip_address, expires_at, revoked_at, rotated_from_hash, rotated_at, last_used_at, sort_weight, notes, enabled, updated_at, created_at FROM sessions
 WHERE user_id = ? AND audience = 'time' AND revoked_at IS NULL AND expires_at > NOW(3)

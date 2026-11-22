@@ -30,6 +30,9 @@ WHERE sessions.public_id = ?
   AND sessions.expires_at > NOW(3)
   AND EXISTS (SELECT 1 FROM users u WHERE u.id = sessions.user_id AND u.enabled = TRUE);
 
+-- name: GetSessionPublicIDByID :one
+SELECT public_id FROM sessions WHERE id = ?;
+
 -- name: GetSessionByRefreshHash :one
 SELECT * FROM sessions
 WHERE sessions.refresh_hash = ?

@@ -9,10 +9,17 @@ import (
 )
 
 // registerAppPasswords registers the app password management routes on the
-// protected group.
+// protected group, and the profile link a device opens without signing in on
+// the public one, under the sign-in rate limit.
 func registerAppPasswords(g apiGroups, deps Deps) {
 	api := g.protected
-	appDeps := apppasswords.Deps{Queries: deps.Queries, WorkspaceID: deps.WorkspaceID, APIPublicURL: deps.APIPublicURL}
+	appDeps := apppasswords.Deps{
+		Queries:      deps.Queries,
+		WorkspaceID:  deps.WorkspaceID,
+		APIPublicURL: deps.APIPublicURL,
+		ProfileKeys:  apppasswords.NewProfileKeys([]byte(deps.JWTSecret)),
+		AppName:      appNameOf(deps),
+	}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-app-passwords",
@@ -32,6 +39,26 @@ func registerAppPasswords(g apiGroups, deps Deps) {
 		Errors: errorStatuses(apierrors.AppPasswordEmailUnverified, apierrors.AppPasswordMFAEnabled,
 			apierrors.AppPasswordLimitReached),
 	}, apppasswords.CreateAppPassword(appDeps))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "create-app-password-profile-link",
+		Method:      http.MethodPost,
+		Path:        "/user/app-passwords/profile-links",
+		Summary:     "Issue a link to a configuration profile that sets up a calendar app",
+		Tags:        []string{"User"},
+		Errors: errorStatuses(apierrors.AppPasswordEmailUnverified, apierrors.AppPasswordMFAEnabled,
+			apierrors.AppPasswordLimitReached),
+	}, apppasswords.CreateProfileLink(appDeps))
+
+	huma.Register(g.public, huma.Operation{
+		OperationID: "get-app-password-profile",
+		Method:      http.MethodGet,
+		Path:        "/auth/app-password-profiles/{ticket}",
+		Summary:     "Download the configuration profile a profile link stands for",
+		Tags:        []string{"User"},
+		Errors: errorStatuses(apierrors.AppPasswordProfileLinkExpired, apierrors.AppPasswordEmailUnverified,
+			apierrors.AppPasswordMFAEnabled, apierrors.AppPasswordLimitReached),
+	}, apppasswords.GetProfile(appDeps))
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "revoke-app-password",

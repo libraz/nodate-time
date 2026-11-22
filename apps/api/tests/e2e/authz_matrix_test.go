@@ -167,6 +167,7 @@ func mxRows() []mxRow {
 		{method: "GET", path: "/auth/oauth/{provider}/callback", group: mxPublic},
 		{method: "GET", path: "/share/{token}", group: mxPublic},
 		{method: "GET", path: "/share/{token}/events", group: mxPublic},
+		{method: "GET", path: "/auth/app-password-profiles/{ticket}", group: mxPublic},
 
 		// Protected, scoped to the caller rather than a calendar.
 		{method: "GET", path: "/user", group: mxProtected},
@@ -179,6 +180,10 @@ func mxRows() []mxRow {
 		{method: "POST", path: "/user/avatar/presign", group: mxProtected},
 		{method: "PUT", path: "/user/avatar", group: mxProtected},
 		{method: "DELETE", path: "/user/avatar", group: mxProtected},
+		{method: "GET", path: "/user/app-passwords", group: mxProtected},
+		{method: "POST", path: "/user/app-passwords", group: mxProtected},
+		{method: "POST", path: "/user/app-passwords/profile-links", group: mxProtected},
+		{method: "DELETE", path: "/user/app-passwords/{appPasswordId}", group: mxProtected},
 		{method: "GET", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/calendars", group: mxProtected},
 		{method: "POST", path: "/invites/{token}/accept", group: mxProtected},

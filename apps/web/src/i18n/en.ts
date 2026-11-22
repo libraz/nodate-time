@@ -990,6 +990,8 @@ export const en: Record<TranslationKey, string> = {
     'Confirm your email address before creating an app password',
   'apiError.APP_PASSWORD.MFA_ENABLED':
     'App passwords are not available while two-factor authentication is enabled',
+  'apiError.APP_PASSWORD.PROFILE_LINK_EXPIRED':
+    'This setup link has expired. Create a new one in Settings',
   'time.days_ago': '{n}d ago',
   'time.hours_ago': '{n}h ago',
   'time.minutes_ago': '{n}m ago',

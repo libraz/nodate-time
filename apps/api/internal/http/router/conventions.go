@@ -43,13 +43,14 @@ type convention struct {
 }
 
 const (
-	reasonNewRow   = "creates a new row"
-	reasonByID     = "acts on one row by identity; nothing is merged"
-	reasonSingle   = "replaces a single value"
-	reasonOwn      = "acts on the caller's own state"
-	reasonExchange = "exchanges a token or credential"
-	reasonQuery    = "reads, but is addressed with POST"
-	reasonUnused   = "the resource carries no version"
+	reasonNewRow    = "creates a new row"
+	reasonByID      = "acts on one row by identity; nothing is merged"
+	reasonSingle    = "replaces a single value"
+	reasonOwn       = "acts on the caller's own state"
+	reasonExchange  = "exchanges a token or credential"
+	reasonQuery     = "reads, but is addressed with POST"
+	reasonUnused    = "the resource carries no version"
+	reasonIssueOnce = "issues a credential once; repeats return the same one"
 )
 
 func read(id, path string, list listShape) convention {
@@ -112,6 +113,7 @@ var operationConventions = []convention{
 	patchUnguarded("update-oauth-provider", "/admin/oauth-providers/{provider}", reasonUnused),
 
 	// Auth
+	{ID: "get-app-password-profile", Method: http.MethodGet, Path: "/auth/app-password-profiles/{ticket}", Status: http.StatusOK, Guard: guardUnconditional, Reason: reasonIssueOnce},
 	action("login", "/auth/login", http.StatusOK, reasonExchange),
 	action("logout", "/auth/logout", http.StatusNoContent, reasonOwn),
 	read("list-oauth-providers-public", "/auth/oauth/providers", listNone),
@@ -226,5 +228,6 @@ var operationConventions = []convention{
 	action("resend-email-verification", "/user/verify-email/resend", http.StatusOK, reasonOwn),
 	read("list-app-passwords", "/user/app-passwords", listArray),
 	create("create-app-password", "/user/app-passwords"),
+	action("create-app-password-profile-link", "/user/app-passwords/profile-links", http.StatusOK, reasonExchange),
 	removeUnguarded("revoke-app-password", "/user/app-passwords/{appPasswordId}", reasonOwn),
 }

@@ -1,10 +1,13 @@
 // Package apppassword generates and normalises the per-device passwords a
 // calendar client presents over HTTP Basic. A password is "ndt_" followed by
-// 32 Crockford base32 characters (160 random bits); only its SHA-256 digest is
-// ever stored.
+// 32 Crockford base32 characters (160 bits); only its SHA-256 digest is ever
+// stored. A password handed out through a profile link is derived from the
+// link rather than drawn at random, so the link yields the same password
+// until the device first syncs.
 package apppassword
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,13 +29,35 @@ const (
 	bitsPerEnc = 5
 )
 
+// rawLen is the bytes behind a password body: 32 chars x 5 bits = 160 bits,
+// so no bits are discarded.
+const rawLen = bodyLen * bitsPerEnc / 8
+
 // Generate returns a new password, its display prefix and the hash to store.
 func Generate() (plain, prefix, hash string, err error) {
-	// 32 chars x 5 bits = 160 bits = 20 bytes, so no bits are discarded.
-	var raw [bodyLen * bitsPerEnc / 8]byte
+	var raw [rawLen]byte
 	if _, err = rand.Read(raw[:]); err != nil {
 		return "", "", "", fmt.Errorf("read random bytes: %w", err)
 	}
+	plain = encode(raw)
+	return plain, plain[:PrefixLen], Hash(plain), nil
+}
+
+// Derive returns the password a profile link stands for: the leading bytes of
+// HMAC(key, nonce || ticketID), encoded as Generate encodes random bytes. The
+// results keep Generate's contract.
+func Derive(key, nonce, ticketID []byte) (plain, prefix, hash string) {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(nonce)
+	mac.Write(ticketID)
+	var raw [rawLen]byte
+	copy(raw[:], mac.Sum(nil))
+	plain = encode(raw)
+	return plain, plain[:PrefixLen], Hash(plain)
+}
+
+// encode writes raw as the prefix and 32 Crockford base32 characters.
+func encode(raw [rawLen]byte) string {
 	var b strings.Builder
 	b.WriteString(Prefix)
 	var acc uint32
@@ -46,8 +71,7 @@ func Generate() (plain, prefix, hash string, err error) {
 		}
 		acc &= 1<<bits - 1
 	}
-	plain = b.String()
-	return plain, plain[:PrefixLen], Hash(plain), nil
+	return b.String()
 }
 
 // Normalize trims s, drops spaces and hyphens, keeps the lowercase "ndt_"

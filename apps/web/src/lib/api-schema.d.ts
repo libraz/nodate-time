@@ -109,6 +109,23 @@ export interface paths {
         patch: operations["update-oauth-provider"];
         trace?: never;
     };
+    "/auth/app-password-profiles/{ticket}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the configuration profile a profile link stands for */
+        get: operations["get-app-password-profile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -1202,6 +1219,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/user/app-passwords/profile-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a link to a configuration profile that sets up a calendar app */
+        post: operations["create-app-password-profile-link"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/user/app-passwords/{appPasswordId}": {
         parameters: {
             query?: never;
@@ -1761,6 +1795,16 @@ export interface components {
             slots: components["schemas"]["PollSlotInput"][] | null;
             timezone: string;
             title: string;
+        };
+        CreateProfileLinkInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/CreateProfileLinkInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description A label for the device the password is for */
+            name: string;
         };
         CreatedAppPasswordResponse: {
             /**
@@ -2387,6 +2431,18 @@ export interface components {
             attachmentId: string;
             /** @description Signed PUT URL, valid for 15 minutes. Empty when these bytes are already stored where the caller can read them: skip the upload and confirm. */
             uploadUrl: string;
+        };
+        ProfileLinkResponse: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ProfileLinkResponse.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description Opens the configuration profile. It works like a password until it expires */
+            url: string;
         };
         ProviderInfo: {
             /**
@@ -3093,6 +3149,76 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "get-app-password-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Disposition"?: string;
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7501,6 +7627,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreatedAppPasswordResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "create-app-password-profile-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProfileLinkInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileLinkResponse"];
                 };
             };
             /** @description Forbidden */

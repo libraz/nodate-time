@@ -176,6 +176,9 @@ var (
 	// factor: the password alone is what a calendar app presents, and sign-in
 	// with it is refused for such an account, so the new password would never work.
 	AppPasswordMFAEnabled = &Spec{Status: 403, Code: "APP_PASSWORD.MFA_ENABLED", Message: "App passwords are not available while two-factor authentication is enabled"}
+	// AppPasswordProfileLinkExpired answers every refused profile link alike,
+	// so a guessed link learns nothing about how close it came.
+	AppPasswordProfileLinkExpired = &Spec{Status: 410, Code: "APP_PASSWORD.PROFILE_LINK_EXPIRED", Message: "This setup link has expired. Create a new one in Settings"}
 )
 
 // --- Avatar errors ---

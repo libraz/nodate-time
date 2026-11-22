@@ -996,6 +996,8 @@ export const ja = {
     'アプリパスワードを作成する前にメールアドレスを確認してください',
   'apiError.APP_PASSWORD.MFA_ENABLED':
     '2 段階認証が有効なアカウントではアプリパスワードを作成できません',
+  'apiError.APP_PASSWORD.PROFILE_LINK_EXPIRED':
+    'この設定用リンクは期限切れです。設定画面で作り直してください',
   'time.days_ago': '{n}日前',
   'time.hours_ago': '{n}時間前',
   'time.minutes_ago': '{n}分前',

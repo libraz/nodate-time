@@ -3,9 +3,12 @@ package helpers
 import (
 	"database/sql"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/libraz/nodate-time/apps/api/internal/apppassword"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/http/handlers/apppasswords"
 )
 
 // VerifyEmail marks a registered tenant's email as verified. Registration
@@ -45,4 +48,24 @@ func CreateAppPassword(t *testing.T, db *sql.DB, userPublicID, name string) stri
 		t.Fatalf("insert app password: user %s not found", userPublicID)
 	}
 	return plain
+}
+
+// MintProfileTicket signs a profile link ticket with the test server's keys,
+// for a session and issue time the test chooses, so a test can present a link
+// that has expired or names a session that never existed.
+func MintProfileTicket(t *testing.T, sessionPub, name string, issuedAt time.Time) string {
+	t.Helper()
+	session, err := uuid.Parse(sessionPub)
+	if err != nil {
+		t.Fatalf("parse session id: %v", err)
+	}
+	claims, err := apppasswords.NewProfileClaims(session, name)
+	if err != nil {
+		t.Fatalf("profile claims: %v", err)
+	}
+	ticket, err := apppasswords.NewProfileKeys([]byte(TestJWTSecret)).Mint(claims, issuedAt)
+	if err != nil {
+		t.Fatalf("mint profile ticket: %v", err)
+	}
+	return ticket
 }

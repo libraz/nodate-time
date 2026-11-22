@@ -33,6 +33,12 @@ WHERE p.token_hash = ?
     WHERE i.user_id = u.id AND i.provider = 'local'
       AND i.enabled = TRUE AND i.mfa_confirmed_at IS NOT NULL);
 
+-- GetDavAppPasswordByPublicIDAny reads one of a user's app passwords whatever
+-- its state, so a caller can tell a revoked or used row from a missing one.
+-- name: GetDavAppPasswordByPublicIDAny :one
+SELECT enabled, revoked_at, last_used_at, token_hash FROM dav_app_passwords
+WHERE public_id = ? AND workspace_id = ? AND user_id = ?;
+
 -- TouchDavAppPassword records a use, at most once a minute per password.
 -- name: TouchDavAppPassword :exec
 UPDATE dav_app_passwords
