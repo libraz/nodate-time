@@ -288,12 +288,6 @@ ALLOWED = {
     # because the log is a shared channel, not because a handler wants it.
     "ListEventsSince",
 
-    # CalDAV queries whose callers are outstanding work; each leaves this
-    # list when the DAV backend or the app-password endpoints call it.
-    "InsertDavEventResource",
-    "ReassignDavEventResource",
-    "GetDavEventResourcesByUID",
-
 }
 
 

@@ -141,6 +141,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Body = io.NopCloser(bytes.NewReader(body))
 		slog.InfoContext(ctx, "dav report", "dav.report", reportName(body))
 	}
+	if r.Method == http.MethodPut {
+		var ok bool
+		if req, ok = bufferPut(w, req); !ok {
+			return
+		}
+	}
 
 	h := caldav.Handler{Backend: b, Prefix: s.prefix}
 	h.ServeHTTP(w, req)
