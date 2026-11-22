@@ -290,22 +290,9 @@ ALLOWED = {
 
     # CalDAV queries whose callers are outstanding work; each leaves this
     # list when the DAV backend or the app-password endpoints call it.
-    "CreateDavAppPassword",
-    "ListDavAppPasswords",
-    "CountLiveDavAppPasswords",
-    "RevokeDavAppPassword",
-    "GetDavAppPasswordByHash",
-    "TouchDavAppPassword",
-    "GetUserForAppPasswordCreate",
     "InsertDavEventResource",
     "ReassignDavEventResource",
-    "GetDavEventResourcesByHref",
     "GetDavEventResourcesByUID",
-    "GetDavEventResourceByEvent",
-    "ListDavEventResourcesByCalendar",
-    "GetMaxCalendarLogID",
-    "GetCalendarLogRow",
-    "ListCalendarLogSince",
 
 }
 
