@@ -79,6 +79,10 @@ type Deps struct {
 	// slow down credential guessing -- and locks out sign-in for everyone
 	// sharing that address. Zero applies the default; negative disables.
 	ShareRateLimit int
+	// DAVRateLimit is the budget for CalDAV requests, counted separately: a
+	// client syncing several calendars sends far more requests than a person
+	// browsing. Zero applies the default; negative disables.
+	DAVRateLimit int
 	// TrustedProxies lists reverse-proxy hops allowed to set X-Forwarded-For for
 	// per-client rate limiting. Nil trusts no proxy: RemoteAddr is always used.
 	// See config.Config.TrustedProxyList.
@@ -92,6 +96,7 @@ type Deps struct {
 const (
 	defaultAuthRateLimit  = 60
 	defaultShareRateLimit = 600
+	defaultDAVRateLimit   = 600
 )
 
 // What the deployment is called when it has not been told. The SPA falls back
@@ -147,6 +152,14 @@ func BuildResult(deps Deps) (http.Handler, *huma.OpenAPI) {
 		r.Mount(storage.BlobPath, blobs.Handler(blobs.Deps{Storage: deps.Storage, Signer: deps.Signer}))
 	}
 
+	// CalDAV. On the bare mux because it speaks WebDAV methods and XML rather
+	// than the typed JSON API, and authenticates with HTTP Basic itself.
+	davLimit := deps.DAVRateLimit
+	if davLimit == 0 {
+		davLimit = defaultDAVRateLimit
+	}
+	mountDAV(r, deps, newEventDeps(deps), davLimit)
+
 	// --- Public routes (no auth) ---
 	// Sensitive unauthenticated endpoints (login, register, password reset,
 	// OAuth, public share) are rate-limited per client IP to blunt credential
@@ -185,6 +198,7 @@ func BuildResult(deps Deps) (http.Handler, *huma.OpenAPI) {
 	registerAuth(g, deps)
 	registerSchedulePolls(g, deps)
 	registerUsers(g, deps)
+	registerAppPasswords(g, deps)
 	registerCalendars(g, deps)
 	registerEvents(g, deps)
 	registerEventRestore(g, deps)

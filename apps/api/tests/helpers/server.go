@@ -127,6 +127,8 @@ func buildHandler(db *sql.DB, mc mailer.Mailer, sc *storage.Client, signer *stor
 		// Likewise for the share budget: a parallel run reads many links from
 		// the same address.
 		ShareRateLimit: -1,
+		// CalDAV sync bursts from one loopback address in the same way.
+		DAVRateLimit: -1,
 		// The test client is the only peer, so treating loopback as a proxy hop
 		// lets a test present an arbitrary client address — including a
 		// full-length IPv6 one, which an httptest listener never produces on its

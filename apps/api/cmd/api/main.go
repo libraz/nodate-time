@@ -224,6 +224,7 @@ func main() {
 		TrustedProxies:       cfg.TrustedProxyList(),
 		AuthRateLimit:        cfg.AuthRateLimit,
 		ShareRateLimit:       cfg.ShareRateLimit,
+		DAVRateLimit:         cfg.DAVRateLimit,
 	}, app.Options{
 		CORSAllowedOrigins: cfg.CORSAllowedOriginList(),
 		AccessLogger:       slog.Default(),

@@ -131,6 +131,7 @@ services:
       # Requests per client per minute; 0 keeps the built-in budget.
       TC_AUTH_RATE_LIMIT: ${TC_AUTH_RATE_LIMIT:-0}
       TC_SHARE_RATE_LIMIT: ${TC_SHARE_RATE_LIMIT:-0}
+      TC_DAV_RATE_LIMIT: ${TC_DAV_RATE_LIMIT:-0}
       # Reached over the compose network. This is not an address the browser
       # ever sees: it names where the API fetches and stores bytes, not where
       # a client is sent.

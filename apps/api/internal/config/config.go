@@ -144,12 +144,15 @@ type Config struct {
 	AuthRateLimit int `env:"TC_AUTH_RATE_LIMIT" envDefault:"0"`
 	// ShareRateLimit is the same for public share links, counted separately so
 	// an audience reading a shared calendar cannot exhaust the sign-in budget.
-	ShareRateLimit int    `env:"TC_SHARE_RATE_LIMIT" envDefault:"0"`
-	S3Endpoint     string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`
-	S3AccessKey    string `env:"TC_S3_ACCESS_KEY" envDefault:"minioadmin"`
-	S3SecretKey    string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
-	S3Bucket       string `env:"TC_S3_BUCKET" envDefault:"nodate-time"`
-	S3UseSSL       bool   `env:"TC_S3_USE_SSL" envDefault:"false"`
+	ShareRateLimit int `env:"TC_SHARE_RATE_LIMIT" envDefault:"0"`
+	// DAVRateLimit is the same for CalDAV clients, which poll and sync in
+	// bursts, counted separately from sign-in and share links.
+	DAVRateLimit int    `env:"TC_DAV_RATE_LIMIT" envDefault:"0"`
+	S3Endpoint   string `env:"TC_S3_ENDPOINT" envDefault:"localhost:9000"`
+	S3AccessKey  string `env:"TC_S3_ACCESS_KEY" envDefault:"minioadmin"`
+	S3SecretKey  string `env:"TC_S3_SECRET_KEY" envDefault:"minioadmin"`
+	S3Bucket     string `env:"TC_S3_BUCKET" envDefault:"nodate-time"`
+	S3UseSSL     bool   `env:"TC_S3_USE_SSL" envDefault:"false"`
 
 	WebURL    string `env:"TC_WEB_URL" envDefault:"http://localhost:5173"`
 	APIPublic string `env:"TC_API_PUBLIC_URL" envDefault:"http://localhost:8080"`
