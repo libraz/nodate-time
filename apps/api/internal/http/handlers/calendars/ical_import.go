@@ -3,11 +3,13 @@ package calendars
 import (
 	"context"
 	"database/sql"
+	"slices"
 
 	"github.com/libraz/nodate-time/apps/api/internal/calimport"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
 	apierrors "github.com/libraz/nodate-time/apps/api/internal/errors"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
+	"github.com/libraz/nodate-time/apps/api/internal/ical"
 )
 
 // --- Import (iCal) ---
@@ -60,19 +62,6 @@ type ImportOutput struct {
 	}
 }
 
-// maxNotificationOffset is the longest reminder the calendar stores, in minutes.
-const maxNotificationOffset = 10080
-
-// importAlarm maps a parsed alarm onto the stored offset. An alarm outside the
-// range the calendar holds is left off rather than snapped to a neighbouring
-// value; the import result counts those it dropped.
-func importAlarm(minutes *int32) sql.NullInt32 {
-	if minutes == nil || *minutes < 0 || *minutes > maxNotificationOffset {
-		return sql.NullInt32{}
-	}
-	return sql.NullInt32{Int32: *minutes, Valid: true}
-}
-
 // importTransp reads TRANSP back. Only the free end of the axis is carried,
 // because that is all the property can say; the finer values survive only in
 // events this product wrote.
@@ -107,7 +96,8 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 			return nil, apierrors.Respond(ctx, err)
 		}
 
-		events := parseICS(in.Body.ICS)
+		body := []byte(in.Body.ICS)
+		events, _ := ical.Parse(body, ical.ParseOptions{})
 		truncated := 0
 		if len(events) > importMaxEvents {
 			// Counted, not swallowed. A file that lost a thousand events must
@@ -120,7 +110,8 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		dropped := 0
 		for i, e := range events {
 			converted[i] = importEvent(e)
-			if e.alarmMinutes != nil && !converted[i].NotificationOffset.Valid {
+			if slices.ContainsFunc(e.Alarms, func(a ical.Alarm) bool { return a.HasOffset }) &&
+				!converted[i].NotificationOffset.Valid {
 				dropped++
 			}
 		}
@@ -136,7 +127,7 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 		out.Body.UnknownTimezones = res.UnknownTimezones
 		out.Body.DroppedReminders = dropped
 		out.Body.Unreadable = res.Imported+res.Skipped+res.Failed+res.Duplicates+truncated == 0 &&
-			!containsICSComponent(in.Body.ICS)
+			!ical.ContainsComponent(body)
 		return out, nil
 	}
 }
@@ -144,42 +135,36 @@ func ImportEvents(deps Deps) func(context.Context, *ImportInputAlt) (*ImportOutp
 // importEvent maps a parsed VEVENT onto the shape the store side takes. The
 // zone is left empty when the file named none, so a changed occurrence then
 // inherits its series' zone.
-func importEvent(e rawEvent) calimport.Event {
-	tz := ""
-	if e.tzid != "" {
-		tz = importZone(e.tzid)
-	}
+func importEvent(e ical.ParsedEvent) calimport.Event {
 	return calimport.Event{
-		SourceUID:          e.uid,
-		Title:              e.summary,
-		Location:           e.location,
-		Memo:               e.desc,
-		URL:                e.url,
-		Start:              e.start,
-		End:                e.end,
-		AllDay:             e.allDay,
-		Timezone:           tz,
-		TimezoneUnknown:    e.tzUnknown,
-		Visibility:         importVisibility(e.class),
-		ShowAs:             importTransp(e.transp),
-		NotificationOffset: importAlarm(e.alarmMinutes),
-		RRule:              e.rrule,
-		Exdates:            e.exdates,
-		TooManyExdates:     e.tooManyExdates,
-		Duration:           e.duration,
-		HasDuration:        e.hasDuration,
-		BadDuration:        e.badDuration,
-		RecurrenceID:       e.recurrenceID,
-		HasRecurrenceID:    e.hasRecurrenceID,
+		SourceUID:          e.UID,
+		Title:              e.Summary,
+		Location:           e.Location,
+		Memo:               e.Description,
+		URL:                e.URL,
+		Start:              e.Start,
+		End:                e.End,
+		AllDay:             e.AllDay,
+		Timezone:           e.Zone(),
+		TimezoneUnknown:    e.TZUnknown,
+		Visibility:         importVisibility(e.Class),
+		ShowAs:             importTransp(e.Transp),
+		NotificationOffset: importAlarm(e.Alarms),
+		RRule:              e.RRule,
+		Exdates:            e.Exdates,
+		TooManyExdates:     e.TooManyExdates,
+		Duration:           e.Duration,
+		HasDuration:        e.HasDuration,
+		BadDuration:        e.BadDuration,
+		RecurrenceID:       e.RecurrenceID,
+		HasRecurrenceID:    e.HasRecurrenceID,
 	}
 }
 
-// importZone keeps the source zone so wall-clock semantics (recurrence,
-// all-day rendering) survive the import. A name nothing can resolve falls back
-// to UTC to match how the times were parsed.
-func importZone(tzid string) string {
-	if name, ok := resolveTZID(tzid); ok {
-		return name
-	}
-	return "UTC"
+// importAlarm is the reminder an event keeps. One the calendar cannot hold is
+// left off rather than snapped to a neighbouring value; the result counts
+// those it dropped.
+func importAlarm(alarms []ical.Alarm) sql.NullInt32 {
+	m, ok := ical.FirstExpressibleAlarm(alarms)
+	return sql.NullInt32{Int32: m, Valid: ok}
 }

@@ -1,8 +1,10 @@
-package calendars
+package ical
 
 import (
 	"testing"
 	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 // TestWindowsZoneNamesResolveToRealZones verifies the mapping is usable: every
@@ -39,9 +41,9 @@ func TestResolveTZIDPlacesTheNamesFilesActuallyCarry(t *testing.T) {
 		{"", "", false},
 	}
 	for _, c := range cases {
-		got, ok := resolveTZID(c.tzid)
+		got, ok := ResolveTZID(c.tzid)
 		if ok != c.ok || got != c.want {
-			t.Errorf("resolveTZID(%q) = %q, %v; want %q, %v", c.tzid, got, ok, c.want, c.ok)
+			t.Errorf("ResolveTZID(%q) = %q, %v; want %q, %v", c.tzid, got, ok, c.want, c.ok)
 		}
 	}
 }
@@ -51,11 +53,11 @@ func TestResolveTZIDPlacesTheNamesFilesActuallyCarry(t *testing.T) {
 // is what decides whether a given instant is on standard time or not -- taking
 // the standard offset from the name would be wrong for half of every year.
 func TestWindowsZoneNamesCarryTheirOwnDaylightRules(t *testing.T) {
-	name, ok := resolveTZID("Eastern Standard Time")
+	name, ok := ResolveTZID("Eastern Standard Time")
 	if !ok {
 		t.Fatal("Eastern Standard Time should resolve")
 	}
-	loc := loadLocationOrUTC(name)
+	loc := recurrence.LoadLocation(name)
 	summer := time.Date(2026, 6, 1, 10, 0, 0, 0, loc)
 	if got := summer.UTC().Format(time.RFC3339); got != "2026-06-01T14:00:00Z" {
 		t.Errorf("10:00 on 1 June is 14:00Z on daylight time, got %s", got)

@@ -11,16 +11,17 @@ import (
 
 	"github.com/libraz/nodate-time/apps/api/internal/attendees"
 	"github.com/libraz/nodate-time/apps/api/internal/db/generated"
+	"github.com/libraz/nodate-time/apps/api/internal/ical"
 )
 
 // MaxExdates bounds the cancellations one imported series may carry.
 // Every listing and export of the series reads the whole list, so a file
 // naming hundreds of thousands of them is refused rather than stored.
-const MaxExdates = 1000
+const MaxExdates = ical.MaxExdates
 
 // MaxMemoRunes is the memo length the events API accepts. A longer
 // description is cut to it rather than stored as a memo no edit could save.
-const MaxMemoRunes = 16000
+const MaxMemoRunes = ical.MaxDescriptionRunes
 
 // Event is one event to import. Changed occurrences (HasRecurrenceID) are
 // matched to their series by SourceUID.

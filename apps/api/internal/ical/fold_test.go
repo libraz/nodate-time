@@ -1,4 +1,4 @@
-package calendars
+package ical
 
 import (
 	"strings"
@@ -60,7 +60,7 @@ func TestFoldedLinesSurviveUnfoldingUnchanged(t *testing.T) {
 	for _, line := range cases {
 		var b strings.Builder
 		writeFolded(&b, line)
-		got := strings.TrimSuffix(unfoldICS(b.String()), "\n")
+		got := strings.TrimSuffix(unfold(b.String()), "\n")
 		require.Equal(t, line, got, "folding and unfolding must be each other's inverse")
 	}
 }

@@ -1,4 +1,4 @@
-package calendars
+package ical
 
 import (
 	"sort"

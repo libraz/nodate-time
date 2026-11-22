@@ -1,4 +1,4 @@
-package calendars
+package ical
 
 // windowsZones maps the time zone names Windows uses onto IANA zone names.
 //

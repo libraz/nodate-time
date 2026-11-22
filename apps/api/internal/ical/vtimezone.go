@@ -1,10 +1,12 @@
-package calendars
+package ical
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/recurrence"
 )
 
 // zoneTransition is one change of a zone's UTC offset.
@@ -29,7 +31,7 @@ func (t zoneTransition) onset() time.Time {
 // past the scanned range. Transitions before that pattern took hold are
 // written one by one.
 func writeVTimezone(b *strings.Builder, zone string, from, now time.Time) {
-	loc := loadLocationOrUTC(zone)
+	loc := recurrence.LoadLocation(zone)
 	scanStart := time.Date(from.UTC().Year()-1, 1, 1, 0, 0, 0, 0, time.UTC)
 	lastYear := now.UTC().Year() + 2 + ruleSampleYears
 	scanEnd := time.Date(lastYear+1, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -69,7 +71,7 @@ func writeZoneComponent(b *strings.Builder, t zoneTransition, rrule string) {
 	writeFolded(b, "TZOFFSETFROM:"+icsOffset(t.from))
 	writeFolded(b, "TZOFFSETTO:"+icsOffset(t.to))
 	if t.name != "" {
-		writeFolded(b, "TZNAME:"+icsEscape(t.name))
+		writeFolded(b, "TZNAME:"+escapeText(t.name))
 	}
 	if rrule != "" {
 		writeFolded(b, "RRULE:"+rrule)

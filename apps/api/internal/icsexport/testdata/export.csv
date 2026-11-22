@@ -1,0 +1,7 @@
+Subject,Start Date,Start Time,End Date,End Time,All Day,Location,Description,URL
+Holiday,2026-07-04,00:00:00,2026-07-04,00:00:00,true,,,
+Trip,2026-07-04,00:00:00,2026-07-06,00:00:00,true,,,
+"Clinic, ""room""",2026-06-01,10:00:00,2026-06-01,11:30:00,false,東京都渋谷区,"line1
+line2","https://example.test/a,b"
+'=SUM(A1),2026-06-01,01:00:00,2026-06-01,01:00:00,false,,'-1,
+Planning,2026-06-01,01:00:00,2026-06-01,02:00:00,false,,,
