@@ -204,6 +204,45 @@ func TestDAVDiscoveryPrivilegesFollowTheRole(t *testing.T) {
 	require.Equal(t, want, readOnly)
 }
 
+// TestDAVDiscoveryDropsACalendarOnceTheMemberIsRemoved verifies that an app
+// password reaches a calendar only while its user is a member: once removed,
+// the home stops listing it and reads and writes on it answer 404.
+func TestDAVDiscoveryDropsACalendarOnceTheMemberIsRemoved(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+	ctx := context.Background()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	member := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	joinAs(t, calURL, owner.AccessToken, member, "editor")
+	a := newDAVAccount(t, member)
+	calPath := a.calendar(owner.CalendarID)
+
+	listed := func() bool {
+		t.Helper()
+		cals, err := a.client.FindCalendars(ctx, a.home())
+		require.NoError(t, err)
+		for _, c := range cals {
+			if c.Path == calPath {
+				return true
+			}
+		}
+		return false
+	}
+	require.True(t, listed())
+
+	status, raw := helpers.DoJSONStatus(t, http.MethodDelete, calURL+"/members/"+member.UserID, owner.AccessToken, nil)
+	require.Equal(t, http.StatusNoContent, status, raw)
+
+	require.False(t, listed())
+	status, _, _ = a.do(t, "PROPFIND", calPath, map[string]string{"Depth": "1"}, davPropfindPrincipal)
+	require.Equal(t, http.StatusNotFound, status)
+	ics := davICS("UID:after-removal@client\nDTSTART:20260611T090000Z\nDTEND:20260611T100000Z\nSUMMARY:After removal")
+	status, _, _ = a.put(t, calPath+"after-removal.ics", ics, map[string]string{"If-None-Match": "*"})
+	require.Equal(t, http.StatusNotFound, status)
+}
+
 // davSystemCalendar makes a provider-fed calendar with tt as an editor of it,
 // written the way a feed import leaves one: there is no API that creates it.
 func davSystemCalendar(t *testing.T, tt *helpers.TestTenant) string {
