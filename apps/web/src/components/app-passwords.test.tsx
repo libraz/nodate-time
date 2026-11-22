@@ -192,6 +192,65 @@ describe('AppPasswords create', () => {
   );
 });
 
+describe('AppPasswords profile', () => {
+  const link = {
+    url: 'https://time.example.com/api/auth/app-password-profiles/abc.def',
+    expiresAt: '2026-11-22T00:10:00Z',
+  };
+
+  function profileNamed(name: string) {
+    fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: name } });
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+  }
+
+  it('issues a link and shows a QR code, the open link and the warning', async () => {
+    await renderLoaded([]);
+    apiPost.mockResolvedValue({ data: link } as never);
+    profileNamed('  iPhone ');
+
+    const open = await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
+    expect(open).toHaveAttribute('href', link.url);
+    expect(apiPost).toHaveBeenCalledWith('/user/app-passwords/profile-links', {
+      body: { name: 'iPhone' },
+    });
+    const qr = screen.getByRole('img', { name: 'appPasswords.profileQrLabel' });
+    expect(qr.tagName.toLowerCase()).toBe('svg');
+    expect(qr.querySelectorAll('rect').length).toBeGreaterThan(100);
+    expect(screen.getByText('appPasswords.profileWarning')).toBeInTheDocument();
+    expect(screen.getByText(/appPasswords\.profileExpires/)).toBeInTheDocument();
+    // No password is made or shown on this path.
+    expect(apiPost).not.toHaveBeenCalledWith('/user/app-passwords', expect.anything());
+    expect(screen.queryByText('appPasswords.createdTitle')).toBeNull();
+  });
+
+  it.each(['APP_PASSWORD.LIMIT_REACHED', 'APP_PASSWORD.MFA_ENABLED'])(
+    'shows the reason for a refused link %s',
+    async (code) => {
+      await renderLoaded([]);
+      apiPost.mockRejectedValue(new ApiError(403, 'forbidden', code));
+      profileNamed('iPhone');
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(`apiError.${code}`);
+      expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+    },
+  );
+
+  it('reloads the list when the card is closed, so the row made on first open shows', async () => {
+    await renderLoaded([]);
+    apiPost.mockResolvedValue({ data: link } as never);
+    profileNamed('iPhone');
+    await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
+    expect(apiGet).toHaveBeenCalledTimes(1);
+
+    listing([row(1, { name: 'iPhone' })]);
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+
+    expect(await screen.findByText('iPhone')).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+  });
+});
+
 describe('AppPasswords connection steps', () => {
   it('is always present and names this host before anything is created', async () => {
     await renderLoaded([]);

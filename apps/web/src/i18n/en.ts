@@ -379,7 +379,21 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.calendarsLink': 'Sync with a calendar app',
   'appPasswords.nameLabel': 'Device name',
   'appPasswords.namePlaceholder': 'iPhone',
-  'appPasswords.create': 'Create app password',
+  'appPasswords.create': 'Show a password to set up manually',
+  'appPasswords.profileCreate': 'Set up with a profile',
+  'appPasswords.profileRecommended':
+    'On an iPhone or Mac, “Set up with a profile” is the easier way.',
+  'appPasswords.profileTitle': 'Profile ready',
+  'appPasswords.profileQrLabel': 'QR code that opens the setup profile',
+  'appPasswords.profileOpen': 'Open on this device',
+  'appPasswords.profileExpires': 'This link works until {time}.',
+  'appPasswords.profileIphone':
+    'iPhone: scan the code with the camera (on the iPhone itself, tap Open on this device) → open in Safari → Settings → Downloaded Profile',
+  'appPasswords.profileMac': 'Mac: Open on this device → System Settings → Profiles',
+  'appPasswords.profileWarning':
+    'This link is as sensitive as a password. Do not paste it into chat or email.',
+  'appPasswords.profileAndroid':
+    'On Android and other devices, use "Show a password to set up manually".',
   'appPasswords.creating': 'Creating...',
   'appPasswords.limitReached':
     'You have reached the limit of {max} app passwords. Revoke one to create another.',

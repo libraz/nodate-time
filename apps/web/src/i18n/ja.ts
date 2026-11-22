@@ -393,7 +393,20 @@ export const ja = {
   'appPasswords.calendarsLink': 'カレンダーアプリで同期',
   'appPasswords.nameLabel': '端末の名前',
   'appPasswords.namePlaceholder': 'iPhone',
-  'appPasswords.create': 'アプリパスワードを作成',
+  'appPasswords.create': 'パスワードを表示して手動で設定',
+  'appPasswords.profileCreate': 'プロファイルで設定',
+  'appPasswords.profileRecommended': 'iPhone と Mac では「プロファイルで設定」がかんたんです。',
+  'appPasswords.profileTitle': 'プロファイルを用意しました',
+  'appPasswords.profileQrLabel': '設定プロファイルを開く QR コード',
+  'appPasswords.profileOpen': 'この端末で開く',
+  'appPasswords.profileExpires': 'このリンクは {time} まで使えます。',
+  'appPasswords.profileIphone':
+    'iPhone: QR コードをカメラで読み取る（iPhone で見ているときは「この端末で開く」）→ Safari で開く → 設定 → ダウンロード済みのプロファイル',
+  'appPasswords.profileMac': 'Mac: この端末で開く → システム設定 → プロファイル',
+  'appPasswords.profileWarning':
+    'このリンクはパスワードと同じ扱いです。チャットやメールに貼らないでください。',
+  'appPasswords.profileAndroid':
+    'Android などは「パスワードを表示して手動で設定」を使ってください。',
   'appPasswords.creating': '作成中...',
   'appPasswords.limitReached':
     'アプリパスワードは {max} 件までです。新しく作るには、どれかを失効させてください。',

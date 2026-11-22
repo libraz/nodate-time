@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { encode } from 'uqr';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { useT } from '@/i18n';
@@ -13,6 +14,7 @@ import { useUiStore } from '@/stores/ui-store';
 
 type AppPassword = components['schemas']['AppPasswordResponse'];
 type CreatedAppPassword = components['schemas']['CreatedAppPasswordResponse'];
+type ProfileLink = components['schemas']['ProfileLinkResponse'];
 
 /** How many live app passwords one account may hold. */
 const APP_PASSWORD_LIMIT = 20;
@@ -40,6 +42,8 @@ export function AppPasswords() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAppPassword | null>(null);
+  const [profile, setProfile] = useState<ProfileLink | null>(null);
+  const [profiling, setProfiling] = useState(false);
   // Outlives the card so the steps keep naming the host the server reported.
   const [serverHost, setServerHost] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<AppPassword | null>(null);
@@ -64,6 +68,7 @@ export function AppPasswords() {
 
   const atLimit = (items?.length ?? 0) >= APP_PASSWORD_LIMIT;
   const trimmed = name.trim();
+  const busy = creating || profiling;
 
   const create = async () => {
     setCreating(true);
@@ -83,6 +88,29 @@ export function AppPasswords() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const createProfile = async () => {
+    setProfiling(true);
+    setCreateError(null);
+    try {
+      const { data } = await client.POST('/user/app-passwords/profile-links', {
+        body: { name: trimmed },
+      });
+      if (!data) return;
+      setProfile(data);
+      setName('');
+    } catch (e) {
+      setCreateError(errorMessage(e));
+    } finally {
+      setProfiling(false);
+    }
+  };
+
+  // The row is made when the device first opens the link, so the list is stale until then.
+  const closeProfile = () => {
+    setProfile(null);
+    void load();
   };
 
   const revoke = async (target: AppPassword) => {
@@ -124,6 +152,14 @@ export function AppPasswords() {
         />
       )}
 
+      {profile && (
+        <ProfileCard
+          profile={profile}
+          expires={formatDateTime(profile.expiresAt, timezone, locale, DateTime.TIME_SIMPLE)}
+          onClose={closeProfile}
+        />
+      )}
+
       {items !== null &&
         (items.length === 0 ? (
           <p className="text-body text-[var(--color-text-secondary)]">{t('appPasswords.empty')}</p>
@@ -159,7 +195,7 @@ export function AppPasswords() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (trimmed && !creating && !atLimit && items !== null) void create();
+          if (trimmed && !busy && !atLimit && items !== null) void createProfile();
         }}
       >
         <label
@@ -180,12 +216,23 @@ export function AppPasswords() {
           />
           <button
             type="submit"
-            disabled={!trimmed || creating || atLimit || items === null}
+            disabled={!trimmed || busy || atLimit || items === null}
             className="btn-primary px-5 text-default disabled:opacity-50"
+          >
+            {profiling ? t('appPasswords.creating') : t('appPasswords.profileCreate')}
+          </button>
+          <button
+            type="button"
+            onClick={() => void create()}
+            disabled={!trimmed || busy || atLimit || items === null}
+            className="btn-secondary px-5 text-default disabled:opacity-50"
           >
             {creating ? t('appPasswords.creating') : t('appPasswords.create')}
           </button>
         </div>
+        <p className="mt-1.5 text-footnote text-[var(--color-text-secondary)]">
+          {t('appPasswords.profileRecommended')}
+        </p>
         {atLimit && (
           <p className="mt-1.5 text-footnote text-[var(--color-text-secondary)]">
             {t('appPasswords.limitReached', { max: String(APP_PASSWORD_LIMIT) })}
@@ -284,6 +331,76 @@ function CreatedCard({ created, onCopy, onClose }: CreatedCardProps) {
         </button>
       </div>
     </div>
+  );
+}
+
+interface ProfileCardProps {
+  profile: ProfileLink;
+  expires: string;
+  onClose: () => void;
+}
+
+/** The link that installs the calendar account, as a QR code and a plain link. */
+function ProfileCard({ profile, expires, onClose }: ProfileCardProps) {
+  const t = useT();
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-inset)] p-4">
+      <p className="text-default font-semibold text-[var(--color-text-primary)]">
+        {t('appPasswords.profileTitle')}
+      </p>
+      <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
+        {t('appPasswords.profileExpires', { time: expires })}
+      </p>
+      <div className="mt-3 hidden sm:block">
+        <QrCode value={profile.url} label={t('appPasswords.profileQrLabel')} />
+      </div>
+      <ul className="mt-3 space-y-1 text-body text-[var(--color-text-secondary)]">
+        <li>{t('appPasswords.profileIphone')}</li>
+        <li>{t('appPasswords.profileMac')}</li>
+        <li>{t('appPasswords.profileAndroid')}</li>
+      </ul>
+      <p className="mt-3 text-footnote text-[var(--color-danger)]">
+        {t('appPasswords.profileWarning')}
+      </p>
+      <div className="mt-4 flex gap-2">
+        <a href={profile.url} className="btn-primary px-5 text-default">
+          {t('appPasswords.profileOpen')}
+        </a>
+        <button type="button" onClick={onClose} className="btn-secondary px-5 text-default">
+          {t('common.close')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Quiet zone in modules, as the QR specification asks of a scanner's input. */
+const QR_QUIET_ZONE = 4;
+const QR_MODULE_PX = 5;
+
+/** Always dark on white, whatever the theme, so a camera can read it. */
+function QrCode({ value, label }: { value: string; label: string }) {
+  const { size, data } = useMemo(() => encode(value, { ecc: 'M', border: QR_QUIET_ZONE }), [value]);
+  const rects = [];
+  for (let y = 0; y < size; y++) {
+    const row = data[y] ?? [];
+    for (let x = 0; x < size; x++) {
+      if (row[x]) rects.push(<rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} />);
+    }
+  }
+  return (
+    <svg
+      role="img"
+      aria-label={label}
+      viewBox={`0 0 ${size} ${size}`}
+      width={size * QR_MODULE_PX}
+      height={size * QR_MODULE_PX}
+      shapeRendering="crispEdges"
+      className="h-auto max-w-full rounded-[var(--radius-sm)]"
+    >
+      <rect width={size} height={size} fill="#ffffff" />
+      <g fill="#000000">{rects}</g>
+    </svg>
   );
 }
 

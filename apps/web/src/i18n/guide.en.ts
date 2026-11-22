@@ -170,5 +170,5 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'Use "Leave calendar" under "Members". Plans you added stay for the other members.',
   'help.faqCalendarSyncQ': 'Can I see my plans in the iPhone or Mac Calendar app?',
   'help.faqCalendarSyncA':
-    'Yes. Under Settings, create an app password in "Calendar app sync", then add a CalDAV account in the Calendar app with the server and username shown there. Labels, checklists, attachments, participants and comments are not shown in the Calendar app.',
+    'Yes. On iPhone or Mac, open Settings → "Calendar app sync", enter a device name and choose "Set up with a profile", then install the profile (scan the QR code on iPhone, or open the link on Mac). Each device gets its own app password. On Android and other devices, choose "Show a password to set up manually" and add a CalDAV account with the server, username and password shown there. Labels, checklists, attachments, participants and comments are not shown in the Calendar app.',
 };
