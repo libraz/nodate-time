@@ -363,7 +363,7 @@ function ProfileCard({ profile, expires, onClose }: ProfileCardProps) {
         {t('appPasswords.profileWarning')}
       </p>
       <div className="mt-4 flex gap-2">
-        <a href={profile.url} className="btn-primary px-5 text-default">
+        <a href={profile.url} className="btn-primary inline-flex items-center px-5 text-default">
           {t('appPasswords.profileOpen')}
         </a>
         <button type="button" onClick={onClose} className="btn-secondary px-5 text-default">
@@ -376,7 +376,7 @@ function ProfileCard({ profile, expires, onClose }: ProfileCardProps) {
 
 /** Quiet zone in modules, as the QR specification asks of a scanner's input. */
 const QR_QUIET_ZONE = 4;
-const QR_MODULE_PX = 5;
+const QR_MODULE_PX = 4;
 
 /** Always dark on white, whatever the theme, so a camera can read it. */
 function QrCode({ value, label }: { value: string; label: string }) {
