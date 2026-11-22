@@ -87,10 +87,10 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('AppPasswords list', () => {
-  it('shows name, prefix, last use and creation date for each password', async () => {
+  it('shows name, last sync and when each device was added, without the secret prefix', async () => {
     await renderLoaded([row(1), row(2, { lastUsedAt: '2026-11-20T10:00:00Z' })]);
     await screen.findByText('Device 1');
-    expect(screen.getByText('ndt_AB01…')).toBeInTheDocument();
+    expect(screen.queryByText(/ndt_AB01/)).toBeNull();
     expect(screen.getByText('Device 2')).toBeInTheDocument();
     expect(screen.getAllByText(/appPasswords\.neverUsed/)).toHaveLength(1);
     expect(screen.getAllByText(/appPasswords\.lastUsed/)).toHaveLength(1);
@@ -128,7 +128,7 @@ describe('AppPasswords create', () => {
     expect(screen.getByText('me@example.com')).toBeInTheDocument();
     expect(screen.getByText('appPasswords.shownOnce')).toBeInTheDocument();
     // The new password joins the list without a second request for it.
-    expect(screen.getByText('ndt_ABCD…')).toBeInTheDocument();
+    expect(screen.getByText(created.name)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     expect(screen.queryByText('ndt_ ABCD EFGH IJKL MNOP')).toBeNull();
@@ -195,7 +195,7 @@ describe('AppPasswords create', () => {
 describe('AppPasswords profile', () => {
   const link = {
     url: 'https://time.example.com/api/auth/app-password-profiles/abc.def',
-    expiresAt: '2026-11-22T00:10:00Z',
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
   };
 
   function profileNamed(name: string) {
@@ -217,7 +217,8 @@ describe('AppPasswords profile', () => {
     expect(qr.tagName.toLowerCase()).toBe('svg');
     expect(qr.querySelectorAll('rect').length).toBeGreaterThan(100);
     expect(screen.getByText('appPasswords.profileWarning')).toBeInTheDocument();
-    expect(screen.getByText(/appPasswords\.profileExpires/)).toBeInTheDocument();
+    expect(screen.getByText(/appPasswords\.profileRemaining/)).toBeInTheDocument();
+    expect(screen.getByText('appPasswords.profileWaiting')).toBeInTheDocument();
     // No password is made or shown on this path.
     expect(apiPost).not.toHaveBeenCalledWith('/user/app-passwords', expect.anything());
     expect(screen.queryByText('appPasswords.createdTitle')).toBeNull();
@@ -248,6 +249,60 @@ describe('AppPasswords profile', () => {
     expect(await screen.findByText('iPhone')).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+  });
+});
+
+describe('AppPasswords profile progress', () => {
+  const link = {
+    url: 'https://time.example.com/api/auth/app-password-profiles/abc.def',
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  it('follows the device from waiting to opened to synced', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await renderLoaded([row(1, { name: 'iPhone' })]);
+    apiPost.mockResolvedValue({ data: link } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'iPhone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+    await screen.findByText('appPasswords.profileWaiting');
+
+    // An older row with the same name is not the device this link set up.
+    listing([row(2, { name: 'iPhone' }), row(1, { name: 'iPhone' })]);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(await screen.findByText('appPasswords.profileOpened')).toBeInTheDocument();
+
+    listing([
+      row(2, { name: 'iPhone', lastUsedAt: new Date().toISOString() }),
+      row(1, { name: 'iPhone' }),
+    ]);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(await screen.findByText('appPasswords.profileSynced')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+  });
+
+  it('offers a new link once this one has expired unopened', async () => {
+    await renderLoaded([]);
+    apiPost.mockResolvedValue({
+      data: { ...link, expiresAt: new Date(Date.now() - 1000).toISOString() },
+    } as never);
+    fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), {
+      target: { value: 'iPad' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+
+    expect(await screen.findByText('appPasswords.profileExpired')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+
+    apiPost.mockResolvedValue({ data: link } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileRecreate' }));
+    expect(
+      await screen.findByRole('link', { name: 'appPasswords.profileOpen' }),
+    ).toBeInTheDocument();
+    expect(apiPost).toHaveBeenLastCalledWith('/user/app-passwords/profile-links', {
+      body: { name: 'iPad' },
+    });
   });
 });
 

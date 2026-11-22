@@ -386,60 +386,87 @@ export const ja = {
   'sessions.revoked': 'ログアウトした',
   'settings.appPasswords': 'カレンダーアプリとの同期',
   'appPasswords.description':
-    'iPhone や Mac などのカレンダーアプリと双方向で同期できます。アプリパスワードは端末ごとに作ってください。',
+    'iPhone や Mac の「カレンダー」アプリに Nodate Time の予定を表示できます。アプリで追加・変更した予定も Nodate Time に反映されます。',
   'appPasswords.sessionsNote':
-    'アプリパスワードはここではログアウトされません。別に失効させてください。',
-  'appPasswords.sessionsLink': 'アプリパスワードを管理',
+    'ここでログアウトしても、カレンダーアプリの同期は止まりません。同期を止めるときは「カレンダーアプリとの同期」で操作してください。',
+  'appPasswords.sessionsLink': '同期している端末を見る',
   'appPasswords.calendarsLink': 'カレンダーアプリで同期',
+  'appPasswords.addTitle': '端末を追加する',
   'appPasswords.nameLabel': '端末の名前',
-  'appPasswords.namePlaceholder': 'iPhone',
-  'appPasswords.create': 'パスワードを表示して手動で設定',
-  'appPasswords.profileCreate': 'プロファイルで設定',
-  'appPasswords.profileRecommended': 'iPhone と Mac では「プロファイルで設定」がかんたんです。',
-  'appPasswords.profileTitle': 'プロファイルを用意しました',
-  'appPasswords.profileQrLabel': '設定プロファイルを開く QR コード',
+  'appPasswords.nameHint': 'あとで見分けるための名前です。',
+  'appPasswords.namePlaceholder': '例: 自分の iPhone',
+  'appPasswords.profileCreate': '設定を始める',
+  'appPasswords.manualLead': 'Android やその他のアプリを使うときは',
+  'appPasswords.create': '手動で設定する',
+  'appPasswords.profileTitle': '「{name}」を追加する',
+  'appPasswords.profileRemaining': '残り {time}',
+  'appPasswords.profileQrLabel': '端末に設定を入れる QR コード',
+  'appPasswords.profileStepScan':
+    'iPhone・iPad のカメラでこの QR コードを読み取り、Safari で開きます。この Mac に入れるときは「この端末で開く」を押します。',
+  'appPasswords.profileStepOpenHere': '下の「この端末で開く」を押します。',
+  'appPasswords.profileStepInstall':
+    'iPhone・iPad は「設定」アプリの上のほうに出る「ダウンロード済みのプロファイル」を開き、「インストール」を押します。Mac は「システム設定」に出る案内に沿ってインストールします。',
+  'appPasswords.profileStepDone': '「カレンダー」アプリを開くと、Nodate Time の予定が表示されます。',
+  'appPasswords.profileWaiting': '端末で開かれるのを待っています',
+  'appPasswords.profileOpened': '端末で開かれました。インストールを続けてください',
+  'appPasswords.profileSynced': '接続できました。同期が始まっています',
+  'appPasswords.profileExpired': 'リンクの有効期限（10 分）が切れました。',
+  'appPasswords.profileRecreate': 'もう一度作る',
   'appPasswords.profileOpen': 'この端末で開く',
-  'appPasswords.profileExpires': 'このリンクは {time} まで使えます。',
-  'appPasswords.profileIphone':
-    'iPhone: QR コードをカメラで読み取る（iPhone で見ているときは「この端末で開く」）→ Safari で開く → 設定 → ダウンロード済みのプロファイル',
-  'appPasswords.profileMac': 'Mac: この端末で開く → システム設定 → プロファイル',
   'appPasswords.profileWarning':
-    'このリンクはパスワードと同じ扱いです。チャットやメールに貼らないでください。',
-  'appPasswords.profileAndroid':
-    'Android などは「パスワードを表示して手動で設定」を使ってください。',
-  'appPasswords.creating': '作成中...',
+    'この QR コードとリンクは、パスワードと同じように扱ってください。チャットやメールで送ると、ほかの人があなたのカレンダーに接続できてしまいます。',
+  'appPasswords.creating': '準備中...',
   'appPasswords.limitReached':
-    'アプリパスワードは {max} 件までです。新しく作るには、どれかを失効させてください。',
-  'appPasswords.loadFailed': 'アプリパスワードを読み込めませんでした',
-  'appPasswords.empty': 'アプリパスワードはまだありません',
-  'appPasswords.neverUsed': '未使用',
-  'appPasswords.lastUsed': '最終利用 {date}',
-  'appPasswords.createdOn': '作成 {date}',
-  'appPasswords.revoke': '失効',
-  'appPasswords.revoked': 'アプリパスワードを失効させた',
-  'appPasswords.confirmRevoke': '「{name}」を失効させますか？',
-  'appPasswords.confirmRevokeHint': 'このパスワードを使っている端末は同期されなくなります。',
-  'appPasswords.createdTitle': 'アプリパスワードを作成しました',
+    '同期できる端末は {max} 台までです。新しく追加するには、使っていない端末の同期を止めてください。',
+  'appPasswords.loadFailed': '同期している端末を読み込めませんでした',
+  'appPasswords.devicesTitle': '同期している端末',
+  'appPasswords.devicesCount': '{count} / {max} 台',
+  'appPasswords.empty': 'まだ端末はありません。上の「設定を始める」から追加できます。',
+  'appPasswords.neverUsed': 'まだ接続されていません',
+  'appPasswords.lastUsed': '最終同期 {date}',
+  'appPasswords.createdOn': '追加 {date}',
+  'appPasswords.revoke': '同期を止める',
+  'appPasswords.revoked': '同期を止めました',
+  'appPasswords.confirmRevoke': '「{name}」の同期を止めますか？',
+  'appPasswords.confirmRevokeHint':
+    'この端末は Nodate Time に接続できなくなります。端末に残っている予定は自動では消えないので、端末の設定からアカウントも削除してください。',
+  'appPasswords.createdTitle': 'カレンダーアプリに入力する情報',
   'appPasswords.shownOnce':
-    'このカードを閉じると、パスワードは再表示できません。今のうちにコピーしてください。',
+    'パスワードはこの画面を閉じると二度と表示できません。カレンダーアプリに入力し終えてから閉じてください。',
+  'appPasswords.whatIsAppPassword':
+    'このパスワードは、カレンダーアプリ専用です。Nodate Time にログインするときのパスワードとは別のもので、端末ごとに作ります。',
   'appPasswords.server': 'サーバ',
   'appPasswords.username': 'ユーザー名',
   'appPasswords.password': 'パスワード',
   'appPasswords.copyPassword': 'パスワードをコピー',
-  'appPasswords.stepsTitle': '接続の手順',
-  'appPasswords.stepsServer': 'サーバ欄には {server} を入力します。',
-  'appPasswords.stepsIphone': 'iPhone',
+  'appPasswords.stepsTitle': '手動で設定するときの手順',
+  'appPasswords.stepsServer': '「サーバ」には {server} を入力します。',
+  'appPasswords.stepsIphone': 'iPhone・iPad',
   'appPasswords.stepsIphonePath':
-    '設定 → カレンダー → アカウント → アカウントを追加 → その他 → CalDAV アカウントを追加',
+    '「設定」→「カレンダー」→「アカウント」→「アカウントを追加」→「その他」→「CalDAV アカウントを追加」',
   'appPasswords.stepsMac': 'Mac',
   'appPasswords.stepsMacPath':
-    'カレンダー → 設定 → アカウント → + → その他の CalDAV アカウント → 手動',
+    '「カレンダー」アプリ →「設定」→「アカウント」→「+」→「その他の CalDAV アカウント」→「手動」',
+  'appPasswords.stopTitle': '同期をやめたいとき',
+  'appPasswords.stopStepRevoke':
+    '「同期している端末」で、その端末の「同期を止める」を押します。これで端末は Nodate Time に接続できなくなります。',
+  'appPasswords.stopStepIphone':
+    'iPhone・iPad では「設定」→「一般」→「VPN とデバイス管理」で Nodate Time のプロファイルを削除します。手動で設定したときは「設定」→「カレンダー」→「アカウント」から削除します。',
+  'appPasswords.stopStepMac':
+    'Mac では「システム設定」の検索欄に「プロファイル」と入力して Nodate Time のプロファイルを削除します。手動で設定したときは「インターネットアカウント」から削除します。',
+  'appPasswords.stopNotePassword':
+    'Nodate Time のパスワードを変えたりログアウトしたりしても、同期は止まりません。端末をなくしたときは、まずここで「同期を止める」を押してください。',
+  'appPasswords.stopNoteMember':
+    'カレンダーのメンバーから外れると、そのカレンダーは次の同期で端末からも消えます。',
   'appPasswords.limitsTitle': '同期されるもの・されないもの',
   'appPasswords.limitsHidden':
     'ラベル・チェックリスト・添付・参加者・コメントは、カレンダーアプリには表示されません。',
   'appPasswords.limitsViewer': '閲覧のみのカレンダーは、カレンダーアプリからも編集できません。',
-  'appPasswords.limitsOthers': '他の人の予定は編集できない場合があります。',
-  'appPasswords.limitsMove': 'カレンダーアプリで予定をカレンダー間で移すと、上の情報は失われます。',
+  'appPasswords.limitsOthers': 'ほかの人の予定は、カレンダーアプリから編集できない場合があります。',
+  'appPasswords.limitsMove':
+    'カレンダーアプリで予定を別のカレンダーへ移すと、上の情報は失われます。',
+  'appPasswords.limitsTentative':
+    '空き状況の「仮」と「不在」は、カレンダーアプリでは「予定あり」と表示されます。',
   'appPasswords.limitsRepeat':
     '毎月 29〜31 日の繰り返しなど、一部の繰り返しはカレンダーアプリから保存できません。',
   'settings.security': 'セキュリティ',
@@ -1004,7 +1031,8 @@ export const ja = {
   'apiError.ADMIN.ALREADY_ADMIN': 'このユーザーは既にインスタンス管理者です',
   'apiError.ADMIN.USER_NOT_FOUND': 'ユーザーが見つかりません',
   'apiError.APP_PASSWORD.NOT_FOUND': 'アプリパスワードが見つかりません',
-  'apiError.APP_PASSWORD.LIMIT_REACHED': 'アプリパスワードの上限に達しています',
+  'apiError.APP_PASSWORD.LIMIT_REACHED':
+    '同期できる端末の数が上限に達しています。使っていない端末の同期を止めてください',
   'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':
     'アプリパスワードを作成する前にメールアドレスを確認してください',
   'apiError.APP_PASSWORD.MFA_ENABLED':

@@ -373,61 +373,88 @@ export const en: Record<TranslationKey, string> = {
   'sessions.revoked': 'Signed out',
   'settings.appPasswords': 'Calendar app sync',
   'appPasswords.description':
-    'Sync two ways with the Calendar app on iPhone, Mac and other CalDAV apps. Create one app password for each device.',
-  'appPasswords.sessionsNote': 'App passwords are not signed out here. Revoke them separately.',
-  'appPasswords.sessionsLink': 'Manage app passwords',
+    'Show your Nodate Time events in the Calendar app on an iPhone or Mac. Events you add or change there show up in Nodate Time too.',
+  'appPasswords.sessionsNote':
+    'Signing out here does not stop calendar app sync. To stop it, use Calendar app sync.',
+  'appPasswords.sessionsLink': 'See synced devices',
   'appPasswords.calendarsLink': 'Sync with a calendar app',
+  'appPasswords.addTitle': 'Add a device',
   'appPasswords.nameLabel': 'Device name',
-  'appPasswords.namePlaceholder': 'iPhone',
-  'appPasswords.create': 'Show a password to set up manually',
-  'appPasswords.profileCreate': 'Set up with a profile',
-  'appPasswords.profileRecommended':
-    'On an iPhone or Mac, “Set up with a profile” is the easier way.',
-  'appPasswords.profileTitle': 'Profile ready',
-  'appPasswords.profileQrLabel': 'QR code that opens the setup profile',
+  'appPasswords.nameHint': 'Just a label so you can tell your devices apart later.',
+  'appPasswords.namePlaceholder': 'e.g. My iPhone',
+  'appPasswords.profileCreate': 'Start setup',
+  'appPasswords.manualLead': 'Using Android or another app?',
+  'appPasswords.create': 'Set it up manually',
+  'appPasswords.profileTitle': 'Add “{name}”',
+  'appPasswords.profileRemaining': '{time} left',
+  'appPasswords.profileQrLabel': 'QR code that sets up the device',
+  'appPasswords.profileStepScan':
+    'Scan this QR code with the camera on your iPhone or iPad and open it in Safari. To set up this Mac, choose Open on this device.',
+  'appPasswords.profileStepOpenHere': 'Tap Open on this device below.',
+  'appPasswords.profileStepInstall':
+    'On an iPhone or iPad, open Settings, tap Profile Downloaded near the top, then tap Install. On a Mac, follow the prompt in System Settings to install it.',
+  'appPasswords.profileStepDone': 'Open the Calendar app and your Nodate Time events are there.',
+  'appPasswords.profileWaiting': 'Waiting for the device to open it',
+  'appPasswords.profileOpened': 'Opened on the device. Finish installing it there',
+  'appPasswords.profileSynced': 'Connected. Sync has started',
+  'appPasswords.profileExpired': 'This link expired after 10 minutes.',
+  'appPasswords.profileRecreate': 'Make a new one',
   'appPasswords.profileOpen': 'Open on this device',
-  'appPasswords.profileExpires': 'This link works until {time}.',
-  'appPasswords.profileIphone':
-    'iPhone: scan the code with the camera (on the iPhone itself, tap Open on this device) → open in Safari → Settings → Downloaded Profile',
-  'appPasswords.profileMac': 'Mac: Open on this device → System Settings → Profiles',
   'appPasswords.profileWarning':
-    'This link is as sensitive as a password. Do not paste it into chat or email.',
-  'appPasswords.profileAndroid':
-    'On Android and other devices, use "Show a password to set up manually".',
-  'appPasswords.creating': 'Creating...',
+    'Treat this QR code and link like a password. Anyone you send it to by chat or email could connect to your calendars.',
+  'appPasswords.creating': 'Preparing...',
   'appPasswords.limitReached':
-    'You have reached the limit of {max} app passwords. Revoke one to create another.',
-  'appPasswords.loadFailed': 'Could not load app passwords',
-  'appPasswords.empty': 'No app passwords yet',
-  'appPasswords.neverUsed': 'Never used',
-  'appPasswords.lastUsed': 'Last used {date}',
-  'appPasswords.createdOn': 'Created {date}',
-  'appPasswords.revoke': 'Revoke',
-  'appPasswords.revoked': 'App password revoked',
-  'appPasswords.confirmRevoke': 'Revoke "{name}"?',
-  'appPasswords.confirmRevokeHint': 'The device using it stops syncing.',
-  'appPasswords.createdTitle': 'App password created',
+    'You can sync up to {max} devices. To add another, stop syncing one you no longer use.',
+  'appPasswords.loadFailed': 'Could not load your synced devices',
+  'appPasswords.devicesTitle': 'Synced devices',
+  'appPasswords.devicesCount': '{count} of {max}',
+  'appPasswords.empty': 'No devices yet. Use Start setup above to add one.',
+  'appPasswords.neverUsed': 'Not connected yet',
+  'appPasswords.lastUsed': 'Last synced {date}',
+  'appPasswords.createdOn': 'Added {date}',
+  'appPasswords.revoke': 'Stop syncing',
+  'appPasswords.revoked': 'Stopped syncing',
+  'appPasswords.confirmRevoke': 'Stop syncing “{name}”?',
+  'appPasswords.confirmRevokeHint':
+    'The device will no longer connect to Nodate Time. Events already on it are not removed, so delete the account in the device’s settings too.',
+  'appPasswords.createdTitle': 'What to enter in the calendar app',
   'appPasswords.shownOnce':
-    'This password cannot be shown again after you close this card. Copy it now.',
+    'The password cannot be shown again once you close this. Close it only after entering it in the calendar app.',
+  'appPasswords.whatIsAppPassword':
+    'This password is only for calendar apps. It is separate from the password you sign in to Nodate Time with, and each device gets its own.',
   'appPasswords.server': 'Server',
-  'appPasswords.username': 'Username',
+  'appPasswords.username': 'User name',
   'appPasswords.password': 'Password',
   'appPasswords.copyPassword': 'Copy password',
-  'appPasswords.stepsTitle': 'How to connect',
+  'appPasswords.stepsTitle': 'Steps for manual setup',
   'appPasswords.stepsServer': 'Enter {server} as the server.',
-  'appPasswords.stepsIphone': 'iPhone',
+  'appPasswords.stepsIphone': 'iPhone and iPad',
   'appPasswords.stepsIphonePath':
     'Settings → Calendar → Accounts → Add Account → Other → Add CalDAV Account',
   'appPasswords.stepsMac': 'Mac',
-  'appPasswords.stepsMacPath': 'Calendar → Settings → Accounts → + → Other CalDAV Account → Manual',
+  'appPasswords.stepsMacPath':
+    'Calendar app → Settings → Accounts → + → Other CalDAV Account → Manual',
+  'appPasswords.stopTitle': 'To stop syncing',
+  'appPasswords.stopStepRevoke':
+    'Under Synced devices, choose Stop syncing for that device. It can no longer connect to Nodate Time.',
+  'appPasswords.stopStepIphone':
+    'On an iPhone or iPad, remove the Nodate Time profile in Settings → General → VPN & Device Management. If you set it up manually, remove it in Settings → Calendar → Accounts.',
+  'appPasswords.stopStepMac':
+    'On a Mac, type “Profiles” into the search field in System Settings and remove the Nodate Time profile. If you set it up manually, remove it in Internet Accounts.',
+  'appPasswords.stopNotePassword':
+    'Changing your Nodate Time password or signing out does not stop sync. If you lose a device, choose Stop syncing here first.',
+  'appPasswords.stopNoteMember':
+    'When you leave a calendar or are removed from it, it disappears from your devices at their next sync.',
   'appPasswords.limitsTitle': 'What syncs and what does not',
   'appPasswords.limitsHidden':
-    'Labels, checklists, attachments, participants and comments do not appear in the Calendar app.',
+    'Labels, checklists, attachments, participants and comments do not appear in calendar apps.',
   'appPasswords.limitsViewer':
-    'A calendar you can only view cannot be edited from the Calendar app either.',
-  'appPasswords.limitsOthers': "You may not be able to edit other people's plans.",
+    'Calendars you can only view cannot be edited from a calendar app either.',
+  'appPasswords.limitsOthers':
+    'You may not be able to edit other people’s events from a calendar app.',
   'appPasswords.limitsMove':
-    'Moving a plan between calendars in the Calendar app loses the information above.',
+    'Moving an event to another calendar in a calendar app loses the information above.',
+  'appPasswords.limitsTentative': 'Tentative and Out of office both show as Busy in calendar apps.',
   'appPasswords.limitsRepeat':
     'Some repeats, such as the 29th to 31st of every month, cannot be saved from the Calendar app.',
   'settings.security': 'Security',
@@ -999,7 +1026,8 @@ export const en: Record<TranslationKey, string> = {
   'apiError.ADMIN.ALREADY_ADMIN': 'This user is already an instance administrator',
   'apiError.ADMIN.USER_NOT_FOUND': 'User not found',
   'apiError.APP_PASSWORD.NOT_FOUND': 'App password not found',
-  'apiError.APP_PASSWORD.LIMIT_REACHED': 'You have reached the app password limit',
+  'apiError.APP_PASSWORD.LIMIT_REACHED':
+    'You have reached the device limit. Stop syncing a device you no longer use',
   'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':
     'Confirm your email address before creating an app password',
   'apiError.APP_PASSWORD.MFA_ENABLED':
