@@ -395,17 +395,34 @@ export const ja = {
   'appPasswords.nameLabel': '端末の名前',
   'appPasswords.nameHint': 'あとで見分けるための名前です。',
   'appPasswords.namePlaceholder': '例: 自分の iPhone',
-  'appPasswords.profileCreate': '設定を始める',
-  'appPasswords.manualLead': 'Android やその他のアプリを使うときは',
-  'appPasswords.create': '手動で設定する',
+  'appPasswords.targetLabel': '追加する端末',
+  'appPasswords.targetHere': 'この {device}',
+  'appPasswords.targetQr': 'iPhone・iPad',
+  'appPasswords.targetMac': 'Mac',
+  'appPasswords.targetManual': 'Android・その他',
+  'appPasswords.hintHere': 'この {device} に設定を入れて、標準の「カレンダー」アプリと同期します。',
+  'appPasswords.hintQr':
+    'ここに表示する QR コードを、iPhone・iPad のカメラで読み取って設定します。',
+  'appPasswords.hintMac':
+    'Mac に入れるときは、Mac のブラウザでこの設定画面を開いてください。ボタンひとつで設定できます。',
+  'appPasswords.hintManual':
+    'カレンダーアプリ（Android なら DAVx⁵ など）に、サーバ・ユーザー名・パスワードを入力して設定します。',
+  'appPasswords.actionHere': 'この {device} に追加',
+  'appPasswords.actionQr': 'QR コードを表示',
+  'appPasswords.actionManual': 'パスワードを表示',
+  'appPasswords.profileStepScan':
+    'iPhone・iPad のカメラでこの QR コードを読み取り、表示されたリンクを開きます。「プロファイルをダウンロードしますか？」と出たら「許可」を押します。',
+  'appPasswords.profileStepOpenHere':
+    '下の「この端末で開く」を押します。「プロファイルをダウンロードしますか？」と出たら「許可」を押します。',
+  'appPasswords.profileStepOpenMac':
+    '下の「この端末で開く」を押します。ファイルがダウンロードされるだけのときは、ダウンロードしたファイルを開きます。',
+  'appPasswords.profileStepInstallIos':
+    '「設定」アプリを開き、上のほうに出る「ダウンロード済みのプロファイル」を押して「インストール」を押します。',
+  'appPasswords.profileStepInstallMac':
+    '「システム設定」の検索欄に「プロファイル」と入力して開き、ダウンロードしたプロファイルの「インストール」を押します。',
   'appPasswords.profileTitle': '「{name}」を追加する',
   'appPasswords.profileRemaining': '残り {time}',
   'appPasswords.profileQrLabel': '端末に設定を入れる QR コード',
-  'appPasswords.profileStepScan':
-    'iPhone・iPad のカメラでこの QR コードを読み取り、Safari で開きます。この Mac に入れるときは「この端末で開く」を押します。',
-  'appPasswords.profileStepOpenHere': '下の「この端末で開く」を押します。',
-  'appPasswords.profileStepInstall':
-    'iPhone・iPad は「設定」アプリの上のほうに出る「ダウンロード済みのプロファイル」を開き、「インストール」を押します。Mac は「システム設定」に出る案内に沿ってインストールします。',
   'appPasswords.profileStepDone': '「カレンダー」アプリを開くと、Nodate Time の予定が表示されます。',
   'appPasswords.profileWaiting': '端末で開かれるのを待っています',
   'appPasswords.profileOpened': '端末で開かれました。インストールを続けてください',
@@ -421,7 +438,7 @@ export const ja = {
   'appPasswords.loadFailed': '同期している端末を読み込めませんでした',
   'appPasswords.devicesTitle': '同期している端末',
   'appPasswords.devicesCount': '{count} / {max} 台',
-  'appPasswords.empty': 'まだ端末はありません。上の「設定を始める」から追加できます。',
+  'appPasswords.empty': 'まだ端末はありません。上の「端末を追加する」から追加できます。',
   'appPasswords.neverUsed': 'まだ接続されていません',
   'appPasswords.lastUsed': '最終同期 {date}',
   'appPasswords.createdOn': '追加 {date}',

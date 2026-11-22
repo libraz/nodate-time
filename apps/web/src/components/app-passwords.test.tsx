@@ -71,8 +71,21 @@ async function renderLoaded(items: AppPassword[] = []) {
 }
 
 function createNamed(name: string) {
+  fireEvent.click(screen.getByRole('radio', { name: 'appPasswords.targetManual' }));
   fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: name } });
-  fireEvent.click(screen.getByRole('button', { name: 'appPasswords.create' }));
+  fireEvent.click(screen.getByRole('button', { name: 'appPasswords.actionManual' }));
+}
+
+/** The submit button of the default target on a browser that is no Apple device. */
+const showQr = () => screen.getByRole('button', { name: 'appPasswords.actionQr' });
+
+/** Pretends the browser runs on the device the user agent names. */
+function onDevice(userAgent: string, maxTouchPoints = 0) {
+  vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+  Object.defineProperty(window.navigator, 'maxTouchPoints', {
+    value: maxTouchPoints,
+    configurable: true,
+  });
 }
 
 beforeEach(() => {
@@ -84,7 +97,11 @@ beforeEach(() => {
   vi.mocked(toast.success).mockReset();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  Object.defineProperty(window.navigator, 'maxTouchPoints', { value: 0, configurable: true });
+});
 
 describe('AppPasswords list', () => {
   it('shows name, last sync and when each device was added, without the secret prefix', async () => {
@@ -107,7 +124,7 @@ describe('AppPasswords list', () => {
     render(<AppPasswords />);
     expect(await screen.findByText('appPasswords.loadFailed')).toBeInTheDocument();
     expect(screen.queryByText('appPasswords.empty')).toBeNull();
-    expect(screen.getByRole('button', { name: 'appPasswords.create' })).toBeDisabled();
+    expect(showQr()).toBeDisabled();
 
     listing([row(1)]);
     fireEvent.click(screen.getByText('error.retry'));
@@ -158,16 +175,16 @@ describe('AppPasswords create', () => {
 
   it('does not submit an empty name', async () => {
     await renderLoaded([]);
-    expect(screen.getByRole('button', { name: 'appPasswords.create' })).toBeDisabled();
+    expect(showQr()).toBeEnabled();
     fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: '  ' } });
-    expect(screen.getByRole('button', { name: 'appPasswords.create' })).toBeDisabled();
+    expect(showQr()).toBeDisabled();
   });
 
   it('disables create at the cap and says why', async () => {
     await renderLoaded(Array.from({ length: 20 }, (_, i) => row(i + 1)));
     await screen.findByText('Device 20');
     fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: 'x' } });
-    expect(screen.getByRole('button', { name: 'appPasswords.create' })).toBeDisabled();
+    expect(showQr()).toBeDisabled();
     expect(screen.getByText('appPasswords.limitReached:20')).toBeInTheDocument();
   });
 
@@ -175,7 +192,7 @@ describe('AppPasswords create', () => {
     await renderLoaded(Array.from({ length: 19 }, (_, i) => row(i + 1)));
     await screen.findByText('Device 19');
     fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: 'x' } });
-    expect(screen.getByRole('button', { name: 'appPasswords.create' })).toBeEnabled();
+    expect(showQr()).toBeEnabled();
     expect(screen.queryByText(/appPasswords\.limitReached/)).toBeNull();
   });
 
@@ -200,20 +217,21 @@ describe('AppPasswords profile', () => {
 
   function profileNamed(name: string) {
     fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), { target: { value: name } });
-    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+    fireEvent.click(showQr());
   }
 
-  it('issues a link and shows a QR code, the open link and the warning', async () => {
+  it('shows a QR code for an iPhone set up from a computer, with no link to open here', async () => {
     await renderLoaded([]);
     apiPost.mockResolvedValue({ data: link } as never);
     profileNamed('  iPhone ');
 
-    const open = await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
-    expect(open).toHaveAttribute('href', link.url);
+    const qr = await screen.findByRole('img', { name: 'appPasswords.profileQrLabel' });
     expect(apiPost).toHaveBeenCalledWith('/user/app-passwords/profile-links', {
       body: { name: 'iPhone' },
     });
-    const qr = screen.getByRole('img', { name: 'appPasswords.profileQrLabel' });
+    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+    expect(screen.getByText('appPasswords.profileStepScan')).toBeInTheDocument();
+    expect(screen.getByText('appPasswords.profileStepInstallIos')).toBeInTheDocument();
     expect(qr.tagName.toLowerCase()).toBe('svg');
     expect(qr.querySelectorAll('rect').length).toBeGreaterThan(100);
     expect(screen.getByText('appPasswords.profileWarning')).toBeInTheDocument();
@@ -232,7 +250,7 @@ describe('AppPasswords profile', () => {
       profileNamed('iPhone');
 
       expect(await screen.findByRole('alert')).toHaveTextContent(`apiError.${code}`);
-      expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+      expect(screen.queryByText('appPasswords.profileWaiting')).toBeNull();
     },
   );
 
@@ -240,7 +258,7 @@ describe('AppPasswords profile', () => {
     await renderLoaded([]);
     apiPost.mockResolvedValue({ data: link } as never);
     profileNamed('iPhone');
-    await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
+    await screen.findByText('appPasswords.profileWaiting');
     expect(apiGet).toHaveBeenCalledTimes(1);
 
     listing([row(1, { name: 'iPhone' })]);
@@ -248,7 +266,7 @@ describe('AppPasswords profile', () => {
 
     expect(await screen.findByText('iPhone')).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+    expect(screen.queryByText('appPasswords.profileWaiting')).toBeNull();
   });
 });
 
@@ -264,8 +282,7 @@ describe('AppPasswords profile progress', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await renderLoaded([row(1, { name: 'iPhone' })]);
     apiPost.mockResolvedValue({ data: link } as never);
-    fireEvent.click(screen.getByRole('button', { name: 'iPhone' }));
-    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+    fireEvent.click(showQr());
     await screen.findByText('appPasswords.profileWaiting');
 
     // An older row with the same name is not the device this link set up.
@@ -279,7 +296,7 @@ describe('AppPasswords profile progress', () => {
     ]);
     await vi.advanceTimersByTimeAsync(4000);
     expect(await screen.findByText('appPasswords.profileSynced')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+    expect(screen.queryByText('appPasswords.profileWarning')).toBeNull();
   });
 
   it('offers a new link once this one has expired unopened', async () => {
@@ -290,19 +307,100 @@ describe('AppPasswords profile progress', () => {
     fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), {
       target: { value: 'iPad' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileCreate' }));
+    fireEvent.click(showQr());
 
     expect(await screen.findByText('appPasswords.profileExpired')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+    expect(screen.queryByText('appPasswords.profileWaiting')).toBeNull();
 
     apiPost.mockResolvedValue({ data: link } as never);
     fireEvent.click(screen.getByRole('button', { name: 'appPasswords.profileRecreate' }));
-    expect(
-      await screen.findByRole('link', { name: 'appPasswords.profileOpen' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('appPasswords.profileWaiting')).toBeInTheDocument();
     expect(apiPost).toHaveBeenLastCalledWith('/user/app-passwords/profile-links', {
       body: { name: 'iPad' },
     });
+  });
+});
+
+describe('AppPasswords on each device', () => {
+  const link = {
+    url: 'https://time.example.com/api/auth/app-password-profiles/abc.def',
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  };
+  const targets = () => screen.getAllByRole('radio').map((r) => r.textContent);
+
+  it('sets up an iPhone on the iPhone itself, with no QR code', async () => {
+    onDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15');
+    await renderLoaded([]);
+    expect(targets()).toEqual(['appPasswords.targetHere:iPhone', 'appPasswords.targetManual']);
+    expect(screen.getByLabelText('appPasswords.nameLabel')).toHaveValue('iPhone');
+
+    apiPost.mockResolvedValue({ data: link } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.actionHere:iPhone' }));
+    const open = await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
+    expect(open).toHaveAttribute('href', link.url);
+    expect(screen.queryByRole('img', { name: 'appPasswords.profileQrLabel' })).toBeNull();
+    expect(screen.getByText('appPasswords.profileStepOpenHere')).toBeInTheDocument();
+    expect(screen.getByText('appPasswords.profileStepInstallIos')).toBeInTheDocument();
+  });
+
+  it('tells an iPad from the Mac it claims to be', async () => {
+    onDevice('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', 5);
+    await renderLoaded([]);
+    expect(targets()[0]).toBe('appPasswords.targetHere:iPad');
+  });
+
+  it('sets up this Mac by link, and an iPhone from it by QR code', async () => {
+    onDevice('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15');
+    await renderLoaded([]);
+    expect(targets()).toEqual([
+      'appPasswords.targetHere:Mac',
+      'appPasswords.targetQr',
+      'appPasswords.targetManual',
+    ]);
+    apiPost.mockResolvedValue({ data: link } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.actionHere:Mac' }));
+    await screen.findByRole('link', { name: 'appPasswords.profileOpen' });
+    expect(screen.getByText('appPasswords.profileStepOpenMac')).toBeInTheDocument();
+    expect(screen.getByText('appPasswords.profileStepInstallMac')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'appPasswords.profileQrLabel' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'appPasswords.targetQr' }));
+    expect(screen.getByLabelText('appPasswords.nameLabel')).toHaveValue('iPhone');
+    fireEvent.click(showQr());
+    expect(
+      await screen.findByRole('img', { name: 'appPasswords.profileQrLabel' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'appPasswords.profileOpen' })).toBeNull();
+  });
+
+  it('defaults to a manual password on Android', async () => {
+    onDevice('Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Mobile');
+    await renderLoaded([]);
+    expect(targets()).toEqual(['appPasswords.targetHere:Android', 'appPasswords.targetQr']);
+    expect(screen.getByLabelText('appPasswords.nameLabel')).toHaveValue('Android');
+
+    apiPost.mockResolvedValue({ data: { ...created, name: 'Android' } } as never);
+    fireEvent.click(screen.getByRole('button', { name: 'appPasswords.actionManual' }));
+    expect(await screen.findByText('appPasswords.createdTitle')).toBeInTheDocument();
+    expect(apiPost).toHaveBeenCalledWith('/user/app-passwords', { body: { name: 'Android' } });
+  });
+
+  it('sends a Mac to the Mac instead of making a link it cannot use', async () => {
+    await renderLoaded([]);
+    fireEvent.click(screen.getByRole('radio', { name: 'appPasswords.targetMac' }));
+    expect(screen.getByText('appPasswords.hintMac')).toBeInTheDocument();
+    expect(screen.queryByLabelText('appPasswords.nameLabel')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'appPasswords.actionQr' })).toBeNull();
+  });
+
+  it('keeps a typed name when the target changes', async () => {
+    await renderLoaded([]);
+    fireEvent.change(screen.getByLabelText('appPasswords.nameLabel'), {
+      target: { value: 'Work phone' },
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'appPasswords.targetManual' }));
+    expect(screen.getByLabelText('appPasswords.nameLabel')).toHaveValue('Work phone');
   });
 });
 

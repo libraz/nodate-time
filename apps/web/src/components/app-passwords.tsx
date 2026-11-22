@@ -20,8 +20,56 @@ type ProfileLink = components['schemas']['ProfileLinkResponse'];
 /** How many live app passwords one account may hold. */
 const APP_PASSWORD_LIMIT = 20;
 
-/** Names offered with one tap, the devices a profile can set up. */
-const NAME_PRESETS = ['iPhone', 'iPad', 'Mac'] as const;
+/** The kind of device this browser runs on, as far as setting up sync goes. */
+type Device = 'iphone' | 'ipad' | 'mac' | 'android' | 'other';
+
+const DEVICE_NAMES: Record<Device, string> = {
+  iphone: 'iPhone',
+  ipad: 'iPad',
+  mac: 'Mac',
+  android: 'Android',
+  other: '',
+};
+
+/** The device this browser runs on. iPadOS reports a Mac, told apart by touch. */
+function detectDevice(): Device {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPod/.test(ua)) return 'iphone';
+  if (/iPad/.test(ua)) return 'ipad';
+  if (/Android/.test(ua)) return 'android';
+  if (/Macintosh/.test(ua)) return navigator.maxTouchPoints > 1 ? 'ipad' : 'mac';
+  return 'other';
+}
+
+/**
+ * Where the new account goes: this Apple device by its profile, an iPhone or
+ * iPad by a QR code shown here, a Mac from another computer (which has to
+ * open this page on the Mac), or any app by a password typed in by hand.
+ */
+type Target = 'here' | 'qr' | 'mac' | 'manual';
+
+/** The choices offered on each device, the first being the default. */
+const TARGETS: Record<Device, readonly [Target, ...Target[]]> = {
+  mac: ['here', 'qr', 'manual'],
+  iphone: ['here', 'manual'],
+  ipad: ['here', 'manual'],
+  android: ['manual', 'qr'],
+  other: ['qr', 'mac', 'manual'],
+};
+
+/** The name a target suggests for the new device. */
+function suggestedName(target: Target, device: Device): string {
+  switch (target) {
+    case 'here':
+      return DEVICE_NAMES[device];
+    case 'qr':
+      return 'iPhone';
+    case 'mac':
+      return 'Mac';
+    case 'manual':
+      return device === 'android' ? 'Android' : '';
+  }
+}
 
 /** How often the list is re-read while a profile link waits to be opened. */
 const PROFILE_POLL_MS = 4000;
@@ -45,7 +93,12 @@ export function AppPasswords() {
 
   const [items, setItems] = useState<AppPassword[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [name, setName] = useState('');
+  const [device] = useState(detectDevice);
+  const targets = TARGETS[device];
+  const [target, setTarget] = useState<Target>(targets[0]);
+  const [name, setName] = useState(() => suggestedName(targets[0], device));
+  // A name the person typed is theirs; switching the target no longer replaces it.
+  const [nameTouched, setNameTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAppPassword | null>(null);
@@ -76,7 +129,18 @@ export function AppPasswords() {
   const atLimit = (items?.length ?? 0) >= APP_PASSWORD_LIMIT;
   const trimmed = name.trim();
   const busy = creating || profiling;
-  const canStart = Boolean(trimmed) && !busy && !atLimit && items !== null;
+  const canStart = Boolean(trimmed) && !busy && !atLimit && items !== null && target !== 'mac';
+
+  const chooseTarget = (next: Target) => {
+    setTarget(next);
+    if (!nameTouched) setName(suggestedName(next, device));
+  };
+
+  const resetForm = () => {
+    setTarget(targets[0]);
+    setName(suggestedName(targets[0], device));
+    setNameTouched(false);
+  };
 
   const create = async () => {
     setCreating(true);
@@ -86,7 +150,7 @@ export function AppPasswords() {
       if (!data) return;
       setCreated(data);
       setServerHost(data.serverHost);
-      setName('');
+      resetForm();
       setItems((cur) => [
         { id: data.id, name: data.name, prefix: data.prefix, createdAt: data.createdAt },
         ...(cur ?? []),
@@ -98,7 +162,7 @@ export function AppPasswords() {
     }
   };
 
-  const createProfile = async (deviceName: string) => {
+  const createProfile = async (deviceName: string, onThisDevice: boolean) => {
     setProfiling(true);
     setCreateError(null);
     try {
@@ -106,8 +170,13 @@ export function AppPasswords() {
         body: { name: deviceName },
       });
       if (!data) return;
-      setProfile({ ...data, name: deviceName, known: new Set((items ?? []).map((p) => p.id)) });
-      setName('');
+      setProfile({
+        ...data,
+        name: deviceName,
+        known: new Set((items ?? []).map((p) => p.id)),
+        installOn: onThisDevice && device !== 'other' && device !== 'android' ? device : null,
+      });
+      resetForm();
     } catch (e) {
       setCreateError(errorMessage(e));
     } finally {
@@ -163,7 +232,7 @@ export function AppPasswords() {
           progress={progress}
           poll={() => load()}
           recreating={profiling}
-          onRecreate={() => void createProfile(profile.name)}
+          onRecreate={() => void createProfile(profile.name, profile.installOn !== null)}
           onClose={closeProfile}
         />
       ) : created ? (
@@ -177,7 +246,9 @@ export function AppPasswords() {
           aria-labelledby="app-password-add-title"
           onSubmit={(e) => {
             e.preventDefault();
-            if (canStart) void createProfile(trimmed);
+            if (!canStart) return;
+            if (target === 'manual') void create();
+            else void createProfile(trimmed, target === 'here');
           }}
         >
           <h3
@@ -186,50 +257,69 @@ export function AppPasswords() {
           >
             {t('appPasswords.addTitle')}
           </h3>
-          <label
-            htmlFor="app-password-name"
-            className="mt-3 mb-1.5 block text-body font-medium text-[var(--color-text-primary)]"
+          <div
+            role="radiogroup"
+            aria-label={t('appPasswords.targetLabel')}
+            className="mt-3 flex w-full gap-1 rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)] p-1"
           >
-            {t('appPasswords.nameLabel')}
-          </label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              id="app-password-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('appPasswords.namePlaceholder')}
-              aria-describedby="app-password-name-hint"
-              maxLength={100}
-              className="input-modern w-full sm:max-w-[280px]"
-            />
-            <button
-              type="submit"
-              disabled={!canStart}
-              className="btn-primary px-5 text-default disabled:opacity-50"
-            >
-              {profiling ? t('appPasswords.creating') : t('appPasswords.profileCreate')}
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {NAME_PRESETS.map((preset) => (
+            {targets.map((option) => (
+              // biome-ignore lint/a11y/useSemanticElements: a segmented control, styled as one row of buttons
               <button
-                key={preset}
+                key={option}
                 type="button"
-                onClick={() => setName(preset)}
-                aria-pressed={trimmed === preset}
-                className="rounded-full border border-[var(--color-border)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)] aria-pressed:border-[var(--color-accent)] aria-pressed:text-[var(--color-accent)]"
+                role="radio"
+                aria-checked={target === option}
+                onClick={() => chooseTarget(option)}
+                className="min-w-0 flex-1 basis-0 truncate rounded-[calc(var(--radius-sm)-4px)] px-2 py-1.5 text-footnote font-medium text-[var(--color-text-secondary)] transition-colors aria-checked:bg-[var(--color-surface)] aria-checked:text-[var(--color-text-primary)] aria-checked:shadow-sm"
               >
-                {preset}
+                {targetLabel(t, option, device)}
               </button>
             ))}
-            <span
-              id="app-password-name-hint"
-              className="ml-1 text-footnote text-[var(--color-text-tertiary)]"
-            >
-              {t('appPasswords.nameHint')}
-            </span>
           </div>
+          <p className="mt-2 text-footnote text-[var(--color-text-secondary)]">
+            {targetHint(t, target, device)}
+          </p>
+
+          {target !== 'mac' && (
+            <>
+              <label
+                htmlFor="app-password-name"
+                className="mt-4 mb-1.5 block text-body font-medium text-[var(--color-text-primary)]"
+              >
+                {t('appPasswords.nameLabel')}
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                <div className="min-w-0 sm:w-[280px]">
+                  <input
+                    id="app-password-name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      setNameTouched(true);
+                    }}
+                    placeholder={t('appPasswords.namePlaceholder')}
+                    aria-describedby="app-password-name-hint"
+                    maxLength={100}
+                    className="input-modern w-full"
+                  />
+                  <p
+                    id="app-password-name-hint"
+                    className="mt-1.5 text-footnote text-[var(--color-text-tertiary)]"
+                  >
+                    {t('appPasswords.nameHint')}
+                  </p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={!canStart}
+                  className="btn-primary px-5 text-default disabled:opacity-50"
+                >
+                  {busy ? t('appPasswords.creating') : actionLabel(t, target, device)}
+                </button>
+              </div>
+            </>
+          )}
           {atLimit && (
             <p className="mt-2 text-footnote text-[var(--color-text-secondary)]">
               {t('appPasswords.limitReached', { max: String(APP_PASSWORD_LIMIT) })}
@@ -240,17 +330,6 @@ export function AppPasswords() {
               {createError}
             </p>
           )}
-          <p className="mt-4 text-footnote text-[var(--color-text-secondary)]">
-            {t('appPasswords.manualLead')}{' '}
-            <button
-              type="button"
-              onClick={() => void create()}
-              disabled={!canStart}
-              className="font-medium text-[var(--color-accent)] underline underline-offset-2 disabled:no-underline disabled:opacity-50"
-            >
-              {creating ? t('appPasswords.creating') : t('appPasswords.create')}
-            </button>
-          </p>
         </form>
       )}
 
@@ -364,6 +443,50 @@ export function AppPasswords() {
 interface PendingProfile extends ProfileLink {
   name: string;
   known: Set<string>;
+  /** The device this browser is, when the profile is for it; null shows a QR code. */
+  installOn: 'iphone' | 'ipad' | 'mac' | null;
+}
+
+type T = ReturnType<typeof useT>;
+
+function targetLabel(t: T, target: Target, device: Device): string {
+  switch (target) {
+    case 'here':
+      return t('appPasswords.targetHere', { device: DEVICE_NAMES[device] });
+    case 'qr':
+      return t('appPasswords.targetQr');
+    case 'mac':
+      return t('appPasswords.targetMac');
+    case 'manual':
+      return device === 'android'
+        ? t('appPasswords.targetHere', { device: DEVICE_NAMES.android })
+        : t('appPasswords.targetManual');
+  }
+}
+
+function targetHint(t: T, target: Target, device: Device): string {
+  switch (target) {
+    case 'here':
+      return t('appPasswords.hintHere', { device: DEVICE_NAMES[device] });
+    case 'qr':
+      return t('appPasswords.hintQr');
+    case 'mac':
+      return t('appPasswords.hintMac');
+    case 'manual':
+      return t('appPasswords.hintManual');
+  }
+}
+
+function actionLabel(t: T, target: Target, device: Device): string {
+  switch (target) {
+    case 'here':
+      return t('appPasswords.actionHere', { device: DEVICE_NAMES[device] });
+    case 'qr':
+      return t('appPasswords.actionQr');
+    case 'mac':
+    case 'manual':
+      return t('appPasswords.actionManual');
+  }
 }
 
 type ProfileProgress = 'waiting' | 'opened' | 'synced';
@@ -455,8 +578,9 @@ function formatRemaining(ms: number): string {
 }
 
 /**
- * The link that installs the calendar account, as a QR code for another device
- * and a plain link for this one, with a status that follows the device.
+ * The link that installs the calendar account: a plain link when the profile
+ * is for this device, else a QR code for the iPhone or iPad to scan, with a
+ * status that follows the device.
  */
 function ProfileCard({
   profile,
@@ -490,6 +614,7 @@ function ProfileCard({
     return () => window.clearInterval(timer);
   }, [polling]);
 
+  const here = profile.installOn;
   const status = {
     waiting: t('appPasswords.profileWaiting'),
     opened: t('appPasswords.profileOpened'),
@@ -509,19 +634,30 @@ function ProfileCard({
         )}
       </div>
 
-      <div className="mt-4 sm:grid sm:grid-cols-[auto_1fr] sm:items-start sm:gap-6">
-        <div className="relative hidden sm:block">
-          <QrCode value={profile.url} label={t('appPasswords.profileQrLabel')} />
-          {expired && (
-            <div className="absolute inset-0 rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)]/90" />
-          )}
-        </div>
+      <div
+        className={here ? 'mt-4' : 'mt-4 sm:grid sm:grid-cols-[auto_1fr] sm:items-start sm:gap-6'}
+      >
+        {!here && (
+          <div className="relative mb-4 flex justify-center sm:mb-0 sm:block">
+            <QrCode value={profile.url} label={t('appPasswords.profileQrLabel')} />
+            {expired && (
+              <div className="absolute inset-0 rounded-[var(--radius-sm)] bg-[var(--color-surface-inset)]/90" />
+            )}
+          </div>
+        )}
         <ol className="space-y-3 text-body text-[var(--color-text-secondary)]">
           <Step n={1}>
-            <span className="hidden sm:inline">{t('appPasswords.profileStepScan')}</span>
-            <span className="sm:hidden">{t('appPasswords.profileStepOpenHere')}</span>
+            {here === 'mac'
+              ? t('appPasswords.profileStepOpenMac')
+              : here
+                ? t('appPasswords.profileStepOpenHere')
+                : t('appPasswords.profileStepScan')}
           </Step>
-          <Step n={2}>{t('appPasswords.profileStepInstall')}</Step>
+          <Step n={2}>
+            {here === 'mac'
+              ? t('appPasswords.profileStepInstallMac')
+              : t('appPasswords.profileStepInstallIos')}
+          </Step>
           <Step n={3}>{t('appPasswords.profileStepDone')}</Step>
         </ol>
       </div>
@@ -562,7 +698,8 @@ function ProfileCard({
             {recreating ? t('appPasswords.creating') : t('appPasswords.profileRecreate')}
           </button>
         ) : (
-          progress === 'waiting' && (
+          progress === 'waiting' &&
+          here && (
             <a
               href={profile.url}
               className="btn-primary inline-flex items-center justify-center px-5 text-default"

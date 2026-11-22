@@ -382,17 +382,33 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.nameLabel': 'Device name',
   'appPasswords.nameHint': 'Just a label so you can tell your devices apart later.',
   'appPasswords.namePlaceholder': 'e.g. My iPhone',
-  'appPasswords.profileCreate': 'Start setup',
-  'appPasswords.manualLead': 'Using Android or another app?',
-  'appPasswords.create': 'Set it up manually',
+  'appPasswords.targetLabel': 'Device to add',
+  'appPasswords.targetHere': 'This {device}',
+  'appPasswords.targetQr': 'iPhone or iPad',
+  'appPasswords.targetMac': 'Mac',
+  'appPasswords.targetManual': 'Android or other',
+  'appPasswords.hintHere': 'Sets up this {device} to sync with its built-in Calendar app.',
+  'appPasswords.hintQr': 'Scan the QR code shown here with the camera on your iPhone or iPad.',
+  'appPasswords.hintMac':
+    'To add a Mac, open this settings page in a browser on the Mac. It takes one click there.',
+  'appPasswords.hintManual':
+    'Enter the server, username and password into your calendar app (on Android, an app such as DAVx⁵).',
+  'appPasswords.actionHere': 'Add this {device}',
+  'appPasswords.actionQr': 'Show QR code',
+  'appPasswords.actionManual': 'Show password',
+  'appPasswords.profileStepScan':
+    'Scan this QR code with the camera on your iPhone or iPad and open the link. When asked whether to download a configuration profile, tap Allow.',
+  'appPasswords.profileStepOpenHere':
+    'Tap Open on this device below. When asked whether to download a configuration profile, tap Allow.',
+  'appPasswords.profileStepOpenMac':
+    'Click Open on this device below. If the file only downloads, open the downloaded file.',
+  'appPasswords.profileStepInstallIos':
+    'Open Settings, tap Profile Downloaded near the top, then tap Install.',
+  'appPasswords.profileStepInstallMac':
+    'In System Settings, search for "Profiles", open it, and install the downloaded profile.',
   'appPasswords.profileTitle': 'Add “{name}”',
   'appPasswords.profileRemaining': '{time} left',
   'appPasswords.profileQrLabel': 'QR code that sets up the device',
-  'appPasswords.profileStepScan':
-    'Scan this QR code with the camera on your iPhone or iPad and open it in Safari. To set up this Mac, choose Open on this device.',
-  'appPasswords.profileStepOpenHere': 'Tap Open on this device below.',
-  'appPasswords.profileStepInstall':
-    'On an iPhone or iPad, open Settings, tap Profile Downloaded near the top, then tap Install. On a Mac, follow the prompt in System Settings to install it.',
   'appPasswords.profileStepDone': 'Open the Calendar app and your Nodate Time events are there.',
   'appPasswords.profileWaiting': 'Waiting for the device to open it',
   'appPasswords.profileOpened': 'Opened on the device. Finish installing it there',
@@ -408,7 +424,7 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.loadFailed': 'Could not load your synced devices',
   'appPasswords.devicesTitle': 'Synced devices',
   'appPasswords.devicesCount': '{count} of {max}',
-  'appPasswords.empty': 'No devices yet. Use Start setup above to add one.',
+  'appPasswords.empty': 'No devices yet. Add one above.',
   'appPasswords.neverUsed': 'Not connected yet',
   'appPasswords.lastUsed': 'Last synced {date}',
   'appPasswords.createdOn': 'Added {date}',
