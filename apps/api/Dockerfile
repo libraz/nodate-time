@@ -7,6 +7,9 @@ WORKDIR /src
 
 # Manifests first so a source-only change reuses the download layer.
 COPY apps/api/go.mod apps/api/go.sum ./
+# go.mod replaces go-webdav with this in-tree fork, so it must be present
+# before the download.
+COPY apps/api/third_party ./third_party
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 

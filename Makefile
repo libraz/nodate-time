@@ -1,4 +1,4 @@
-.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen openapi web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up mail-up format lint
+.PHONY: dev dev-api db-up db-down db-schema db-apply db-seed db-seed-users sqlc verify-codegen openapi web api build-api create-user test-api test-e2e test-e2e-storage test-e2e-storage-absent test-conformance test-upgrade-path check-core check-core-pin check-core-current storage-up mail-up format lint test-third-party
 
 # What the API server needs to run locally. Only the server: a command that
 # talks to the database answers none of this, so none of it is passed to one.
@@ -106,6 +106,11 @@ create-user:
 test-api:
 	cd apps/api && go test ./... -count=1
 
+# The vendored go-webdav fork is its own module, so `go test ./...` in
+# apps/api does not reach it.
+test-third-party:
+	cd apps/api/third_party/go-webdav && go test ./... -count=1
+
 test-e2e:
 	cd apps/api && TC_TEST_INTEGRATION=1 go test ./tests/e2e/ -v -count=1
 
@@ -156,14 +161,17 @@ mail-up:
 	docker compose up -d mailpit
 
 # Formatting & linting
+# third_party keeps its upstream formatting so its diff stays reviewable upstream.
+GOFMT_FILES = $$(find apps/api -path apps/api/third_party -prune -o -name '*.go' -print)
+
 # format: apply fixes in place – gofmt for Go, Biome (format + safe lint fixes) for web.
 format:
-	gofmt -w apps/api
+	gofmt -w $(GOFMT_FILES)
 	bunx biome check --write .
 
 # lint: report-only (CI-friendly), no writes. Fails if anything is unformatted.
 lint:
-	@unformatted="$$(gofmt -l apps/api)"; \
+	@unformatted="$$(gofmt -l $(GOFMT_FILES))"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt: the following files need formatting (run 'make format'):"; \
 		echo "$$unformatted"; \

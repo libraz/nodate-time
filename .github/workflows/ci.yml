@@ -149,6 +149,11 @@ jobs:
         working-directory: apps/api
         run: go vet ./...
 
+      # The vendored go-webdav fork is a separate module that apps/api's
+      # ./... does not reach.
+      - name: go-webdav fork tests
+        run: make test-third-party
+
       - name: E2E tests
         working-directory: apps/api
         env:
