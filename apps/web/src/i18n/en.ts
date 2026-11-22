@@ -939,6 +939,12 @@ export const en: Record<TranslationKey, string> = {
   'apiError.UPLOAD.TOO_LARGE': 'The uploaded file is larger than the size reserved for it',
   'apiError.ADMIN.ALREADY_ADMIN': 'This user is already an instance administrator',
   'apiError.ADMIN.USER_NOT_FOUND': 'User not found',
+  'apiError.APP_PASSWORD.NOT_FOUND': 'App password not found',
+  'apiError.APP_PASSWORD.LIMIT_REACHED': 'You have reached the app password limit',
+  'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':
+    'Confirm your email address before creating an app password',
+  'apiError.APP_PASSWORD.MFA_ENABLED':
+    'App passwords are not available while two-factor authentication is enabled',
   'time.days_ago': '{n}d ago',
   'time.hours_ago': '{n}h ago',
   'time.minutes_ago': '{n}m ago',

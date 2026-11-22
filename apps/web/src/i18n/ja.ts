@@ -945,6 +945,12 @@ export const ja = {
   'apiError.UPLOAD.TOO_LARGE': 'アップロードされたファイルが予約した大きさを超えています',
   'apiError.ADMIN.ALREADY_ADMIN': 'このユーザーは既にインスタンス管理者です',
   'apiError.ADMIN.USER_NOT_FOUND': 'ユーザーが見つかりません',
+  'apiError.APP_PASSWORD.NOT_FOUND': 'アプリパスワードが見つかりません',
+  'apiError.APP_PASSWORD.LIMIT_REACHED': 'アプリパスワードの上限に達しています',
+  'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':
+    'アプリパスワードを作成する前にメールアドレスを確認してください',
+  'apiError.APP_PASSWORD.MFA_ENABLED':
+    '2 段階認証が有効なアカウントではアプリパスワードを作成できません',
   'time.days_ago': '{n}日前',
   'time.hours_ago': '{n}時間前',
   'time.minutes_ago': '{n}分前',

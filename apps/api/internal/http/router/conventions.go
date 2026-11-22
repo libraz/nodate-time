@@ -224,4 +224,7 @@ var operationConventions = []convention{
 	read("list-sessions", "/user/sessions", listArray),
 	removeUnguarded("revoke-session", "/user/sessions/{sessionId}", reasonOwn),
 	action("resend-email-verification", "/user/verify-email/resend", http.StatusOK, reasonOwn),
+	read("list-app-passwords", "/user/app-passwords", listArray),
+	create("create-app-password", "/user/app-passwords"),
+	removeUnguarded("revoke-app-password", "/user/app-passwords/{appPasswordId}", reasonOwn),
 }

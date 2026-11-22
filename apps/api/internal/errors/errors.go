@@ -166,6 +166,18 @@ var (
 	StorageUnavailable     = &Spec{Status: 503, Code: "STORAGE.UNAVAILABLE", Message: "File storage is not available"}
 )
 
+// --- App password errors ---
+
+var (
+	AppPasswordNotFound        = &Spec{Status: 404, Code: "APP_PASSWORD.NOT_FOUND", Message: "App password not found"}
+	AppPasswordLimitReached    = &Spec{Status: 409, Code: "APP_PASSWORD.LIMIT_REACHED", Message: "You have reached the maximum number of app passwords"}
+	AppPasswordEmailUnverified = &Spec{Status: 403, Code: "APP_PASSWORD.EMAIL_UNVERIFIED", Message: "Confirm your email address before creating an app password"}
+	// AppPasswordMFAEnabled refuses creation for an account with a second
+	// factor: the password alone is what a calendar app presents, and sign-in
+	// with it is refused for such an account, so the new password would never work.
+	AppPasswordMFAEnabled = &Spec{Status: 403, Code: "APP_PASSWORD.MFA_ENABLED", Message: "App passwords are not available while two-factor authentication is enabled"}
+)
+
 // --- Avatar errors ---
 
 var (
