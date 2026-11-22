@@ -140,24 +140,30 @@ Storage that is not configured answers 503 `STORAGE.UNAVAILABLE`.
 
 ## App passwords
 
-A calendar app cannot hold a session, so it signs in to CalDAV with an app password: one credential per device, shown once and revoked on its own. Changing the account password, resetting it or revoking every session does not touch them. All three operations need a signed-in user and act on that user's passwords only.
+A calendar app cannot hold a session, so it signs in to CalDAV with an app password: one credential per device, shown once (or retrievable from a profile link until the device first syncs) and revoked on its own. Changing the account password, resetting it or revoking every session does not touch them. Every operation except the profile download needs a signed-in user and acts on that user's passwords only.
 
-| Operation                                    | Status | Body                                                                                                      |
-| -------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
-| `GET /user/app-passwords`                    | 200    | Bare array, newest first, revoked ones left out: `id`, `name`, `prefix`, `lastUsedAt`, `createdAt`.       |
-| `POST /user/app-passwords`                   | 201    | Takes `name` (1 to 100 characters). Returns the same fields plus `password`, `serverHost` and `username`. |
-| `DELETE /user/app-passwords/{appPasswordId}` | 204    | No body. Not `If-Match`-guarded: it changes only the caller's own state.                                  |
+| Operation                                    | Status | Body                                                                                                                                |
+| -------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /user/app-passwords`                    | 200    | Bare array, newest first, revoked ones left out: `id`, `name`, `prefix`, `lastUsedAt`, `createdAt`.                                 |
+| `POST /user/app-passwords`                   | 201    | Takes `name` (1 to 100 characters). Returns the same fields plus `password`, `serverHost` and `username`.                           |
+| `DELETE /user/app-passwords/{appPasswordId}` | 204    | No body. Not `If-Match`-guarded: it changes only the caller's own state.                                                            |
+| `POST /user/app-passwords/profile-links`     | 200    | Takes `name` (1 to 100 characters). Returns `url` and `expiresAt`. No password is created yet.                                      |
+| `GET /auth/app-password-profiles/{ticket}`   | 200    | No authentication. Returns an `application/x-apple-aspen-config` configuration profile; creates the app password on the first open. |
 
 - `password` is in the creation response and nowhere else. The server keeps only a SHA-256 digest, so a lost password is replaced, not recovered. `prefix` is the first characters of it, to tell passwords apart in a list.
 - `serverHost` is the host of `TC_API_PUBLIC_URL`, the value a calendar app asks for as the server, and `username` is the account's email address.
 - Passwords are `ndt_` followed by 32 characters. Spaces, hyphens and letter case are ignored when one is presented, so the grouped form the web app displays can be typed as shown.
+- A profile link installs the CalDAV account on an iPhone or Mac without typing the server, username or password. The `url` points at `/auth/app-password-profiles/{ticket}` and is valid for 10 minutes. Open it in Safari on an iPhone (other browsers do not hand profiles to Settings) or in any browser on a Mac. Opening it again before the device first syncs returns the same profile and password; after that it answers 410.
+- The link is a credential: do not paste it into chat or email. An unopened link stops working when the session that issued it signs out or the account password changes.
+- The profile is unsigned, so the device shows it as unverified.
 
-| Status | Code                            | Meaning                                                                                                     |
-| ------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 403    | `APP_PASSWORD.EMAIL_UNVERIFIED` | The account has a local sign-in whose email is not yet confirmed.                                           |
-| 403    | `APP_PASSWORD.MFA_ENABLED`      | The account's local sign-in has a second factor. CalDAV accepts the password alone, so it would be refused. |
-| 409    | `APP_PASSWORD.LIMIT_REACHED`    | The user already has 20 unrevoked passwords.                                                                |
-| 404    | `APP_PASSWORD.NOT_FOUND`        | Revoking a password that does not exist, belongs to someone else or is already revoked.                     |
+| Status | Code                                | Meaning                                                                                                              |
+| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 403    | `APP_PASSWORD.EMAIL_UNVERIFIED`     | The account has a local sign-in whose email is not yet confirmed.                                                    |
+| 403    | `APP_PASSWORD.MFA_ENABLED`          | The account's local sign-in has a second factor. CalDAV accepts the password alone, so it would be refused.          |
+| 409    | `APP_PASSWORD.LIMIT_REACHED`        | The user already has 20 unrevoked passwords.                                                                         |
+| 404    | `APP_PASSWORD.NOT_FOUND`            | Revoking a password that does not exist, belongs to someone else or is already revoked.                              |
+| 410    | `APP_PASSWORD.PROFILE_LINK_EXPIRED` | The link has expired, is invalid or revoked, the session that issued it has ended, or the device has already synced. |
 
 ## CalDAV
 
