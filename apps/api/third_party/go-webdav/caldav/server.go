@@ -322,17 +322,8 @@ func (h *Handler) handleSyncCollection(r *http.Request, w http.ResponseWriter, s
 		return internal.HTTPErrorf(http.StatusBadRequest, "caldav: sync-collection REPORT is not supported")
 	}
 
-	// RFC 6578 section 3.2: the request must have a "Depth: 0" header. REPORT
-	// requests default to "Depth: 0" when the header is absent.
-	if s := r.Header.Get("Depth"); s != "" {
-		depth, err := internal.ParseDepth(s)
-		if err != nil {
-			return &internal.HTTPError{Code: http.StatusBadRequest, Err: err}
-		}
-		if depth != internal.DepthZero {
-			return internal.HTTPErrorf(http.StatusBadRequest, `caldav: only "Depth: 0" is accepted in sync-collection REPORT request`)
-		}
-	}
+	// RFC 6578 section 3.2 asks for "Depth: 0", but Apple's clients send
+	// "Depth: 1". The scope is sync-level's, so the header is not read.
 	if sync.SyncLevel != internal.DepthOne.String() {
 		return internal.HTTPErrorf(http.StatusBadRequest, "caldav: unsupported sync-level %q", sync.SyncLevel)
 	}

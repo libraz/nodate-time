@@ -211,6 +211,20 @@ func TestSyncCollectionInitial(t *testing.T) {
 	}
 }
 
+// TestSyncCollectionIgnoresDepth covers clients that send a Depth other than
+// the "0" RFC 6578 asks for: Apple's send "1".
+func TestSyncCollectionIgnoresDepth(t *testing.T) {
+	for _, depth := range []string{"", "0", "1", "infinity"} {
+		t.Run("Depth "+depth, func(t *testing.T) {
+			res := serveSyncTest(t, newSyncTestBackend(), "REPORT", depth, syncCollectionBody("", "1", ""))
+			ms := decodeSyncTestMultiStatus(t, res)
+			if len(ms.Responses) != 2 {
+				t.Errorf("responses = %d, want 2", len(ms.Responses))
+			}
+		})
+	}
+}
+
 func TestSyncCollectionIncremental(t *testing.T) {
 	res := serveSyncTest(t, newSyncTestBackend(), "REPORT", "", syncCollectionBody("1", "1", ""))
 	ms := decodeSyncTestMultiStatus(t, res)
@@ -282,8 +296,6 @@ func TestSyncCollectionBadRequest(t *testing.T) {
 		depth   string
 		level   string
 	}{
-		{"Depth 1", newSyncTestBackend(), "1", "1"},
-		{"Depth infinity", newSyncTestBackend(), "infinity", "1"},
 		{"sync-level infinite", newSyncTestBackend(), "0", "infinite"},
 		{"no SyncBackend", testBackend{calendars: []Calendar{{Path: syncTestCalendarPath}}}, "0", "1"},
 	} {

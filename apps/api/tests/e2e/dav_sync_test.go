@@ -283,3 +283,22 @@ func TestDAVSyncHonoursTheLimit(t *testing.T) {
 	require.Equal(t, http.StatusInsufficientStorage, status, resp)
 	require.Contains(t, resp, "number-of-matches-within-limits")
 }
+
+// TestDAVSyncAcceptsAppleDepth verifies the sync-collection Apple's clients
+// send, which carries "Depth: 1" where RFC 6578 asks for "Depth: 0".
+func TestDAVSyncAcceptsAppleDepth(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	owner := helpers.NewTenant(t, testServerURL)
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	id := davCreate(t, calURL, owner.AccessToken, map[string]any{"title": "one"})
+	a := newDAVAccount(t, owner)
+	calPath := a.calendar(owner.CalendarID)
+
+	for _, depth := range []string{"0", "1"} {
+		status, _, resp := a.do(t, "REPORT", calPath, map[string]string{"Depth": depth}, davSyncBody(""))
+		require.Equal(t, http.StatusMultiStatus, status, "Depth %s: %s", depth, resp)
+		require.Contains(t, resp, davObjectPath(calPath, id))
+	}
+}
