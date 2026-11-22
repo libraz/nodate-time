@@ -51,6 +51,16 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 
 スキーマは MySQL のボリュームを最初に作ったときに適用されます。`sql/schema.sql` は全テーブルを DROP してから作り直すので、データの入った DB には流し直しません。スキーマの変更を既存の DB に当てる方法は[既存環境の更新](#既存環境の更新)を参照してください。
 
+## カレンダーアプリ（CalDAV）
+
+API は `/dav/` で CalDAV を提供し、同梱の nginx は `/api/dav/` として公開します。ユーザーは設定画面で作ったアプリパスワードでサインインします。プロトコルの説明は [API 概要](api.md#caldav) にあります。有効化の操作は要りません。エンドポイントはどのデプロイにもあり、`TC_DAV_RATE_LIMIT`（[設定](configuration.md)を参照）はクライアントあたりの上限を決めるだけです。
+
+- 同梱の nginx は `/.well-known/caldav` に、認証なしで `/api/dav/` への 301 を返します。ホスト名だけを渡されたカレンダーアプリも、これでサーバーを見つけます。web サービスの前に置くプロキシやトンネルは、このパスをそのまま通す必要があります。
+- API の前に置くもの（同梱の nginx、ホストのプロキシ、トンネル、CDN のどれでも）は、WebDAV のメソッド `PROPFIND`、`REPORT`、`PUT`、`DELETE`、`OPTIONS` と `Authorization` ヘッダを通す必要があります。未知のメソッドを弾く層やヘッダを落とす層があると、カレンダーアプリがサインインできない、または同期できないという形で現れます。`PROPFIND` が 403 や 405 で返るのが典型です。同梱の nginx は `/api/` 配下のメソッドを絞っていません。
+- 資格情報は HTTP Basic で送られるので、エンドポイントには TLS 越しに到達できる必要があります。
+- リダイレクトとメソッドの通過は、スタックの外から確かめます。`curl -i https://app.example.com/.well-known/caldav` は `Location: /api/dav/` 付きの 301、`curl -i -X PROPFIND https://app.example.com/api/dav/` は `WWW-Authenticate: Basic` ヘッダ付きの 401 を返します。
+- [既存環境の更新](#既存環境の更新)の `caldav.sql` の手順が、アプリパスワードとクライアントが付けたリソース名のテーブルを作ります。これが無い DB では、CalDAV とアプリパスワードのエンドポイントが失敗します。
+
 ## バックアップ
 
 永続データは `mysql_data` と `storage_data` の 2 つのボリュームに入っています。バックアップは必ず両方を揃えて取ります。添付ファイルは、片方の行がもう片方のオブジェクトを指す形で成立しているためです。オブジェクトは普通のファイルで、content type と ETag は拡張属性に入っています。ファイル単位でコピーするなら拡張属性も残してください（GNU `tar --xattrs --xattrs-include='user.*'`。busybox の tar は落とします）。
@@ -70,7 +80,7 @@ docker compose -f compose.prod.yml exec -T mysql \
 1. 終日の行を分類します。`sql/core/tools/classify-all-day.sql` を DB に対して流します。読み取りだけを行います。先に `@nf_http_cutoff` に、他のプロダクトによる終日の行の正規化がこの DB に届いた UTC の時刻を設定します。レポートは各終日の行がどう変換されるかを示し、最後に、判断が要る行ごとに `INSERT` を 1 本出力します。それらの行の form と zone を埋めて実行します。入れ先の `core_upgrade_0004_decisions` は、手順 2 の初回の実行が作るテーブルです。
 2. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てます。これが済むまで後続の手順は実行を拒否します。`0004-all-day-canonical.sql` はすべての終日の行を正規の形に変換し、それを強制する制約を足します。未判定の行や、ほかに解消すべき指摘が残っている間は、`public_id` で行を列挙して止まります。解消してからもう一度流します。`--force` は付けません。
 3. `sql/time/upgrades/from-v0.1.0.sql` を、まだ当てていない DB にだけ。`album_photos.retired_at` 列がなければ未適用です。新しい API が一度でもリクエストを処理したら、二度と流しません。
-4. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 3 を済ませたどの DB にも当てられます。
+4. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql`、`caldav.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 3 を済ませたどの DB にも当てられます。
 5. `sql/time/upgrades/triggers.sql` を機能ファイルの後に。この層のトリガーをすべて DROP して作り直します。MySQL はトリガーを不可分に置き換えられないので、その間に走った削除はトリガーを通りません。書き込む側をすべて止めるのはこのためです。
 6. 適合性検査 `sql/core/conformance/run.sh --mode all`。結果が契約どおりになっているかを確かめます。データの検査は手順 2 が済んでいることを前提にします。
 7. 新しい API を起動します。
@@ -94,7 +104,7 @@ docker compose -f compose.prod.yml exec -T mysql bash -euc '
   if ! mysql -uroot "$MYSQL_DATABASE" -e "SELECT retired_at FROM album_photos LIMIT 0" 2>/dev/null; then
     apply "$up/from-v0.1.0.sql"
   fi
-  for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
+  for f in schedule-polls calendar-covers caldav triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
     --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode all
   rm -rf /tmp/upgrade-sql

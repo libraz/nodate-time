@@ -30,6 +30,7 @@
 - **サインイン** — メール+パスワード、Google と LINE の OAuth、開発用のパスワードレスログイン。パスワード再設定とメール確認は SMTP リレーを設定したときだけ使えます。[設定](https://github.com/libraz/nodate-time/blob/main/docs/ja/configuration.md)
 - **管理者機能** — OAuth プロバイダ設定と、サインインを許可するメール・ドメインのアロウリスト。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **エクスポートとインポート** — エクスポートは iCal と CSV、インポートは iCal。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
+- **カレンダーアプリとの同期** — iOS・macOS などのカレンダーアプリ向けの CalDAV サーバー。端末ごとのアプリパスワードでサインインします。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#caldav)
 - **多言語とテーマ** — 日本語と英語、5 種類のテーマ、ライト・ダーク・システム連動のカラーモード。
 - **自己ホスト** — TLS、オブジェクトストレージ、更新手順をそろえた compose ファイル 1 つ。[デプロイ](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md)
 - **メトリクスとプロファイル** — Prometheus メトリクス、pprof、依存先ごとのヘルスレポートを別リスナーで提供。[可観測性](https://github.com/libraz/nodate-time/blob/main/docs/ja/observability.md)

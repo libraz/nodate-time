@@ -30,6 +30,7 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 - **Sign-in** — email and password, Google and LINE OAuth, and a development-only password-less login. Password reset and email verification appear only when an SMTP relay is configured. [Configuration](https://github.com/libraz/nodate-time/blob/main/docs/en/configuration.md)
 - **Admin** — OAuth provider settings and an allowlist of permitted sign-in emails and domains. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Export and import** — export as iCal or CSV, import iCal. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Calendar app sync** — a CalDAV server for iOS, macOS and other calendar apps, signed in with per-device app passwords. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#caldav)
 - **Languages and themes** — English and Japanese, five themes, light, dark or system color mode.
 - **Self-hosting** — one compose file with TLS, object storage and upgrade scripts. [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md)
 - **Metrics and profiling** — Prometheus metrics, pprof and a per-dependency health report on a separate listener. [Observability](https://github.com/libraz/nodate-time/blob/main/docs/en/observability.md)

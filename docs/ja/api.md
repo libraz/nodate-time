@@ -6,9 +6,10 @@ Huma v2 が OpenAPI 記述を自動生成します。認証なしで `/openapi.j
 
 - **公開**: `/health`、`/openapi.json`、`/openapi.yaml`、`/docs`。`/auth/*`（`/auth/logout` を除く。register / login / refresh / password-reset / verify-email/confirm / oauth があり、`dev-login` は開発時のみ）。`/share/{token}` と `/share/{token}/events`。`/blobs/*` はセッションを持たず、URL の署名で認可されます。
 - **要認証**: `/auth/logout`、`/user/*`、`/calendars`、`/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import,schedule-polls}`、`/search`、`/invites/{token}/accept`。
+- **CalDAV**: `/dav/`（公開パスは `/api/dav/`）。セッションではなくアプリパスワードで認証します。[CalDAV](#caldav) を参照してください。
 - **管理者**: `/admin/oauth-providers`、`/admin/allowed-emails`、`/admin/instance-admins`。
 
-サインイン・登録・パスワード再設定・OAuth（`/auth/*`）と公開共有リンク（`/share/*`）は IP 単位でレート制限されます。上限は[設定](configuration.md)の `TC_AUTH_RATE_LIMIT` と `TC_SHARE_RATE_LIMIT` で決まります。`/health`、OpenAPI と docs のルート、`/blobs/*` は対象外です。
+サインイン・登録・パスワード再設定・OAuth（`/auth/*`）と公開共有リンク（`/share/*`）は IP 単位でレート制限されます。上限は[設定](configuration.md)の `TC_AUTH_RATE_LIMIT` と `TC_SHARE_RATE_LIMIT` で決まります。CalDAV のリクエストには別枠の `TC_DAV_RATE_LIMIT` があります。`/health`、OpenAPI と docs のルート、`/blobs/*` は対象外です。
 
 ## 規約
 
@@ -136,3 +137,73 @@ Huma v2 が OpenAPI 記述を自動生成します。認証なしで `/openapi.j
 3. confirm（200。アバターとカバーは `PUT`）。サーバはオブジェクトを読み戻し、宣言された digest と大きさに照合します。不一致は 422 `UPLOAD.DIGEST_MISMATCH`、超過は 413 `UPLOAD.TOO_LARGE` です。失敗したアップロードは何も残しません。
 
 ストレージが未設定なら 503 `STORAGE.UNAVAILABLE` です。
+
+## アプリパスワード
+
+カレンダーアプリはセッションを持てないため、CalDAV へはアプリパスワードでサインインします。アプリパスワードは端末ごとに 1 つ発行する資格情報で、作成時に一度だけ表示され、個別に失効できます。アカウントのパスワード変更・再設定や全セッションの失効では影響を受けません。3 つの操作はいずれもサインイン中のユーザー本人のパスワードだけを対象にします。
+
+| 操作                                         | ステータス | ボディ                                                                                                      |
+| -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET /user/app-passwords`                    | 200        | 配列（新しい順、失効済みは除く）: `id`、`name`、`prefix`、`lastUsedAt`、`createdAt`。                       |
+| `POST /user/app-passwords`                   | 201        | `name`（1〜100 文字）を受け取ります。上と同じ項目に `password`、`serverHost`、`username` を加えて返します。 |
+| `DELETE /user/app-passwords/{appPasswordId}` | 204        | ボディなし。本人の状態だけを変えるため、`If-Match` は不要です。                                             |
+
+- `password` が返るのは作成のレスポンスだけです。サーバーは SHA-256 のダイジェストしか保持しないので、失くしたパスワードは再発行します。`prefix` は先頭の数文字で、一覧で見分けるために使います。
+- `serverHost` は `TC_API_PUBLIC_URL` のホストで、カレンダーアプリの「サーバ」欄に入れる値です。`username` はアカウントのメールアドレスです。
+- パスワードは `ndt_` に 32 文字が続く形です。提示するときは空白・ハイフン・大文字小文字の違いを無視するので、Web アプリが区切って表示した形のまま入力できます。
+
+| ステータス | コード                          | 意味                                                                                                     |
+| ---------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 403        | `APP_PASSWORD.EMAIL_UNVERIFIED` | ローカルのサインインを持つアカウントで、メールアドレスが未確認です。                                     |
+| 403        | `APP_PASSWORD.MFA_ENABLED`      | ローカルのサインインに第 2 要素が登録されています。CalDAV はパスワードだけで認証するため、拒否されます。 |
+| 409        | `APP_PASSWORD.LIMIT_REACHED`    | 失効していないパスワードがすでに 20 件あります。                                                         |
+| 404        | `APP_PASSWORD.NOT_FOUND`        | 失効の対象が存在しない、他人のもの、またはすでに失効済みです。                                           |
+
+## CalDAV
+
+CalDAV サーバーは、カレンダーアプリ（iOS / macOS のカレンダー、または CalDAV を話すクライアント）から、ユーザーが所属するカレンダーを読み書きできるようにします。API の `/dav/` にマウントされ、同梱の nginx の背後では `/api/dav/` です。クライアントに渡すアドレスは `TC_API_PUBLIC_URL` に `/dav/` を続けたものです。
+
+### 認証と発見
+
+- 認証は TLS 上の HTTP Basic です。パスワードにアプリパスワードを使います。ユーザー名は検査しないので、メールアドレスを変えても端末は壊れません。未知・失効済み・形式不正を含め、それ以外はすべて 401 で、`WWW-Authenticate: Basic realm="<TC_APP_NAME>", charset="UTF-8"` を返します。ユーザーの無効化、有効なサインインがないこと、ローカルのサインインに第 2 要素が登録されていることでも、パスワードは使えなくなります。パスワードの連続失敗によるサインインのロックは影響しません。
+- `OPTIONS` は資格情報なしで答え、`DAV: 1, 3, calendar-access` 付きの 204 を返します。
+- 同梱の nginx では `/.well-known/caldav` が `/api/dav/` へ 301 でリダイレクトされるので、ホスト名だけを渡されたクライアントもサーバーを見つけられます。発見を行わないクライアントには完全なアドレスを渡します。
+- パスは `/dav/<userId>/`（principal）、`/dav/<userId>/calendars/`（カレンダーホーム）、`/dav/<userId>/calendars/<calendarId>/`（1 つのカレンダー）です。他人の principal と、所属していないカレンダーは 404 です。
+
+### 対応関係
+
+- ユーザーが有効なメンバーであるカレンダーは、REST API と同じメンバーシップで、ホームの下の 1 つのカレンダーコレクションになります。中身は `VEVENT` だけです。
+- ユーザーのロールが編集できないカレンダーとシステムカレンダーは読み取り専用（`DAV:write` 権限なし）です。
+- 1 つの予定は、回ごとの変更も含めて 1 つの `<name>.ics` リソースです。リソースには系列と、閲覧者に見える変更済みの回がすべて入り、中身はその閲覧者の iCalendar エクスポートと同じ表示（[公開範囲](#公開範囲)の隠し方を含む）です。`confidential` の予定は、当事者でない人には存在しません。クライアントが作った予定はクライアントが付けた名前のまま、それ以外は `ndt-<id>.ics` という名前です。名前は `A-Z a-z 0-9 . _ ~ @ + = -` の 1〜251 文字に `.ics` を付けた形で、大文字小文字を区別します。それ以外は 400 です。
+- `ETag` は閲覧者に見える内容のハッシュです。見える内容が変わったときだけ変わります。
+- ラベル・担当レイヤ・参加者・チェックリスト・添付・コメント・作成者は運びません。カレンダーアプリからの書き込みでも、これらは保たれます。
+- calendar-query と multiget に対応しています。エントリが 20,000 件を超えるカレンダーは 507 です。
+
+### 同期
+
+各カレンダーが `sync-collection` と `DAV:sync-token` を公開します。token はカレンダーの変更履歴から作られます。空の token では全リソースを返し、以降は変更と削除だけを返します。
+
+- token が有効なのは発行した UTC 日の間です。翌日以降、カレンダーの設定やユーザー自身のロールが変わった後、変更が 5,000 件を超えたとき、形式が不正なとき、別のカレンダーの token のときは 403 `valid-sync-token` を返し、クライアントは空の token からやり直します。そのためクライアントは少なくとも 1 日 1 回は全件を取り直します。削除されないまま閲覧者から見えなくなった予定は、この全件取得で消えます。
+- 結果が `limit` を超えるときは 507 `number-of-matches-within-limits` です。
+- 閲覧者に見えない `confidential` の予定の変更は、その閲覧者には報告されません。
+
+### 書き込み
+
+`PUT` は同じ変更を行う REST の操作列に変換されるので、権限・検証・変更履歴は Web アプリと同じに働きます。
+
+- `If-None-Match: *` で予定を作成します。`If-Match` はクライアントが読んだ版の置き換えで、古い ETag は 412 です。`DELETE` は系列ごと削除します。`PUT` の応答には `ETag` を付けません。保存した内容が送られた内容と一致しないことがあるためで、クライアントは読み直します。
+- 反映するのは変わったプロパティだけです。要約・場所・説明・URL・開始と終了・終日・タイムゾーン・繰り返し規則・クラス・透過性と、表現できる最初のアラームが対象です。新しい `RECURRENCE-ID` はその回の変更、`EXDATE` の追加は回の取り消し、削除は取り消しの取り消しになります。
+- REST API が拒否する操作は、precondition 要素の付かない 403 です。エディターが他人の予定を編集する、タスク連動の予定の時刻を変える、読み取り専用のカレンダーへ書き込む、などです。受け付けられない内容は CalDAV の precondition 付きの 409 です。`valid-calendar-data`、`supported-calendar-component`（`VEVENT` 以外）、`no-uid-conflict`（リソースと異なる `UID`、またはカレンダー内の見える別の予定がすでに使っている `UID`）、`max-resource-size`（1 MiB 超）があります。ボディが空、または UTF-8 でないときは 400 です。
+- `valid-calendar-data` として拒否するもの: `RDATE`、`STATUS:CANCELLED`、`RANGE=THISANDFUTURE`、`METHOD`、複数の `UID`、1,000 件を超える `EXDATE`、負の継続時間、サーバーが保存できない繰り返し規則（29〜31 日始まりの単純な毎月の規則や `BYMONTH` 付きなど）、REST API 自体の上限に外れる値。
+- floating の時刻と未知のタイムゾーンは UTC として読みます。`ndt-` で始まる名前と `@nodate-time` で終わる UID はサーバーが付けた予定用に予約されていて、これらでの作成は 403 です。
+- サーバーが使わないプロパティ（`SEQUENCE`、`GEO`、`ATTACH`、`PRIORITY`、`COLOR`、`X-` プロパティなど）は無視します。`ATTENDEE` と `ORGANIZER` は出力も取り込みもしません。
+
+### 対応しないもの
+
+- `MKCALENDAR`、`MKCOL`、`COPY`、`MOVE` は 403、`PROPPATCH` は 501 です。カレンダーの作成・名前変更・色の変更・削除は Web アプリで行い、予定をカレンダー間でクライアントから移すことはできません。
+- スケジューリング（招待、free-busy）、ToDo、メモ、アドレス帳、プッシュ通知、`CS:getctag`。
+- パスワードごとの読み取り専用スコープ。どのパスワードもユーザーの権限をすべて持ちます。
+
+### 上限
+
+リソースは 1 MiB までです。`TC_DAV_RATE_LIMIT` はクライアントアドレスあたりの 1 分間のリクエスト数を制限し、既定は `600` です。1 ユーザーが持てるアプリパスワードは 20 件までです。REPORT の種類は `dav.report` としてログに残ります。

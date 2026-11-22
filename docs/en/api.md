@@ -6,9 +6,10 @@ The groups below are not exhaustive; the router is the full list.
 
 - **Public**: `/health`, `/openapi.json`, `/openapi.yaml`, `/docs`; `/auth/*` except `/auth/logout` (register, login, refresh, password-reset, verify-email/confirm, oauth; `dev-login` only in development); `/share/{token}` and `/share/{token}/events`; `/blobs/*`, which carries no session and is authorized by the signature on the URL.
 - **Authenticated**: `/auth/logout`, `/user/*`, `/calendars`, `/calendars/{id}/{events,memos,members,invites,albums,labels,activity,export,import,schedule-polls}`, `/search`, and `/invites/{token}/accept`.
+- **CalDAV**: `/dav/` (published as `/api/dav/`), authenticated with an app password rather than a session; see [CalDAV](#caldav).
 - **Admin**: `/admin/oauth-providers`, `/admin/allowed-emails`, `/admin/instance-admins`.
 
-Sign-in, registration, password reset and OAuth (`/auth/*`) and the public share links (`/share/*`) are rate-limited per client IP; see `TC_AUTH_RATE_LIMIT` and `TC_SHARE_RATE_LIMIT` in [Configuration](configuration.md). `/health`, the OpenAPI and docs routes and `/blobs/*` are not rate-limited.
+Sign-in, registration, password reset and OAuth (`/auth/*`) and the public share links (`/share/*`) are rate-limited per client IP; see `TC_AUTH_RATE_LIMIT` and `TC_SHARE_RATE_LIMIT` in [Configuration](configuration.md). CalDAV requests have a budget of their own, `TC_DAV_RATE_LIMIT`. `/health`, the OpenAPI and docs routes and `/blobs/*` are not rate-limited.
 
 ## Conventions
 
@@ -136,3 +137,73 @@ Attachments, album photos, avatars and calendar covers upload the same way, thro
 3. Confirm (200; `PUT` for avatars and covers). The server reads the object back and checks it against the declared digest and size: 422 `UPLOAD.DIGEST_MISMATCH`, 413 `UPLOAD.TOO_LARGE`. A failed upload leaves nothing behind.
 
 Storage that is not configured answers 503 `STORAGE.UNAVAILABLE`.
+
+## App passwords
+
+A calendar app cannot hold a session, so it signs in to CalDAV with an app password: one credential per device, shown once and revoked on its own. Changing the account password, resetting it or revoking every session does not touch them. All three operations need a signed-in user and act on that user's passwords only.
+
+| Operation                                    | Status | Body                                                                                                      |
+| -------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
+| `GET /user/app-passwords`                    | 200    | Bare array, newest first, revoked ones left out: `id`, `name`, `prefix`, `lastUsedAt`, `createdAt`.       |
+| `POST /user/app-passwords`                   | 201    | Takes `name` (1 to 100 characters). Returns the same fields plus `password`, `serverHost` and `username`. |
+| `DELETE /user/app-passwords/{appPasswordId}` | 204    | No body. Not `If-Match`-guarded: it changes only the caller's own state.                                  |
+
+- `password` is in the creation response and nowhere else. The server keeps only a SHA-256 digest, so a lost password is replaced, not recovered. `prefix` is the first characters of it, to tell passwords apart in a list.
+- `serverHost` is the host of `TC_API_PUBLIC_URL`, the value a calendar app asks for as the server, and `username` is the account's email address.
+- Passwords are `ndt_` followed by 32 characters. Spaces, hyphens and letter case are ignored when one is presented, so the grouped form the web app displays can be typed as shown.
+
+| Status | Code                            | Meaning                                                                                                     |
+| ------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 403    | `APP_PASSWORD.EMAIL_UNVERIFIED` | The account has a local sign-in whose email is not yet confirmed.                                           |
+| 403    | `APP_PASSWORD.MFA_ENABLED`      | The account's local sign-in has a second factor. CalDAV accepts the password alone, so it would be refused. |
+| 409    | `APP_PASSWORD.LIMIT_REACHED`    | The user already has 20 unrevoked passwords.                                                                |
+| 404    | `APP_PASSWORD.NOT_FOUND`        | Revoking a password that does not exist, belongs to someone else or is already revoked.                     |
+
+## CalDAV
+
+The CalDAV server lets a calendar app (iOS and macOS Calendar, or any client that speaks CalDAV) read and edit the calendars its user belongs to. It is mounted at `/dav/` on the API, so `/api/dav/` behind the bundled nginx; the address to give a client is `TC_API_PUBLIC_URL` followed by `/dav/`.
+
+### Authentication and discovery
+
+- Authentication is HTTP Basic over TLS. The password is an app password; the username is not checked, so a change of email address does not break a device. Anything else, including an unknown, revoked or malformed credential, is 401 with `WWW-Authenticate: Basic realm="<TC_APP_NAME>", charset="UTF-8"`. A password also stops working when its user is disabled, when the user has no enabled sign-in, or when the local sign-in has a second factor enrolled. A sign-in lockout from failed password attempts does not affect it.
+- `OPTIONS` is answered without credentials: 204 with `DAV: 1, 3, calendar-access`.
+- `/.well-known/caldav` redirects (301) to `/api/dav/` in the bundled nginx, so a client given only a host name finds the server. Clients that skip discovery take the full address.
+- The paths are `/dav/<userId>/` (the principal), `/dav/<userId>/calendars/` (the calendar home) and `/dav/<userId>/calendars/<calendarId>/` (one calendar). Another user's principal and a calendar the user does not belong to are 404.
+
+### What maps to what
+
+- Every calendar the user is an active member of is a calendar collection under the home, with the same membership the REST API uses. It holds `VEVENT` only.
+- A calendar is read-only (no `DAV:write` privilege) when the user's role cannot edit it and for system calendars.
+- One event, with all of its occurrence changes, is one resource named `<name>.ics`. The resource holds the series and every changed occurrence the reader may see, and shows each exactly as that reader's iCalendar export does, including the hiding rules in [Visibility](#visibility); a confidential event is absent for anyone who is not a party to it. Events the client created keep the name it chose; others are named `ndt-<id>.ics`. A name is 1 to 251 characters from `A-Z a-z 0-9 . _ ~ @ + = -` plus `.ics`, compared case-sensitively; anything else is 400.
+- The `ETag` is a hash of what the reader would see, so it changes when the visible content does and not otherwise.
+- Labels, assigned layers, attendees, checklists, attachments, comments and the creator are not carried. A write from a calendar app leaves them as they are.
+- Calendar-query and multiget are supported. A calendar with more than 20,000 entries answers 507.
+
+### Sync
+
+The server advertises `sync-collection` and a `DAV:sync-token` on each calendar, built from the calendar's change history. An empty token returns every resource; a later one returns what changed and what was deleted.
+
+- A token is accepted for the UTC day it was issued on. From the next day, or after the calendar's settings or the user's own role changed, or after more than 5,000 changes, or when it is malformed or from another calendar, the answer is 403 `valid-sync-token`, and the client starts over with an empty token. A client therefore does a full pass at least daily; this is also what removes events that left the reader's view without being deleted.
+- A `limit` the result exceeds is 507 `number-of-matches-within-limits`.
+- Changes to confidential events a reader may not see are not reported to that reader.
+
+### Writes
+
+A `PUT` is turned into the REST operations that make the same change, so permissions, validation and the change history behave as they do for the web app.
+
+- `If-None-Match: *` creates an event. `If-Match` replaces the one the client read: a stale tag is 412. `DELETE` removes the whole series. A `PUT` answer carries no `ETag`, because what is stored can differ from what was sent; the client reads it again.
+- Only changed properties are applied: summary, location, description, URL, start and end, all-day, time zone, recurrence rule, class, transparency and the first alarm that can be expressed. A new `RECURRENCE-ID` changes that occurrence, an added `EXDATE` cancels one and a removed one restores it.
+- Anything the REST API would refuse is 403 with no precondition element: editing someone else's event as an editor, changing the time of a task-linked event, writing to a read-only calendar. A body the server cannot accept is 409 with a CalDAV precondition: `valid-calendar-data`, `supported-calendar-component` (anything but `VEVENT`), `no-uid-conflict` (a `UID` that differs from the resource's, or that another visible event in the calendar already uses), `max-resource-size` (over 1 MiB). An empty or non-UTF-8 body is 400.
+- Refused as `valid-calendar-data`: `RDATE`, `STATUS:CANCELLED`, `RANGE=THISANDFUTURE`, `METHOD`, more than one `UID`, more than 1,000 `EXDATE`s, a negative duration, a recurrence rule the server does not store (for example a plain monthly rule starting on the 29th to 31st, or one with `BYMONTH`), and values the REST API's own limits reject.
+- Floating times and unknown time zones are read as UTC. Names that start with `ndt-` and UIDs ending in `@nodate-time` are reserved for events the server named; creating one is 403.
+- Properties the server does not use (`SEQUENCE`, `GEO`, `ATTACH`, `PRIORITY`, `COLOR`, `X-` properties and so on) are ignored. `ATTENDEE` and `ORGANIZER` are neither written nor read.
+
+### Not supported
+
+- `MKCALENDAR`, `MKCOL`, `COPY` and `MOVE` are 403, and `PROPPATCH` is 501: calendars are created, renamed, recolored and deleted in the web app, and an event cannot be moved between calendars from a client.
+- Scheduling (invitations, free-busy), to-dos, notes, address books, push notifications and `CS:getctag`.
+- A read-only scope per password: every password carries its user's full access.
+
+### Limits
+
+A resource is at most 1 MiB. `TC_DAV_RATE_LIMIT` caps requests per client address per minute, `600` by default. A user holds at most 20 app passwords. Each REPORT's kind is logged as `dav.report`.

@@ -51,6 +51,16 @@ With `TC_PASSWORD_LOGIN_ENABLED=false`, leave out `-password`. The account is th
 
 The schema is applied when the MySQL volume is first created. `sql/schema.sql` drops every table before creating it, so it is never re-run against a database that holds data; see [Upgrading](#upgrading) for how a schema change reaches one.
 
+## Calendar apps (CalDAV)
+
+The API serves CalDAV at `/dav/`, published as `/api/dav/` by the bundled nginx. Users sign in to it with app passwords created in Settings; the protocol is described in [API overview](api.md#caldav). Nothing has to be enabled: the endpoint exists on every deployment, and `TC_DAV_RATE_LIMIT` (see [Configuration](configuration.md)) only sets its per-client budget.
+
+- The bundled nginx answers `/.well-known/caldav` with a 301 to `/api/dav/`, without authentication, so a calendar app given only the host name finds the server. A proxy or tunnel you put in front of the web service has to pass that path through unchanged.
+- Whatever sits in front of the API, whether the bundled nginx, a host proxy, a tunnel or a CDN, has to pass the WebDAV methods `PROPFIND`, `REPORT`, `PUT`, `DELETE` and `OPTIONS` and the `Authorization` header. A layer that rejects unknown methods or strips the header shows up as a calendar app that cannot sign in or sync; a `PROPFIND` answered with 403 or 405 is the usual sign. The bundled nginx does not restrict methods under `/api/`.
+- Credentials travel in HTTP Basic, so the endpoint has to be reached over TLS.
+- Check the redirect and the method pass-through from outside the stack: `curl -i https://app.example.com/.well-known/caldav` answers 301 with `Location: /api/dav/`, and `curl -i -X PROPFIND https://app.example.com/api/dav/` answers 401 with a `WWW-Authenticate: Basic` header.
+- The `caldav.sql` step of [Upgrading](#upgrading) creates the tables behind app passwords and the client-chosen resource names; a database that lacks them fails on CalDAV requests and on the app password endpoints.
+
 ## Backups
 
 Two volumes hold everything durable: `mysql_data` and `storage_data`. Back them up together, because an attachment is a row in one pointing at an object in the other. Objects are plain files whose content type and ETag live in extended attributes, so a file-level copy has to keep them (GNU `tar --xattrs --xattrs-include='user.*'`; busybox tar drops them).
@@ -70,7 +80,7 @@ Back up both volumes first, as described in [Backups](#backups). A database that
 1. Classify the all-day rows. Run `sql/core/tools/classify-all-day.sql` against the database; it only reads. Set `@nf_http_cutoff` first, to the UTC time at which the other product's normalisation of all-day rows reached this database. The report lists how each all-day row will be converted and ends with one `INSERT` per row that needs a decision. Fill in the form and zone of those rows and run the statements: they go into `core_upgrade_0004_decisions`, a table that step 2 creates on its first run.
 2. `sql/core/upgrades/*.sql`, every file, in number order. These change the tables shared with other products and always come first; the later steps refuse to run until they have. `0004-all-day-canonical.sql` converts every all-day row to its canonical form and adds the constraints that enforce it. It stops, listing the rows by `public_id`, while any row is undecided or any other finding remains; settle those and run it again. Apply it without `--force`.
 3. `sql/time/upgrades/from-v0.1.0.sql`, only on a database that has not had it, which is one without the `album_photos.retired_at` column. Once the new API has served a request it is never run again.
-4. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 3.
+4. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`, `caldav.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 3.
 5. `sql/time/upgrades/triggers.sql`, after the feature files. It drops and recreates every trigger of this layer. MySQL cannot replace a trigger atomically, so a delete running in between would miss it; this is why every writer is stopped.
 6. The conformance check, `sql/core/conformance/run.sh --mode all`, which confirms the result matches the contract. Its data checks need step 2 applied.
 7. Start the new API.
@@ -94,7 +104,7 @@ docker compose -f compose.prod.yml exec -T mysql bash -euc '
   if ! mysql -uroot "$MYSQL_DATABASE" -e "SELECT retired_at FROM album_photos LIMIT 0" 2>/dev/null; then
     apply "$up/from-v0.1.0.sql"
   fi
-  for f in schedule-polls calendar-covers triggers; do apply "$up/$f.sql"; done
+  for f in schedule-polls calendar-covers caldav triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
     --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode all
   rm -rf /tmp/upgrade-sql
