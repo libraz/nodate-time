@@ -1,11 +1,15 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "e2a139a481545d4a03f6e10d35dbfd2da7ac5501",
+  "ref": "b108713ea840b222c42da9fb566e1dff28924183",
   "files": [
     {
+      "path": "IMPORTERS.md",
+      "sha256": "a196ba4a0270fb66878d8bbe680f810df22f543e2fadf268856588d44e50940e"
+    },
+    {
       "path": "PROTOCOL.md",
-      "sha256": "aa301a1ac4cebe458985d9184ed9123793919965f054c8481d7737a728557321"
+      "sha256": "405557f97acd4039307007f13c1af490108b62b88384197f845ac30e2db641e7"
     },
     {
       "path": "all-day/fixtures.json",
@@ -73,7 +77,7 @@
     },
     {
       "path": "conformance/schema/50-nullable-unique-keys.sql",
-      "sha256": "a3df2302e11a20905d83ac0e9a72718d668b1a504b91e1b4d4f1619a2559f66d"
+      "sha256": "291155bf92f92ee93a34ca80df07e74be46e489dcce08fb70362645debc23b0f"
     },
     {
       "path": "conformance/schema/70-recurrence-shape.sql",
@@ -170,6 +174,14 @@
     {
       "path": "event-kinds.yaml",
       "sha256": "2270726c1c1fa51fcea37567a912c7e1b4528a87615d28f1d4e4c3bc4869bc42"
+    },
+    {
+      "path": "importers/mapping-common.yaml",
+      "sha256": "eb8daeefa72643112ce282c22fcb2e8a4430384684a76a7d426b95ce811fe971"
+    },
+    {
+      "path": "importers/sync-guard.json",
+      "sha256": "3e4fe4a4d901ef8a446c33380cd4e1e62560a37bcf5ede2daf9a37fd8f787173"
     },
     {
       "path": "recurrence/exception-forms.json",
@@ -325,7 +337,7 @@
     },
     {
       "path": "tools/fixtures/0004-base.sql",
-      "sha256": "6ad260b29b0f40dd3224d7ec8eff432738d3478da77932e217e4a524764ab5ce"
+      "sha256": "8070d9a3fb6567d8c46cd40d4e1d8d29e512c3da0bfae60cf2ce433822cf449c"
     },
     {
       "path": "tools/fixtures/0004-decisions.sql",

@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "nothing to delete",
+      "present": 10,
+      "synced": 10,
+      "delete": 0,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "first sync with nothing synced",
+      "present": 30,
+      "synced": 0,
+      "delete": 0,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "empty source on a first sync",
+      "present": 0,
+      "synced": 0,
+      "delete": 0,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "lost 10 of 10 stays under the count threshold",
+      "present": 5,
+      "synced": 10,
+      "delete": 10,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "lost 10 of 19 is a majority but stays under the count threshold",
+      "present": 9,
+      "synced": 19,
+      "delete": 10,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "lost 11 of 20 is a mass delete",
+      "present": 9,
+      "synced": 20,
+      "delete": 11,
+      "moved": 0,
+      "refuse": "mass-delete"
+    },
+    {
+      "name": "lost 11 with synced at twice lost is not a majority",
+      "present": 11,
+      "synced": 22,
+      "delete": 11,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "lost 11 with synced one under twice lost is a mass delete",
+      "present": 10,
+      "synced": 21,
+      "delete": 11,
+      "moved": 0,
+      "refuse": "mass-delete"
+    },
+    {
+      "name": "lost 11 with synced one over twice lost passes",
+      "present": 12,
+      "synced": 23,
+      "delete": 11,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "lost 11 of 100 passes",
+      "present": 89,
+      "synced": 100,
+      "delete": 11,
+      "moved": 0,
+      "refuse": null
+    },
+    {
+      "name": "moved takes lost down to 10",
+      "present": 5,
+      "synced": 20,
+      "delete": 15,
+      "moved": 5,
+      "refuse": null
+    },
+    {
+      "name": "moved leaves lost at 12 of 20",
+      "present": 5,
+      "synced": 20,
+      "delete": 15,
+      "moved": 3,
+      "refuse": "mass-delete"
+    },
+    {
+      "name": "empty source with every candidate moved loses nothing",
+      "present": 0,
+      "synced": 5,
+      "delete": 5,
+      "moved": 5,
+      "refuse": null
+    },
+    {
+      "name": "empty source losing one row",
+      "present": 0,
+      "synced": 1,
+      "delete": 1,
+      "moved": 0,
+      "refuse": "empty-source"
+    },
+    {
+      "name": "empty source losing fewer than the count threshold",
+      "present": 0,
+      "synced": 50,
+      "delete": 50,
+      "moved": 45,
+      "refuse": "empty-source"
+    },
+    {
+      "name": "empty source that is also a mass delete is decided as empty source",
+      "present": 0,
+      "synced": 20,
+      "delete": 20,
+      "moved": 0,
+      "refuse": "empty-source"
+    }
+  ]
+}

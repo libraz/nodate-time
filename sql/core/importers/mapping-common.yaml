@@ -1,0 +1,316 @@
+version: 1
+cases:
+  # Valid mappings.
+  - name: minimal run
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+    expect: []
+
+  - name: dry-run with no container
+    dry_run: true
+    mapping:
+      importer: ops@example.com
+    container: null
+    expect: []
+
+  - name: every shared key
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      users:
+        - { email: hanako@example.com, name: Hanako Yamada }
+        - { email: taro@example.com }
+      source_users:
+        "1201234567890": hanako@example.com
+        "1201234567891": ops@example.com
+    container:
+      source: Marketing
+      name: Marketing team
+      members:
+        - { email: hanako@example.com, role: editor }
+        - { email: taro@example.com, role: editor }
+    expect: []
+
+  - name: source written as a YAML integer
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: 1209876543210
+    expect: []
+
+  - name: upper-case addresses are valid
+    dry_run: false
+    mapping:
+      importer: Ops@Example.COM
+      users:
+        - { email: Hanako@Example.com }
+    container:
+      source: "1209876543210"
+      members:
+        - { email: HANAKO@example.com, role: editor }
+    expect: []
+
+  - name: name of 255 multibyte runes
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      name: "あいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえお"
+    expect: []
+
+  # Documents that do not parse.
+  - name: empty document
+    dry_run: false
+    raw: ""
+    expect:
+      - { path: "", kind: empty }
+
+  - name: comment-only document
+    dry_run: false
+    raw: "# nothing here\n"
+    expect:
+      - { path: "", kind: empty }
+
+  - name: unknown top-level key
+    dry_run: false
+    raw: "importer: ops@example.com\nauthors: {}\n"
+    expect:
+      - { path: "", kind: unknown_key }
+
+  # importer.
+  - name: importer missing
+    dry_run: false
+    mapping: {}
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: importer, kind: required }
+
+  - name: importer empty
+    dry_run: false
+    mapping:
+      importer: ""
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: importer, kind: required }
+
+  - name: importer not an address
+    dry_run: false
+    mapping:
+      importer: ops.example.com
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: importer, kind: invalid_email }
+
+  - name: importer with a non-ASCII domain
+    dry_run: false
+    mapping:
+      importer: ops@例え.jp
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: importer, kind: invalid_email }
+
+  # users.
+  - name: user without an email
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      users:
+        - { name: Hanako Yamada }
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: "users[0].email", kind: required }
+
+  - name: user with an invalid email
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      users:
+        - { email: hanako@ }
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: "users[0].email", kind: invalid_email }
+
+  - name: user listed twice in different case
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      users:
+        - { email: hanako@example.com }
+        - { email: taro@example.com }
+        - { email: Hanako@Example.com }
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: "users[2].email", kind: duplicate }
+
+  # source_users.
+  - name: source user id with letters
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      source_users:
+        "U123": hanako@example.com
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: 'source_users["U123"]', kind: invalid_source_user_id }
+
+  - name: source user id with a sign
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      source_users:
+        "-123": hanako@example.com
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: 'source_users["-123"]', kind: invalid_source_user_id }
+
+  - name: source user mapped to an invalid email
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+      source_users:
+        "1201234567890": hanako
+    container:
+      source: "1209876543210"
+    expect:
+      - { path: 'source_users["1201234567890"]', kind: invalid_email }
+
+  # Containers.
+  - name: run with no container
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container: null
+    expect:
+      - { path: containers, kind: no_containers }
+
+  - name: container without a source
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      name: Marketing
+    expect:
+      - { path: "containers[0].source", kind: required }
+
+  - name: container with an empty source
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: ""
+    expect:
+      - { path: "containers[0].source", kind: required }
+
+  - name: name of 256 runes
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      name: "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345"
+    expect:
+      - { path: "containers[0].name", kind: too_long }
+
+  # Members.
+  - name: member without an email
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { role: editor }
+    expect:
+      - { path: "containers[0].members[0].email", kind: required }
+
+  - name: member with an invalid email
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: "hanako yamada@example.com", role: editor }
+    expect:
+      - { path: "containers[0].members[0].email", kind: invalid_email }
+
+  - name: member listed twice
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: hanako@example.com, role: editor }
+        - { email: HANAKO@example.com, role: editor }
+    expect:
+      - { path: "containers[0].members[1].email", kind: duplicate }
+
+  - name: importer listed as a member
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: Ops@Example.com, role: editor }
+    expect:
+      - { path: "containers[0].members[0].email", kind: importer_listed }
+
+  - name: member without a role
+    dry_run: false
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: hanako@example.com }
+    expect:
+      - { path: "containers[0].members[0].role", kind: required }
+
+  - name: member with an unknown role
+    dry_run: true
+    mapping:
+      importer: ops@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: hanako@example.com, role: owner }
+    expect:
+      - { path: "containers[0].members[0].role", kind: invalid_role }
+
+  # Every error is collected.
+  - name: errors across the mapping are reported together
+    dry_run: false
+    mapping:
+      importer: ops
+      users:
+        - { email: hanako@example.com }
+        - { email: hanako@example.com }
+      source_users:
+        "abc": taro@example.com
+    container:
+      source: "1209876543210"
+      members:
+        - { email: taro@example.com, role: owner }
+        - { email: taro@example.com, role: editor }
+    expect:
+      - { path: importer, kind: invalid_email }
+      - { path: "users[1].email", kind: duplicate }
+      - { path: 'source_users["abc"]', kind: invalid_source_user_id }
+      - { path: "containers[0].members[0].role", kind: invalid_role }
+      - { path: "containers[0].members[1].email", kind: duplicate }

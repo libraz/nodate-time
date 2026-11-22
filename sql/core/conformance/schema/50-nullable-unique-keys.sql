@@ -109,6 +109,11 @@ INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reaso
   ('agent_runs', 'uniq_agent_runs_agent_source_event', 'source_event_id',
    'Keeps an on_event agent to one run per triggering event. A scheduled run has no source event and is deduplicated by uniq_agent_runs_dedupe_key instead, and a run whose event was hard-deleted keeps its history with the FK set to NULL.'),
 
+  ('attachments', 'uniq_attachments_task_id_source_uid_key', 'task_id',
+   'One live imported attachment per source ID per task. A row whose task was hard-deleted has task_id set NULL by the FK and leaves the key''s scope, so it is no longer an import a second run could duplicate under that task.'),
+  ('attachments', 'uniq_attachments_task_id_source_uid_key', 'source_uid_key',
+   'An attachment uploaded here and every soft-deleted row carry no key, and none of them is an import that a second run could duplicate. Only live imported attachments occupy the key.'),
+
   ('calendar_event_invites', 'uniq_calendar_event_invites_event_attendee', 'event_id',
    'Both halves are set on every invite a writer creates; they go NULL only when the event or the attendee is hard-deleted and the FK sets them so the revoked invite survives. A row that no longer names an event has no grant left to keep singular.'),
   ('calendar_event_invites', 'uniq_calendar_event_invites_event_attendee', 'attendee_id',
@@ -129,6 +134,11 @@ INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reaso
 
   ('calendars', 'uniq_calendars_system_slug', 'system_slug',
    'One calendar per provider feed per workspace. A personal calendar carries no slug and no claim on one, and a workspace holds many of them.'),
+
+  ('comments', 'uniq_comments_task_id_source_uid_key', 'task_id',
+   'One live imported comment per source ID per task. A row whose task was hard-deleted has task_id set NULL by the FK and leaves the key''s scope, so it is no longer an import a second run could duplicate under that task.'),
+  ('comments', 'uniq_comments_task_id_source_uid_key', 'source_uid_key',
+   'A comment written here and every soft-deleted row carry no key, and none of them is an import that a second run could duplicate. Only live imported comments occupy the key.'),
 
   ('events', 'uniq_events_reverses', 'reverses_event_id',
    'Stops two concurrent reversals of one event from both landing and double-cancelling in any projection over the log. An ordinary event reverses nothing and must stay freely appendable.'),
@@ -165,6 +175,9 @@ INSERT INTO nf_nullable_unique_allow (table_name, index_name, column_name, reaso
 
   ('task_handoffs', 'uniq_task_handoffs_one_pending_role', 'pending_role_key',
    'The generated column resolves to the role only while a handoff is pending, so the key allows one unresolved handoff per task role. Accepted, declined, expired and cancelled handoffs are immutable history and any number of them may exist.'),
+
+  ('tasks', 'uniq_tasks_project_id_source_uid_key', 'source_uid_key',
+   'One live imported task per source ID per project. A task created here and every soft-deleted row carry no key, and none of them is an import that a second run could duplicate; a deleted import may be brought in again.'),
 
   ('webhook_deliveries', 'uniq_webhook_deliveries_subscription_event', 'event_public_id',
    'Stops one event being POSTed twice to a subscriber when the fan-out fires twice. A test ping stands for no event and is a fresh dispatch each time it is asked for, so deduplicating pings would make the second press of the button do nothing.');

@@ -1,5 +1,6 @@
 -- Rows for test-0004.sh that 0004 converts once the decision table is
--- filled (0004-decisions.sql), each with the value it must hold afterwards.
+-- filled with the operator decisions test-0004.sh plants, each with the
+-- value it must hold afterwards.
 -- Group numbers follow the fixture table of the 0004 design; the rows that
 -- must stop live in 0004-stop-*.sql.
 --

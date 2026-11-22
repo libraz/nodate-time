@@ -24,6 +24,7 @@ either side reading the other's source.
 | `recurrence/exception-forms.json` | Exception elements, their classification and the occurrence each cancels. |
 | `all-day/fixtures.json`           | Stored all-day rows and the dates a viewer in each zone must see.         |
 | `event-kinds.yaml`                | The registry of event kinds written for changes to core tables.           |
+| `IMPORTERS.md`, `importers/`      | The contract every importer follows, with its guard and mapping fixtures. |
 
 A product adds its own tables in a sibling layer — this repository keeps
 its own under `sql/flow/`. Layers compose: a deployment applies core, then
