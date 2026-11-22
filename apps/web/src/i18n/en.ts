@@ -401,7 +401,7 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.profileRecreate': 'Make a new one',
   'appPasswords.profileOpen': 'Open on this device',
   'appPasswords.profileWarning':
-    'Treat this QR code and link like a password. Anyone you send it to by chat or email could connect to your calendars.',
+    'Treat this screen like a password. Anyone you send a screenshot or the link to by chat or email could connect to your calendars.',
   'appPasswords.creating': 'Preparing...',
   'appPasswords.limitReached':
     'You can sync up to {max} devices. To add another, stop syncing one you no longer use.',
@@ -454,7 +454,8 @@ export const en: Record<TranslationKey, string> = {
     'You may not be able to edit other people’s events from a calendar app.',
   'appPasswords.limitsMove':
     'Moving an event to another calendar in a calendar app loses the information above.',
-  'appPasswords.limitsTentative': 'Tentative and Out of office both show as Busy in calendar apps.',
+  'appPasswords.limitsTentative':
+    'Tentative shows as tentative in apps that support it (some apps show it the same as Busy). Out of office shows as Busy.',
   'appPasswords.limitsRepeat':
     'Some repeats, such as the 29th to 31st of every month, cannot be saved from the Calendar app.',
   'settings.security': 'Security',

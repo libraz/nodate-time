@@ -414,7 +414,7 @@ export const ja = {
   'appPasswords.profileRecreate': 'もう一度作る',
   'appPasswords.profileOpen': 'この端末で開く',
   'appPasswords.profileWarning':
-    'この QR コードとリンクは、パスワードと同じように扱ってください。チャットやメールで送ると、ほかの人があなたのカレンダーに接続できてしまいます。',
+    'この画面はパスワードと同じように扱ってください。スクリーンショットやリンクをチャットやメールで送ると、ほかの人があなたのカレンダーに接続できてしまいます。',
   'appPasswords.creating': '準備中...',
   'appPasswords.limitReached':
     '同期できる端末は {max} 台までです。新しく追加するには、使っていない端末の同期を止めてください。',
@@ -466,7 +466,7 @@ export const ja = {
   'appPasswords.limitsMove':
     'カレンダーアプリで予定を別のカレンダーへ移すと、上の情報は失われます。',
   'appPasswords.limitsTentative':
-    '空き状況の「仮」と「不在」は、カレンダーアプリでは「予定あり」と表示されます。',
+    '空き状況の「仮」は、対応しているアプリでは仮の予定として表示されます（アプリによっては「予定あり」と同じ見た目です）。「不在」は「予定あり」として表示されます。',
   'appPasswords.limitsRepeat':
     '毎月 29〜31 日の繰り返しなど、一部の繰り返しはカレンダーアプリから保存できません。',
   'settings.security': 'セキュリティ',
