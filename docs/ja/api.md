@@ -199,6 +199,7 @@ CalDAV サーバーは、カレンダーアプリ（iOS / macOS のカレンダ�
 
 - `If-None-Match: *` で予定を作成します。`If-Match` はクライアントが読んだ版の置き換えで、古い ETag は 412 です。`DELETE` は系列ごと削除します。`PUT` の応答には `ETag` を付けません。保存した内容が送られた内容と一致しないことがあるためで、クライアントは読み直します。
 - 反映するのは変わったプロパティだけです。要約・場所・説明・URL・開始と終了・終日・タイムゾーン・繰り返し規則・クラス・透過性と、表現できる最初のアラームが対象です。新しい `RECURRENCE-ID` はその回の変更、`EXDATE` の追加は回の取り消し、削除は取り消しの取り消しになります。
+- 空き状況は `TRANSP` で書き出し、「仮」には `STATUS:TENTATIVE` を添えます。「不在」に当たる標準のプロパティはないので `OPAQUE` だけです。書き込みでは `TRANSPARENT` を空き、`STATUS:TENTATIVE` を仮、`STATUS:CONFIRMED` を予定ありとして読みます。どちらの `STATUS` も無い `OPAQUE` は、保存済みの予定あり・仮・不在をそのまま残し、空きの予定は予定ありに変えます。
 - REST API が拒否する操作は、precondition 要素の付かない 403 です。エディターが他人の予定を編集する、タスク連動の予定の時刻を変える、読み取り専用のカレンダーへ書き込む、などです。受け付けられない内容は CalDAV の precondition 付きの 409 です。`valid-calendar-data`、`supported-calendar-component`（`VEVENT` 以外）、`no-uid-conflict`（リソースと異なる `UID`、またはカレンダー内の見える別の予定がすでに使っている `UID`）、`max-resource-size`（1 MiB 超）があります。ボディが空、または UTF-8 でないときは 400 です。
 - `valid-calendar-data` として拒否するもの: `RDATE`、`STATUS:CANCELLED`、`RANGE=THISANDFUTURE`、`METHOD`、複数の `UID`、1,000 件を超える `EXDATE`、負の継続時間、サーバーが保存できない繰り返し規則（29〜31 日始まりの単純な毎月の規則や `BYMONTH` 付きなど）、REST API 自体の上限に外れる値。
 - floating の時刻と未知のタイムゾーンは UTC として読みます。`ndt-` で始まる名前と `@nodate-time` で終わる UID はサーバーが付けた予定用に予約されていて、これらでの作成は 403 です。
