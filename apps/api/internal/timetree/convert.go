@@ -76,12 +76,12 @@ type converter struct {
 
 // Why an event's TimeTree author is not recorded as its creator.
 const (
-	authorNotMapped  = "not in authors"
+	authorNotMapped  = "not in source_users"
 	authorNotAMember = "not a member of the calendar"
 	authorMissing    = "no author"
 )
 
-func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer string, authors map[string]string) *converter {
+func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer string, sourceUsers map[string]string) *converter {
 	loc, _ := readZone(wsTZ)
 	cv := &converter{
 		wsTZ:         wsTZ,
@@ -96,7 +96,7 @@ func newConverter(wsTZ string, labels []ttLabel, m *MappingCalendar, importer st
 	for _, l := range labels {
 		cv.labels[l.ID] = l.Name
 	}
-	for id, email := range authors {
+	for id, email := range sourceUsers {
 		cv.authors[flexID(id)] = norm(email)
 	}
 	if m != nil {

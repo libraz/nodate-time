@@ -56,7 +56,9 @@ func (d dbLookup) calendars(ctx context.Context, userID uint32) ([]generated.Lis
 // calendarPlan is one mapped calendar after it met TimeTree and the database.
 type calendarPlan struct {
 	Mapping MappingCalendar
-	TT      ttCalendar
+	// Index is the position in the mapping's calendars, for error paths.
+	Index int
+	TT    ttCalendar
 	// Name is the calendar's name here.
 	Name string
 	// ExistingID is the calendar that is reused; 0 means it is created.
@@ -78,23 +80,23 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 	add := func(format string, a ...any) { res.Errors = append(res.Errors, fmt.Sprintf(format, a...)) }
 
 	for i, c := range m.Calendars {
-		where := fmt.Sprintf("calendars[%d] (%s)", i, c.TimeTree)
+		where := fmt.Sprintf("calendars[%d]", i)
 		var hits []ttCalendar
 		for _, t := range tt {
-			if t.Name == c.TimeTree || t.AliasCode == c.TimeTree {
+			if t.Name == c.Source || t.AliasCode == c.Source {
 				hits = append(hits, t)
 			}
 		}
 		switch len(hits) {
 		case 0:
-			add("%s: no active TimeTree calendar has that name or alias_code", where)
+			add("%s.source: no active TimeTree calendar has that name or alias_code", where)
 			continue
 		case 1:
 		default:
-			add("%s: %d TimeTree calendars match that name or alias_code", where, len(hits))
+			add("%s.source: %d TimeTree calendars match that name or alias_code", where, len(hits))
 			continue
 		}
-		plan := calendarPlan{Mapping: c, TT: hits[0], Name: c.Name}
+		plan := calendarPlan{Mapping: c, Index: i, TT: hits[0], Name: c.Name}
 		if plan.Name == "" {
 			plan.Name = hits[0].Name
 		}
@@ -104,7 +106,7 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		}
 		for _, label := range sortedKeys(c.Labels) {
 			if !known[label] {
-				add("%s: labels[%q] matches no label of the TimeTree calendar", where, label)
+				add("%s.labels[%q]: matches no label of the TimeTree calendar", where, label)
 			}
 		}
 		res.Plans = append(res.Plans, plan)
@@ -117,19 +119,19 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 			people[u.UserID] = true
 		}
 	}
-	for _, id := range sortedKeys(m.Authors) {
+	for _, id := range sortedKeys(m.SourceUsers) {
 		if !people[flexID(id)] {
-			add("authors[%q]: no mapped TimeTree calendar has that user", id)
+			add("source_users[%q]: no mapped TimeTree calendar has that user", id)
 		}
 	}
 
 	// Nothing else can be said about names until every entry has one.
-	names := map[string]string{}
+	names := map[string]int{}
 	for _, p := range res.Plans {
 		if prev, dup := names[p.Name]; dup {
-			add("calendars %s and %s resolve to the same name %q", prev, p.Mapping.TimeTree, p.Name)
+			add("calendars[%d].source: resolves to the same name %q as calendars[%d]", p.Index, p.Name, prev)
 		}
-		names[p.Name] = p.Mapping.TimeTree
+		names[p.Name] = p.Index
 	}
 
 	inUsers := map[string]bool{}
@@ -153,7 +155,7 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 			importerID, importerExists = u.ID, exists
 		}
 		if exists && !u.Enabled {
-			add("%s %q belongs to a disabled account", r.what, r.email)
+			add("%s: %q belongs to a disabled account", r.path, r.email)
 			if key == norm(m.Importer) {
 				importerExists = false
 			}
@@ -161,7 +163,7 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		}
 		if !exists {
 			if !inUsers[key] {
-				add("%s %q is not in users and is not an existing account", r.what, r.email)
+				add("%s: %q is not in users and is not an existing account", r.path, r.email)
 			} else {
 				res.NewUsers = append(res.NewUsers, r.email)
 			}
@@ -172,7 +174,7 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 			return res, fmt.Errorf("look up workspace membership of %s: %w", r.email, err)
 		}
 		if !member {
-			add("%s %q is not a member of the workspace", r.what, r.email)
+			add("%s: %q is not a member of the workspace", r.path, r.email)
 		}
 	}
 
@@ -197,12 +199,12 @@ func resolve(ctx context.Context, m *Mapping, tt []ttCalendar, labels map[flexID
 		case 0:
 		case 1:
 			if !calresolve.CanManage(hits[0].MemberRole) {
-				add("calendar %q: the importer cannot manage the existing shared calendar", p.Name)
+				add("calendars[%d].source: the importer cannot manage the existing shared calendar %q", p.Index, p.Name)
 				continue
 			}
 			p.ExistingID = hits[0].ID
 		default:
-			add("calendar %q: the importer is a member of %d shared calendars with that name", p.Name, len(hits))
+			add("calendars[%d].source: the importer is a member of %d shared calendars named %q", p.Index, len(hits), p.Name)
 		}
 	}
 	return res, nil
@@ -325,17 +327,37 @@ func countMoved(plans []calendarPlan, syncs map[flexID]*calendarSync) {
 	}
 }
 
+// Reasons the deletion guard refuses a calendar.
+const (
+	refuseEmptySource = "empty-source"
+	refuseMassDelete  = "mass-delete"
+)
+
+// guard decides the deletion guard for one calendar: candidates is the deletion
+// candidate count and moved the candidates another mapped calendar now has. It returns
+// the refusal reason, or "", and the deletions that would be lost.
+func guard(present, synced, candidates, moved int) (reason string, lost int) {
+	lost = candidates - moved
+	switch {
+	case present == 0 && synced > 0 && lost > 0:
+		return refuseEmptySource, lost
+	case lost > maxUnguardedDeletes && lost*2 > synced:
+		return refuseMassDelete, lost
+	}
+	return "", lost
+}
+
 // refusals lists the calendars a sync would empty or mostly empty. A fetch
 // that came back partial, or from another account, looks exactly like that.
 func refusals(plans []calendarPlan, syncs map[flexID]*calendarSync) []string {
 	var out []string
 	for _, p := range plans {
 		s := syncs[p.TT.ID]
-		lost := len(s.plan.Delete) - s.moved
-		switch {
-		case len(s.present) == 0 && s.plan.Synced > 0 && lost > 0:
+		reason, lost := guard(len(s.present), s.plan.Synced, len(s.plan.Delete), s.moved)
+		switch reason {
+		case refuseEmptySource:
 			out = append(out, fmt.Sprintf("TimeTree returned no events for calendar %q but %d are synced", p.Name, s.plan.Synced))
-		case lost > maxUnguardedDeletes && lost*2 > s.plan.Synced:
+		case refuseMassDelete:
 			out = append(out, fmt.Sprintf("calendar %q would delete %d of %d synced events", p.Name, lost, s.plan.Synced))
 		}
 	}

@@ -173,10 +173,10 @@ users:
   - email: %s
     name: 山田花子
   - email: %s
-authors:
+source_users:
   501: %s
 calendars:
-  - timetree: %s
+  - source: %s
     default_owner: %s
     default_attendees: [%s, %s]
     members:
@@ -217,7 +217,7 @@ func (s *ttScenario) run(t *testing.T, dryRun bool) (int, string, error) {
 
 type ttTotals struct{ imported, duplicates, skipped, failed, rejected, calendars, users int }
 
-var ttTotalLine = regexp.MustCompile(`total: imported=(\d+) updated=\d+ duplicates=(\d+) deleted=\d+ kept=\d+ moved=\d+ skipped=(\d+) failed=(\d+) rejected=(\d+) calendars_created=(\d+) users_created=(\d+)`)
+var ttTotalLine = regexp.MustCompile(`total: events imported=(\d+) updated=\d+ duplicates=(\d+) deleted=\d+ kept=\d+ moved=\d+ skipped=(\d+) failed=(\d+) rejected=(\d+); calendars_created=(\d+) users_created=(\d+)`)
 
 func parseTotals(t *testing.T, out string) ttTotals {
 	t.Helper()
@@ -332,13 +332,13 @@ func TestTimeTreeImportDryRunWritesNothing(t *testing.T) {
 	assert.Contains(t, out, s.calName)
 	assert.Contains(t, out, "mapped")
 	assert.Contains(t, out, "create")
-	assert.Contains(t, out, "users to create: ["+s.hanako)
+	assert.Contains(t, out, "users to create: "+s.hanako)
 	assert.Contains(t, out, "validation errors: 0")
 	assert.Contains(t, out, `by TimeTree author: (no author)=5, 501 "hana"=1, 502 "gone"=1`)
 	creators := []string{s.hanako + "=1", s.importer + "=2"}
 	sort.Strings(creators)
 	assert.Contains(t, out, "by creator: "+strings.Join(creators, ", "))
-	assert.Contains(t, out, `502 "gone" (not in authors)=1`)
+	assert.Contains(t, out, `502 "gone" (not in source_users)=1`)
 	assert.NotContains(t, out, "stopped-", "a deactivated calendar is not listed")
 }
 
@@ -515,4 +515,37 @@ func TestTimeTreeImportMissingCredentialsExitsTwoWithoutWriting(t *testing.T) {
 	}
 	require.Zero(t, s.users(t))
 	require.Zero(t, s.calendars(t))
+}
+
+func TestRunRefusesBadInputWritesNoWorkspace(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	s := newTTScenario(t, ttEvents())
+	slug := "ttnows-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	cfg := ttConfig()
+	cfg.WorkspaceSlug = slug
+	workspaces := func() int { return s.count(t, `SELECT COUNT(*) FROM workspaces WHERE slug = ?`, slug) }
+	run := func(mapping string) (int, string, error) {
+		var out strings.Builder
+		code, err := timetree.Run(context.Background(), timetree.Options{
+			BaseURL: s.server.URL, Email: "tt@example.com", Password: "pw",
+			Mapping: strings.NewReader(mapping), DB: testDB, Config: cfg, Out: &out,
+		})
+		return code, out.String(), err
+	}
+
+	// A stage-1 error, a calendar TimeTree does not have, and an importer that
+	// exists nowhere: each ends the run before anything is written.
+	for name, mapping := range map[string]string{
+		"stage 1":          "importer: nope\ncalendars:\n  - source: x\n",
+		"unknown calendar": strings.Replace(s.mapping, s.calName, "missing-"+s.calName, 1),
+		"unknown importer": "importer: " + s.importer + "\ncalendars:\n  - source: " + s.calName + "\n",
+	} {
+		code, out, err := run(mapping)
+		require.Error(t, err, name)
+		require.Equal(t, 2, code, "%s: %s", name, out)
+		require.Contains(t, out, "validation errors: ", name)
+		require.Zero(t, workspaces(), "%s created the workspace", name)
+	}
 }

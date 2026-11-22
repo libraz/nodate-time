@@ -74,15 +74,15 @@ func TestResolveAcceptsAConsistentMapping(t *testing.T) {
 func TestResolveTimeTreeMatchesNameOrAliasExactlyOnce(t *testing.T) {
 	for in, want := range map[string]flexID{"Band": "1", "alias-one": "1", "Second": "2", "Band2": "2"} {
 		m := mustParse(t, goodMapping)
-		m.Calendars[0].TimeTree = in
-		m.Calendars[0].Labels, m.Authors = nil, nil
+		m.Calendars[0].Source = in
+		m.Calendars[0].Labels, m.SourceUsers = nil, nil
 		res := resolveWith(t, m, existing())
 		require.Empty(t, res.Errors, in)
 		assert.Equal(t, want, res.Plans[0].TT.ID, in)
 	}
 	for in, msg := range map[string]string{"nothing": "no active TimeTree calendar", "Dup": "2 TimeTree calendars match"} {
 		m := mustParse(t, goodMapping)
-		m.Calendars[0].TimeTree, m.Authors = in, nil
+		m.Calendars[0].Source, m.SourceUsers = in, nil
 		res := resolveWith(t, m, existing())
 		require.Len(t, res.Errors, 1, in)
 		assert.Contains(t, res.Errors[0], msg)
@@ -172,7 +172,7 @@ func TestResolveReusesExactlyOneSharedCalendarOfTheSameName(t *testing.T) {
 func TestResolveCalendarNamesMustBeDistinctAfterDefaulting(t *testing.T) {
 	m := mustParse(t, goodMapping)
 	m.Calendars[0].Name = "Second"
-	m.Calendars = append(m.Calendars, MappingCalendar{TimeTree: "Second"}) // defaults to "Second"
+	m.Calendars = append(m.Calendars, MappingCalendar{Source: "Second"}) // defaults to "Second"
 	res := resolveWith(t, m, existing())
 	require.Len(t, res.Errors, 1)
 	assert.Contains(t, res.Errors[0], "same name")
@@ -302,11 +302,11 @@ func TestResolveAuthorIDsMustBelongToAMappedCalendar(t *testing.T) {
 		{ID: "2", Name: "Other", Users: []ttCalendarUser{{UserID: "200", Name: "太郎"}}},
 	}
 	m := &Mapping{
-		Importer:  "ops@example.com",
-		Authors:   map[string]string{"100": "hanako@example.com", "200": "mgr@example.com"},
-		Calendars: []MappingCalendar{{TimeTree: "Band"}},
+		Importer:    "ops@example.com",
+		SourceUsers: map[string]string{"100": "hanako@example.com", "200": "mgr@example.com"},
+		Calendars:   []MappingCalendar{{Source: "Band"}},
 	}
 	res, err := resolve(context.Background(), m, cals, nil, existing())
 	require.NoError(t, err)
-	assert.Equal(t, []string{`authors["200"]: no mapped TimeTree calendar has that user`}, res.Errors)
+	assert.Equal(t, []string{`source_users["200"]: no mapped TimeTree calendar has that user`}, res.Errors)
 }

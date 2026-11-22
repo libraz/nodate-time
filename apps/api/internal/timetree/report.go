@@ -3,7 +3,10 @@ package timetree
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
+
+	"github.com/libraz/nodate-time/apps/api/internal/accounts"
 )
 
 // calData is one TimeTree calendar as fetched.
@@ -129,8 +132,8 @@ func tally(m map[string]int) string {
 	return s
 }
 
-// writeReport prints the dry-run report: every TimeTree calendar, and for the
-// mapped ones what would be done.
+// writeReport prints the per-calendar part of the dry-run report: every
+// TimeTree calendar, and for the mapped ones what would be done.
 func writeReport(w io.Writer, all []*analysis, res resolution) {
 	plans := map[flexID]calendarPlan{}
 	for _, p := range res.Plans {
@@ -141,7 +144,7 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 		fmt.Fprintf(w, "TimeTree calendar %s name=%q alias_code=%q\n", cal.ID, cal.Name, cal.AliasCode)
 		plan, mapped := plans[cal.ID]
 		if mapped {
-			fmt.Fprintf(w, "  mapping: mapped (timetree: %s)\n", plan.Mapping.TimeTree)
+			fmt.Fprintf(w, "  mapping: mapped (source: %s)\n", plan.Mapping.Source)
 		} else {
 			fmt.Fprintln(w, "  mapping: not mapped")
 		}
@@ -173,6 +176,16 @@ func writeReport(w io.Writer, all []*analysis, res resolution) {
 			fmt.Fprintf(w, "  calendar %q: create\n", plan.Name)
 		}
 	}
+}
+
+// writeDryRunTail prints the dry-run lines that follow the sync plans: the
+// sign-in restriction, the accounts to create and the validation errors.
+func writeDryRunTail(w io.Writer, r accounts.Restriction, res resolution) {
+	if r.Restricted() {
+		fmt.Fprintf(w, "sign-in restriction: domains=%d allowlist=%d\n", r.Domains, r.Allowlist)
+	} else {
+		fmt.Fprintln(w, "sign-in restriction: open")
+	}
 	fmt.Fprintf(w, "users to create: %s\n", listOrNone(res.NewUsers))
 	writeErrors(w, res.Errors)
 }
@@ -185,7 +198,7 @@ func writeSyncPlans(w io.Writer, all []*analysis, res resolution, syncs map[flex
 	}
 	for _, p := range res.Plans {
 		s := syncs[p.TT.ID]
-		fmt.Fprintf(w, "calendar %q: sync plan create=%d update=%d unchanged=%d delete=%d moved=%d kept=%d synced=%d orphaned=%d repeated=%d\n",
+		fmt.Fprintf(w, "calendar %q: sync plan events create=%d update=%d unchanged=%d delete=%d moved=%d kept=%d synced=%d orphaned=%d repeated=%d\n",
 			p.Name, s.plan.Create, s.plan.Update, s.plan.Unchanged, len(s.plan.Delete), s.moved, s.plan.Kept,
 			s.plan.Synced, s.plan.Orphaned, repeated[p.TT.ID])
 	}
@@ -195,13 +208,32 @@ func listOrNone(items []string) string {
 	if len(items) == 0 {
 		return "none"
 	}
-	return fmt.Sprint(items)
+	return strings.Join(items, ", ")
 }
 
-// writeErrors lists every validation error.
+// writeErrors lists every validation error, each on one line.
 func writeErrors(w io.Writer, errs []string) {
 	fmt.Fprintf(w, "validation errors: %d\n", len(errs))
 	for _, e := range errs {
-		fmt.Fprintf(w, "  - %s\n", e)
+		fmt.Fprintf(w, "  - %s\n", strings.Join(strings.Fields(e), " "))
 	}
+}
+
+// errorTexts renders mapping errors as report lines.
+func errorTexts(errs []mappingError) []string {
+	out := make([]string, len(errs))
+	for i, e := range errs {
+		out[i] = e.Error()
+	}
+	return out
+}
+
+// writeCalendarResult prints one calendar's line of a real run.
+func writeCalendarResult(w io.Writer, name, state string, added, existing int, c counts) {
+	fmt.Fprintf(w, "calendar %q (%s): members added=%d existing=%d; events %s\n", name, state, added, existing, c.text())
+}
+
+// writeTotal prints the closing line of a real run.
+func writeTotal(w io.Writer, c counts, calendarsCreated, usersCreated int) {
+	fmt.Fprintf(w, "total: events %s; calendars_created=%d users_created=%d\n", c.text(), calendarsCreated, usersCreated)
 }

@@ -44,6 +44,22 @@ type Result struct {
 	Created bool
 }
 
+// Restriction is how sign-in is limited on a deployment: the configured
+// domains and the enabled allow-list rows. Both zero means open.
+type Restriction struct{ Domains, Allowlist int }
+
+// Restricted reports whether either limit is set.
+func (r Restriction) Restricted() bool { return r.Domains > 0 || r.Allowlist > 0 }
+
+// SignInRestriction reads the sign-in restriction without writing anything.
+func SignInRestriction(ctx context.Context, q *generated.Queries, cfg *config.Config) (Restriction, error) {
+	entries, err := q.CountEnabledOauthSigninAllowlistEntries(ctx)
+	if err != nil {
+		return Restriction{}, fmt.Errorf("read allow-list: %w", err)
+	}
+	return Restriction{Domains: len(cfg.GoogleAllowedDomainList()), Allowlist: int(entries)}, nil
+}
+
 // Create writes the account, its workspace membership and, where the
 // deployment calls for them, the allow-list entry and admin grant.
 func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Result, error) {
@@ -143,15 +159,11 @@ func Create(ctx context.Context, db *sql.DB, cfg *config.Config, p Params) (Resu
 		// deliberate exception to it, so its address joins the allowlist. On
 		// an open deployment a row would itself switch the restriction on and
 		// close sign-in to everyone else, so none is written.
-		restricted := len(cfg.GoogleAllowedDomainList()) > 0
-		if !restricted {
-			entries, err := q.CountEnabledOauthSigninAllowlistEntries(ctx)
-			if err != nil {
-				return fmt.Errorf("read allow-list: %w", err)
-			}
-			restricted = entries > 0
+		restriction, err := SignInRestriction(ctx, q, cfg)
+		if err != nil {
+			return err
 		}
-		if restricted {
+		if restriction.Restricted() {
 			allowPubID, err := uuid.NewV7()
 			if err != nil {
 				return err

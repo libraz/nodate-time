@@ -501,10 +501,10 @@ func TestAnalyzeTalliesTheReportInputs(t *testing.T) {
 	assert.Equal(t, 5, a.owners["ops@example.com"], "b, and the four all-day events")
 
 	var sb strings.Builder
-	writeReport(&sb, []*analysis{a}, resolution{Plans: []calendarPlan{{TT: ttCalendar{ID: "9"}, Name: "n", Mapping: MappingCalendar{TimeTree: "x"}}}, NewUsers: []string{"u@example.com"}, Errors: []string{"bad thing"}})
+	writeReport(&sb, []*analysis{a}, resolution{Plans: []calendarPlan{{TT: ttCalendar{ID: "9"}, Name: "n", Mapping: MappingCalendar{Source: "x"}}}, NewUsers: []string{"u@example.com"}, Errors: []string{"bad thing"}})
 	rep := sb.String()
-	for _, want := range []string{"alias_code", "mapped (timetree: x)", "oldest start: 2026-03-01", "花子=1", "possible double display: 0",
-		"all-day sample: ad0 start_at=", "calendar \"n\": create", "users to create: [u@example.com]", "validation errors: 1", "bad thing"} {
+	for _, want := range []string{"alias_code", "mapped (source: x)", "oldest start: 2026-03-01", "花子=1", "possible double display: 0",
+		"all-day sample: ad0 start_at=", "calendar \"n\": create"} {
 		assert.Contains(t, rep, want)
 	}
 }

@@ -70,10 +70,15 @@ func Run(ctx context.Context, o Options) (int, error) {
 	}
 	m, err := parseMapping(o.Mapping)
 	if err != nil {
-		return exitNoWrites, err
+		var me mappingError
+		if !errors.As(err, &me) {
+			return exitNoWrites, err
+		}
+		writeErrors(out, errorTexts([]mappingError{me}))
+		return exitNoWrites, errors.New("mapping has 1 error(s)")
 	}
 	if errs := m.validate(o.DryRun); len(errs) > 0 {
-		writeErrors(out, errs)
+		writeErrors(out, errorTexts(errs))
 		return exitNoWrites, fmt.Errorf("mapping has %d error(s)", len(errs))
 	}
 
@@ -82,7 +87,7 @@ func Run(ctx context.Context, o Options) (int, error) {
 	}
 
 	q := generated.New(o.DB)
-	ws, found, err := resolveWorkspace(ctx, q, o.Config, o.DryRun)
+	ws, found, err := findWorkspace(ctx, q, o.Config)
 	if err != nil {
 		return exitNoWrites, err
 	}
@@ -118,16 +123,23 @@ func Run(ctx context.Context, o Options) (int, error) {
 		if p := plans[d.cal.ID]; p != nil {
 			mc = &p.Mapping
 		}
-		cv := newConverter(ws.Timezone, d.labels, mc, m.Importer, m.Authors)
+		cv := newConverter(ws.Timezone, d.labels, mc, m.Importer, m.SourceUsers)
 		analyses[i] = analyze(d, cv)
 	}
 
 	if o.DryRun {
 		writeReport(out, analyses, res)
-	} else if len(res.Errors) > 0 {
-		writeErrors(out, res.Errors)
 	}
 	if len(res.Errors) > 0 {
+		if o.DryRun {
+			restriction, err := accounts.SignInRestriction(ctx, q, o.Config)
+			if err != nil {
+				return exitNoWrites, err
+			}
+			writeDryRunTail(out, restriction, res)
+		} else {
+			writeErrors(out, res.Errors)
+		}
 		return exitNoWrites, fmt.Errorf("mapping has %d error(s) against TimeTree and the database", len(res.Errors))
 	}
 
@@ -140,6 +152,15 @@ func Run(ctx context.Context, o Options) (int, error) {
 		if o.DryRun {
 			writeSyncPlans(out, analyses, res, syncs)
 		}
+	}
+	if o.DryRun {
+		restriction, err := accounts.SignInRestriction(ctx, q, o.Config)
+		if err != nil {
+			return exitNoWrites, err
+		}
+		writeDryRunTail(out, restriction, res)
+	}
+	if o.Sync {
 		if refused := refusals(res.Plans, syncs); len(refused) > 0 {
 			for _, r := range refused {
 				fmt.Fprintf(out, "refusing: %s\n", r)
@@ -150,19 +171,12 @@ func Run(ctx context.Context, o Options) (int, error) {
 	if o.DryRun {
 		return exitOK, nil
 	}
-	return write(ctx, o, ws, m, res, analyses, syncs)
+	return write(ctx, o, m, res, analyses, syncs)
 }
 
-// resolveWorkspace finds the workspace. A real run creates it when missing;
-// a dry run must not, and reports found=false instead.
-func resolveWorkspace(ctx context.Context, q *generated.Queries, cfg *config.Config, dryRun bool) (workspace.Scope, bool, error) {
-	if !dryRun {
-		ws, err := workspace.Ensure(ctx, q, cfg.WorkspaceSlug, cfg.WorkspaceName, cfg.WorkspaceTimezone, cfg.WorkspaceCountry)
-		if err != nil {
-			return workspace.Scope{}, false, fmt.Errorf("resolve workspace: %w", err)
-		}
-		return ws, true, nil
-	}
+// findWorkspace reads the workspace without creating it; found=false means
+// it does not exist yet. write creates it.
+func findWorkspace(ctx context.Context, q *generated.Queries, cfg *config.Config) (workspace.Scope, bool, error) {
 	row, err := q.GetWorkspaceBySlug(ctx, cfg.WorkspaceSlug)
 	switch {
 	case err == nil:
@@ -209,6 +223,12 @@ type counts struct {
 	imported, updated, duplicates, deleted, kept, moved, skipped, failed, rejected int
 }
 
+// text renders the counts in the shared report order.
+func (c counts) text() string {
+	return fmt.Sprintf("imported=%d updated=%d duplicates=%d deleted=%d kept=%d moved=%d skipped=%d failed=%d rejected=%d",
+		c.imported, c.updated, c.duplicates, c.deleted, c.kept, c.moved, c.skipped, c.failed, c.rejected)
+}
+
 func (c *counts) add(o counts) {
 	c.imported += o.imported
 	c.updated += o.updated
@@ -221,16 +241,20 @@ func (c *counts) add(o counts) {
 	c.rejected += o.rejected
 }
 
-// write performs the mutations in dependency order. syncs is nil unless the
-// run syncs.
+// write performs the mutations in dependency order, creating the workspace
+// first. syncs is nil unless the run syncs.
 func write(
-	ctx context.Context, o Options, ws workspace.Scope, m *Mapping, res resolution, analyses []*analysis,
+	ctx context.Context, o Options, m *Mapping, res resolution, analyses []*analysis,
 	syncs map[flexID]*calendarSync,
 ) (int, error) {
 	q := generated.New(o.DB)
 	out := o.Out
 	if out == nil {
 		out = io.Discard
+	}
+	ws, err := workspace.Ensure(ctx, q, o.Config.WorkspaceSlug, o.Config.WorkspaceName, o.Config.WorkspaceTimezone, o.Config.WorkspaceCountry)
+	if err != nil {
+		return exitFailed, fmt.Errorf("resolve workspace: %w", err)
 	}
 
 	created := 0
@@ -343,13 +367,9 @@ func write(
 		if p.ExistingID == 0 {
 			state = "created"
 		}
-		fmt.Fprintf(out, "calendar %q (%s): members added=%d existing=%d; events imported=%d updated=%d duplicates=%d deleted=%d kept=%d moved=%d skipped=%d failed=%d rejected=%d\n",
-			p.Name, state, added, existing,
-			c.imported, c.updated, c.duplicates, c.deleted, c.kept, c.moved, c.skipped, c.failed, c.rejected)
+		writeCalendarResult(out, p.Name, state, added, existing, c)
 	}
-	fmt.Fprintf(out, "total: imported=%d updated=%d duplicates=%d deleted=%d kept=%d moved=%d skipped=%d failed=%d rejected=%d calendars_created=%d users_created=%d\n",
-		total.imported, total.updated, total.duplicates, total.deleted, total.kept, total.moved,
-		total.skipped, total.failed, total.rejected, calendarsCreated, created)
+	writeTotal(out, total, calendarsCreated, created)
 
 	if total.failed > 0 {
 		return exitFailed, fmt.Errorf("%d event(s) failed to import", total.failed)

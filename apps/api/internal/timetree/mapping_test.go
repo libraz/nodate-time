@@ -15,10 +15,10 @@ users:
   - email: hanako@example.com
     name: 山田花子
   - email: mgr@example.com
-authors:
+source_users:
   10000001: hanako@example.com
 calendars:
-  - timetree: Band
+  - source: Band
     name: Team
     default_owner: mgr@example.com
     members:
@@ -43,7 +43,7 @@ func TestMappingParsesTheDocumentedShape(t *testing.T) {
 	assert.Equal(t, "", m.Users[1].Name, "name is optional")
 	require.Len(t, m.Calendars, 1)
 	assert.Equal(t, "hanako@example.com", m.Calendars[0].Labels["花子"], "non-ASCII label names are kept as written")
-	assert.Equal(t, map[string]string{"10000001": "hanako@example.com"}, m.Authors, "a numeric key reads as the id")
+	assert.Equal(t, map[string]string{"10000001": "hanako@example.com"}, m.SourceUsers, "a numeric key reads as the id")
 	assert.Empty(t, m.validate(false))
 }
 
@@ -66,8 +66,8 @@ func TestMappingUnknownKeysAreRefused(t *testing.T) {
 	for name, src := range map[string]string{
 		"top level": "importer: a@example.com\nversion: 1\ncalendars: []\n",
 		"user":      "importer: a@example.com\nusers:\n  - {email: b@example.com, nane: x}\n",
-		"calendar":  "importer: a@example.com\ncalendars:\n  - {timetree: x, owner: y}\n",
-		"member":    "importer: a@example.com\ncalendars:\n  - {timetree: x, members: [{email: b@example.com, role: viewer, color: red}]}\n",
+		"calendar":  "importer: a@example.com\ncalendars:\n  - {source: x, owner: y}\n",
+		"member":    "importer: a@example.com\ncalendars:\n  - {source: x, members: [{email: b@example.com, role: viewer, color: red}]}\n",
 	} {
 		_, err := parseMapping(strings.NewReader(src))
 		assert.Error(t, err, name)
@@ -79,7 +79,7 @@ func edit(t *testing.T, dryRun bool, mut func(*Mapping)) []string {
 	t.Helper()
 	m := mustParse(t, goodMapping)
 	mut(m)
-	return m.validate(dryRun)
+	return errorTexts(m.validate(dryRun))
 }
 
 func assertOneError(t *testing.T, errs []string, contains string) {
@@ -90,7 +90,7 @@ func assertOneError(t *testing.T, errs []string, contains string) {
 
 func TestMappingValidationRules(t *testing.T) {
 	t.Run("importer is required", func(t *testing.T) {
-		assertOneError(t, edit(t, false, func(m *Mapping) { m.Importer = "" }), "importer is required")
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.Importer = "" }), "importer: is required")
 	})
 	t.Run("calendars are required on a real run", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars = nil }), "at least one calendar")
@@ -115,19 +115,19 @@ func TestMappingValidationRules(t *testing.T) {
 	t.Run("duplicate users", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) { m.Users = append(m.Users, m.Users[0]) }), "listed twice")
 	})
-	t.Run("duplicate timetree", func(t *testing.T) {
+	t.Run("duplicate source", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) {
 			c := m.Calendars[0]
 			c.Name = "Other"
 			m.Calendars = append(m.Calendars, c)
-		}), "timetree \"Band\" is listed twice")
+		}), `calendars[1].source: "Band" is listed twice`)
 	})
 	t.Run("duplicate name", func(t *testing.T) {
 		assertOneError(t, edit(t, false, func(m *Mapping) {
 			c := m.Calendars[0]
-			c.TimeTree = "Another"
+			c.Source = "Another"
 			m.Calendars = append(m.Calendars, c)
-		}), "name \"Team\" is used twice")
+		}), `calendars[1].name: "Team" is listed twice`)
 	})
 	t.Run("name length", func(t *testing.T) {
 		assert.Empty(t, edit(t, false, func(m *Mapping) { m.Calendars[0].Name = strings.Repeat("あ", 255) }))
@@ -169,14 +169,14 @@ func TestMappingValidationRules(t *testing.T) {
 			m.Calendars[0].DefaultAttendees = []string{"hanako@example.com", "HANAKO@example.com"}
 		}), "default_attendees[1]")
 	})
-	t.Run("author keys are TimeTree user ids", func(t *testing.T) {
-		assertOneError(t, edit(t, false, func(m *Mapping) { m.Authors["hanako"] = "hanako@example.com" }), `authors["hanako"]`)
+	t.Run("source user keys are TimeTree user ids", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.SourceUsers["hanako"] = "hanako@example.com" }), `source_users["hanako"]`)
 	})
-	t.Run("author addresses must be valid", func(t *testing.T) {
-		assertOneError(t, edit(t, false, func(m *Mapping) { m.Authors["1"] = "not-an-address" }), `authors["1"]`)
+	t.Run("source user addresses must be valid", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.SourceUsers["1"] = "not-an-address" }), `source_users["1"]`)
 	})
-	t.Run("timetree is required", func(t *testing.T) {
-		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars[0].TimeTree = "" }), "timetree is required")
+	t.Run("source is required", func(t *testing.T) {
+		assertOneError(t, edit(t, false, func(m *Mapping) { m.Calendars[0].Source = "" }), "calendars[0].source: is required")
 	})
 }
 
@@ -197,11 +197,12 @@ func TestRunRefusesBadInputWithoutTouchingAnything(t *testing.T) {
 	assert.Equal(t, 2, code, "a dry run needs credentials too")
 	assert.Error(t, err)
 
-	code, _, err = run(Options{Email: "e", Password: "p", Mapping: strings.NewReader("")})
+	code, emptyOut, err := run(Options{Email: "e", Password: "p", Mapping: strings.NewReader("")})
 	assert.Equal(t, 2, code)
-	assert.ErrorContains(t, err, "empty")
+	assert.ErrorContains(t, err, "1 error")
+	assert.Contains(t, emptyOut, "  - mapping is empty")
 
-	code, out, err := run(Options{Email: "e", Password: "p", Mapping: strings.NewReader("importer: nope\ncalendars: [{timetree: x}]\n")})
+	code, out, err := run(Options{Email: "e", Password: "p", Mapping: strings.NewReader("importer: nope\ncalendars: [{source: x}]\n")})
 	assert.Equal(t, 2, code)
 	assert.Error(t, err)
 	assert.Contains(t, out, "not a valid ASCII email")

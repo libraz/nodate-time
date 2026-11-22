@@ -20,7 +20,7 @@ import (
 
 type ttSyncTotals struct{ imported, updated, duplicates, deleted, kept, moved, skipped, failed, rejected int }
 
-var ttSyncTotalLine = regexp.MustCompile(`total: imported=(\d+) updated=(\d+) duplicates=(\d+) deleted=(\d+) kept=(\d+) moved=(\d+) skipped=(\d+) failed=(\d+) rejected=(\d+)`)
+var ttSyncTotalLine = regexp.MustCompile(`total: events imported=(\d+) updated=(\d+) duplicates=(\d+) deleted=(\d+) kept=(\d+) moved=(\d+) skipped=(\d+) failed=(\d+) rejected=(\d+)`)
 
 func parseSyncTotals(t *testing.T, out string) ttSyncTotals {
 	t.Helper()
@@ -432,7 +432,7 @@ func TestTimeTreeSync(t *testing.T) {
 		s.mu.Lock()
 		s.extraCals = []map[string]any{{"id": 9003, "name": other, "alias_code": "b-" + s.calName, "deactivated_at": nil}}
 		s.mu.Unlock()
-		s.mapping += fmt.Sprintf("  - timetree: %s\n", other)
+		s.mapping += fmt.Sprintf("  - source: %s\n", other)
 		require.Equal(t, 11, s.syncOK(t).imported)
 
 		s.setFeed(9001, nil)
@@ -459,7 +459,7 @@ func TestTimeTreeSync(t *testing.T) {
 		code, out, err := s.runSync(t, true)
 		require.NoError(t, err, out)
 		require.Equal(t, 0, code, out)
-		assert.Contains(t, out, fmt.Sprintf(`calendar %q: sync plan create=3 update=0 unchanged=0 delete=0 moved=0 kept=0 synced=0 orphaned=0 repeated=1`, s.calName))
+		assert.Contains(t, out, fmt.Sprintf(`calendar %q: sync plan events create=3 update=0 unchanged=0 delete=0 moved=0 kept=0 synced=0 orphaned=0 repeated=1`, s.calName))
 
 		assert.Equal(t, 3, s.syncOK(t).imported)
 		assert.Equal(t, "new", s.row(t, "r-1").title)
@@ -479,7 +479,7 @@ func TestTimeTreeSync(t *testing.T) {
 		code, out, err := s.runSync(t, true)
 		require.NoError(t, err, out)
 		require.Equal(t, 0, code, out)
-		assert.Contains(t, out, fmt.Sprintf(`calendar %q: sync plan create=1 update=1 unchanged=1 delete=1 moved=0 kept=0 synced=3 orphaned=0 repeated=0`, s.calName))
+		assert.Contains(t, out, fmt.Sprintf(`calendar %q: sync plan events create=1 update=1 unchanged=1 delete=1 moved=0 kept=0 synced=3 orphaned=0 repeated=0`, s.calName))
 		assert.NotContains(t, out, "total:")
 
 		assert.Equal(t, before, snapshot(t, timed.id))
