@@ -77,7 +77,7 @@ jobs:
       # sql/core is a copy of the shared schema contract. This asserts that
       # the copy is unedited here and still matches the commit it claims to
       # come from. Whether upstream has moved on is not asserted here, since
-      # that would redden unrelated PRs; vendored-drift.yml reports it daily.
+      # that would redden unrelated PRs; run make check-core-current for that.
       - name: Vendored contract is unedited and matches its pin
         run: make check-core-pin
 

@@ -35,11 +35,10 @@ The web app is on <http://localhost:5173> and the API on <http://localhost:8080>
 
 ## Checks
 
-| Check                                                                                | Workflow             | Trigger                      |
-| ------------------------------------------------------------------------------------ | -------------------- | ---------------------------- |
-| Biome, typecheck, Vitest, production build (`web`)                                   | `ci.yml`             | push to `main`, pull request |
-| Vendored contract check, generated code, conformance, upgrade path, vet, E2E (`api`) | `ci.yml`             | push to `main`, pull request |
-| Vendored copy against the current upstream (`make check-core-current`)               | `vendored-drift.yml` | daily, manual                |
+| Check                                                                                | Workflow | Trigger                      |
+| ------------------------------------------------------------------------------------ | -------- | ---------------------------- |
+| Biome, typecheck, Vitest, production build (`web`)                                   | `ci.yml` | push to `main`, pull request |
+| Vendored contract check, generated code, conformance, upgrade path, vet, E2E (`api`) | `ci.yml` | push to `main`, pull request |
 
 A red check is no reason to hold a pull request back.
 
