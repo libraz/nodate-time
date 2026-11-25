@@ -29,6 +29,7 @@ const ENTITY_LABEL: Record<string, TranslationKey> = {
   attachment: 'activity.entityAttachment',
   photo: 'activity.entityPhoto',
   calendar: 'activity.entityCalendar',
+  label: 'activity.entityLabel',
   rsvp: 'activity.entityRsvp',
   subscription: 'activity.entitySubscription',
 };

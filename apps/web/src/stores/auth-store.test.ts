@@ -234,7 +234,7 @@ describe('logout', () => {
       events: [],
       memos: [],
       membersMap: { 'cal-1': [] },
-      labels: [{ id: 'label-1', name: 'Work', color: '#000000', etag: '"l1"' }],
+      labelsMap: { 'cal-1': [{ id: 'label-1', name: 'Work', color: '#000000', etag: '"l1"' }] },
       activeCalendarIds: ['cal-1'],
     });
 
@@ -248,7 +248,7 @@ describe('logout', () => {
       events: [],
       memos: [],
       membersMap: {},
-      labels: [],
+      labelsMap: {},
       activeCalendarIds: [],
     });
   });

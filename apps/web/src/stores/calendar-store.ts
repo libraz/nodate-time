@@ -6,7 +6,6 @@ import { type EventScope, scopeEtag, seriesId } from '@/lib/event-move';
 import { offerOccurrenceRestore, offerRestore } from '@/lib/event-restore';
 import { resizeImageForCover } from '@/lib/image-resize';
 import { loadJson, saveJson } from '@/lib/storage';
-import { toast } from '@/lib/toast';
 import { uploadCalendarCover as uploadCover } from '@/lib/upload';
 import { useUiStore } from '@/stores/ui-store';
 import type {
@@ -40,6 +39,8 @@ export interface EventInput {
   notificationOffset?: number | null | undefined;
   participantIds?: string[] | undefined;
   ownerId?: string | null | undefined;
+  /** The label the event is filed under; null on a patch takes it off. */
+  labelId?: string | null | undefined;
   recurrenceRule?: RecurrenceRule | null | undefined;
   showAs?: ShowAs | undefined;
   flexibility?: Flexibility | undefined;
@@ -59,10 +60,11 @@ type Schemas = components['schemas'];
 
 /** The create body: the generated schema has no null for these, an omission says the same. */
 function createBody(evt: EventInput): Schemas['CreateEventInputBody'] {
-  const { ownerId, notificationOffset, recurrenceRule, ...rest } = evt;
+  const { ownerId, labelId, notificationOffset, recurrenceRule, ...rest } = evt;
   return {
     ...rest,
     ...(ownerId ? { ownerId } : {}),
+    ...(labelId ? { labelId } : {}),
     ...(notificationOffset != null ? { notificationOffset } : {}),
     // The schema types the rule as an opaque object.
     ...(recurrenceRule ? { recurrenceRule } : {}),
@@ -79,12 +81,19 @@ function toEvent(item: Schemas['EventResponse'], calendarId: string): CalendarEv
   return { ...(item as unknown as CalendarEvent), calendarId };
 }
 
+/** Reads a calendar's labels and the visible events again; a label change recolours events. */
+async function refreshAfterLabelChange(get: () => CalendarState, calendarId: string) {
+  const { start, end } = get().visibleRange();
+  await Promise.all([get().fetchLabels(calendarId), get().fetchEvents(start, end)]);
+}
+
 interface CalendarState {
   calendars: Calendar[];
   events: CalendarEvent[];
   memos: StoredMemo[];
   membersMap: Record<string, Member[]>;
-  labels: Label[];
+  /** Each calendar's labels, in creation order, once asked for. */
+  labelsMap: Record<string, Label[]>;
   activeCalendarIds: string[];
   isLoading: boolean;
   /**
@@ -99,6 +108,8 @@ interface CalendarState {
    * than shown as a calendar nobody is on.
    */
   memberErrors: Record<string, string>;
+  /** Calendars whose label list failed to load, by id. */
+  labelErrors: Record<string, string>;
   /**
    * Calendars whose last event listing had more to give than it returned. The
    * grid would otherwise read the missing tail of the window as free time.
@@ -128,6 +139,16 @@ interface CalendarState {
   fetchMemos: (signal?: AbortSignal) => Promise<void>;
   fetchMembers: (calendarId: string) => Promise<void>;
   fetchLabels: (calendarId: string) => Promise<void>;
+  /** Creates a label. Events are read again, since the grid draws their colours. */
+  addLabel: (calendarId: string, label: { name: string; color: string }) => Promise<void>;
+  /** Renames or recolours a label, checked against the version the list carried. */
+  updateLabel: (
+    calendarId: string,
+    labelId: string,
+    patch: { name?: string; color?: string },
+  ) => Promise<void>;
+  /** Deletes a label; the events that carried it fall back to their owner's colour. */
+  deleteLabel: (calendarId: string, labelId: string) => Promise<void>;
   /** Re-runs whichever of the startup loads did not come back. */
   retryFailedLoads: () => Promise<void>;
 
@@ -199,6 +220,10 @@ function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
   delete nextMap[id];
   const nextErrors = { ...s.memberErrors };
   delete nextErrors[id];
+  const nextLabels = { ...s.labelsMap };
+  delete nextLabels[id];
+  const nextLabelErrors = { ...s.labelErrors };
+  delete nextLabelErrors[id];
   return {
     calendars: s.calendars.filter((c) => c.id !== id),
     events: s.events.filter((e) => e.calendarId !== id),
@@ -206,6 +231,8 @@ function forgetCalendar(s: CalendarState, id: string): Partial<CalendarState> {
     activeCalendarIds: ids,
     membersMap: nextMap,
     memberErrors: nextErrors,
+    labelsMap: nextLabels,
+    labelErrors: nextLabelErrors,
     truncatedCalendarIds: s.truncatedCalendarIds.filter((cid) => cid !== id),
   };
 }
@@ -249,7 +276,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   events: [],
   memos: [],
   membersMap: {},
-  labels: [],
+  labelsMap: {},
+  labelErrors: {},
   activeCalendarIds: loadJson<string[]>('activeCalendarIds', []),
   isLoading: false,
   loadError: null,
@@ -312,14 +340,6 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       // of those asks for the one calendar it is showing. Loading all of them
       // at startup cost one request per calendar for an answer that arrived
       // with the list itself.
-      const first = cals[0];
-      if (first && get().labels.length === 0) {
-        try {
-          await get().fetchLabels(first.id);
-        } catch (e) {
-          toast.error(errorMessage(e));
-        }
-      }
     } finally {
       if (
         requestGeneration === calendarRequestGeneration &&
@@ -474,12 +494,48 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   async fetchLabels(calendarId) {
     const currentAccountGeneration = accountGeneration;
-    const { data } = await client.GET('/calendars/{calendarId}/labels', {
-      params: { path: { calendarId } },
-    });
-    const labels: Label[] = present(data) ?? [];
+    let labels: Label[];
+    try {
+      const { data } = await client.GET('/calendars/{calendarId}/labels', {
+        params: { path: { calendarId } },
+      });
+      labels = present(data) ?? [];
+    } catch (e) {
+      if (currentAccountGeneration !== accountGeneration) return;
+      set((s) => ({ labelErrors: { ...s.labelErrors, [calendarId]: errorMessage(e) } }));
+      return;
+    }
     if (currentAccountGeneration !== accountGeneration) return;
-    set({ labels });
+    set((s) => {
+      const nextErrors = { ...s.labelErrors };
+      delete nextErrors[calendarId];
+      return { labelsMap: { ...s.labelsMap, [calendarId]: labels }, labelErrors: nextErrors };
+    });
+  },
+
+  async addLabel(calendarId, label) {
+    await client.POST('/calendars/{calendarId}/labels', {
+      params: { path: { calendarId } },
+      body: label,
+    });
+    await refreshAfterLabelChange(get, calendarId);
+  },
+
+  async updateLabel(calendarId, labelId, patch) {
+    const etag = get().labelsMap[calendarId]?.find((l) => l.id === labelId)?.etag ?? '';
+    await client.PATCH('/calendars/{calendarId}/labels/{labelId}', {
+      params: { path: { calendarId, labelId }, header: { 'If-Match': etag } },
+      body: patch,
+    });
+    await refreshAfterLabelChange(get, calendarId);
+  },
+
+  async deleteLabel(calendarId, labelId) {
+    const etag = get().labelsMap[calendarId]?.find((l) => l.id === labelId)?.etag ?? '';
+    await client.DELETE('/calendars/{calendarId}/labels/{labelId}', {
+      params: { path: { calendarId, labelId }, header: { 'If-Match': etag } },
+    });
+    await refreshAfterLabelChange(get, calendarId);
   },
 
   async retryFailedLoads() {
@@ -774,7 +830,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       events: [],
       memos: [],
       membersMap: {},
-      labels: [],
+      labelsMap: {},
+      labelErrors: {},
       activeCalendarIds: [],
       isLoading: false,
       loadError: null,

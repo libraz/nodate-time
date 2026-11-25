@@ -15,7 +15,7 @@ import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
-import { client, errorMessage, isStaleError } from '@/lib/client';
+import { ApiError, client, errorMessage, isStaleError } from '@/lib/client';
 import { writableVisibleCalendars } from '@/lib/create-event';
 import { seriesId } from '@/lib/event-move';
 import {
@@ -104,6 +104,7 @@ interface FormState {
   notificationOffset: number | null;
   participantIds: string[];
   ownerId: string | null;
+  labelId: string | null;
   visibility: Visibility;
   showAs: ShowAs;
   flexibility: Flexibility;
@@ -163,6 +164,7 @@ function eventToForm(ev: CalendarEvent, timezone: string): FormState {
     notificationOffset: ev.notificationOffset ?? null,
     participantIds: ev.participantIds ?? [],
     ownerId: ev.ownerId ?? null,
+    labelId: ev.labelId ?? null,
     visibility: ev.visibility ?? 'default',
     showAs: ev.showAs ?? 'busy',
     flexibility: ev.flexibility ?? 'fixed',
@@ -189,6 +191,9 @@ export function EventModal() {
   const deleteEvent = useCalendarStore((s) => s.deleteEvent);
   const membersMap = useCalendarStore((s) => s.membersMap);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
+  const labelsMap = useCalendarStore((s) => s.labelsMap);
+  const labelErrors = useCalendarStore((s) => s.labelErrors);
+  const fetchLabels = useCalendarStore((s) => s.fetchLabels);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
   const visibleRange = useCalendarStore((s) => s.visibleRange);
   const me = useAuthStore((s) => s.user);
@@ -278,6 +283,7 @@ export function EventModal() {
     notificationOffset: null,
     participantIds: [],
     ownerId: null,
+    labelId: null,
     visibility: 'default',
     showAs: 'busy',
     flexibility: 'fixed',
@@ -370,6 +376,15 @@ export function EventModal() {
     if (membersMap[formCalendarId]) return;
     fetchMembers(formCalendarId);
   }, [showEventModal, formCalendarId, membersMap, fetchMembers]);
+
+  // The label picker names the labels of the calendar being edited, asked for
+  // the same way; a failed read is not retried on every render.
+  useEffect(() => {
+    if (!showEventModal || !formCalendarId) return;
+    if (labelsMap[formCalendarId] || labelErrors[formCalendarId]) return;
+    void fetchLabels(formCalendarId);
+  }, [showEventModal, formCalendarId, labelsMap, labelErrors, fetchLabels]);
+  const calendarLabels = (formCalendarId && labelsMap[formCalendarId]) || [];
 
   // Answering an invitation is the invitee's own to give and is not editing,
   // so the control appears for a participant of a saved event regardless of
@@ -487,6 +502,7 @@ export function EventModal() {
       notificationOffset: null,
       participantIds: [],
       ownerId: null,
+      labelId: null,
       visibility: 'default',
       showAs: 'busy',
       flexibility: 'fixed',
@@ -586,6 +602,11 @@ export function EventModal() {
               participantIds: form.participantIds,
               ownerId: form.ownerId,
               visibility: form.visibility,
+              // An edit names the label only when it changed, so a label
+              // deleted meanwhile cannot fail an unrelated save.
+              ...((editingEvent ? form.labelId !== initialForm.current?.labelId : form.labelId)
+                ? { labelId: form.labelId }
+                : {}),
             }),
         notificationOffset: form.notificationOffset,
         showAs: form.showAs,
@@ -619,6 +640,12 @@ export function EventModal() {
           await fetchEvents(start, end).catch(() => {});
           return;
         }
+        if (e instanceof ApiError && e.code === 'EVENT.LABEL_UNKNOWN') {
+          // The label was deleted meanwhile: read the list again and drop the choice.
+          void fetchLabels(form.calendarId || editingEvent?.calendarId || '');
+          setForm((f) => ({ ...f, labelId: null }));
+          setScopePrompt(null);
+        }
         toast.error(errorMessage(e, t('error.saveFailed')));
       } finally {
         setSaving(false);
@@ -626,6 +653,7 @@ export function EventModal() {
     },
     [
       form,
+      fetchLabels,
       editingEvent,
       isRecurringInstance,
       addEvent,
@@ -752,10 +780,10 @@ export function EventModal() {
       )}
 
       {/* Identity: which calendar + which color (event's visual identity) */}
-      {/* An event has no colour of its own: it sits on its owner's layer, and
-          the layer is what carries a colour the whole calendar has agreed on.
-          Changing it is done in the members list. With one calendar there is
-          nothing to choose or name, so the card is left out. */}
+      {/* An event is drawn in its label's colour, else its owner's layer colour,
+          which the whole calendar has agreed on and the members list changes.
+          With one calendar there is nothing to choose or name, so the card is
+          left out. */}
       {(() => {
         const current = calendars.find((c) => c.id === formCalendarId);
         const calIcon = (
@@ -780,7 +808,9 @@ export function EventModal() {
               {calIcon}
               <CustomSelect
                 value={formCalendarId}
-                onChange={(v) => setForm((f) => ({ ...f, calendarId: v, ownerId: null }))}
+                onChange={(v) =>
+                  setForm((f) => ({ ...f, calendarId: v, ownerId: null, labelId: null }))
+                }
                 ariaLabel={t('event.calendar')}
                 className="min-w-0 flex-1"
                 triggerClassName="input-modern"
@@ -815,6 +845,43 @@ export function EventModal() {
           </div>
         );
       })()}
+
+      {/* Label: the colour the event is drawn in instead of its owner's. Left
+          out where the calendar has none to offer. */}
+      {!detailsHidden && calendarLabels.length > 0 && (
+        <div className="px-6 pb-3">
+          <div className="card-section flex items-center gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-text-tertiary)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0"
+              aria-hidden="true"
+            >
+              <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+              <circle cx="7.5" cy="7.5" r="1.2" />
+            </svg>
+            <span className="flex-1 text-default text-[var(--color-text-primary)]">
+              {t('event.label')}
+            </span>
+            <CustomSelect
+              value={form.labelId ?? ''}
+              onChange={(v) => setForm((f) => ({ ...f, labelId: v || null }))}
+              ariaLabel={t('event.label')}
+              disabled={!editable}
+              options={[
+                { value: '', label: t('event.labelNone') },
+                ...calendarLabels.map((l) => ({ value: l.id, label: l.name, color: l.color })),
+              ]}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Creator (read-only metadata, shown only for existing events) */}
       {editingEvent &&

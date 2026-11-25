@@ -75,6 +75,12 @@ const calendarState = {
   activeCalendarIds: ['cal-1'],
   membersMap: { 'cal-1': members } as Record<string, Member[]>,
   memberErrors: {} as Record<string, string>,
+  labelsMap: { 'cal-1': [] } as Record<string, unknown[]>,
+  labelErrors: {} as Record<string, string>,
+  fetchLabels: vi.fn(),
+  addLabel: vi.fn(),
+  updateLabel: vi.fn(),
+  deleteLabel: vi.fn(),
   fetchMembers: vi.fn(),
   leaveCalendar: vi.fn(),
   updateMemberColor: vi.fn(),
@@ -351,5 +357,17 @@ describe('MembersPanel adding people', () => {
 
     expect(screen.getByRole('searchbox')).toBeInTheDocument();
     await act(async () => {});
+  });
+});
+
+describe('MembersPanel labels', () => {
+  it('lists the calendar labels below the members', () => {
+    calendarState.labelsMap = {
+      'cal-1': [{ id: 'l1', name: 'Live', color: '#E73B3B', etag: '"l"' }],
+    };
+    render(<MembersPanel />);
+
+    expect(screen.getByText('Live')).toBeInTheDocument();
+    calendarState.labelsMap = { 'cal-1': [] };
   });
 });

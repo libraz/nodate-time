@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { TipCard } from '@/components/guide';
+import { LabelsPanel } from '@/components/labels-panel';
 import { MemberAdder } from '@/components/member-adder';
 import { MemberColorEditor } from '@/components/member-color-editor';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
@@ -295,6 +296,9 @@ export function MembersPanel() {
                 </button>
               </div>
             )}
+          {calendarId && !loading && (
+            <LabelsPanel calendarId={calendarId} canManage={canManageMembers} />
+          )}
         </div>
       )}
 

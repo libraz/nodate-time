@@ -185,7 +185,8 @@ beforeEach(() => {
     events: [],
     memos: [],
     membersMap: {},
-    labels: [],
+    labelsMap: {},
+    labelErrors: {},
     activeCalendarIds: [],
     isLoading: false,
   });
@@ -1064,5 +1065,91 @@ describe('updateEvent etags', () => {
     ).rejects.toThrow('stale');
 
     expect(useCalendarStore.getState().events[0]?.etag).toBe('"before"');
+  });
+});
+
+describe('labels', () => {
+  const label = (id: string, name: string, etag = `"${id}"`) => ({
+    id,
+    name,
+    color: '#47B2F7',
+    etag,
+  });
+
+  /** Answers a labels listing and the event listing a label change reads again. */
+  function answer(labels: ReturnType<typeof label>[]) {
+    mockApi.get.mockImplementation(async (url: string) =>
+      url.endsWith('/labels') ? labels : page([]),
+    );
+  }
+
+  it('keeps each calendar own list', async () => {
+    answer([label('l1', 'Live')]);
+    await useCalendarStore.getState().fetchLabels('cal-1');
+    answer([label('l2', 'Lesson')]);
+    await useCalendarStore.getState().fetchLabels('cal-2');
+
+    const { labelsMap } = useCalendarStore.getState();
+    expect(labelsMap['cal-1']?.map((l) => l.name)).toEqual(['Live']);
+    expect(labelsMap['cal-2']?.map((l) => l.name)).toEqual(['Lesson']);
+  });
+
+  it('records a failed listing instead of throwing', async () => {
+    mockApi.get.mockRejectedValue(new Error('down'));
+
+    await useCalendarStore.getState().fetchLabels('cal-1');
+
+    expect(useCalendarStore.getState().labelErrors['cal-1']).toBe('down');
+  });
+
+  it('creates a label, then reads the labels and events again', async () => {
+    const fetchEvents = vi.fn(async () => {});
+    useCalendarStore.setState({ fetchEvents });
+    mockApi.post.mockResolvedValue(label('l1', 'Live'));
+    answer([label('l1', 'Live')]);
+
+    await useCalendarStore.getState().addLabel('cal-1', { name: 'Live', color: '#47B2F7' });
+
+    expect(mockApi.post.mock.calls[0]?.[0]).toBe('/calendars/cal-1/labels');
+    expect(mockApi.post.mock.calls[0]?.[1]).toMatchObject({
+      body: { name: 'Live', color: '#47B2F7' },
+    });
+    expect(useCalendarStore.getState().labelsMap['cal-1']).toHaveLength(1);
+    expect(fetchEvents).toHaveBeenCalled();
+  });
+
+  it('sends the version the list carries, read again after each change', async () => {
+    useCalendarStore.setState({ labelsMap: { 'cal-1': [label('l1', 'Live', '"v1"')] } });
+    mockApi.patch.mockResolvedValue(label('l1', 'Gig'));
+    mockApi.delete.mockResolvedValue(undefined);
+    answer([label('l1', 'Gig', '"v2"')]);
+
+    await useCalendarStore.getState().updateLabel('cal-1', 'l1', { name: 'Gig' });
+    await useCalendarStore.getState().deleteLabel('cal-1', 'l1');
+
+    expect(mockApi.patch.mock.calls[0]?.[0]).toBe('/calendars/cal-1/labels/l1');
+    expect(mockApi.patch.mock.calls[0]?.[1]).toMatchObject({
+      params: { header: { 'If-Match': '"v1"' } },
+      body: { name: 'Gig' },
+    });
+    expect(mockApi.delete.mock.calls[0]?.[1]).toMatchObject({
+      params: { header: { 'If-Match': '"v2"' } },
+    });
+  });
+
+  it('omits a null label from a create body and keeps it on a patch', async () => {
+    mockApi.post.mockResolvedValue(evt('e1', 'cal-1'));
+    mockApi.patch.mockResolvedValue(evt('e1', 'cal-1'));
+
+    await useCalendarStore
+      .getState()
+      .addEvent('cal-1', { title: 'x', allDay: true, labelId: null });
+    await useCalendarStore
+      .getState()
+      .updateEvent('cal-1', 'e1', { labelId: null }, undefined, '"e"');
+
+    expect(mockApi.post.mock.calls[0]?.[1]).toMatchObject({ body: { title: 'x' } });
+    expect(mockApi.post.mock.calls[0]?.[1]?.body).not.toHaveProperty('labelId');
+    expect(mockApi.patch.mock.calls[0]?.[1]).toMatchObject({ body: { labelId: null } });
   });
 });

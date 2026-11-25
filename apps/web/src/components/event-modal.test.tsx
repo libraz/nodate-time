@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/client';
-import type { CalendarEvent, Member } from '@/types/calendar';
+import type { CalendarEvent, Label, Member } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
   useT: () => (key: string) => key,
@@ -127,6 +127,9 @@ const calendarState = {
   deleteEvent: vi.fn(),
   membersMap: { 'cal-1': [] } as Record<string, Member[]>,
   fetchMembers: vi.fn(),
+  labelsMap: {} as Record<string, Label[]>,
+  labelErrors: {} as Record<string, string>,
+  fetchLabels: vi.fn(),
   fetchEvents: vi.fn(),
   visibleRange: () => ({ start: uiState.selectedDate, end: uiState.selectedDate }),
 };
@@ -200,6 +203,8 @@ beforeEach(() => {
   calendarState.events = [event];
   calendarState.calendars = [teamCalendar];
   calendarState.activeCalendarIds = ['cal-1'];
+  calendarState.labelsMap = {};
+  calendarState.labelErrors = {};
   teamCalendar.role = 'owner';
   relativeTime.mockReturnValue('a while ago');
   answerGets({});
@@ -1524,5 +1529,107 @@ describe('EventModal edit grants', () => {
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
     expect(screen.queryByRole('button', { name: 'attendee.canEdit' })).toBeNull();
+  });
+});
+
+describe('EventModal label', () => {
+  const live: Label = { id: 'l1', name: 'Live', color: '#E73B3B', etag: '"l1"' };
+  const lesson: Label = { id: 'l2', name: 'Lesson', color: '#2ECC87', etag: '"l2"' };
+
+  async function openEditor() {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+  }
+
+  async function chooseLabel(name: string) {
+    fireEvent.click(screen.getByRole('button', { name: 'event.label' }));
+    fireEvent.click(await screen.findByRole('option', { name }));
+  }
+
+  async function savedPatch() {
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    return calendarState.updateEvent.mock.calls[0]?.[2] as Record<string, unknown>;
+  }
+
+  it('leaves the field out where the calendar has no labels', async () => {
+    calendarState.labelsMap = { 'cal-1': [] };
+
+    await openEditor();
+
+    expect(screen.queryByRole('button', { name: 'event.label' })).toBeNull();
+  });
+
+  it('sends the chosen label with the save', async () => {
+    calendarState.labelsMap = { 'cal-1': [live, lesson] };
+    await openEditor();
+
+    await chooseLabel('Lesson');
+
+    expect(await savedPatch()).toMatchObject({ labelId: 'l2' });
+  });
+
+  it('keeps the label out of a save that only changes the title', async () => {
+    calendarState.labelsMap = { 'cal-1': [live] };
+    calendarState.events = [{ ...event, labelId: 'l1' }];
+    await openEditor();
+
+    fireEvent.change(titleField(), { target: { value: 'Retitled' } });
+
+    expect(await savedPatch()).not.toHaveProperty('labelId');
+  });
+
+  it('sends null when the label is taken off', async () => {
+    calendarState.labelsMap = { 'cal-1': [live] };
+    calendarState.events = [{ ...event, labelId: 'l1' }];
+    await openEditor();
+
+    await chooseLabel('event.labelNone');
+
+    expect(await savedPatch()).toMatchObject({ labelId: null });
+  });
+
+  it('forgets the chosen label when the calendar changes', async () => {
+    const home = { ...teamCalendar, id: 'cal-2', name: 'Home' };
+    calendarState.calendars = [teamCalendar, home];
+    calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
+    calendarState.labelsMap = { 'cal-1': [live], 'cal-2': [lesson] };
+    uiState.editingEventId = null;
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Dentist' } });
+
+    await chooseLabel('Live');
+    fireEvent.click(screen.getByRole('button', { name: 'event.calendar' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    expect(calendarState.addEvent.mock.calls[0]?.[1]).not.toHaveProperty('labelId');
+  });
+
+  it('reads the labels again and drops the choice when the label is gone', async () => {
+    calendarState.labelsMap = { 'cal-1': [live] };
+    calendarState.updateEvent.mockRejectedValueOnce(
+      new ApiError(422, 'EVENT.LABEL_UNKNOWN', 'unknown'),
+    );
+    await openEditor();
+    await chooseLabel('Live');
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(calendarState.fetchLabels).toHaveBeenCalledWith('cal-1');
+    expect(screen.getByRole('button', { name: 'event.label' })).toHaveTextContent(
+      'event.labelNone',
+    );
+  });
+
+  it('does not send the label for an event whose details are withheld', async () => {
+    calendarState.labelsMap = { 'cal-1': [live] };
+    calendarState.events = [{ ...event, detailsHidden: true }];
+    await openEditor();
+
+    expect(screen.queryByRole('button', { name: 'event.label' })).toBeNull();
+    expect(await savedPatch()).not.toHaveProperty('labelId');
   });
 });
