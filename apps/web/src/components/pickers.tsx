@@ -755,7 +755,6 @@ function TimeWheel({
       {rows.map((row) => {
         const picked = row === value;
         return (
-          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the spinbutton around the rows takes the keys
           <div
             key={row}
             aria-hidden
