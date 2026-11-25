@@ -23,16 +23,18 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 
 ## What it does
 
-- **Shared calendars** — per-member roles (owner / manager / editor / viewer), invite links, public share tokens and an embeddable view. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
-- **Events** — all-day and timed, recurrence (RRULE) with per-occurrence exceptions, drag to move or resize, attendees, checklists, attachments, comments. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Shared calendars** — per-member roles (owner / manager / editor / viewer) and colours, invite links, public share tokens, an embeddable view and an uploaded cover image. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Events** — all-day and timed, recurrence (RRULE) with per-occurrence exceptions, drag to move or resize, an owner and participants, show-as (busy, free, tentative, out of office), per-event visibility on share links, calendar-defined labels that colour them, checklists, attachments, comments. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
+- **Schedule polls** — send candidate times to members, collect their answers and turn the chosen time into an event; free time can be looked up across calendars that share their availability. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Memos and albums** — per-calendar notes and photo albums, optionally linked to events. [Object storage](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md#object-storage)
 - **Change history** — a history for events and memos, plus a per-calendar activity feed. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Sign-in** — email and password, Google and LINE OAuth, and a development-only password-less login. Password reset and email verification appear only when an SMTP relay is configured. [Configuration](https://github.com/libraz/nodate-time/blob/main/docs/en/configuration.md)
 - **Admin** — OAuth provider settings and an allowlist of permitted sign-in emails and domains. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Export and import** — export as iCal or CSV, import iCal. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
-- **Calendar app sync** — a CalDAV server for iOS, macOS and other calendar apps, signed in with per-device app passwords. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#caldav)
-- **Languages and themes** — English and Japanese, five themes, light, dark or system color mode.
+- **Calendar app sync** — a CalDAV server for iOS, macOS and other calendar apps, signed in with per-device app passwords; an iPhone or Mac is set up from a QR code or link. [App passwords](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#app-passwords) · [CalDAV](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#caldav)
+- **Languages and themes** — English and Japanese, five themes, light, dark or system color mode, an in-app tour and help page.
 - **Self-hosting** — one compose file with TLS, object storage and upgrade scripts. [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md)
+- **Migrating from TimeTree** — `importtimetree` copies shared calendars with who owns and created each event, and can keep following them with `-sync`. [Migrating from TimeTree](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md#migrating-from-timetree)
 - **Metrics and profiling** — Prometheus metrics, pprof and a per-dependency health report on a separate listener. [Observability](https://github.com/libraz/nodate-time/blob/main/docs/en/observability.md)
 - **Optional shared database** — can share one MySQL with [nodate-flow](https://github.com/libraz/nodate-flow) through a published schema contract, with no code dependency. [Introduction](https://github.com/libraz/nodate-time/blob/main/docs/en/introduction.md#optional-shared-database-with-nodate-flow)
 

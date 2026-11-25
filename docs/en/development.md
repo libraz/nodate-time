@@ -20,8 +20,10 @@ apps/
     cmd/api/           entrypoint
     cmd/createuser/    user-creation CLI
     cmd/healthcheck/   container health probe
-    internal/          config, auth, cleanup, db/generated, errors,
-                       eventlog, mailer, recurrence, secrets, storage,
+    cmd/importtimetree/ TimeTree importer
+    cmd/openapi/       writes the OpenAPI description
+    internal/          domain packages (auth, dav, ical, recurrence, storage,
+                       timetree, …), db/generated and
                        http/{handlers,middleware,router}
     tests/e2e/         E2E tests
   web/                 React SPA
@@ -40,6 +42,8 @@ sql/
   time/                this application's own tables
     tables/             table definitions
     views/              view definitions
+    constraints/        foreign keys and checks added after the tables
+    triggers/           this layer's triggers
     upgrades/           bring an existing database's own tables and rows up to date
   queries/             sqlc query definitions
   schema.sql           combined schema produced by build-schema.sh
@@ -57,11 +61,16 @@ E2E tests create an independent user and calendar per test (tenant isolation) an
 ```sh
 make db-up                      # MySQL on TC_DB_PORT (default 33306)
 make test-e2e                   # runs with TC_TEST_INTEGRATION=1
+make storage-up                 # object storage, for the storage run
+make test-e2e-storage           # adds the tests that need object storage
+make test-e2e-storage-absent    # the tests for the 503 without object storage
 ```
+
+Without `TC_TEST_STORAGE`, the attachment, album, avatar and cover tests skip and `make test-e2e` still passes, so count the skips rather than trusting a green run. The tests for absent object storage skip when it is set. The test server is built once per process, so the two sides take two runs.
 
 The tests connect to `127.0.0.1:${TC_DB_PORT:-33306}`, and so does CI, so a non-default `TC_DB_PORT` has to be exported for both commands.
 
-CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest) and API (build / vet / E2E).
+CI (`.github/workflows/ci.yml`) runs web (Biome / typecheck / Vitest / build) and API (core checks, codegen drift, conformance, upgrade path, build, vet, and E2E with and without object storage).
 
 ## Migrations and code generation
 

@@ -7,7 +7,10 @@ Nodate Time is a shared calendar for running one calendar across several people:
 - A **calendar** has **members**, each with a role: owner, manager, editor or viewer. The role sets what a member can do in that calendar.
 - A calendar is shared by invite link, by a public share token (read-only view), or by an embeddable view that any site may frame.
 - Events, memos and albums belong to a calendar. Events support all-day and timed entries, recurrence (RRULE) with per-occurrence exceptions, attendees, checklists, attachments and comments.
+- An event has an owner, the member whose plan it is, and may have further participants. Its show-as (busy, free, tentative, out of office) says whether it takes up their time, and its visibility decides what a share link shows of it. A calendar can define labels, each with a colour, and give one to an event.
+- A schedule poll sends candidate times to chosen members. Their answers are tallied, and finalizing the poll creates the event. Candidates can be checked against the busy time of calendars that share their availability.
 - Every change to an event or memo is recorded, and each calendar has an activity feed.
+- Calendar apps on a phone or computer sync over CalDAV, each device signed in with its own app password.
 
 The calendar-sharing experience is inspired by TimeTree, and the role-based permission model is in the style of Google Calendar.
 
@@ -36,7 +39,7 @@ This is an independent, original project. It is inspired by the shared-calendar 
 ## Where to go next
 
 - [Development](development.md): tech stack, repository layout, tests, migrations and code generation.
-- [Deployment](deployment.md): the self-hosting stack, upgrades, object storage and backups.
+- [Deployment](deployment.md): the self-hosting stack, calendar apps, upgrades, object storage, backups and migrating from TimeTree.
 - [Configuration](configuration.md): every `TC_*` environment variable.
 - [Observability](observability.md): metrics, profiling, health detail and logging.
-- [API overview](api.md): route groups and how the OpenAPI description is served.
+- [API overview](api.md): route groups, conventions, app passwords and the CalDAV server.

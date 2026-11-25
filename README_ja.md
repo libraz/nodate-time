@@ -23,16 +23,18 @@
 
 ## できること
 
-- **カレンダー共有** — メンバーごとのロール（owner / manager / editor / viewer）、招待リンク、公開共有トークン、埋め込みビュー。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
-- **予定** — 終日・時間指定、例外日を持てる繰り返し（RRULE）、ドラッグでの移動とリサイズ、参加者・チェックリスト・添付ファイル・コメント。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
+- **カレンダー共有** — メンバーごとのロール（owner / manager / editor / viewer）と色、招待リンク、公開共有トークン、埋め込みビュー、アップロードしたカバー画像。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
+- **予定** — 終日・時間指定、例外日を持てる繰り返し（RRULE）、ドラッグでの移動とリサイズ、担当者と参加者、空き状況（予定あり・空き・仮・不在）、公開リンクでの予定ごとの公開範囲、カレンダーで定義して色を付けるラベル、チェックリスト・添付ファイル・コメント。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
+- **日程調整** — 候補日時をメンバーに送って回答を集め、決まった日時をそのまま予定にします。空き状況を共有しているカレンダーをまたいで空き時間を調べられます。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **メモとアルバム** — カレンダー単位のメモと写真アルバム。アルバムは予定に紐付けられます。[オブジェクトストレージ](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md#オブジェクトストレージ)
 - **変更履歴** — 予定とメモの履歴と、カレンダー単位のアクティビティフィード。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **サインイン** — メール+パスワード、Google と LINE の OAuth、開発用のパスワードレスログイン。パスワード再設定とメール確認は SMTP リレーを設定したときだけ使えます。[設定](https://github.com/libraz/nodate-time/blob/main/docs/ja/configuration.md)
 - **管理者機能** — OAuth プロバイダ設定と、サインインを許可するメール・ドメインのアロウリスト。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **エクスポートとインポート** — エクスポートは iCal と CSV、インポートは iCal。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
-- **カレンダーアプリとの同期** — iOS・macOS などのカレンダーアプリ向けの CalDAV サーバー。端末ごとのアプリパスワードでサインインします。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#caldav)
-- **多言語とテーマ** — 日本語と英語、5 種類のテーマ、ライト・ダーク・システム連動のカラーモード。
+- **カレンダーアプリとの同期** — iOS・macOS などのカレンダーアプリ向けの CalDAV サーバー。端末ごとのアプリパスワードでサインインし、iPhone と Mac は QR コードかリンクから設定できます。[アプリパスワード](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#アプリパスワード) · [CalDAV](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#caldav)
+- **多言語とテーマ** — 日本語と英語、5 種類のテーマ、ライト・ダーク・システム連動のカラーモード、アプリ内ツアーとヘルプページ。
 - **自己ホスト** — TLS、オブジェクトストレージ、更新手順をそろえた compose ファイル 1 つ。[デプロイ](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md)
+- **TimeTree からの移行** — `importtimetree` が共有カレンダーを、予定ごとの担当者と作成者を保ったまま取り込みます。`-sync` で取り込み後も追従できます。[TimeTree からの移行](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md#timetree-からの移行)
 - **メトリクスとプロファイル** — Prometheus メトリクス、pprof、依存先ごとのヘルスレポートを別リスナーで提供。[可観測性](https://github.com/libraz/nodate-time/blob/main/docs/ja/observability.md)
 - **任意の共有データベース** — 公開されたスキーマ契約を介して、[nodate-flow](https://github.com/libraz/nodate-flow) と 1 つの MySQL を共有できます。コード依存はありません。[概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/introduction.md#nodate-flow-との任意の共有データベース)
 

@@ -20,8 +20,10 @@ apps/
     cmd/api/           エントリポイント
     cmd/createuser/    ユーザー作成 CLI
     cmd/healthcheck/   コンテナのヘルスチェック
-    internal/          config, auth, cleanup, db/generated, errors,
-                       eventlog, mailer, recurrence, secrets, storage,
+    cmd/importtimetree/ TimeTree からの取り込み
+    cmd/openapi/       OpenAPI 記述の書き出し
+    internal/          ドメインのパッケージ（auth, dav, ical, recurrence,
+                       storage, timetree 等）、db/generated、
                        http/{handlers,middleware,router}
     tests/e2e/         E2E テスト
   web/                 React SPA
@@ -40,6 +42,8 @@ sql/
   time/                本アプリ固有のテーブル
     tables/             テーブル定義
     views/              ビュー定義
+    constraints/        テーブルの後に足す外部キーと制約
+    triggers/           本アプリの層のトリガ
     upgrades/           既存の DB の本アプリのテーブルと行を今の形へ上げる SQL
   queries/             sqlc クエリ定義
   schema.sql           build-schema.sh で生成される結合スキーマ
@@ -57,11 +61,16 @@ E2E はテストごとに独立したユーザーとカレンダーを生成（�
 ```bash
 make db-up                      # TC_DB_PORT（既定 33306）で MySQL 起動
 make test-e2e                   # TC_TEST_INTEGRATION=1 で実行
+make storage-up                 # storage 付きの実行が使うオブジェクトストレージ
+make test-e2e-storage           # オブジェクトストレージが要るテストも実行
+make test-e2e-storage-absent    # オブジェクトストレージ不在時の 503 のテスト
 ```
+
+`TC_TEST_STORAGE` を付けないと、添付・アルバム・アバター・カバーのテストは skip し、`make test-e2e` はそれでも成功します。緑の結果をそのまま信じず、skip の数を確認してください。オブジェクトストレージ不在のテストは、逆に `TC_TEST_STORAGE` を付けると skip します。テストサーバーはプロセスごとに 1 回しか作られないため、両側を見るには 2 回の実行が要ります。
 
 テストは `127.0.0.1:${TC_DB_PORT:-33306}` に接続します。CI も同じなので、既定以外の `TC_DB_PORT` を使う場合は両方のコマンドで export してください。
 
-CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest）と API（build / vet / E2E）を実行します。
+CI（`.github/workflows/ci.yml`）では Web（Biome / typecheck / Vitest / build）と API（core の検査、生成物の差分、conformance、upgrade path、build、vet、オブジェクトストレージありとなしの E2E）を実行します。
 
 ## マイグレーションとコード生成
 
