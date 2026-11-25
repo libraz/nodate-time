@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useEffect, useState } from 'react';
+import { CustomSelect } from '@/components/custom-select';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
-import { CustomSelect } from '@/components/pickers';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
   InviteeGrid,

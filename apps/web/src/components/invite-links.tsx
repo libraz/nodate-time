@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
-import { CustomSelect } from '@/components/pickers';
+import { CustomSelect } from '@/components/custom-select';
 import { RoleHint } from '@/components/role-hint';
 import { UrlRow } from '@/components/url-row';
 import { useT } from '@/i18n';

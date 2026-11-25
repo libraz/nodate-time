@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { type InputHTMLAttributes, useEffect, useRef, useState } from 'react';
-import { DateField, TimeField } from '@/components/pickers';
+import { DateField, TimeField } from '@/components/date-time-fields';
 import { formatSchedulePollSlotTime, slotTimeRange } from '@/components/schedule-poll-ui';
 import { useT } from '@/i18n';
 import { errorMessage } from '@/lib/client';

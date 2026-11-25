@@ -667,9 +667,7 @@ describe('EventModal recurrence end', () => {
     openWith(weeklyWithCount);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
-    const [startDate] = screen.getAllByRole('button', { name: '2026年8月7日(金)' });
-    if (!startDate) throw new Error('no start date field');
-    fireEvent.click(startDate);
+    fireEvent.click(screen.getByRole('button', { name: 'event.start 2026年8月7日(金)' }));
     fireEvent.click(screen.getByRole('button', { name: '2026-08-13' }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -890,8 +888,13 @@ describe('EventModal task-derived event', () => {
     expect(titleField()).toHaveAttribute('readonly');
     expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'event.recurrence' })).toBeDisabled();
-    for (const date of screen.getAllByRole('button', { name: '2026年8月7日(金)' })) {
-      expect(date).toBeDisabled();
+    for (const name of [
+      'event.start 2026年8月7日(金)',
+      'event.start 09:00',
+      'event.end 2026年8月7日(金)',
+      'event.end 10:00',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
     }
   });
 
@@ -1276,7 +1279,7 @@ describe('EventModal participants', () => {
 
 describe('EventModal end before start', () => {
   async function typeEnd(time: string) {
-    fireEvent.click(screen.getByRole('button', { name: '10:00' }));
+    fireEvent.click(screen.getByRole('button', { name: 'event.end 10:00' }));
     const input = await screen.findByRole('textbox', { name: 'picker.typeTime' });
     fireEvent.change(input, { target: { value: time } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -1289,6 +1292,9 @@ describe('EventModal end before start', () => {
     await typeEnd('8:00');
 
     expect(await screen.findByText('event.endBeforeStart')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'event.end 08:00' })).toHaveClass(
+      'text-[var(--color-danger)]',
+    );
     const save = screen.getByRole('button', { name: 'common.save' });
     expect(save).toBeDisabled();
     fireEvent.click(save);

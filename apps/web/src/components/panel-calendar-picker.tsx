@@ -1,4 +1,4 @@
-import { CustomSelect } from '@/components/pickers';
+import { CustomSelect } from '@/components/custom-select';
 import type { Calendar } from '@/types/calendar';
 
 interface PanelCalendarPickerProps {

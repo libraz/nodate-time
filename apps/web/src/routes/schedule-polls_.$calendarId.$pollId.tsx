@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
-import { CustomSelect } from '@/components/pickers';
+import { CustomSelect } from '@/components/custom-select';
 import { SchedulePollCandidateFinder } from '@/components/schedule-poll-candidate-finder';
 import {
   AnswerMark,

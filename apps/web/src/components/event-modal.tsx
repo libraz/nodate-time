@@ -3,6 +3,8 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Avatar } from '@/components/avatar';
 import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
+import { CustomSelect } from '@/components/custom-select';
+import { DateTimeRangeField } from '@/components/date-time-fields';
 import { AttachmentsSection } from '@/components/event-attachments';
 import {
   ChecklistSection,
@@ -16,7 +18,6 @@ import { RecurrenceEditor } from '@/components/event-recurrence';
 import { TipCard } from '@/components/guide';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { LabelledButton } from '@/components/labelled-button';
-import { CustomSelect, DateTimeField } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
@@ -995,58 +996,59 @@ export function EventModal() {
         {taskOwned && <Callout className="mb-2">{t('event.taskOwnedNote')}</Callout>}
         <div className="card-section bg-[var(--color-surface-secondary)] p-4">
           <fieldset disabled={!editable || taskOwned} className="contents">
-            <DateTimeField
-              label={t('event.start')}
-              dateValue={DateTime.fromISO(form.startAt, { zone: timezone })}
-              timeValue={form.startAt.split('T')[1]?.slice(0, 5) ?? '09:00'}
+            <DateTimeRangeField
               showTime={!form.allDay}
-              onDateChange={(date) => {
-                setForm((f) => {
-                  const moved = shiftStartKeepingDuration(f, date, timezone);
-                  return withPresetRule({ ...f, startAt: moved.startAt, endAt: moved.endAt });
-                });
+              endInvalid={endError}
+              start={{
+                label: t('event.start'),
+                date: DateTime.fromISO(form.startAt, { zone: timezone }),
+                time: form.startAt.split('T')[1]?.slice(0, 5) ?? '09:00',
+                onDateChange: (date) => {
+                  setForm((f) => {
+                    const moved = shiftStartKeepingDuration(f, date, timezone);
+                    return withPresetRule({ ...f, startAt: moved.startAt, endAt: moved.endAt });
+                  });
+                },
+                onTimeChange: (time) => {
+                  const datePart = form.startAt.split('T')[0] ?? '';
+                  setForm((f) => {
+                    const newStart = `${datePart}T${time}`;
+                    // If end is now before start on same day, push end forward by 1 hour
+                    const startDt = DateTime.fromISO(newStart, { zone: timezone });
+                    const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
+                    if (endDt <= startDt) {
+                      const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
+                      return withPresetRule({ ...f, startAt: newStart, endAt: newEnd });
+                    }
+                    return withPresetRule({ ...f, startAt: newStart });
+                  });
+                },
               }}
-              onTimeChange={(time) => {
-                const datePart = form.startAt.split('T')[0] ?? '';
-                setForm((f) => {
-                  const newStart = `${datePart}T${time}`;
-                  // If end is now before start on same day, push end forward by 1 hour
-                  const startDt = DateTime.fromISO(newStart, { zone: timezone });
-                  const endDt = DateTime.fromISO(f.endAt, { zone: timezone });
-                  if (endDt <= startDt) {
-                    const newEnd = startDt.plus({ hours: 1 }).toFormat("yyyy-MM-dd'T'HH:mm");
-                    return withPresetRule({ ...f, startAt: newStart, endAt: newEnd });
-                  }
-                  return withPresetRule({ ...f, startAt: newStart });
-                });
+              end={{
+                label: t('event.end'),
+                date: DateTime.fromISO(form.endAt, { zone: timezone }),
+                time: form.endAt.split('T')[1]?.slice(0, 5) ?? '10:00',
+                onDateChange: (date) => {
+                  const time = form.endAt.split('T')[1] ?? '10:00';
+                  setForm((f) => {
+                    const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
+                    // If end is before start, clamp to start date
+                    const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
+                    const endDt = DateTime.fromISO(newEnd, { zone: timezone });
+                    if (endDt < startDt) {
+                      const startTime = f.startAt.split('T')[1] ?? '09:00';
+                      return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
+                    }
+                    return { ...f, endAt: newEnd };
+                  });
+                },
+                onTimeChange: (time) => {
+                  const datePart = form.endAt.split('T')[0] ?? '';
+                  // Applied as chosen: an end before the start is reported below
+                  // and blocks the save rather than being silently ignored.
+                  setForm((f) => ({ ...f, endAt: `${datePart}T${time}` }));
+                },
               }}
-            />
-            <DateTimeField
-              label={t('event.end')}
-              dateValue={DateTime.fromISO(form.endAt, { zone: timezone })}
-              timeValue={form.endAt.split('T')[1]?.slice(0, 5) ?? '10:00'}
-              showTime={!form.allDay}
-              onDateChange={(date) => {
-                const time = form.endAt.split('T')[1] ?? '10:00';
-                setForm((f) => {
-                  const newEnd = `${date.toFormat('yyyy-MM-dd')}T${time}`;
-                  // If end is before start, clamp to start date
-                  const startDt = DateTime.fromISO(f.startAt, { zone: timezone });
-                  const endDt = DateTime.fromISO(newEnd, { zone: timezone });
-                  if (endDt < startDt) {
-                    const startTime = f.startAt.split('T')[1] ?? '09:00';
-                    return { ...f, endAt: `${date.toFormat('yyyy-MM-dd')}T${startTime}` };
-                  }
-                  return { ...f, endAt: newEnd };
-                });
-              }}
-              onTimeChange={(time) => {
-                const datePart = form.endAt.split('T')[0] ?? '';
-                // Applied as chosen: an end before the start is reported below
-                // and blocks the save rather than being silently ignored.
-                setForm((f) => ({ ...f, endAt: `${datePart}T${time}` }));
-              }}
-              minDate={DateTime.fromISO(form.startAt, { zone: timezone })}
             />
             {endError && (
               <p role="alert" className="pb-1 text-footnote text-[var(--color-danger)]">

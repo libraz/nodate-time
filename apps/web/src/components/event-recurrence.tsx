@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
-import { CustomSelect, DateTimeField } from '@/components/pickers';
+import { CustomSelect } from '@/components/custom-select';
+import { DateTimeField } from '@/components/date-time-fields';
 import { type Locale, type TranslationKey, useT } from '@/i18n';
 import { getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
 import {

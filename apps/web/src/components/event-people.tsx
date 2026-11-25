@@ -1,7 +1,7 @@
 import { Avatar } from '@/components/avatar';
 import { Callout } from '@/components/callout';
+import { CustomSelect } from '@/components/custom-select';
 import { LabelledButton } from '@/components/labelled-button';
-import { CustomSelect } from '@/components/pickers';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { memberOption } from '@/lib/member-option';

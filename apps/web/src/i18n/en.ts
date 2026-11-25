@@ -71,6 +71,7 @@ export const en: Record<TranslationKey, string> = {
   'event.titlePlaceholder': 'Title',
   'event.start': 'Start',
   'event.end': 'End',
+  'event.sameDay': 'Same day',
   'event.participants': 'Participants',
   'event.notification': 'Notification',
   'event.notification_hint': 'Raised by the calendar app this event is exported to',

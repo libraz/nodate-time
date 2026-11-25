@@ -75,6 +75,7 @@ export const ja = {
   'event.titlePlaceholder': 'タイトル',
   'event.start': '開始',
   'event.end': '終了',
+  'event.sameDay': '同日',
   'event.participants': '参加者',
   'event.notification': '通知',
   'event.notification_hint': 'この予定の書き出し先のカレンダーアプリが通知します',

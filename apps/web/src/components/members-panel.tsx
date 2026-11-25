@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
+import { CustomSelect } from '@/components/custom-select';
 import { TipCard } from '@/components/guide';
 import { InviteLinks, inviteKey } from '@/components/invite-links';
 import { MemberAdder } from '@/components/member-adder';
 import { MemberColorEditor } from '@/components/member-color-editor';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
-import { CustomSelect } from '@/components/pickers';
 import { RoleHint } from '@/components/role-hint';
 import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
-import { CustomSelect } from '@/components/pickers';
+import { CustomSelect } from '@/components/custom-select';
 import { useT } from '@/i18n';
 import { type AlbumPhoto, formatAlbumMoment } from '@/lib/album';
 import { fromISOInZone } from '@/lib/date-utils';

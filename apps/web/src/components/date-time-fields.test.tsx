@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CustomSelect, DateTimeField, parseTypedTime } from './pickers';
+import { DateTimeField, DateTimeRangeField } from './date-time-fields';
 
 // Mock the ui-store to provide locale
 vi.mock('@/stores/ui-store', () => ({
@@ -10,261 +10,6 @@ vi.mock('@/stores/ui-store', () => ({
 }));
 
 afterEach(cleanup);
-
-describe('CustomSelect', () => {
-  const options = [
-    { value: 'a', label: 'Alpha' },
-    { value: 'b', label: 'Beta' },
-    { value: 'c', label: 'Gamma' },
-  ];
-
-  it('renders the selected label', () => {
-    render(<CustomSelect value="b" options={options} onChange={() => {}} ariaLabel="Letters" />);
-    expect(screen.getByText('Beta')).toBeInTheDocument();
-  });
-
-  it('opens dropdown on click and shows all options', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
-
-    await user.click(screen.getByText('Alpha'));
-
-    expect(screen.getByText('Beta')).toBeInTheDocument();
-    expect(screen.getByText('Gamma')).toBeInTheDocument();
-  });
-
-  it('calls onChange when an option is selected', async () => {
-    const onChange = vi.fn();
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={onChange} ariaLabel="Letters" />);
-
-    await user.click(screen.getByText('Alpha'));
-    await user.click(screen.getByText('Gamma'));
-
-    expect(onChange).toHaveBeenCalledWith('c');
-  });
-
-  it('closes dropdown after selection', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
-
-    await user.click(screen.getByText('Alpha'));
-    expect(screen.getByText('Gamma')).toBeInTheDocument();
-
-    await user.click(screen.getByText('Beta'));
-    // After selection, portal dropdown should be gone
-    const dropdowns = document.querySelectorAll('body > .fixed');
-    expect(dropdowns).toHaveLength(0);
-  });
-
-  it('narrows a long list by label or by code', async () => {
-    const user = userEvent.setup();
-    const countries = [
-      { value: 'DE', label: 'Germany' },
-      { value: 'JP', label: 'Japan' },
-      { value: 'US', label: 'United States' },
-    ];
-    render(
-      <CustomSelect
-        value="JP"
-        options={countries}
-        onChange={() => {}}
-        ariaLabel="Country"
-        searchable
-      />,
-    );
-
-    await user.click(screen.getByText('Japan'));
-    const filter = screen.getByRole('textbox', { name: 'Search' });
-
-    await user.type(filter, 'germ');
-    expect(screen.getByText('Germany')).toBeInTheDocument();
-    expect(screen.queryByText('United States')).toBeNull();
-
-    await user.clear(filter);
-    await user.type(filter, 'us');
-    expect(screen.getByText('United States')).toBeInTheDocument();
-    expect(screen.queryByText('Germany')).toBeNull();
-
-    await user.clear(filter);
-    await user.type(filter, 'zz');
-    expect(screen.getByText('No matches')).toBeInTheDocument();
-  });
-
-  it('leaves an ordinary select without a filter box', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
-
-    await user.click(screen.getByText('Alpha'));
-    expect(screen.queryByRole('textbox')).toBeNull();
-  });
-
-  it('shows checkmark on selected option', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="b" options={options} onChange={() => {}} ariaLabel="Letters" />);
-
-    await user.click(screen.getByText('Beta'));
-
-    // The selected item "Beta" in the dropdown should have a checkmark svg
-    const betaInDropdown = screen.getAllByText('Beta');
-    // There should be 2 instances: trigger + dropdown
-    expect(betaInDropdown.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('names itself and its list to assistive tech', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Calendar" />);
-
-    const trigger = screen.getByRole('button', { name: 'Calendar' });
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-
-    await user.click(trigger);
-
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('listbox', { name: 'Calendar' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Alpha' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: 'Beta' })).toHaveAttribute('aria-selected', 'false');
-  });
-
-  /**
-   * The keys a native select answers. Replacing one with a button that only
-   * takes a pointer would read as the same control while being usable by
-   * fewer people.
-   */
-  it('opens and picks from the keyboard', async () => {
-    const onChange = vi.fn();
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={onChange} ariaLabel="Letters" />);
-
-    const trigger = screen.getByRole('button', { name: 'Letters' });
-    trigger.focus();
-
-    await user.keyboard('{ArrowDown}');
-    expect(screen.getByRole('listbox')).toBeInTheDocument();
-
-    // Opening starts on the current value, so one step down lands on Beta.
-    await user.keyboard('{ArrowDown}{Enter}');
-    expect(onChange).toHaveBeenCalledWith('b');
-  });
-
-  /**
-   * Escape closes the list and stops there. These pickers sit inside dialogs
-   * that close on Escape themselves, and dismissing both at once loses the
-   * form behind the list.
-   */
-  it('closes on Escape without letting the key travel further', async () => {
-    const user = userEvent.setup();
-    const onDialogKey = vi.fn();
-    render(
-      // biome-ignore lint/a11y/noStaticElementInteractions: stands in for the dialog listening behind the picker
-      <div onKeyDown={onDialogKey}>
-        <CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />
-      </div>,
-    );
-
-    const trigger = screen.getByRole('button', { name: 'Letters' });
-    trigger.focus();
-    await user.keyboard('{ArrowDown}');
-    expect(screen.getByRole('listbox')).toBeInTheDocument();
-
-    await user.keyboard('{Escape}');
-
-    expect(screen.queryByRole('listbox')).toBeNull();
-    expect(onDialogKey).not.toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'Escape' }) as never,
-    );
-  });
-
-  it('jumps to the ends of the list', async () => {
-    const onChange = vi.fn();
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={onChange} ariaLabel="Letters" />);
-
-    screen.getByRole('button', { name: 'Letters' }).focus();
-    await user.keyboard('{Enter}{End}{Enter}');
-
-    expect(onChange).toHaveBeenCalledWith('c');
-  });
-
-  /**
-   * The row the arrows are on and the row that is chosen are two different
-   * things. Sharing one highlight would make arrowing past the selection look
-   * like the selection moving with it.
-   */
-  it('marks which row the keyboard is on without moving the selection', async () => {
-    const user = userEvent.setup();
-    render(<CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />);
-
-    screen.getByRole('button', { name: 'Letters' }).focus();
-    await user.keyboard('{ArrowDown}{ArrowDown}');
-
-    const alpha = screen.getByRole('option', { name: 'Alpha' });
-    const beta = screen.getByRole('option', { name: 'Beta' });
-
-    // Inline style, not computed: jsdom resolves var() and no theme is loaded here.
-    expect(beta.style.backgroundColor).toBe('var(--color-hover)');
-    expect(alpha.style.backgroundColor).toBe('var(--color-accent-bg)');
-    expect(alpha).toHaveAttribute('aria-selected', 'true');
-    expect(beta).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('shows the option colour on the trigger as well as in the list', async () => {
-    const user = userEvent.setup();
-    const swatch = (el: HTMLElement) => el.querySelector('span[style*="background-color"]');
-    render(
-      <CustomSelect
-        value="a"
-        options={[
-          { value: 'a', label: 'Alpha', color: '#ff0000' },
-          { value: 'b', label: 'Beta', color: '#00ff00' },
-        ]}
-        onChange={() => {}}
-        ariaLabel="Calendar"
-      />,
-    );
-
-    const trigger = screen.getByRole('button', { name: 'Calendar' });
-    expect(swatch(trigger)).toHaveStyle({ backgroundColor: '#ff0000' });
-
-    await user.click(trigger);
-    expect(swatch(screen.getByRole('option', { name: 'Beta' }))).toHaveStyle({
-      backgroundColor: '#00ff00',
-    });
-  });
-
-  /**
-   * The outside-click listeners are subscribed for as long as the dropdown is
-   * open, not re-subscribed for every render it survives. The refs are handed
-   * to the hook as a fresh array each render, so naming the array in the
-   * effect's dependencies tore the document listeners down and put them back
-   * on every keystroke that reached the picker's parent.
-   */
-  it('subscribes to the document once while open, not once per render', async () => {
-    const user = userEvent.setup();
-    const subscribe = vi.spyOn(document, 'addEventListener');
-    const mousedowns = () => subscribe.mock.calls.filter(([type]) => type === 'mousedown').length;
-
-    const { rerender } = render(
-      <CustomSelect value="a" options={options} onChange={() => {}} ariaLabel="Letters" />,
-    );
-    await user.click(screen.getByText('Alpha'));
-
-    const whileOpen = mousedowns();
-    // A render the dropdown lives through: same open list, different props.
-    rerender(
-      <CustomSelect
-        value="a"
-        options={options}
-        onChange={() => {}}
-        ariaLabel="Letters"
-        className="w-40"
-      />,
-    );
-
-    expect(mousedowns()).toBe(whileOpen);
-    subscribe.mockRestore();
-  });
-});
 
 describe('DateTimeField', () => {
   const baseDate = DateTime.fromISO('2026-04-19T09:00:00');
@@ -582,48 +327,6 @@ describe('DateTimeField from the keyboard', () => {
   });
 });
 
-describe('CustomSelect disabled', () => {
-  it('shows the value but never opens', async () => {
-    const user = userEvent.setup();
-    render(
-      <CustomSelect
-        value="a"
-        options={[{ value: 'a', label: 'Alpha' }]}
-        onChange={() => {}}
-        ariaLabel="Letters"
-        disabled
-      />,
-    );
-
-    const trigger = screen.getByRole('button', { name: 'Letters' });
-    expect(trigger).toBeDisabled();
-    expect(trigger).toHaveTextContent('Alpha');
-    await user.click(trigger);
-    expect(screen.queryByRole('listbox')).toBeNull();
-  });
-});
-
-describe('parseTypedTime', () => {
-  it.each([
-    ['9', '09:00'],
-    ['09', '09:00'],
-    ['9:30', '09:30'],
-    ['09:30', '09:30'],
-    ['930', '09:30'],
-    ['0930', '09:30'],
-    ['0', '00:00'],
-    ['23:59', '23:59'],
-    ['\uFF19\uFF1A\uFF13\uFF10', '09:30'],
-    [' 14:05 ', '14:05'],
-  ])('reads %j as %s', (input, expected) => {
-    expect(parseTypedTime(input)).toBe(expected);
-  });
-
-  it.each(['24:00', '9:5', '960', '', '12345', 'ab', '9:60', '25'])('refuses %j', (input) => {
-    expect(parseTypedTime(input)).toBeNull();
-  });
-});
-
 describe('TimePicker typed entry', () => {
   function renderField(onTimeChange = vi.fn()) {
     render(
@@ -726,5 +429,93 @@ describe('TimePicker typed entry', () => {
     await user.keyboard('{ArrowDown}{ArrowDown}');
 
     expect(input).toHaveFocus();
+  });
+});
+
+describe('DateTimeRangeField', () => {
+  function renderRange(props: { showTime?: boolean; endInvalid?: boolean; endDate?: string } = {}) {
+    const onStartTime = vi.fn();
+    const onEndDate = vi.fn();
+    render(
+      <DateTimeRangeField
+        showTime={props.showTime ?? true}
+        endInvalid={props.endInvalid ?? false}
+        start={{
+          label: 'Start',
+          date: DateTime.fromISO('2026-10-07T14:00:00'),
+          time: '14:00',
+          onDateChange: () => {},
+          onTimeChange: onStartTime,
+        }}
+        end={{
+          label: 'End',
+          date: DateTime.fromISO(props.endDate ?? '2026-10-07T19:00:00'),
+          time: '19:00',
+          onDateChange: onEndDate,
+          onTimeChange: () => {},
+        }}
+      />,
+    );
+    return { onStartTime, onEndDate };
+  }
+
+  it('names each date and time after the end it belongs to', () => {
+    renderRange();
+    for (const name of [
+      'Start Wed, Oct 7, 2026',
+      'Start 14:00',
+      'End Wed, Oct 7, 2026',
+      'End 19:00',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('says "same day" instead of repeating the start date', () => {
+    renderRange();
+    const end = screen.getByRole('button', { name: 'End Wed, Oct 7, 2026' });
+    expect(end).toHaveTextContent('Same day');
+    expect(screen.getByRole('button', { name: 'Start Wed, Oct 7, 2026' })).toHaveTextContent(
+      'Wed, Oct 7, 2026',
+    );
+  });
+
+  it('spells out an end on another day', () => {
+    renderRange({ endDate: '2026-10-08T10:00:00', showTime: false });
+    expect(screen.getByRole('button', { name: 'End Thu, Oct 8, 2026' })).toHaveTextContent(
+      '2026Thu, Oct 8',
+    );
+  });
+
+  it('shows only the dates for an all-day span', () => {
+    renderRange({ showTime: false });
+    expect(screen.getByRole('button', { name: 'Start Wed, Oct 7, 2026' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start 14:00' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'End 19:00' })).toBeNull();
+  });
+
+  it('routes a typed start time to the start', async () => {
+    const { onStartTime } = renderRange();
+    fireEvent.click(screen.getByRole('button', { name: 'Start 14:00' }));
+    const input = await screen.findByRole('textbox', { name: 'Type a time' });
+    fireEvent.change(input, { target: { value: '15:30' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onStartTime).toHaveBeenCalledWith('15:30');
+  });
+
+  it('refuses end dates before the start', () => {
+    const { onEndDate } = renderRange();
+    fireEvent.click(screen.getByRole('button', { name: 'End Wed, Oct 7, 2026' }));
+    const before = screen.getByRole('button', { name: '2026-10-06' });
+    expect(before).toBeDisabled();
+    fireEvent.click(before);
+    expect(onEndDate).not.toHaveBeenCalled();
+  });
+
+  it('draws an end the caller rejects as an error', () => {
+    renderRange({ endInvalid: true });
+    expect(screen.getByRole('button', { name: 'End 19:00' })).toHaveClass(
+      'text-[var(--color-danger)]',
+    );
   });
 });
