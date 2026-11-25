@@ -23,6 +23,7 @@ import {
   recurrenceAnchorStart,
   shiftStartKeepingDuration,
 } from '@/lib/event-times';
+import { isSubmitEnter } from '@/lib/keys';
 import {
   canEdit,
   canEditEvent,
@@ -721,10 +722,8 @@ export function EventModal() {
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           onKeyDown={(e) => {
-            // Enter confirms the title instead of breaking the line; a key that
-            // commits an IME composition is not an Enter.
-            if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
-            if (e.metaKey || e.ctrlKey) return;
+            // Enter confirms the title instead of breaking the line.
+            if (!isSubmitEnter(e) || e.metaKey || e.ctrlKey) return;
             e.preventDefault();
             void handleSave();
           }}
@@ -1329,8 +1328,7 @@ export function EventModal() {
           aria-modal="true"
           aria-label={editingEvent ? t('event.editEvent') : t('event.createEvent')}
           onKeyDown={(e) => {
-            if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (!isSubmitEnter(e) || !(e.metaKey || e.ctrlKey)) return;
             // The sections that save as they change keep Enter for themselves.
             if ((e.target as HTMLElement).closest('[data-saves-immediately]')) return;
             e.preventDefault();

@@ -4,6 +4,7 @@ import { ConfirmSheet } from '@/components/confirm-sheet';
 import { EmptyState, GUIDE_ICONS } from '@/components/guide';
 import { useT } from '@/i18n';
 import { errorMessage, isStaleError } from '@/lib/client';
+import { isSubmitEnter } from '@/lib/keys';
 import { canManage, canOwn } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -316,7 +317,7 @@ export function CalendarList() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreateCalendar();
+                if (isSubmitEnter(e)) handleCreateCalendar();
                 if (e.key === 'Escape') setShowNewForm(false);
               }}
               placeholder={t('calendar.calendarName')}

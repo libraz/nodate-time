@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
 import { client, errorMessage, isStaleError } from '@/lib/client';
+import { isSubmitEnter } from '@/lib/keys';
 import { toast } from '@/lib/toast';
 import type { ChecklistItem } from '@/types/calendar';
 
@@ -224,7 +225,7 @@ export function ChecklistSection({
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (!isSubmitEnter(e)) return;
               e.preventDefault();
               handleAdd();
             }}

@@ -1,3 +1,5 @@
+import { isSubmitEnter } from '@/lib/keys';
+
 /** `text` with the first case-insensitive match of `query` marked. */
 export function Highlight({ text, query }: { text: string; query: string }) {
   const q = query.trim().toLowerCase();
@@ -27,7 +29,7 @@ export function handleResultListKeys(e: React.KeyboardEvent<HTMLElement>) {
   const rows = Array.from(scope.querySelectorAll<HTMLElement>('[data-search-result]'));
   if (rows.length === 0) return;
   const box = scope.querySelector<HTMLInputElement>('input');
-  if (e.key === 'Enter' && e.target === box) {
+  if (isSubmitEnter(e) && e.target === box) {
     e.preventDefault();
     rows[0]?.click();
     return;

@@ -5,6 +5,7 @@ import { Avatar } from '@/components/avatar';
 import { useT } from '@/i18n';
 import { formatMonthYear, formatYear, getWeekdayLabel, isToday } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
+import { isSubmitEnter } from '@/lib/keys';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -689,9 +690,7 @@ function TimePickerDropdown({
       ?.scrollIntoView({ block: 'nearest' });
   };
 
-  const handleTypedKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-    e.preventDefault();
+  const applyTyped = () => {
     const time = parseTypedTime(typed);
     if (!time) {
       setTypedInvalid(true);
@@ -701,10 +700,16 @@ function TimePickerDropdown({
     closeToField();
   };
 
+  const handleTypedKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isSubmitEnter(e)) return;
+    e.preventDefault();
+    applyTyped();
+  };
+
   // Slots are one Tab stop; the arrows walk the list.
   const handleListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target instanceof HTMLInputElement) return;
-    const slots = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button'));
+    const slots = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[data-slot]'));
     const at = slots.indexOf(document.activeElement as HTMLElement);
     const target =
       e.key === 'ArrowDown'
@@ -736,7 +741,9 @@ function TimePickerDropdown({
         handleListKey(e);
       }}
     >
-      <div className={sheet ? 'pb-2' : 'border-b border-[var(--color-separator)] p-1.5'}>
+      <div
+        className={`flex items-center gap-1 ${sheet ? 'pb-2' : 'border-b border-[var(--color-separator)] p-1.5'}`}
+      >
         <input
           data-1p-ignore
           type="text"
@@ -747,10 +754,30 @@ function TimePickerDropdown({
           aria-label={t('picker.typeTime')}
           aria-invalid={typedInvalid}
           placeholder="9:30"
-          className={`input-modern w-full text-center text-default tabular-nums ${
+          className={`input-modern h-9 min-w-0 flex-1 text-center text-default tabular-nums ${
             typedInvalid ? 'ring-1 ring-[var(--color-danger)]' : ''
           }`}
         />
+        {/* A numeric keypad has no return key, so the typed time needs a button. */}
+        <button
+          type="button"
+          aria-label={t('picker.applyTime')}
+          onClick={applyTyped}
+          disabled={!typed.trim()}
+          className="icon-btn icon-btn-accent h-9 w-9 shrink-0 disabled:opacity-40"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            aria-hidden="true"
+          >
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        </button>
       </div>
       <div
         ref={listRef}

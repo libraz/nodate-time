@@ -621,6 +621,28 @@ describe('TimePicker typed entry', () => {
     expect(onTimeChange).toHaveBeenCalledWith('14:30');
   });
 
+  it('applies a typed time from the button, which a numeric keypad needs', async () => {
+    const onTimeChange = renderField();
+    const { user, input } = await openTyped();
+    const apply = screen.getByRole('button', { name: 'Use this time' });
+    expect(apply).toBeDisabled();
+
+    await user.click(input);
+    await user.keyboard('1430');
+    await user.click(apply);
+
+    expect(onTimeChange).toHaveBeenCalledWith('14:30');
+  });
+
+  it('does not apply on the Safari IME Enter, reported only as keyCode 229', async () => {
+    const onTimeChange = renderField();
+    const { input } = await openTyped();
+
+    fireEvent.change(input, { target: { value: '1430' } });
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 });
+    expect(onTimeChange).not.toHaveBeenCalled();
+  });
+
   it('does not apply on the Enter that confirms an IME composition', async () => {
     const onTimeChange = renderField();
     const { input } = await openTyped();

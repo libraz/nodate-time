@@ -1,5 +1,6 @@
 import { type CSSProperties, useEffect, useId, useRef, useState } from 'react';
 import { useT } from '@/i18n';
+import { isSubmitEnter } from '@/lib/keys';
 import { parseColorInput, readableInk, rgbOf } from '@/lib/member-color';
 import { MEMBER_COLORS, type Member } from '@/types/calendar';
 
@@ -157,10 +158,9 @@ export function MemberColorEditor({
               setInvalid(false);
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                applyText();
-              }
+              if (!isSubmitEnter(e)) return;
+              e.preventDefault();
+              applyText();
             }}
             placeholder="#RRGGBB / 255, 128, 0"
             aria-invalid={invalid || undefined}

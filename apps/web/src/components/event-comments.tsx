@@ -5,6 +5,7 @@ import { LabelledButton } from '@/components/labelled-button';
 import { useT } from '@/i18n';
 import { client, errorMessage, isStaleError } from '@/lib/client';
 import { formatRelativeTime } from '@/lib/date-utils';
+import { isSubmitEnter } from '@/lib/keys';
 import { canDeleteComment, canEditComment } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useAuthStore } from '@/stores/auth-store';
@@ -266,7 +267,7 @@ export function CommentsSection({
                       onChange={(e) => setEditContent(e.target.value)}
                       className="input-modern min-w-0 flex-1 text-body"
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveEdit(c.id);
+                        if (isSubmitEnter(e)) saveEdit(c.id);
                         if (e.key === 'Escape') {
                           // Leaving the edit box is all this Escape means; let
                           // it reach the modal and the whole editor would close.
@@ -304,8 +305,7 @@ export function CommentsSection({
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key !== 'Enter' || e.shiftKey) return;
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (!isSubmitEnter(e) || e.shiftKey) return;
               e.preventDefault();
               handleSend();
             }}
