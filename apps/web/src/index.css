@@ -3073,3 +3073,35 @@ textarea,
     transform: none;
   }
 }
+
+/* Time picker wheels: rows fade toward the edges, and where scroll-driven
+   animations exist each row also shrinks away from the band like a drum. */
+.time-wheel {
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+}
+.time-wheel::-webkit-scrollbar {
+  display: none;
+}
+.time-wheel-row {
+  scroll-snap-align: center;
+}
+@supports (animation-timeline: view()) {
+  .time-wheel-row {
+    animation: time-wheel-drum linear both;
+    animation-timeline: view();
+  }
+}
+/* Entering at the bottom the row faces down, leaving at the top it faces up. */
+@keyframes time-wheel-drum {
+  0% {
+    transform: perspective(320px) rotateX(-48deg) scale(0.86);
+  }
+  50% {
+    transform: none;
+  }
+  100% {
+    transform: perspective(320px) rotateX(48deg) scale(0.86);
+  }
+}

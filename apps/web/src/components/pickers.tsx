@@ -597,7 +597,7 @@ function DatePickerDropdown({
 }
 
 /* ============================================
-   TimePicker — scrollable time slot dropdown
+   TimePicker — hour and minute wheels
    ============================================ */
 
 interface TimePickerDropdownProps {
@@ -612,24 +612,23 @@ interface TimePickerDropdownProps {
   returnFocusRef: React.RefObject<HTMLElement | null>;
 }
 
-const TIME_SLOTS = (() => {
-  const slots: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 15) {
-      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    }
-  }
-  return slots;
-})();
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const MINUTE_STEP = 5;
+/** Rows a wheel shows: the selected one with two either side. */
+const WHEEL_ROWS = 5;
+/** How long a wheel must be still before the row under the band counts as picked. */
+const WHEEL_SETTLE_MS = 120;
 
-/** The slot a time rounds to, as `HH:mm`. */
-function nearestSlotOf(time: string): string {
-  const [h, m] = time.split(':').map(Number);
-  const totalMin = (h ?? 0) * 60 + (m ?? 0);
-  const rounded = Math.min(Math.round(totalMin / 15) * 15, 23 * 60 + 45);
-  const rh = Math.floor(rounded / 60);
-  const rm = rounded % 60;
-  return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** The minute wheel's rows: five-minute steps, plus the current minute when it is off them. */
+function minuteRows(current: number): number[] {
+  const rows = Array.from({ length: 60 / MINUTE_STEP }, (_, i) => i * MINUTE_STEP);
+  if (!rows.includes(current)) {
+    rows.push(current);
+    rows.sort((a, b) => a - b);
+  }
+  return rows;
 }
 
 /**
@@ -648,9 +647,140 @@ export function parseTypedTime(input: string): string | null {
   const hour = Number(match[1]);
   const minute = match[2] ? Number(match[2]) : 0;
   if (hour > 23 || minute > 59) return null;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return `${pad2(hour)}:${pad2(minute)}`;
 }
 
+/**
+ * One scroll-snapped column of numbers. The row resting under the band is the
+ * value once scrolling stops; a tap on a row picks it, a tap on the picked row
+ * confirms. To assistive tech and the keyboard it is a spinbutton.
+ */
+function TimeWheel({
+  label,
+  rows,
+  value,
+  rowHeight,
+  onPick,
+  onConfirm,
+  autoFocus,
+}: {
+  label: string;
+  rows: number[];
+  value: number;
+  rowHeight: number;
+  onPick: (v: number) => void;
+  onConfirm: () => void;
+  autoFocus?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const settleTimer = useRef<number | undefined>(undefined);
+  const mounted = useRef(false);
+  const [focused, setFocused] = useState(false);
+  const index = Math.max(0, rows.indexOf(value));
+  // The settle timer outlives renders, so it reads the latest props from here.
+  const latest = useRef({ rows, value, onPick });
+  latest.current = { rows, value, onPick };
+
+  // Brings the picked row under the band: at once when the wheel appears,
+  // gliding after that. A wheel already resting there is left alone.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const top = index * rowHeight;
+    if (Math.abs(el.scrollTop - top) < 1) return;
+    if (!mounted.current || !el.scrollTo) el.scrollTop = top;
+    else el.scrollTo({ top, behavior: 'smooth' });
+    mounted.current = true;
+  }, [index, rowHeight]);
+
+  useEffect(() => {
+    mounted.current = true;
+    if (autoFocus) ref.current?.focus({ preventScroll: true });
+    return () => window.clearTimeout(settleTimer.current);
+  }, [autoFocus]);
+
+  const handleScroll = () => {
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      const el = ref.current;
+      if (!el) return;
+      const { rows: r, value: v, onPick: pick } = latest.current;
+      const at = Math.min(r.length - 1, Math.max(0, Math.round(el.scrollTop / rowHeight)));
+      const next = r[at];
+      if (next !== undefined && next !== v) pick(next);
+    }, WHEEL_SETTLE_MS);
+  };
+
+  const stepTo = (i: number) => {
+    const next = rows[Math.min(rows.length - 1, Math.max(0, i))];
+    if (next !== undefined && next !== value) onPick(next);
+  };
+
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const moves = new Map<string, number>([
+      ['ArrowUp', index - 1],
+      ['ArrowDown', index + 1],
+      ['PageUp', index - WHEEL_ROWS],
+      ['PageDown', index + WHEEL_ROWS],
+      ['Home', 0],
+      ['End', rows.length - 1],
+    ]);
+    const target = moves.get(e.key);
+    if (target !== undefined) {
+      e.preventDefault();
+      stepTo(target);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      onConfirm();
+    }
+  };
+
+  return (
+    <div
+      ref={ref}
+      role="spinbutton"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={rows[0]}
+      aria-valuemax={rows[rows.length - 1]}
+      aria-valuetext={pad2(value)}
+      onScroll={handleScroll}
+      onKeyDown={handleKey}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      className="time-wheel relative h-full overflow-y-auto overscroll-contain outline-none"
+      style={{ paddingBlock: rowHeight * 2 }}
+    >
+      {rows.map((row) => {
+        const picked = row === value;
+        return (
+          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the spinbutton around the rows takes the keys
+          <div
+            key={row}
+            aria-hidden
+            onClick={() => (picked ? onConfirm() : onPick(row))}
+            className={`time-wheel-row flex cursor-pointer items-center justify-center tabular-nums transition-colors ${
+              picked
+                ? `font-semibold ${focused ? 'text-[var(--color-accent-ink)]' : 'text-[var(--color-text-primary)]'}`
+                : 'text-[var(--color-text-tertiary)]'
+            }`}
+            style={{ height: rowHeight }}
+          >
+            {pad2(row)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Picks a time on an hour wheel and a minute wheel, the way a phone's own
+ * clock does. Each wheel applies as it comes to rest, so the field behind
+ * follows along; tapping the picked row, Enter or Done closes. A minute off
+ * the five-minute steps is typed.
+ */
 function TimePickerDropdown({
   value,
   onChange,
@@ -661,33 +791,21 @@ function TimePickerDropdown({
   returnFocusRef,
 }: TimePickerDropdownProps) {
   const t = useT();
-  const selectedRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const [typed, setTyped] = useState('');
   const [typedInvalid, setTypedInvalid] = useState(false);
+  const sheet = useSheetPicker();
+  const rowHeight = sheet ? 44 : 34;
+
+  const [hourPart, minutePart] = value.split(':').map(Number);
+  const hour = Number.isFinite(hourPart) ? (hourPart as number) : 9;
+  const minute = Number.isFinite(minutePart) ? (minutePart as number) : 0;
+  const minutes = useMemo(() => minuteRows(minute), [minute]);
 
   useOutsideClose([floatingRef], onClose, true);
 
   const closeToField = () => {
     onClose();
     returnFocusRef.current?.focus();
-  };
-
-  // Focus starts on the slot, not the text box, so a tap does not raise the
-  // on-screen keyboard.
-  useEffect(() => {
-    selectedRef.current?.focus({ preventScroll: true });
-    selectedRef.current?.scrollIntoView({ block: 'center' });
-  }, []);
-
-  const handleTypedChange = (next: string) => {
-    setTyped(next);
-    setTypedInvalid(false);
-    const time = parseTypedTime(next);
-    if (!time) return;
-    listRef.current
-      ?.querySelector<HTMLElement>(`[data-slot="${nearestSlotOf(time)}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
   };
 
   const applyTyped = () => {
@@ -706,55 +824,78 @@ function TimePickerDropdown({
     applyTyped();
   };
 
-  // Slots are one Tab stop; the arrows walk the list.
-  const handleListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.target instanceof HTMLInputElement) return;
-    const slots = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[data-slot]'));
-    const at = slots.indexOf(document.activeElement as HTMLElement);
-    const target =
-      e.key === 'ArrowDown'
-        ? slots[Math.min(at + 1, slots.length - 1)]
-        : e.key === 'ArrowUp'
-          ? slots[Math.max(at - 1, 0)]
-          : e.key === 'Home'
-            ? slots[0]
-            : e.key === 'End'
-              ? slots[slots.length - 1]
-              : undefined;
-    if (!target) return;
-    e.preventDefault();
-    target.focus();
-  };
-
-  const nearestSlot = useMemo(() => nearestSlotOf(value), [value]);
-  const sheet = useSheetPicker();
-
   return (
     <PickerSurface
       sheet={sheet}
-      title={title}
       floatingRef={floatingRef}
       style={style}
-      popoverClassName="flex max-h-[300px] w-[120px] flex-col"
-      onKeyDown={(e) => {
-        handlePopupKeys(e, closeToField);
-        handleListKey(e);
-      }}
+      popoverClassName="w-[232px] p-3"
+      onKeyDown={(e) => handlePopupKeys(e, closeToField)}
     >
+      {sheet && (
+        <div className="mb-1 flex items-center justify-between pl-1">
+          <p className="text-footnote font-medium text-[var(--color-text-secondary)]">{title}</p>
+          <button
+            type="button"
+            onClick={closeToField}
+            className="-mr-2 h-10 px-3 text-callout font-semibold text-[var(--color-accent-ink)]"
+          >
+            {t('picker.done')}
+          </button>
+        </div>
+      )}
+
+      {/* The band marks the row each wheel rests on; the wheels scroll over it. */}
       <div
-        className={`flex items-center gap-1 ${sheet ? 'pb-2' : 'border-b border-[var(--color-separator)] p-1.5'}`}
+        className={`relative grid items-center justify-center ${
+          sheet
+            ? 'grid-cols-[88px_auto_88px] text-[23px]'
+            : 'grid-cols-[64px_auto_64px] text-[17px]'
+        }`}
+        style={{ height: rowHeight * WHEEL_ROWS }}
       >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 rounded-[var(--radius-control)] bg-[var(--color-surface-inset)]"
+          style={{ height: rowHeight }}
+        />
+        <TimeWheel
+          label={t('picker.hour')}
+          rows={HOURS}
+          value={hour}
+          rowHeight={rowHeight}
+          onPick={(h) => onChange(`${pad2(h)}:${pad2(minute)}`)}
+          onConfirm={closeToField}
+          autoFocus
+        />
+        <span aria-hidden className="relative px-1 font-semibold text-[var(--color-text-tertiary)]">
+          :
+        </span>
+        <TimeWheel
+          label={t('picker.minute')}
+          rows={minutes}
+          value={minute}
+          rowHeight={rowHeight}
+          onPick={(m) => onChange(`${pad2(hour)}:${pad2(m)}`)}
+          onConfirm={closeToField}
+        />
+      </div>
+
+      <div className="mt-3 flex items-center gap-1.5 border-t border-[var(--color-separator)] pt-3">
         <input
           data-1p-ignore
           type="text"
           inputMode="numeric"
           value={typed}
-          onChange={(e) => handleTypedChange(e.target.value)}
+          onChange={(e) => {
+            setTyped(e.target.value);
+            setTypedInvalid(false);
+          }}
           onKeyDown={handleTypedKey}
           aria-label={t('picker.typeTime')}
           aria-invalid={typedInvalid}
-          placeholder="9:30"
-          className={`input-modern h-9 min-w-0 flex-1 text-center text-default tabular-nums ${
+          placeholder={t('picker.typeTimePlaceholder')}
+          className={`input-modern h-9 min-w-0 flex-1 text-default tabular-nums ${
             typedInvalid ? 'ring-1 ring-[var(--color-danger)]' : ''
           }`}
         />
@@ -764,7 +905,7 @@ function TimePickerDropdown({
           aria-label={t('picker.applyTime')}
           onClick={applyTyped}
           disabled={!typed.trim()}
-          className="icon-btn icon-btn-accent h-9 w-9 shrink-0 disabled:opacity-40"
+          className="icon-btn icon-btn-accent h-9 w-9 shrink-0 disabled:bg-[var(--color-surface-inset)] disabled:text-[var(--color-text-tertiary)]"
         >
           <svg
             width="14"
@@ -778,41 +919,6 @@ function TimePickerDropdown({
             <path d="M20 6L9 17l-5-5" />
           </svg>
         </button>
-      </div>
-      <div
-        ref={listRef}
-        className={`overflow-y-auto ${sheet ? '-mx-1 grid max-h-[46dvh] grid-cols-4 gap-1.5 p-1' : 'flex-1 p-1'}`}
-      >
-        {TIME_SLOTS.map((slot) => {
-          const isSelected = slot === nearestSlot;
-          // On the hour reads as a heading; the quarters under it recede.
-          const onHour = slot.endsWith(':00');
-          return (
-            <button
-              key={slot}
-              ref={isSelected ? selectedRef : undefined}
-              type="button"
-              data-slot={slot}
-              tabIndex={isSelected ? 0 : -1}
-              aria-pressed={isSelected}
-              onClick={() => {
-                onChange(slot);
-                closeToField();
-              }}
-              className={`flex w-full items-center justify-center rounded-[var(--radius-control)] tabular-nums transition-colors ${
-                sheet ? 'h-11 text-callout' : 'h-8 text-default'
-              } ${
-                isSelected
-                  ? 'bg-[var(--color-accent)] font-semibold text-[var(--color-text-on-accent)]'
-                  : onHour
-                    ? 'font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text-primary)]'
-              } ${sheet && !isSelected ? 'bg-[var(--color-surface-inset)]' : ''}`}
-            >
-              {slot}
-            </button>
-          );
-        })}
       </div>
     </PickerSurface>
   );
@@ -1280,7 +1386,7 @@ export function TimeField({
   onChange: (time: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const floating = useFloating(open, 100);
+  const floating = useFloating(open, 232);
   const close = useCallback(() => setOpen(false), []);
   return (
     <PickerFormLabel label={label}>
@@ -1337,7 +1443,7 @@ export function DateTimeField({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const dateFloating = useFloating(showDatePicker, 280);
-  const timeFloating = useFloating(showTimePicker, 100);
+  const timeFloating = useFloating(showTimePicker, 232);
 
   const dateLabel = useMemo(() => {
     if (locale === 'en') return dateValue.setLocale('en').toFormat('EEE, MMM d, yyyy');

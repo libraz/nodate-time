@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -376,12 +376,56 @@ describe('DateTimeField', () => {
 
     await user.click(screen.getByText('09:00'));
 
-    // Time picker should show time slots
-    expect(screen.getByText('09:15')).toBeInTheDocument();
-    expect(screen.getByText('10:00')).toBeInTheDocument();
+    const hours = screen.getByRole('spinbutton', { name: 'Hour' });
+    expect(hours).toHaveAttribute('aria-valuenow', '9');
+    expect(hours.children).toHaveLength(24);
+    const minutes = screen.getByRole('spinbutton', { name: 'Minute' });
+    expect(minutes).toHaveAttribute('aria-valuenow', '0');
+    expect(minutes.children).toHaveLength(12);
   });
 
-  it('calls onTimeChange when a time slot is picked', async () => {
+  it('keeps a minute off the five-minute steps on the wheel', async () => {
+    const user = userEvent.setup();
+    render(
+      <DateTimeField
+        label="Start"
+        dateValue={baseDate}
+        timeValue="09:07"
+        showTime={true}
+        onDateChange={() => {}}
+        onTimeChange={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByText('09:07'));
+
+    const minutes = screen.getByRole('spinbutton', { name: 'Minute' });
+    expect(minutes.children).toHaveLength(13);
+    expect(minutes).toHaveAttribute('aria-valuetext', '07');
+  });
+
+  it('applies an hour at once, keeping the minute and the picker open', async () => {
+    const onTimeChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <DateTimeField
+        label="Start"
+        dateValue={baseDate}
+        timeValue="09:30"
+        showTime={true}
+        onDateChange={() => {}}
+        onTimeChange={onTimeChange}
+      />,
+    );
+
+    await user.click(screen.getByText('09:30'));
+    await user.click(within(screen.getByRole('spinbutton', { name: 'Hour' })).getByText('14'));
+
+    expect(onTimeChange).toHaveBeenCalledWith('14:30');
+    expect(screen.getByRole('spinbutton', { name: 'Hour' })).toBeInTheDocument();
+  });
+
+  it('closes when the picked row is tapped again', async () => {
     const onTimeChange = vi.fn();
     const user = userEvent.setup();
     render(
@@ -396,9 +440,11 @@ describe('DateTimeField', () => {
     );
 
     await user.click(screen.getByText('09:00'));
-    await user.click(screen.getByText('14:30'));
+    await user.click(within(screen.getByRole('spinbutton', { name: 'Minute' })).getByText('45'));
+    expect(onTimeChange).toHaveBeenCalledWith('09:45');
 
-    expect(onTimeChange).toHaveBeenCalledWith('14:30');
+    await user.click(within(screen.getByRole('spinbutton', { name: 'Minute' })).getByText('00'));
+    expect(screen.queryByRole('spinbutton', { name: 'Hour' })).toBeNull();
   });
 
   it('navigates months in date picker', async () => {
@@ -523,11 +569,15 @@ describe('DateTimeField from the keyboard', () => {
 
     timeButton.focus();
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('button', { name: '09:00', pressed: true })).toHaveFocus();
+    expect(screen.getByRole('spinbutton', { name: 'Hour' })).toHaveFocus();
 
-    await user.keyboard('{ArrowDown}{Enter}');
+    await user.keyboard('{ArrowDown}');
+    expect(onTimeChange).toHaveBeenLastCalledWith('10:00');
+    await user.tab();
+    await user.keyboard('{ArrowDown}');
+    expect(onTimeChange).toHaveBeenLastCalledWith('09:05');
 
-    expect(onTimeChange).toHaveBeenCalledWith('09:15');
+    await user.keyboard('{Enter}');
     expect(timeButton).toHaveFocus();
   });
 });
@@ -595,18 +645,19 @@ describe('TimePicker typed entry', () => {
     return { user, input: screen.getByRole('textbox', { name: 'Type a time' }) };
   }
 
-  it('keeps focus on the selected slot when it opens', async () => {
+  it('keeps focus on the hour wheel when it opens', async () => {
     renderField();
     await openTyped();
 
-    expect(screen.getByRole('button', { name: '09:00', pressed: true })).toHaveFocus();
+    expect(screen.getByRole('spinbutton', { name: 'Hour' })).toHaveFocus();
   });
 
-  it('is reached from the slot list with Shift+Tab', async () => {
+  it('is reached from the wheels with Tab', async () => {
     renderField();
     const { user, input } = await openTyped();
 
-    await user.tab({ shift: true });
+    await user.tab();
+    await user.tab();
 
     expect(input).toHaveFocus();
   });
