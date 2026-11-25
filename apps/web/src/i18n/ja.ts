@@ -53,7 +53,8 @@ export const ja = {
   'calendar.inviteMembers': 'メンバーを招待',
   'calendar.inviteLater': 'あとで',
   'calendar.deleteCalendar': 'カレンダーを削除',
-  'calendar.deleteWarning': '「{name}」の予定・メモ・アルバムがメンバー全員から消えます。',
+  'calendar.deleteWarning':
+    '「{name}」の予定・メモ・アルバムがメンバー全員から消えます。元には戻せません。',
   'calendar.moreEvents': 'ほか{count}件の予定',
 
   // Weekday labels
@@ -206,6 +207,7 @@ export const ja = {
   'panel.targetCalendar': '対象カレンダー',
   'panel.album': 'アルバム',
   'panel.members': 'メンバー',
+  'panel.labels': 'ラベル',
   'panel.share': '共有',
   'panel.enterToPost': 'Enterで投稿',
   'panel.updated': '更新しました',
@@ -593,6 +595,7 @@ export const ja = {
   'confirm.removeCover': 'カバー画像を削除しますか？',
   'confirm.removeAllowedEmail': 'このメールアドレスを許可リストから外しますか？',
   'confirm.deleteCalendar': 'このカレンダーを削除しますか？',
+  'confirm.typeToConfirm': '確認のため「{text}」と入力してください',
   'confirm.removeProvider': 'このログイン方法を削除しますか？',
   'confirm.removeMember': '{name}さんをカレンダーから外しますか？',
   'confirm.leaveTitle': 'このカレンダーから退出しますか？',
@@ -621,7 +624,6 @@ export const ja = {
   'members.roleViewerHint': '予定を見ることだけできます',
 
   // Labels
-  'labels.title': 'ラベル',
   'labels.hint': '予定に付けると、その予定がラベルの色で表示されます',
   'labels.add': '追加',
   'labels.name': '名前',

@@ -52,7 +52,8 @@ export const en: Record<TranslationKey, string> = {
   'calendar.inviteMembers': 'Invite members',
   'calendar.inviteLater': 'Later',
   'calendar.deleteCalendar': 'Delete calendar',
-  'calendar.deleteWarning': 'The events, memos and album in "{name}" go with it, for everyone.',
+  'calendar.deleteWarning':
+    'The events, memos and album in "{name}" go with it, for everyone. This cannot be undone.',
   'calendar.moreEvents': '{count} more events',
 
   'weekday.sun': 'Sun',
@@ -203,6 +204,7 @@ export const en: Record<TranslationKey, string> = {
   'panel.targetCalendar': 'Calendar',
   'panel.album': 'Album',
   'panel.members': 'Members',
+  'panel.labels': 'Labels',
   'panel.share': 'Share',
   'panel.enterToPost': 'Press Enter to post',
   'panel.updated': 'Updated',
@@ -578,6 +580,7 @@ export const en: Record<TranslationKey, string> = {
   'confirm.removeCover': 'Remove the cover image?',
   'confirm.removeAllowedEmail': 'Remove this address from the allow list?',
   'confirm.deleteCalendar': 'Delete this calendar?',
+  'confirm.typeToConfirm': 'Type "{text}" to confirm',
   'confirm.removeProvider': 'Remove this sign-in method?',
   'confirm.removeMember': 'Remove {name} from this calendar?',
   'confirm.leaveTitle': 'Leave this calendar?',
@@ -607,7 +610,6 @@ export const en: Record<TranslationKey, string> = {
   'members.roleViewerHint': 'Can only view events',
 
   // Labels
-  'labels.title': 'Labels',
   'labels.hint': "An event filed under a label is drawn in the label's colour",
   'labels.add': 'Add',
   'labels.name': 'Name',

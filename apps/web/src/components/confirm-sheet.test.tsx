@@ -63,4 +63,35 @@ describe('ConfirmSheet', () => {
     setup();
     expect(screen.getByRole('button', { name: 'Keep' })).toBeInTheDocument();
   });
+
+  it('unlocks the action only once the confirm text is typed, ignoring surrounding spaces', () => {
+    const { onConfirm } = setup({ confirmText: 'Team' });
+    const action = screen.getByRole('button', { name: 'Delete' });
+    const field = screen.getByPlaceholderText('Team');
+
+    expect(action).toBeDisabled();
+    fireEvent.change(field, { target: { value: 'team' } });
+    expect(action).toBeDisabled();
+    fireEvent.change(field, { target: { value: ' Team ' } });
+    expect(action).toBeEnabled();
+    fireEvent.click(action);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('empties the confirm field each time it opens', () => {
+    const { rerender, onConfirm, onCancel } = setup({ confirmText: 'Team' });
+    fireEvent.change(screen.getByPlaceholderText('Team'), { target: { value: 'Team' } });
+    const props = {
+      title: 'Delete this?',
+      confirmLabel: 'Delete',
+      confirmText: 'Team',
+      onConfirm,
+      onCancel,
+    };
+    rerender(<ConfirmSheet open={false} {...props} />);
+    rerender(<ConfirmSheet open {...props} />);
+
+    expect(screen.getByPlaceholderText('Team')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  });
 });

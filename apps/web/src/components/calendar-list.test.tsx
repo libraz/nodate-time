@@ -146,7 +146,13 @@ describe('CalendarList calendar deletion', () => {
     expect(deleteCalendar).not.toHaveBeenCalled();
     expect(screen.getByText('calendar.deleteWarning')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'common.delete' }));
+    // Nothing is deleted until the calendar's name is typed out.
+    const remove = screen.getByRole('button', { name: 'common.delete' });
+    expect(remove).toBeDisabled();
+    await user.type(screen.getByLabelText('confirm.typeToConfirm'), 'Famil');
+    expect(remove).toBeDisabled();
+    await user.type(screen.getByLabelText('confirm.typeToConfirm'), 'y');
+    await user.click(remove);
     expect(deleteCalendar).toHaveBeenCalledWith('cal-owned');
   });
 
@@ -157,6 +163,7 @@ describe('CalendarList calendar deletion', () => {
     render(<CalendarList />);
 
     await user.click(screen.getByRole('button', { name: 'calendar.deleteCalendar' }));
+    await user.type(screen.getByLabelText('confirm.typeToConfirm'), 'Family');
     await user.click(screen.getByRole('button', { name: 'common.delete' }));
 
     expect(await screen.findAllByText('conflict.stale')).not.toHaveLength(0);

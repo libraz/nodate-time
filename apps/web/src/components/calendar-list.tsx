@@ -354,6 +354,7 @@ export function CalendarList() {
           deleteError ?? t('calendar.deleteWarning', { name: pendingDeleteCalendar?.name ?? '' })
         }
         confirmLabel={t('common.delete')}
+        confirmText={pendingDeleteCalendar?.name ?? ''}
         busy={deleting}
         onConfirm={() =>
           pendingDeleteCalendar &&

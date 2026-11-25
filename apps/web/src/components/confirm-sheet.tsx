@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/i18n';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -15,6 +15,11 @@ interface ConfirmSheetProps {
   tone?: 'dark' | 'theme';
   /** Colours the confirm action as dangerous. Defaults to true. */
   destructive?: boolean;
+  /**
+   * Text the reader must type before the confirm action unlocks, for an
+   * action nobody can undo. Surrounding whitespace is ignored.
+   */
+  confirmText?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -51,6 +56,7 @@ export function ConfirmSheet({
   busy = false,
   tone = 'theme',
   destructive = true,
+  confirmText,
   onConfirm,
   onCancel,
 }: ConfirmSheetProps) {
@@ -58,8 +64,15 @@ export function ConfirmSheet({
   const titleId = useId();
   const hintId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const typedId = useId();
+  const [typed, setTyped] = useState('');
   const panelRef = useModalA11y<HTMLDivElement>(open, onCancel, cancelRef);
+  // Every opening starts from an empty field.
+  useEffect(() => {
+    if (open) setTyped('');
+  }, [open]);
   if (!open) return null;
+  const locked = confirmText !== undefined && typed.trim() !== confirmText.trim();
   const c = SHEET_TONES[tone];
   return createPortal(
     <div className="fixed inset-0 z-[65] flex items-end justify-center bg-black/40 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
@@ -89,10 +102,27 @@ export function ConfirmSheet({
               {hint}
             </p>
           )}
+          {confirmText !== undefined && (
+            <div className="px-4 pb-3.5 text-left">
+              <label htmlFor={typedId} className={`mb-1.5 block text-footnote ${c.hint}`}>
+                {t('confirm.typeToConfirm', { text: confirmText })}
+              </label>
+              <input
+                id={typedId}
+                data-1p-ignore
+                type="text"
+                autoComplete="off"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={confirmText}
+                className="input-modern h-10 w-full text-default"
+              />
+            </div>
+          )}
           <button
             type="button"
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || locked}
             className={`w-full border-t py-3.5 text-callout font-medium transition-colors disabled:opacity-50 ${c.rule} ${c.hover} ${destructive ? c.danger : c.accent}`}
           >
             {busy ? t('common.processing') : confirmLabel}
