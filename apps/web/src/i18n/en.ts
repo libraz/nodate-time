@@ -1069,6 +1069,7 @@ export const en: Record<TranslationKey, string> = {
   'invites.shareLink': 'Share link',
   'invites.closeTitle': "You haven't copied the link",
   'invites.closeAnyway': 'Close',
+  'checklist.add': 'Add item',
   'checklist.deleted': 'Item deleted',
   'restore.toast': '"{name}" deleted',
   'restore.undo': 'Undo',

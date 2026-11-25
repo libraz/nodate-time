@@ -98,6 +98,41 @@ describe('ChecklistSection', () => {
     const req = (del.mock.calls[0] as unknown as [Request])[0];
     expect(req.headers.get('If-Match')).toBe('"v1"');
   });
+  it('adds an item from the button, with no return key involved', async () => {
+    const post = vi.fn((_req: Request) => jsonResponse(checklistItem({ title: 'Minutes' }), 201));
+    mockApi({
+      [`GET ${BASE}/checklist`]: jsonResponse([]),
+      [`POST ${BASE}/checklist`]: post,
+    });
+    render(<ChecklistSection calendarId="cal-1" eventId="evt-1" editable />);
+
+    const box = await screen.findByRole('textbox');
+    const add = screen.getByRole('button', { name: /add item|項目を追加/i });
+    expect(add).toHaveProperty('disabled', true);
+    fireEvent.change(box, { target: { value: 'Minutes' } });
+    fireEvent.click(add);
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const req = post.mock.calls[0]?.[0] as Request;
+    expect(await req.json()).toEqual({ title: 'Minutes', sortOrder: 0 });
+  });
+
+  it('leaves the Enter that commits an IME conversion to the IME', async () => {
+    const post = vi.fn(() => jsonResponse(checklistItem(), 201));
+    mockApi({
+      [`GET ${BASE}/checklist`]: jsonResponse([]),
+      [`POST ${BASE}/checklist`]: post,
+    });
+    render(<ChecklistSection calendarId="cal-1" eventId="evt-1" editable />);
+
+    const box = await screen.findByRole('textbox');
+    fireEvent.change(box, { target: { value: 'ぎじろく' } });
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(box, { key: 'Enter', keyCode: 229 });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe('CommentsSection', () => {
@@ -136,6 +171,23 @@ describe('CommentsSection', () => {
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     const req = (post.mock.calls[0] as unknown as [Request])[0];
     expect(await req.json()).toEqual({ body: 'new' });
+  });
+
+  it('leaves the Enter that commits an IME conversion to the IME', async () => {
+    const post = vi.fn(() => jsonResponse(comment(), 201));
+    mockApi({
+      [`GET ${BASE}/activities`]: jsonResponse({ items: [] }),
+      [`POST ${BASE}/activities`]: post,
+    });
+    render(<CommentsSection calendarId="cal-1" eventId="evt-1" canPost moderatorRole="owner" />);
+
+    const box = await screen.findByRole('textbox');
+    fireEvent.change(box, { target: { value: 'りょうかい' } });
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(box, { key: 'Enter', keyCode: 229 });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   });
 });
 

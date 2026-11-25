@@ -224,14 +224,31 @@ export function ChecklistSection({
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleAdd();
-              }
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              handleAdd();
             }}
             placeholder={t('event.checklistPlaceholder')}
             className="input-modern h-10 min-w-0 flex-1 text-default"
           />
+          {/* A software keyboard's return key is not something users reach for. */}
+          <LabelledButton
+            label={t('checklist.add')}
+            onClick={handleAdd}
+            disabled={!newTitle.trim()}
+            className="icon-btn icon-btn-accent h-10 w-10 shrink-0 disabled:opacity-40"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </LabelledButton>
         </div>
       )}
     </div>

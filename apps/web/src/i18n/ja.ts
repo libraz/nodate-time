@@ -1074,6 +1074,7 @@ export const ja = {
   'invites.shareLink': 'リンクを共有',
   'invites.closeTitle': 'コピーしていないリンクがあります',
   'invites.closeAnyway': '閉じる',
+  'checklist.add': '項目を追加',
   'checklist.deleted': '項目を削除しました',
   'restore.toast': '「{name}」を削除しました',
   'restore.undo': '元に戻す',

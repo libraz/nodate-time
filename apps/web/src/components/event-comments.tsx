@@ -304,10 +304,10 @@ export function CommentsSection({
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
+              if (e.key !== 'Enter' || e.shiftKey) return;
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              e.preventDefault();
+              handleSend();
             }}
             placeholder={t('event.commentPlaceholder')}
             className="input-modern h-10 min-w-0 flex-1 text-default"
