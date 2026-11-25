@@ -2,11 +2,17 @@ import { useEffect, useId, useState } from 'react';
 import { ColorEditor } from '@/components/color-editor';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LabelledButton } from '@/components/labelled-button';
+import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
+import { SidePanel } from '@/components/side-panel';
 import { useT } from '@/i18n';
 import { errorMessage, isStaleError } from '@/lib/client';
 import { isSubmitEnter } from '@/lib/keys';
+import { canManage } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
+import { usePanelCalendar } from '@/lib/use-panel-calendar';
+import { usePresence } from '@/lib/use-presence';
 import { useCalendarStore } from '@/stores/calendar-store';
+import { useUiStore } from '@/stores/ui-store';
 import { type Label, MEMBER_COLORS } from '@/types/calendar';
 
 const NAME_MAX = 50;
@@ -97,7 +103,93 @@ function LabelForm({
  * The named colours a calendar's events can be filed under. Everyone on the
  * calendar sees the list; owners and managers also add, edit and delete.
  */
-export function LabelsPanel({ calendarId, canManage }: { calendarId: string; canManage: boolean }) {
+export function LabelsPanel() {
+  const t = useT();
+  const rightPanel = useUiStore((s) => s.rightPanel);
+  const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const presence = usePresence(rightPanel === 'labels');
+  const { options, target, setTargetId } = usePanelCalendar();
+  const [adding, setAdding] = useState(false);
+  const calendarId = target?.id ?? '';
+  const manages = target ? canManage(target.role) : false;
+
+  // The add form belongs to one calendar and one opening of the panel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: calendarId is the trigger
+  useEffect(() => {
+    setAdding(false);
+  }, [calendarId, presence.mounted]);
+
+  if (!presence.mounted) return null;
+
+  return (
+    <SidePanel
+      presence={presence}
+      onClose={() => toggleRightPanel('labels')}
+      title={t('panel.labels')}
+      actions={
+        manages &&
+        !adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="btn-primary btn-sm inline-flex items-center gap-1 pr-3 pl-2.5"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {t('labels.add')}
+          </button>
+        )
+      }
+    >
+      {target && (
+        <div className="border-b border-[var(--color-border)] px-5 py-3">
+          <PanelCalendarPicker
+            label={t('panel.targetCalendar')}
+            options={options}
+            target={target}
+            onChange={setTargetId}
+          />
+          <p className="mt-2 text-caption text-[var(--color-text-secondary)]">{t('labels.hint')}</p>
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto">
+        {calendarId ? (
+          <LabelList
+            calendarId={calendarId}
+            canManage={manages}
+            adding={adding}
+            onAddingChange={setAdding}
+          />
+        ) : (
+          <p className="py-10 text-center text-body text-[var(--color-text-tertiary)]">—</p>
+        )}
+      </div>
+    </SidePanel>
+  );
+}
+
+/** One calendar's labels, with the add form above them while `adding`. */
+export function LabelList({
+  calendarId,
+  canManage,
+  adding,
+  onAddingChange,
+}: {
+  calendarId: string;
+  canManage: boolean;
+  adding: boolean;
+  onAddingChange: (adding: boolean) => void;
+}) {
   const t = useT();
   const labels = useCalendarStore((s) => s.labelsMap[calendarId]);
   const loadError = useCalendarStore((s) => s.labelErrors[calendarId]);
@@ -105,7 +197,7 @@ export function LabelsPanel({ calendarId, canManage }: { calendarId: string; can
   const addLabel = useCalendarStore((s) => s.addLabel);
   const updateLabel = useCalendarStore((s) => s.updateLabel);
   const deleteLabel = useCalendarStore((s) => s.deleteLabel);
-  // 'new' is the add form; an id is that label's edit form.
+  // The label whose edit form is open.
   const [editing, setEditing] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Label | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,6 +208,11 @@ export function LabelsPanel({ calendarId, canManage }: { calendarId: string; can
     setPendingDelete(null);
     if (calendarId) void fetchLabels(calendarId);
   }, [calendarId, fetchLabels]);
+
+  // Opening the add form closes any edit form.
+  useEffect(() => {
+    if (adding) setEditing(null);
+  }, [adding]);
 
   const loading = labels === undefined && !loadError;
   const list = labels ?? [];
@@ -141,54 +238,24 @@ export function LabelsPanel({ calendarId, canManage }: { calendarId: string; can
   };
 
   return (
-    <section className="border-t border-[var(--color-separator)] px-5 py-4">
-      <div className="flex min-h-9 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
-            {t('labels.title')}
-          </h3>
-          <p className="text-caption text-[var(--color-text-secondary)]">{t('labels.hint')}</p>
-        </div>
-        {canManage && editing !== 'new' && !loading && !loadError && (
-          <button
-            type="button"
-            onClick={() => setEditing('new')}
-            className="btn-secondary btn-sm inline-flex shrink-0 items-center gap-1 pr-3 pl-2.5"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            {t('labels.add')}
-          </button>
-        )}
-      </div>
-
-      {editing === 'new' && canManage && (
-        <div className="mt-3">
+    <section className="px-5 py-2">
+      {adding && canManage && (
+        <div className="py-3">
           <LabelForm
             initial={{ name: '', color: freshColor(list) }}
             others={list}
             submitLabel={t('labels.add')}
             busy={busy}
-            onCancel={() => setEditing(null)}
+            onCancel={() => onAddingChange(false)}
             onSubmit={async (value) => {
-              if (await run(() => addLabel(calendarId, value))) setEditing(null);
+              if (await run(() => addLabel(calendarId, value))) onAddingChange(false);
             }}
           />
         </div>
       )}
 
       {loading ? (
-        <ul className="mt-3 space-y-2" aria-busy="true">
+        <ul className="space-y-2 py-2" aria-busy="true">
           {[0, 1].map((i) => (
             <li key={i} className="flex animate-pulse items-center gap-3 py-2">
               <span className="h-3 w-3 shrink-0 rounded-full bg-[var(--color-surface-inset)]" />
@@ -208,13 +275,13 @@ export function LabelsPanel({ calendarId, canManage }: { calendarId: string; can
           </button>
         </div>
       ) : list.length === 0 ? (
-        editing !== 'new' && (
+        !adding && (
           <p className="py-4 text-center text-footnote text-[var(--color-text-tertiary)]">
             {t('labels.empty')}
           </p>
         )
       ) : (
-        <ul className="mt-2 divide-y divide-[var(--color-separator)]">
+        <ul className="divide-y divide-[var(--color-separator)]">
           {list.map((label) => (
             <li key={label.id} className="py-2.5">
               {editing === label.id && canManage ? (
@@ -253,7 +320,10 @@ export function LabelsPanel({ calendarId, canManage }: { calendarId: string; can
                     <>
                       <LabelledButton
                         label={t('labels.edit', { name: label.name })}
-                        onClick={() => setEditing(label.id)}
+                        onClick={() => {
+                          onAddingChange(false);
+                          setEditing(label.id);
+                        }}
                         className="icon-btn h-8 w-8"
                       >
                         <svg

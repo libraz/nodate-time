@@ -21,7 +21,29 @@ vi.mock('@/lib/toast', () => ({
 const live: Label = { id: 'l1', name: 'Live', color: '#E73B3B', etag: '"l1"' };
 const lesson: Label = { id: 'l2', name: 'Lesson', color: '#2ECC87', etag: '"l2"' };
 
+const uiState = {
+  rightPanel: 'labels' as string | null,
+  toggleRightPanel: vi.fn(),
+  panelCalendarRequest: null as { calendarId: string } | null,
+};
+
+vi.mock('@/stores/ui-store', () => ({
+  useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
+}));
+
 const calendarState = {
+  calendars: [
+    {
+      id: 'cal-1',
+      name: 'Team',
+      color: '#000',
+      createdAt: '',
+      publicShared: false,
+      role: 'manager',
+      memberColor: '#ff0000',
+    },
+  ],
+  activeCalendarIds: ['cal-1'],
   labelsMap: {} as Record<string, Label[]>,
   labelErrors: {} as Record<string, string>,
   fetchLabels: vi.fn(),
@@ -37,7 +59,14 @@ vi.mock('@/stores/calendar-store', () => ({
 import { toast } from '@/lib/toast';
 import { LabelsPanel } from './labels-panel';
 
+/** Opens the panel as a member holding `role` on the one calendar shown. */
+function renderPanel(role: string) {
+  for (const c of calendarState.calendars) c.role = role;
+  return render(<LabelsPanel />);
+}
+
 beforeEach(() => {
+  uiState.rightPanel = 'labels';
   calendarState.labelsMap = { 'cal-1': [live, lesson] };
   calendarState.labelErrors = {};
   calendarState.addLabel.mockResolvedValue(undefined);
@@ -53,7 +82,7 @@ afterEach(() => {
 
 describe('LabelsPanel', () => {
   it('lists the labels for everyone but offers no editing to a reader', () => {
-    render(<LabelsPanel calendarId="cal-1" canManage={false} />);
+    renderPanel('reader');
 
     expect(screen.getByText('Live')).toBeInTheDocument();
     expect(screen.getByText('Lesson')).toBeInTheDocument();
@@ -63,18 +92,18 @@ describe('LabelsPanel', () => {
   });
 
   it('asks for the calendar labels when it opens', () => {
-    render(<LabelsPanel calendarId="cal-1" canManage={false} />);
+    renderPanel('reader');
 
     expect(calendarState.fetchLabels).toHaveBeenCalledWith('cal-1');
   });
 
   it('adds a label from the name and colour, trimming the name', async () => {
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
 
     fireEvent.click(screen.getByRole('button', { name: 'labels.add' }));
     fireEvent.change(screen.getByLabelText('labels.name'), { target: { value: '  Shoot ' } });
-    // The add form's own button is the second one named "labels.add".
-    fireEvent.click(screen.getAllByRole('button', { name: 'labels.add' }).at(-1) as HTMLElement);
+    // The header's add button gives way to the form, so the one left is the form's.
+    fireEvent.click(screen.getByRole('button', { name: 'labels.add' }));
 
     await waitFor(() => expect(calendarState.addLabel).toHaveBeenCalled());
     expect(calendarState.addLabel).toHaveBeenCalledWith('cal-1', {
@@ -84,15 +113,15 @@ describe('LabelsPanel', () => {
   });
 
   it('does not submit an empty name', () => {
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
 
     fireEvent.click(screen.getByRole('button', { name: 'labels.add' }));
 
-    expect(screen.getAllByRole('button', { name: 'labels.add' }).at(-1)).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'labels.add' })).toBeDisabled();
   });
 
   it('renames a label and sends only what changed', async () => {
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
 
     fireEvent.click(screen.getByRole('button', { name: 'labels.edit:Live' }));
     fireEvent.change(screen.getByLabelText('labels.name'), { target: { value: 'Gig' } });
@@ -103,7 +132,7 @@ describe('LabelsPanel', () => {
   });
 
   it('asks before deleting, then deletes', async () => {
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
 
     fireEvent.click(screen.getByRole('button', { name: 'labels.delete:Live' }));
     expect(screen.getByText('labels.deleteConfirm')).toBeInTheDocument();
@@ -115,7 +144,7 @@ describe('LabelsPanel', () => {
 
   it('reports a refused write and reads the list again on a stale version', async () => {
     calendarState.updateLabel.mockRejectedValueOnce(new ApiError(412, 'stale', 'LABEL.STALE'));
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
     calendarState.fetchLabels.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: 'labels.edit:Live' }));
@@ -129,11 +158,26 @@ describe('LabelsPanel', () => {
   it('offers a retry when the list could not be loaded', () => {
     calendarState.labelsMap = {};
     calendarState.labelErrors = { 'cal-1': 'down' };
-    render(<LabelsPanel calendarId="cal-1" canManage />);
+    renderPanel('manager');
     calendarState.fetchLabels.mockClear();
 
     fireEvent.click(screen.getByRole('button', { name: 'error.retry' }));
 
     expect(calendarState.fetchLabels).toHaveBeenCalledWith('cal-1');
+  });
+
+  it('draws nothing while the panel is closed', () => {
+    uiState.rightPanel = null;
+    const { container } = renderPanel('manager');
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('closes as the labels panel', () => {
+    renderPanel('reader');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'common.close' }).at(-1) as HTMLElement);
+
+    expect(uiState.toggleRightPanel).toHaveBeenCalledWith('labels');
   });
 });

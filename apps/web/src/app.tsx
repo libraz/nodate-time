@@ -49,6 +49,9 @@ const ListView = lazy(() =>
 const MembersPanel = lazy(() =>
   import('@/components/members-panel').then((module) => ({ default: module.MembersPanel })),
 );
+const LabelsPanel = lazy(() =>
+  import('@/components/labels-panel').then((module) => ({ default: module.LabelsPanel })),
+);
 const MobileMenu = lazy(() =>
   import('@/components/mobile-menu').then((module) => ({ default: module.MobileMenu })),
 );
@@ -435,6 +438,7 @@ export function App() {
   const memoLoaded = useLatch(rightPanel === 'memo');
   const albumLoaded = useLatch(rightPanel === 'album');
   const membersLoaded = useLatch(rightPanel === 'members');
+  const labelsLoaded = useLatch(rightPanel === 'labels');
   const shareLoaded = useLatch(rightPanel === 'share');
   const activityLoaded = useLatch(showActivity);
   const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
@@ -732,6 +736,13 @@ export function App() {
       {membersLoaded && (
         <Deferred>
           <MembersPanel />
+        </Deferred>
+      )}
+
+      {/* Labels overlay */}
+      {labelsLoaded && (
+        <Deferred>
+          <LabelsPanel />
         </Deferred>
       )}
 

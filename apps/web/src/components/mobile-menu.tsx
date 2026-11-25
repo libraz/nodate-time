@@ -77,6 +77,24 @@ export function MobileMenu() {
       onSelect: () => openPanel('members'),
     },
     {
+      key: 'labels',
+      labelKey: 'panel.labels',
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          width="20"
+          height="20"
+        >
+          <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+          <circle cx="7.5" cy="7.5" r="1.2" />
+        </svg>
+      ),
+      onSelect: () => openPanel('labels'),
+    },
+    {
       key: 'share',
       labelKey: 'panel.share',
       icon: (
