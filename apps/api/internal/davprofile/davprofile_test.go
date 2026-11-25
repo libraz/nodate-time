@@ -130,7 +130,7 @@ var (
 
 func params(publicURL string) Params {
 	return Params{
-		AppName:     "Nodate Time",
+		AppName:     "Example Calendar",
 		DeviceName:  "iPhone",
 		Email:       "user@example.com",
 		Password:    "ndt_ABCDEFGHJKMNPQRSTVWXYZ0123456789",
@@ -147,16 +147,16 @@ func TestBuildCarriesTheAccount(t *testing.T) {
 	require.Equal(t, 1, top["PayloadVersion"])
 	require.Equal(t, "com.example.cal.caldav."+testUser.String(), top["PayloadIdentifier"])
 	require.Equal(t, testProfile.String(), top["PayloadUUID"])
-	require.Equal(t, "Nodate Time", top["PayloadDisplayName"])
+	require.Equal(t, "Example Calendar", top["PayloadDisplayName"])
 	require.Equal(t, "iPhone", top["PayloadDescription"])
-	require.Equal(t, "Nodate Time", top["PayloadOrganization"])
+	require.Equal(t, "Example Calendar", top["PayloadOrganization"])
 	require.Equal(t, false, top["PayloadRemovalDisallowed"])
 
 	acc := account(t, top)
 	require.Equal(t, "com.apple.caldav.account", acc["PayloadType"])
 	require.Equal(t, 1, acc["PayloadVersion"])
 	require.Equal(t, "com.example.cal.caldav."+testUser.String()+".account", acc["PayloadIdentifier"])
-	require.Equal(t, "Nodate Time", acc["CalDAVAccountDescription"])
+	require.Equal(t, "Example Calendar", acc["CalDAVAccountDescription"])
 	require.Equal(t, "cal.example.com", acc["CalDAVHostName"])
 	require.Equal(t, 443, acc["CalDAVPort"])
 	require.Equal(t, true, acc["CalDAVUseSSL"])
