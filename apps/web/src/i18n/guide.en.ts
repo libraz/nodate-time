@@ -23,9 +23,9 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'Plans from ticked calendars are shown. Use "+" to make a new calendar for each group you share with.',
   'tour.addTitle': 'Add a plan',
   'tour.addDesc': 'Write down a plan with this button. Press any plan later to change it.',
-  'tour.shareTitle': 'Invite the people you plan with',
-  'tour.shareDesc':
-    'Make an invite link here and send it in a message or an email. Whoever opens it can join this calendar.',
+  'tour.inviteTitle': 'Invite the people you plan with',
+  'tour.inviteDesc':
+    'Use "Add" under "Members" to pick people from your workspace, or make an invite link and send it in a message or an email.',
   'tour.helpTitle': 'When you are stuck',
   'tour.helpDesc':
     'Look up how things work here at any time. You can replay this tour from here, too.',
@@ -38,8 +38,8 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'tip.guideAction': 'Start the tour',
   'tip.members':
     'The role decides what someone can do. Make people who add plans "Editors", and people who only look "Viewers".',
-  'tip.share':
-    'Send an invite link to people who plan with you, and a public link to people who only look. A public link works without an account.',
+  'tip.public':
+    'Send a public link to people who only look; it works without an account. People who plan with you are invited from "Add" under "Members".',
   'tip.memo':
     "Memos hold things that are not tied to a date, like packing lists or notices, shared with the calendar's members.",
   'tip.event':
@@ -76,7 +76,7 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
   'help.startStep1': 'Create a calendar with "New calendar" in the menu.',
   'help.startStep2': 'Add a plan with the "+" button.',
   'help.startStep3':
-    'Pick people from your workspace with "Add" under "Members", or send anyone else an invite link from "Share".',
+    'Use "Add" under "Members" to pick people from your workspace, or make an invite link and send it.',
 
   'help.eventsTitle': 'Plans',
   'help.eventsAdd': 'Adding a plan',
@@ -122,10 +122,10 @@ export const guideEn: Record<keyof typeof guideJa, string> = {
     'People in the same workspace can be added from "Add" under "Members" without a link. Choose several at once, pick editor or viewer, and add them.',
   'help.inviteLink': 'Invite link',
   'help.inviteLinkDesc':
-    'A link for people who plan with you. Whoever opens it creates an account and joins the calendar. You can set how long it lasts and how many people can use it.',
+    'A link for people who plan with you, made from "Add" under "Members" by choosing "Invite link". Whoever opens it creates an account and joins the calendar. You can set how long it lasts and how many people can use it.',
   'help.publicLink': 'Public link',
   'help.publicLinkDesc':
-    'A view-only link. Anyone who has it can see the calendar without an account. Do not create one for a calendar with plans you would not want others to see.',
+    'A view-only link, made from "Public". Anyone who has it can see the calendar without an account. Do not create one for a calendar with plans you would not want others to see.',
   'help.stopSharing': 'Stop sharing',
   'help.stopSharingDesc': 'Either link can be switched off at any time.',
 

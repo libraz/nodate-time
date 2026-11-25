@@ -58,8 +58,8 @@ const MobileMenu = lazy(() =>
 const SearchPanel = lazy(() =>
   import('@/components/search-panel').then((module) => ({ default: module.SearchPanel })),
 );
-const SharePanel = lazy(() =>
-  import('@/components/share-panel').then((module) => ({ default: module.SharePanel })),
+const PublicPanel = lazy(() =>
+  import('@/components/public-panel').then((module) => ({ default: module.PublicPanel })),
 );
 const WeeklyTimeline = lazy(() =>
   import('@/components/weekly-timeline').then((module) => ({ default: module.WeeklyTimeline })),
@@ -439,7 +439,7 @@ export function App() {
   const albumLoaded = useLatch(rightPanel === 'album');
   const membersLoaded = useLatch(rightPanel === 'members');
   const labelsLoaded = useLatch(rightPanel === 'labels');
-  const shareLoaded = useLatch(rightPanel === 'share');
+  const publicLoaded = useLatch(rightPanel === 'public');
   const activityLoaded = useLatch(showActivity);
   const fetchCalendars = useCalendarStore((s) => s.fetchCalendars);
   const fetchEvents = useCalendarStore((s) => s.fetchEvents);
@@ -746,10 +746,10 @@ export function App() {
         </Deferred>
       )}
 
-      {/* Share overlay */}
-      {shareLoaded && (
+      {/* Public link overlay */}
+      {publicLoaded && (
         <Deferred>
-          <SharePanel />
+          <PublicPanel />
         </Deferred>
       )}
 

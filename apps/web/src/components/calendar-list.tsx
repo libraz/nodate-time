@@ -64,7 +64,7 @@ export function CalendarList() {
 
   const handleInvite = (id: string) => {
     setJustCreatedId(null);
-    openPanelFor('share', id);
+    openPanelFor('members', id, { addMembers: true });
   };
 
   // Deleting takes the calendar's events, memos and album with it for every

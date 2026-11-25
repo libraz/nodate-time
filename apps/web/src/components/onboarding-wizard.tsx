@@ -29,7 +29,7 @@ const SPOT_STEPS: SpotStep[] = [
   { target: 'menu', title: 'tour.menuTitle', desc: 'tour.menuDesc' },
   { target: 'calendars', title: 'tour.calendarsTitle', desc: 'tour.calendarsDesc' },
   { target: 'add-event', title: 'tour.addTitle', desc: 'tour.addDesc' },
-  { target: 'share', title: 'tour.shareTitle', desc: 'tour.shareDesc' },
+  { target: 'members', title: 'tour.inviteTitle', desc: 'tour.inviteDesc' },
   { target: 'help', title: 'tour.helpTitle', desc: 'tour.helpDesc' },
 ];
 

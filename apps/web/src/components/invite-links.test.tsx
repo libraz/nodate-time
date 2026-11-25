@@ -81,7 +81,8 @@ vi.mock('@/stores/calendar-store', () => ({
 }));
 
 import { toast } from '@/lib/toast';
-import { SharePanel } from './share-panel';
+import { useInvites } from '@/lib/use-invites';
+import { InviteLinks } from './invite-links';
 
 const apiGet = raw.get;
 const apiPost = raw.post;
@@ -111,57 +112,13 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-/**
- * The panel and the settings tab offer the same operations on a calendar's
- * links and share one implementation of them, so what holds here has to hold
- * on both screens.
- */
-describe('SharePanel invites', () => {
-  it('asks a bounded link for the role and the limits that were chosen', async () => {
-    apiPost.mockResolvedValue(invite('inv-1', 'token-1'));
+/** The links as the members panel holds them: the hook outside, the view inside. */
+function Harness({ calendarId = 'cal-1' }: { calendarId?: string }) {
+  const invites = useInvites(calendarId, true);
+  return <InviteLinks invites={invites} onHandedOff={() => {}} />;
+}
 
-    render(<SharePanel />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'share.createInvite' }));
-
-    await act(async () => {});
-    expect(apiPost).toHaveBeenCalledWith('/calendars/cal-1/invites', {
-      role: 'editor',
-      expiresInHours: 168,
-      maxUses: 1,
-    });
-  });
-
-  /**
-   * A public link is handed to people who are not members and cannot be taken
-   * back from wherever it is forwarded, so it reads and only reads.
-   */
-  it('creates the public link read-only, and only once confirmed', async () => {
-    apiPost.mockResolvedValue(invite('inv-public', 'token-public', true));
-
-    render(<SharePanel />);
-
-    const create = await screen.findByRole('button', { name: 'share.createPublic' });
-    fireEvent.click(create);
-    await act(async () => {});
-    expect(screen.getByRole('alertdialog')).toBeTruthy();
-    expect(apiPost).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
-    await act(async () => {});
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(apiPost).not.toHaveBeenCalled();
-
-    fireEvent.click(create);
-    await act(async () => {});
-    fireEvent.click(screen.getByRole('button', { name: 'common.create' }));
-    await act(async () => {});
-    expect(apiPost).toHaveBeenCalledWith('/calendars/cal-1/invites', {
-      role: 'viewer',
-      isPublic: true,
-    });
-  });
-
+describe('InviteLinks', () => {
   /**
    * The API gives a join link seven days when the request states no expiry,
    * and takes nothing that means "never", so the picker must not offer one:
@@ -169,7 +126,7 @@ describe('SharePanel invites', () => {
    * would not.
    */
   it('offers no expiry that outlives what the server will grant', async () => {
-    render(<SharePanel />);
+    render(<Harness />);
 
     // The trigger shows the current choice; the list arrives through a portal.
     fireEvent.click(await screen.findByRole('button', { name: 'invites.expiry' }));
@@ -183,7 +140,7 @@ describe('SharePanel invites', () => {
    * own reach, so the API accepts editor and viewer and nothing else.
    */
   it('offers only the roles an invite link may grant', async () => {
-    render(<SharePanel />);
+    render(<Harness />);
 
     // The dropdown renders through a portal, so it is queried from the
     // document rather than from the render container.
@@ -194,9 +151,6 @@ describe('SharePanel invites', () => {
   });
 
   it('does not let a superseded listing land under another calendar', async () => {
-    calendarState.calendars = [calendar('cal-1', 'A'), calendar('cal-2', 'B')];
-    calendarState.activeCalendarIds = ['cal-1', 'cal-2'];
-
     let landFirst: (invites: InviteData[]) => void = () => {};
     apiGet.mockImplementation((path) => {
       if (String(path).startsWith('/calendars/cal-1/invites')) {
@@ -210,10 +164,8 @@ describe('SharePanel invites', () => {
       return Promise.resolve([]);
     });
 
-    render(<SharePanel />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'panel.targetCalendar' }));
-    fireEvent.click(screen.getByRole('option', { name: 'B' }));
+    const { rerender } = render(<Harness />);
+    rerender(<Harness calendarId="cal-2" />);
     expect(await screen.findByDisplayValue('http://localhost:3000/share/token-b')).toBeTruthy();
 
     await act(async () => {
@@ -226,7 +178,7 @@ describe('SharePanel invites', () => {
   it('says why the listing failed in the language the reader chose', async () => {
     apiGet.mockRejectedValue(new Error('error.serverUnavailable'));
 
-    render(<SharePanel />);
+    render(<Harness />);
 
     await act(async () => {});
     expect(toastError).toHaveBeenCalledWith('error.serverUnavailable');
@@ -245,7 +197,7 @@ describe('SharePanel invites', () => {
  * TypeScript cannot catch this: a template literal accepts `string |
  * undefined` and prints it. Only an assertion can.
  */
-describe('SharePanel links a listing cannot reproduce', () => {
+describe('InviteLinks links a listing cannot reproduce', () => {
   /** An invite as the listing returns one: no token, because there is none. */
   function listedWithoutToken(id: string): InviteData {
     const { token: _token, ...rest } = invite(id, 'unused');
@@ -256,7 +208,7 @@ describe('SharePanel links a listing cannot reproduce', () => {
     apiGet.mockResolvedValue([listedWithoutToken('inv-1')]);
 
     await act(async () => {
-      render(<SharePanel />);
+      render(<Harness />);
     });
 
     expect(screen.queryByDisplayValue(/\/share\//)).toBeNull();
@@ -271,65 +223,12 @@ describe('SharePanel links a listing cannot reproduce', () => {
     apiGet.mockResolvedValue([listedWithoutToken('inv-1')]);
 
     await act(async () => {
-      render(<SharePanel />);
+      render(<Harness />);
     });
     // A calendar that already has a link offers to make another one.
     fireEvent.click(await screen.findByRole('button', { name: 'share.createAnotherInvite' }));
 
     // Re-listing after the creation must not blank the link that was just made.
     expect(await screen.findByDisplayValue('http://localhost:3000/share/token-1')).toBeTruthy();
-  });
-});
-
-describe('SharePanel copy', () => {
-  const setClipboard = (writeText: (text: string) => Promise<void>) =>
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-
-  afterEach(() => {
-    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
-  });
-
-  it('acknowledges the copy only once the clipboard write has resolved', async () => {
-    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
-    let finish: () => void = () => {};
-    setClipboard(() => new Promise<void>((resolve) => (finish = resolve)));
-
-    render(<SharePanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
-    await act(async () => {});
-    expect(screen.queryByRole('button', { name: 'common.copied' })).toBeNull();
-
-    await act(async () => finish());
-    expect(screen.getByRole('button', { name: 'common.copied' })).toBeTruthy();
-  });
-
-  it('shows an error and no acknowledgement when the clipboard write is rejected', async () => {
-    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
-    setClipboard(() => Promise.reject(new DOMException('denied', 'NotAllowedError')));
-
-    render(<SharePanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
-    await act(async () => {});
-
-    expect(toastError).toHaveBeenCalledWith('common.copyFailed');
-    expect(screen.queryByRole('button', { name: 'common.copied' })).toBeNull();
-  });
-
-  it('shows an error when there is no clipboard API', async () => {
-    apiGet.mockResolvedValue([invite('inv-p', 'tok', true)]);
-
-    render(<SharePanel />);
-    fireEvent.click(await screen.findByRole('button', { name: 'share.copyUrl' }));
-    await act(async () => {});
-
-    expect(toastError).toHaveBeenCalledWith('common.copyFailed');
-  });
-});
-
-describe('SharePanel direct addition', () => {
-  it('opens the members panel on its picker for the same calendar', async () => {
-    render(<SharePanel />);
-    fireEvent.click(await screen.findByRole('button', { name: /members.addSection/ }));
-    expect(uiState.openPanelFor).toHaveBeenCalledWith('members', 'cal-1', { addMembers: true });
   });
 });

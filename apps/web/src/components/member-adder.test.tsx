@@ -36,10 +36,9 @@ const hanako = { id: 'u-1', name: 'Hanako', email: 'hanako@example.com' };
 const taro = { id: 'u-2', name: 'Taro', email: 'taro@example.com' };
 
 const onDone = vi.fn();
-const onInviteByLink = vi.fn();
 
 function renderAdder() {
-  return render(<MemberAdder calendarId="cal-1" onDone={onDone} onInviteByLink={onInviteByLink} />);
+  return render(<MemberAdder calendarId="cal-1" onDone={onDone} />);
 }
 
 beforeEach(() => {
@@ -148,13 +147,11 @@ describe('MemberAdder', () => {
     expect(screen.getByRole('button', { name: 'members.addSelected:1' })).toBeTruthy();
   });
 
-  it('says when the page is not everyone, and points outsiders to a link', async () => {
+  it('says when the page is not everyone', async () => {
     apiGet.mockResolvedValue({ data: { items: [hanako], hasMore: true } });
     renderAdder();
     await settle();
 
     expect(screen.getByText('members.addMore')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'members.addViaLink' }));
-    expect(onInviteByLink).toHaveBeenCalled();
   });
 });

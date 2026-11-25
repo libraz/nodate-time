@@ -381,3 +381,55 @@ describe('MembersPanel adding people', () => {
     await act(async () => {});
   });
 });
+
+describe('MembersPanel invite links', () => {
+  const invite = {
+    id: 'inv-1',
+    token: 'token-1',
+    role: 'viewer',
+    maxUses: 1,
+    useCount: 0,
+    isPublic: false,
+    expiresAt: null,
+    createdAt: '2026-08-01T00:00:00Z',
+  };
+
+  function routeGet() {
+    vi.mocked(client.GET).mockImplementation((async (path: string) =>
+      path.endsWith('/invites') ? { data: [] } : { data: { items: [], hasMore: false } }) as never);
+  }
+
+  it('does not ask for the invites of a calendar the reader cannot manage', async () => {
+    routeGet();
+    render(<MembersPanel />);
+    await act(async () => {});
+    const getMock = client.GET as unknown as ReturnType<typeof vi.fn>;
+    const paths = getMock.mock.calls.map((call) => String(call[0]));
+    expect(paths.some((p) => p.endsWith('/invites'))).toBe(false);
+  });
+
+  it('makes a link from the second tab and keeps it across tabs until it is sent', async () => {
+    setMyRole('owner');
+    routeGet();
+    vi.mocked(client.POST).mockResolvedValue({ data: invite } as never);
+    render(<MembersPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'members.addShort' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'members.inviteTab' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'share.createInvite' }));
+    expect(await screen.findByDisplayValue(/\/share\/token-1$/)).toBeInTheDocument();
+    expect((client.POST as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toMatchObject({
+      body: { role: 'editor', expiresInHours: 168, maxUses: 1 },
+    });
+
+    fireEvent.click(screen.getByRole('radio', { name: 'members.workspaceTab' }));
+    expect(screen.getByRole('searchbox')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'members.inviteTab' }));
+    expect(screen.getByDisplayValue(/\/share\/token-1$/)).toBeInTheDocument();
+
+    // The link is shown once; closing before it was copied asks first.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(uiState.toggleRightPanel).not.toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('invites.closeTitle');
+  });
+});

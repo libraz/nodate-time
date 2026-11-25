@@ -29,10 +29,8 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 interface MemberAdderProps {
   calendarId: string;
-  /** Leaves the picker; carries the ids that were added, empty when cancelled. */
+  /** Leaves the picker with the ids that were added. */
   onDone: (addedIds: string[]) => void;
-  /** Sends the reader to the invite links for people outside the workspace. */
-  onInviteByLink: () => void;
 }
 
 /**
@@ -40,7 +38,7 @@ interface MemberAdderProps {
  * so colleagues do not each have to be sent a link. Key it by calendar: a
  * selection belongs to the calendar it was made for.
  */
-export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderProps) {
+export function MemberAdder({ calendarId, onDone }: MemberAdderProps) {
   const t = useT();
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
   const [query, setQuery] = useState('');
@@ -137,32 +135,6 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="space-y-3 border-b border-[var(--color-border)] px-5 pt-3 pb-4">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onDone([])}
-            aria-label={t('members.backToList')}
-            title={t('members.backToList')}
-            className="icon-btn -ml-2 h-8 w-8"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
-            {t('members.addSection')}
-          </h3>
-        </div>
         <div className="relative">
           <svg
             className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[var(--color-text-tertiary)]"
@@ -337,16 +309,6 @@ export function MemberAdder({ calendarId, onDone, onInviteByLink }: MemberAdderP
               ? t('members.addPick')
               : t('members.addSelected', { count })}
         </button>
-        <p className="text-center text-caption text-[var(--color-text-tertiary)]">
-          {t('members.addOutside')}{' '}
-          <button
-            type="button"
-            onClick={onInviteByLink}
-            className="font-medium text-[var(--color-accent-ink)] hover:underline"
-          >
-            {t('members.addViaLink')}
-          </button>
-        </p>
       </div>
     </div>
   );

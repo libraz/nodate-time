@@ -1,5 +1,4 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { DateTime } from 'luxon';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppPasswords } from '@/components/app-passwords';
@@ -9,7 +8,6 @@ import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { PageTopBar } from '@/components/page-top-bar';
 import { CustomSelect } from '@/components/pickers';
-import { RoleHint } from '@/components/role-hint';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
 import type { components } from '@/lib/api-schema';
@@ -22,34 +20,18 @@ import {
   filenameFromDisposition,
   isAbortError,
 } from '@/lib/client';
-import { copyText } from '@/lib/clipboard';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
-import { memberRowRules } from '@/lib/member-row';
-import {
-  DEFAULT_INVITE_ROLE,
-  INVITE_ROLE_OPTIONS,
-  type Role,
-  roleLabelKey,
-} from '@/lib/permissions';
+import { canManage } from '@/lib/permissions';
 import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
 import { toast } from '@/lib/toast';
-import { useCalendarMembers } from '@/lib/use-calendar-members';
 import { useEnsureCalendars } from '@/lib/use-ensure-calendars';
 import { useHolidayCountries } from '@/lib/use-holidays';
-import { useInvites } from '@/lib/use-invites';
 import { describeUserAgent } from '@/lib/user-agent';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import type { Member } from '@/types/calendar';
-import {
-  INVITE_EXPIRY_HOURS,
-  INVITE_MAX_USES,
-  inviteExpiryLabelKey,
-  inviteUsesLabelKey,
-} from '@/types/invite';
 
 export interface SettingsSearch {
   tab?: TabId | undefined;
@@ -1108,19 +1090,10 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
 /** Exported for testing: the invite listing is role-gated on the client too. */
 export function CalendarsSection() {
   const t = useT();
+  const navigate = useNavigate();
   const calendars = useCalendarStore((s) => s.calendars);
-  const me = useAuthStore((s) => s.user);
-  const locale = useUiStore((s) => s.locale);
-  const timezone = useUiStore((s) => s.timezone);
-
+  const openPanelFor = useUiStore((s) => s.openPanelFor);
   const [selectedId, setSelectedId] = useState<string>(calendars[0]?.id ?? '');
-  const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_INVITE_ROLE);
-  // Bounded by default: an unbounded link cannot be taken back once forwarded.
-  const [inviteExpiry, setInviteExpiry] = useState<number>(168);
-  const [inviteUses, setInviteUses] = useState<number>(1);
-  const [pendingRemoveMember, setPendingRemoveMember] = useState<Member | null>(null);
-  const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
-  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     if (!selectedId && calendars.length > 0) {
@@ -1130,63 +1103,14 @@ export function CalendarsSection() {
   }, [calendars, selectedId]);
 
   // The caller's own role arrives with the calendar, so what this screen may
-  // offer is settled before the member list it would otherwise be read from.
-  const {
-    members,
-    canManageMembers: isAdmin,
-    amOwner,
-    roleOptions,
-    ownerCount,
-    changeRole,
-    removeMember,
-  } = useCalendarMembers(selectedId);
+  // offer is settled without reading the member list.
+  const isAdmin = canManage(calendars.find((c) => c.id === selectedId)?.role);
 
-  // Only a manager may read a calendar's invites. Asking regardless meant an
-  // editor or viewer got a permission error for opening a screen, once per
-  // calendar they selected, having done nothing wrong. Public embed links are
-  // managed in the share panel with their own /embed URL, so only the joinable
-  // ones are taken here.
-  const {
-    joinInvites,
-    loading: loadingInvites,
-    busy,
-    createInvite,
-    revokeInvite,
-  } = useInvites(selectedId, isAdmin);
-
-  const handleRemoveMember = async (member: Member) => {
-    setConfirmBusy(true);
-    const left = await removeMember(member);
-    setConfirmBusy(false);
-    setPendingRemoveMember(null);
-    // Leaving takes the calendar with it, so what is left of the list is what
-    // the section has to show rather than a selection pointing at nothing.
-    if (left) {
-      setSelectedId(calendars.find((c) => c.id !== selectedId)?.id ?? '');
-    }
-  };
-
-  const handleCreateInvite = async () => {
-    const created = await createInvite({
-      role: inviteRole,
-      expiryHours: inviteExpiry,
-      maxUses: inviteUses,
-    });
-    if (created) toast.success(t('invites.create'));
-  };
-
-  const handleRevokeInvite = async (id: string) => {
-    setConfirmBusy(true);
-    const revoked = await revokeInvite(id);
-    setConfirmBusy(false);
-    setPendingRevokeId(null);
-    if (revoked) toast.success(t('invites.revoke'));
-  };
-
-  const copyInvite = async (token: string) => {
-    const url = `${window.location.origin}/share/${token}`;
-    if (await copyText(url)) toast.success(t('common.copied'));
-    else toast.error(t('common.copyFailed'));
+  // Members and their invite links live in one place, the members panel, so
+  // this screen sends the reader there rather than keeping a second copy.
+  const openMembers = () => {
+    openPanelFor('members', selectedId);
+    navigate({ to: '/' });
   };
 
   return (
@@ -1214,216 +1138,11 @@ export function CalendarsSection() {
 
       {isAdmin && selectedId && <CalendarDetailsSection key={selectedId} calendarId={selectedId} />}
 
-      <Section
-        title={t('settings.members')}
-        description={`${members.length} · ${t('members.role')}`}
-      >
-        <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
-          {t('members.layerHint')}
-        </p>
-        {members.length === 0 ? (
-          <p className="py-2 text-body text-[var(--color-text-secondary)]">—</p>
-        ) : (
-          <ul className="-my-2 divide-y divide-[var(--color-separator)]">
-            {members.map((m) => {
-              const { isMe, canChangeRole, canRemove } = memberRowRules(m, {
-                meId: me?.id,
-                canManageMembers: isAdmin,
-                amOwner,
-                ownerCount,
-              });
-              return (
-                <li key={m.id} className="flex items-center gap-3 py-3">
-                  <span
-                    aria-hidden
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-default font-bold text-white"
-                    style={{ backgroundColor: m.color }}
-                  >
-                    {m.name.slice(0, 1)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-default font-semibold text-[var(--color-text-primary)]">
-                      {m.name}
-                      {isMe && (
-                        <span className="ml-2 rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-caption font-medium text-[var(--color-accent-ink)]">
-                          {t('members.you')}
-                        </span>
-                      )}
-                    </p>
-                    <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                      {m.email}
-                    </p>
-                    {canChangeRole && <RoleHint role={m.role} />}
-                  </div>
-                  {canChangeRole ? (
-                    <CustomSelect
-                      value={m.role}
-                      onChange={(v) => changeRole(m, v)}
-                      ariaLabel={t('members.roleFor', { name: m.name })}
-                      className="shrink-0"
-                      triggerClassName="rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]"
-                      options={roleOptions.map((r) => ({ value: r, label: t(roleLabelKey(r)) }))}
-                    />
-                  ) : (
-                    <span className="shrink-0 rounded-full bg-[var(--color-surface-inset)] px-3 py-1 text-footnote text-[var(--color-text-secondary)]">
-                      {t(roleLabelKey(m.role))}
-                    </span>
-                  )}
-                  {canRemove && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingRemoveMember(m)}
-                      aria-label={isMe ? t('members.leave') : t('common.delete')}
-                      className="icon-btn icon-btn-danger h-9 w-9 shrink-0"
-                    >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path
-                          d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <ConfirmSheet
-          open={pendingRemoveMember !== null}
-          title={
-            pendingRemoveMember?.id === me?.id
-              ? t('confirm.leaveTitle')
-              : t('confirm.removeMember', { name: pendingRemoveMember?.name ?? '' })
-          }
-          hint={
-            pendingRemoveMember?.id === me?.id
-              ? t('members.leaveConfirm')
-              : t('members.removeConfirm')
-          }
-          confirmLabel={
-            pendingRemoveMember?.id === me?.id ? t('members.leave') : t('confirm.remove')
-          }
-          busy={confirmBusy}
-          onConfirm={() => pendingRemoveMember && handleRemoveMember(pendingRemoveMember)}
-          onCancel={() => setPendingRemoveMember(null)}
-        />
-      </Section>
-
-      {isAdmin && (
-        <Section title={t('settings.invites')}>
-          <p className="mb-2 text-footnote text-[var(--color-text-secondary)]">
-            {t('share.inviteLead')}
-          </p>
-          <p className="mb-3 text-footnote text-[var(--color-text-secondary)]">
-            {t('share.inviteTermsNote')}
-          </p>
-          <CustomSelect
-            value={inviteRole}
-            onChange={(role) => setInviteRole(role as Role)}
-            ariaLabel={t('members.role')}
-            options={INVITE_ROLE_OPTIONS.map((role) => ({
-              value: role,
-              label: t(roleLabelKey(role)),
-            }))}
-            className="max-w-xs"
-            triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-          />
-          <RoleHint role={inviteRole} className="mt-1.5 mb-3" />
-          <div className="mb-3 flex max-w-md gap-2">
-            <CustomSelect
-              className="flex-1"
-              value={String(inviteExpiry)}
-              onChange={(v) => setInviteExpiry(Number(v))}
-              ariaLabel={t('invites.expiry')}
-              options={INVITE_EXPIRY_HOURS.map((h) => ({
-                value: String(h),
-                label: t(inviteExpiryLabelKey(h)),
-              }))}
-              triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-            />
-            <CustomSelect
-              className="flex-1"
-              value={String(inviteUses)}
-              onChange={(v) => setInviteUses(Number(v))}
-              ariaLabel={t('invites.uses')}
-              options={INVITE_MAX_USES.map((u) => ({
-                value: String(u),
-                label: t(inviteUsesLabelKey(u)),
-              }))}
-              triggerClassName="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)] px-3 py-2 text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleCreateInvite}
-            disabled={busy === 'invite' || !isAdmin}
-            className="btn-primary mb-4 px-5 text-default disabled:opacity-50"
-          >
-            {busy === 'invite' ? t('share.creating') : t('invites.create')}
+      {selectedId && (
+        <Section title={t('settings.members')} description={t('settings.membersMoved')}>
+          <button type="button" onClick={openMembers} className="btn-secondary btn-sm">
+            {t('settings.openMembers')}
           </button>
-          {loadingInvites ? (
-            <p className="text-body text-[var(--color-text-secondary)]">{t('common.loading')}</p>
-          ) : joinInvites.length === 0 ? (
-            <p className="rounded-[var(--radius-md)] bg-[var(--color-surface-inset)] px-4 py-6 text-center text-body text-[var(--color-text-secondary)]">
-              {t('invites.empty')}
-            </p>
-          ) : (
-            <ul className="-my-2 divide-y divide-[var(--color-separator)]">
-              {joinInvites.map((inv) => (
-                <li key={inv.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--color-surface-inset)] px-3 py-2 text-footnote text-[var(--color-text-secondary)]">
-                    {inv.token ? `/share/${inv.token}` : t('invites.linkUnavailable')}
-                  </code>
-                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
-                    {inv.useCount}/{inv.maxUses ?? t('invites.unlimited')}
-                  </span>
-                  <span className="shrink-0 text-footnote text-[var(--color-text-tertiary)]">
-                    {inv.expiresAt
-                      ? `${t('invites.expiresAt')}: ${formatDateTime(
-                          inv.expiresAt,
-                          timezone,
-                          locale,
-                          DateTime.DATE_SHORT,
-                        )}`
-                      : t('invites.noExpiry')}
-                  </span>
-                  {inv.token && (
-                    <button
-                      type="button"
-                      onClick={() => copyInvite(inv.token as string)}
-                      className="shrink-0 rounded-lg px-3 py-1.5 text-footnote font-medium text-[var(--color-accent-ink)] transition hover:bg-[var(--color-accent-bg)]"
-                    >
-                      {t('invites.copy')}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPendingRevokeId(inv.id)}
-                    className="btn-secondary btn-sm btn-danger shrink-0"
-                  >
-                    {t('invites.revoke')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <ConfirmSheet
-            open={pendingRevokeId !== null}
-            title={t('confirm.revokeInvite')}
-            confirmLabel={t('confirm.revoke')}
-            busy={confirmBusy}
-            onConfirm={() => pendingRevokeId && handleRevokeInvite(pendingRevokeId)}
-            onCancel={() => setPendingRevokeId(null)}
-          />
         </Section>
       )}
     </>

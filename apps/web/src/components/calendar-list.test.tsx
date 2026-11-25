@@ -218,8 +218,8 @@ describe('CalendarList after creating a calendar', () => {
     await user.click(await screen.findByRole('button', { name: 'calendar.inviteMembers' }));
 
     const ui = useUiStore.getState();
-    expect(ui.rightPanel).toBe('share');
-    expect(ui.panelCalendarRequest).toEqual({ calendarId: 'cal-new' });
+    expect(ui.rightPanel).toBe('members');
+    expect(ui.panelCalendarRequest).toEqual({ calendarId: 'cal-new', addMembers: true });
     expect(screen.queryByText('calendar.createdInviteHint')).toBeNull();
 
     calendarState.calendars.pop();

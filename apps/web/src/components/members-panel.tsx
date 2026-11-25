@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { TipCard } from '@/components/guide';
+import { InviteLinks, inviteKey } from '@/components/invite-links';
 import { MemberAdder } from '@/components/member-adder';
 import { MemberColorEditor } from '@/components/member-color-editor';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';
@@ -12,6 +13,7 @@ import { useT } from '@/i18n';
 import { memberRowRules } from '@/lib/member-row';
 import { roleLabelKey } from '@/lib/permissions';
 import { useCalendarMembers, useMembersState } from '@/lib/use-calendar-members';
+import { useInvites } from '@/lib/use-invites';
 import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useAuthStore } from '@/stores/auth-store';
@@ -21,16 +23,28 @@ import type { Member } from '@/types/calendar';
 
 const JUST_ADDED_MS = 2400;
 
+/** How a manager brings someone in: from the workspace directly, or by a join link. */
+type AddMode = 'workspace' | 'link';
+const ADD_MODES: readonly AddMode[] = ['workspace', 'link'];
+const ADD_MODE_LABEL = new Map([
+  ['workspace', 'members.workspaceTab'],
+  ['link', 'members.inviteTab'],
+] as const);
+
 export function MembersPanel() {
   const t = useT();
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
-  const openPanelFor = useUiStore((s) => s.openPanelFor);
   const presence = usePresence(rightPanel === 'members');
   const me = useAuthStore((s) => s.user);
   const { options, target, setTargetId } = usePanelCalendar();
   const [editingColorOf, setEditingColorOf] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('workspace');
+  // Every join link copied or shared since the panel opened. A join link is
+  // shown only once, so closing with one outside this set loses it for good.
+  const [handedOff, setHandedOff] = useState<ReadonlySet<string>>(new Set());
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<Member | null>(null);
   const [removing, setRemoving] = useState(false);
   // Rows just added stay tinted for a moment, so the reader sees where they landed.
@@ -52,6 +66,16 @@ export function MembersPanel() {
   const { loading, error: loadError } = useMembersState(calendarId);
   const fetchMembers = useCalendarStore((s) => s.fetchMembers);
   const myRow = members.find((m) => m.id === me?.id);
+  // Held here rather than in the link view, so a link shown once survives
+  // switching to the workspace picker or back to the list.
+  const invites = useInvites(calendarId, presence.mounted && canManageMembers);
+  const hasUnsentLink = invites.joinInvites.some(
+    (inv) => inv.token && !handedOff.has(inviteKey(inv.id)),
+  );
+  const requestClose = () => {
+    if (hasUnsentLink) setConfirmingClose(true);
+    else toggleRightPanel('members');
+  };
 
   const confirmRemove = async (member: Member) => {
     setRemoving(true);
@@ -62,11 +86,19 @@ export function MembersPanel() {
 
   // The picker is a step inside the panel, not a place it reopens on.
   useEffect(() => {
-    if (!presence.mounted) setAdding(false);
+    if (!presence.mounted) {
+      setAdding(false);
+      setAddMode('workspace');
+      setHandedOff(new Set());
+      setConfirmingClose(false);
+    }
   }, [presence.mounted]);
 
   useEffect(() => {
-    if (request?.addMembers) setAdding(true);
+    if (request?.addMembers) {
+      setAdding(true);
+      setAddMode('workspace');
+    }
   }, [request]);
 
   useEffect(() => {
@@ -81,7 +113,7 @@ export function MembersPanel() {
   return (
     <SidePanel
       presence={presence}
-      onClose={() => toggleRightPanel('members')}
+      onClose={requestClose}
       title={t('panel.members')}
       helpTopic="calendars"
       actions={
@@ -89,7 +121,10 @@ export function MembersPanel() {
         !picking && (
           <button
             type="button"
-            onClick={() => setAdding(true)}
+            onClick={() => {
+              setAddMode('workspace');
+              setAdding(true);
+            }}
             className="btn-primary btn-sm inline-flex items-center gap-1 pr-3 pl-2.5"
           >
             <svg
@@ -136,15 +171,72 @@ export function MembersPanel() {
       )}
 
       {picking ? (
-        <MemberAdder
-          key={calendarId}
-          calendarId={calendarId}
-          onDone={(ids) => {
-            setAdding(false);
-            setJustAdded(new Set(ids));
-          }}
-          onInviteByLink={() => openPanelFor('share', calendarId)}
-        />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="space-y-3 px-5 pt-3">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setAdding(false)}
+                aria-label={t('members.backToList')}
+                title={t('members.backToList')}
+                className="icon-btn -ml-2 h-8 w-8"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <h3 className="text-default font-semibold text-[var(--color-text-primary)]">
+                {t('members.addSection')}
+              </h3>
+            </div>
+            <div
+              className="segmented-control w-full"
+              role="radiogroup"
+              aria-label={t('members.addSection')}
+            >
+              {ADD_MODES.map((mode) => (
+                // biome-ignore lint/a11y/useSemanticElements: the segmented control styles buttons, not radio inputs
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={addMode === mode}
+                  data-active={addMode === mode}
+                  onClick={() => setAddMode(mode)}
+                >
+                  {t(ADD_MODE_LABEL.get(mode) ?? 'members.workspaceTab')}
+                </button>
+              ))}
+            </div>
+          </div>
+          {addMode === 'workspace' ? (
+            <MemberAdder
+              key={calendarId}
+              calendarId={calendarId}
+              onDone={(ids) => {
+                setAdding(false);
+                setJustAdded(new Set(ids));
+              }}
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <InviteLinks
+                invites={invites}
+                onHandedOff={(key) => setHandedOff((prev) => new Set(prev).add(key))}
+              />
+            </div>
+          )}
+        </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
           {!calendarId ? (
@@ -310,6 +402,17 @@ export function MembersPanel() {
         busy={removing}
         onConfirm={() => pendingRemove && confirmRemove(pendingRemove)}
         onCancel={() => setPendingRemove(null)}
+      />
+      <ConfirmSheet
+        open={confirmingClose}
+        title={t('invites.closeTitle')}
+        hint={t('invites.linkShownOnce')}
+        confirmLabel={t('invites.closeAnyway')}
+        onConfirm={() => {
+          setConfirmingClose(false);
+          toggleRightPanel('members');
+        }}
+        onCancel={() => setConfirmingClose(false)}
       />
     </SidePanel>
   );

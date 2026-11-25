@@ -38,7 +38,7 @@ describe('guide store', () => {
   it('brings dismissed tips back on request without replaying the tour', () => {
     useGuideStore.getState().loadFor('alice');
     useGuideStore.getState().closeWizard();
-    useGuideStore.getState().dismissTip('share');
+    useGuideStore.getState().dismissTip('public');
     useGuideStore.getState().resetTips();
 
     // Reloading proves the reset reached storage, not only memory.
