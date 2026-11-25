@@ -56,6 +56,7 @@ docker compose -f compose.prod.yml run --rm --entrypoint /createuser api \
 API は `/dav/` で CalDAV を提供し、同梱の nginx は `/api/dav/` として公開します。ユーザーは設定画面で作ったアプリパスワードでサインインします。プロトコルの説明は [API 概要](api.md#caldav) にあります。有効化の操作は要りません。エンドポイントはどのデプロイにもあり、`TC_DAV_RATE_LIMIT`（[設定](configuration.md)を参照）はクライアントあたりの上限を決めるだけです。
 
 - 同梱の nginx は `/.well-known/caldav` に、認証なしで `/api/dav/` への 301 を返します。ホスト名だけを渡されたカレンダーアプリも、これでサーバーを見つけます。web サービスの前に置くプロキシやトンネルは、このパスをそのまま通す必要があります。
+- Apple のクライアントはホストのルートも CalDAV サーバーとして扱い、そこからのリダイレクトには従いません。そのため同梱の nginx は、`/` への `OPTIONS`、`PROPFIND`、`REPORT` をその場で `/api/dav/` として処理します。`/` へのそれ以外のメソッドは、これまでどおり web アプリに届きます。web サービスの前に置くプロキシは、`/` へのこれらのメソッドを通す必要があります。
 - API の前に置くもの（同梱の nginx、ホストのプロキシ、トンネル、CDN のどれでも）は、WebDAV のメソッド `PROPFIND`、`REPORT`、`PUT`、`DELETE`、`OPTIONS` と `Authorization` ヘッダを通す必要があります。未知のメソッドを弾く層やヘッダを落とす層があると、カレンダーアプリがサインインできない、または同期できないという形で現れます。`PROPFIND` が 403 や 405 で返るのが典型です。同梱の nginx は `/api/` 配下のメソッドを絞っていません。
 - 資格情報は HTTP Basic で送られるので、エンドポイントには TLS 越しに到達できる必要があります。
 - リダイレクトとメソッドの通過は、スタックの外から確かめます。`curl -i https://app.example.com/.well-known/caldav` は `Location: /api/dav/` 付きの 301、`curl -i -X PROPFIND https://app.example.com/api/dav/` は `WWW-Authenticate: Basic` ヘッダ付きの 401 を返します。
@@ -187,11 +188,11 @@ importer: ops@example.com # 取り込みの実行者。カレンダーの owner 
 users: # 作成するアカウント（既存のものはスキップ）
   - email: hanako@example.com
     name: 山田花子 # 省略時はメールのローカル部
-authors: # TimeTree のユーザー ID → 予定を作った人のメール
+source_users: # TimeTree のユーザー ID → 予定を作った人のメール
   10000001: hanako@example.com
 calendars:
-  - timetree: Band # TimeTree カレンダーの name または alias_code
-    name: Band # こちら側の名前。省略時は TimeTree の name
+  - source: バンド # TimeTree カレンダーの name または alias_code
+    name: バンド # こちら側の名前。省略時は TimeTree の name
     default_owner: mgr@example.com # 対応するラベルがない予定の所有者。省略時は importer
     default_attendees: [hanako@example.com] # その予定の参加者。省略可
     members:
@@ -203,21 +204,21 @@ calendars:
 
 - `importer` は取り込みを実行するアカウントです。既存のアカウントでも、`users` に書いて新規に作るものでも構いません。すべてのカレンダーの owner になるので、`members` には書けません。
 - `users` は作成するアカウントの一覧です。すでにアカウントのあるアドレスには手を付けません。
-- `calendars[].timetree` は、停止していない TimeTree カレンダーを name か alias_code で 1 つ選びます。
+- `calendars[].source` は、停止していない TimeTree カレンダーを name か alias_code で 1 つ選びます。
 - `calendars[].name` はこちら側のカレンダー名です。importer がメンバーである同名のカレンダー（個人カレンダーを除く）が既にあれば、それを再利用します。
 - `members` は各人のロールで、`manager`・`editor`・`viewer` のいずれかです。既にメンバーの人のロールは変えません。
 - `labels` は、TimeTree のラベル名と、その予定を持つ人の対応です。ラベルのない予定と、ここに書かれていないラベルの予定は `default_owner` になります。
 - `default_attendees` に書いた人は、`default_owner` に入る予定（グループ全体のレッスンなど）の参加者になります。それぞれメンバーか importer である必要があります。対応するラベルがある予定には参加者を付けません。参加者は空き時間の検索で予定ありとして数えられ、参加者が 2 人以上の予定には所有者の写真の代わりに色の点が表示されます。
-- `authors` は、TimeTree のユーザー ID と、その人が作った予定の作成者として表示するアカウントの対応です。ID はどの TimeTree カレンダーでも同じで、dry-run がカレンダーごとの作成者を ID 付きで出します。作成者がここに書かれていない場合や、そのカレンダーのメンバーでない場合（退会した人など）は、importer が作成者になります。所有者は作成者ではなく、これまでどおりラベルで決まります。
+- `source_users` は、TimeTree のユーザー ID と、その人が作った予定の作成者として表示するアカウントの対応です。ID はどの TimeTree カレンダーでも同じで、dry-run がカレンダーごとの作成者を ID 付きで出します。作成者がここに書かれていない場合や、そのカレンダーのメンバーでない場合（退会した人など）は、importer が作成者になります。所有者は作成者ではなく、これまでどおりラベルで決まります。
 
 検証は書き込みの前にすべて済ませます。次のどれかに当たると、何も書かずに終了します。
 
 - 未知のキー、重複するエントリ、未知のロール
 - 形の崩れたメール、ASCII 以外を含むメール
 - カレンダーのメンバーでない所有者
-- どのカレンダーにも一致しない、または複数に一致する `timetree`
+- どのカレンダーにも一致しない、または複数に一致する `source`
 - どの TimeTree ラベルにも一致しないラベル
-- 対応表のどの TimeTree カレンダーにもいないユーザーの `authors` の ID
+- 対応表のどの TimeTree カレンダーにもいないユーザーの `source_users` の ID
 - 同名の既存カレンダーが 2 つある
 
 ### まず dry-run
@@ -227,7 +228,7 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
   --entrypoint /importtimetree api -mapping - -dry-run < mapping.yaml
 ```
 
-`-mapping` にはパスか、標準入力を表す `-` を渡します。`-dry-run` を付けると、ログイン・取得・検証をしてレポートを出すだけで、何も書きません。レポートには TimeTree のカレンダーごとに、予定の総数、最古の開始日、ラベル別の件数（ラベルなしを含む）、TimeTree の作成者別の件数（ID と名前）、スキップされる予定とその理由、参加者付きの予定数、UTC で記録された時刻予定の数、終日予定 3 件の生の値と変換後の値が出ます。対応表にあるカレンダーには、さらに所有者別・作成者別の件数、importer が作成者になる予定の作成者とその理由、作成か再利用か、作成されるアカウントが加わります。検証エラーは最後にまとめて並びます。対応表に漏れているラベルがないかをラベル別・所有者別の件数で見て、最古の日付と終日予定の例を TimeTree の表示と見比べてください。
+`-mapping` にはパスか、標準入力を表す `-` を渡します。`-dry-run` を付けると、ログイン・取得・検証をしてレポートを出すだけで、何も書きません。レポートには TimeTree のカレンダーごとに、予定の総数、最古の開始日、ラベル別の件数（ラベルなしを含む）、TimeTree の作成者別の件数（ID と名前）、スキップされる予定とその理由、参加者付きの予定数、UTC で記録された時刻予定の数、終日予定 3 件の生の値と変換後の値が出ます。対応表にあるカレンダーには、さらに所有者別・作成者別の件数、importer が作成者になる予定の作成者とその理由、作成か再利用かが加わります。カレンダーのあとに、サインイン制限（`open`、または許可ドメインと許可リストの件数）、作成されるアカウント、検証エラーが続きます。検証エラーには、対象になった対応表の項目のパスが付きます。対応表に漏れているラベルがないかをラベル別・所有者別の件数で見て、最古の日付と終日予定の例を TimeTree の表示と見比べてください。
 
 ### 実行
 
@@ -247,8 +248,8 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 カレンダーごとに 1 行、最後に合計が出ます。
 
 ```text
-calendar "Band" (reused): members added=0 existing=9; events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0
-total: imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0 calendars_created=0 users_created=0
+calendar "バンド" (reused): members added=0 existing=9; events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0
+total: events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0; calendars_created=0 users_created=0
 ```
 
 予定は TimeTree の id で識別するので、`-sync` なしで同じ取り込みをもう一度流しても新しく入るものはなく、取り込み済みの予定は重複として報告されます。`-sync` なしでは `updated`・`deleted`・`kept`・`moved` は 0 のままです。
@@ -274,7 +275,7 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 `-sync` を付けた dry-run では、対応表のカレンダーごとに次の行が加わります。
 
 ```text
-calendar "Band": sync plan create=1 update=3 unchanged=120 delete=2 moved=0 kept=0 synced=125 orphaned=0 repeated=0
+calendar "バンド": sync plan events create=1 update=3 unchanged=120 delete=2 moved=0 kept=0 synced=125 orphaned=0 repeated=0
 ```
 
 - `delete` は、TimeTree にもう無い取り込み済みの予定の数です。`moved` はそのうち対応表の別のカレンダーに移ったもので、移動先で新しく作られます。

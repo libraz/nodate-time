@@ -56,6 +56,7 @@ The schema is applied when the MySQL volume is first created. `sql/schema.sql` d
 The API serves CalDAV at `/dav/`, published as `/api/dav/` by the bundled nginx. Users sign in to it with app passwords created in Settings; the protocol is described in [API overview](api.md#caldav). Nothing has to be enabled: the endpoint exists on every deployment, and `TC_DAV_RATE_LIMIT` (see [Configuration](configuration.md)) only sets its per-client budget.
 
 - The bundled nginx answers `/.well-known/caldav` with a 301 to `/api/dav/`, without authentication, so a calendar app given only the host name finds the server. A proxy or tunnel you put in front of the web service has to pass that path through unchanged.
+- Apple's clients also treat the host root as the CalDAV server and ignore a redirect from it, so the bundled nginx serves `OPTIONS`, `PROPFIND` and `REPORT` on `/` as `/api/dav/` in place. Other methods on `/` reach the web app as before. A proxy in front of the web service has to pass those methods on `/` through.
 - Whatever sits in front of the API, whether the bundled nginx, a host proxy, a tunnel or a CDN, has to pass the WebDAV methods `PROPFIND`, `REPORT`, `PUT`, `DELETE` and `OPTIONS` and the `Authorization` header. A layer that rejects unknown methods or strips the header shows up as a calendar app that cannot sign in or sync; a `PROPFIND` answered with 403 or 405 is the usual sign. The bundled nginx does not restrict methods under `/api/`.
 - Credentials travel in HTTP Basic, so the endpoint has to be reached over TLS.
 - Check the redirect and the method pass-through from outside the stack: `curl -i https://app.example.com/.well-known/caldav` answers 301 with `Location: /api/dav/`, and `curl -i -X PROPFIND https://app.example.com/api/dav/` answers 401 with a `WWW-Authenticate: Basic` header.
@@ -187,10 +188,10 @@ importer: ops@example.com # runs the import; owns the calendars and is the defau
 users: # accounts to create (existing ones are skipped)
   - email: hanako@example.com
     name: Hanako Yamada # defaults to the local part of the email
-authors: # TimeTree user id -> email of who created the events
+source_users: # TimeTree user id -> email of who created the events
   10000001: hanako@example.com
 calendars:
-  - timetree: Band # the TimeTree calendar's name or alias code
+  - source: Band # the TimeTree calendar's name or alias code
     name: Band # name here; defaults to the TimeTree name
     default_owner: mgr@example.com # owner of events with no mapped label; defaults to importer
     default_attendees: [hanako@example.com] # participants of those same events; optional
@@ -203,21 +204,21 @@ calendars:
 
 - `importer` is the existing or newly created account the import runs as. It becomes the owner of every calendar, so it must not be listed under `members`.
 - `users` lists the accounts to create. An address that already has an account is left alone.
-- `calendars[].timetree` selects one active TimeTree calendar by name or alias code.
+- `calendars[].source` selects one active TimeTree calendar by name or alias code.
 - `calendars[].name` is the calendar's name here. An existing calendar of that name that the importer belongs to (other than a personal one) is reused.
 - `members` gives each person a role: `manager`, `editor` or `viewer`. An existing member keeps the role they have.
 - `labels` maps TimeTree label names to the person who owns those events. Events with no label, or a label not listed, go to `default_owner`.
 - `default_attendees` makes the listed people participants of the events that go to `default_owner`, such as a whole group's rehearsals. Each must be a member or the importer. Events under a mapped label get no participants. Participants count as busy in availability searches, and an event with two or more participants shows a plain dot instead of its owner's picture.
-- `authors` maps a TimeTree user id to the account shown as the creator of the events that user created. The id is the same in every TimeTree calendar, and the dry run lists each calendar's authors with their ids. An event is filed under the importer as its creator when its author is not listed, or is not a member of that calendar here, as happens with people who have left. The creator does not decide the owner: that is still the label's.
+- `source_users` maps a TimeTree user id to the account shown as the creator of the events that user created. The id is the same in every TimeTree calendar, and the dry run lists each calendar's authors with their ids. An event is filed under the importer as its creator when its author is not listed, or is not a member of that calendar here, as happens with people who have left. The creator does not decide the owner: that is still the label's.
 
 Everything is checked before anything is written, and any of these stops the command with nothing written:
 
 - an unknown key, a duplicate entry or an unknown role
 - a malformed or non-ASCII email
 - an owner who is not a member of the calendar
-- a `timetree` value that matches no calendar, or more than one
+- a `source` value that matches no calendar, or more than one
 - a mapped label that no TimeTree label matches
-- an `authors` id that is not a user of any mapped TimeTree calendar
+- a `source_users` id that is not a user of any mapped TimeTree calendar
 - two existing calendars with the same name
 
 ### Dry run first
@@ -227,7 +228,7 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
   --entrypoint /importtimetree api -mapping - -dry-run < mapping.yaml
 ```
 
-`-mapping` takes a path or `-` for standard input. With `-dry-run` the command logs in, fetches and validates, prints the report and writes nothing. For each TimeTree calendar the report shows the event count, the earliest start date, the count per label (including events with no label), the count per TimeTree author by id and name, what would be skipped and why, the number of events that have attendees, the number of timed events recorded in UTC, and three all-day events with their raw and converted times. For each calendar in the mapping it adds the count per owner and per creator, the authors that would be recorded as the importer and why, whether the calendar would be created or reused, and the accounts that would be created. Validation errors are listed at the end. Read the label and owner counts for a label missing from the mapping, and compare the earliest dates and the all-day examples with what TimeTree shows.
+`-mapping` takes a path or `-` for standard input. With `-dry-run` the command logs in, fetches and validates, prints the report and writes nothing. For each TimeTree calendar the report shows the event count, the earliest start date, the count per label (including events with no label), the count per TimeTree author by id and name, what would be skipped and why, the number of events that have attendees, the number of timed events recorded in UTC, and three all-day events with their raw and converted times. For each calendar in the mapping it adds the count per owner and per creator, the authors that would be recorded as the importer and why, and whether the calendar would be created or reused. After the calendars come the sign-in restriction (`open`, or the number of allowed domains and allow-listed addresses), the accounts that would be created, and the validation errors, each given with the path of the mapping entry it concerns. Read the label and owner counts for a label missing from the mapping, and compare the earliest dates and the all-day examples with what TimeTree shows.
 
 ### Running it
 
@@ -248,7 +249,7 @@ Each calendar gets a line, followed by the totals:
 
 ```text
 calendar "Band" (reused): members added=0 existing=9; events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0
-total: imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0 calendars_created=0 users_created=0
+total: events imported=1 updated=3 duplicates=120 deleted=2 kept=0 moved=0 skipped=0 failed=0 rejected=0; calendars_created=0 users_created=0
 ```
 
 Events are identified by their TimeTree id, so running the same import again without `-sync` imports nothing new and reports the already-imported events as duplicates. `updated`, `deleted`, `kept` and `moved` stay 0 without `-sync`.
@@ -274,7 +275,7 @@ docker compose -f compose.prod.yml run --rm -T -e TIMETREE_EMAIL -e TIMETREE_PAS
 With `-sync`, the dry run adds one line per mapped calendar:
 
 ```text
-calendar "Band": sync plan create=1 update=3 unchanged=120 delete=2 moved=0 kept=0 synced=125 orphaned=0 repeated=0
+calendar "Band": sync plan events create=1 update=3 unchanged=120 delete=2 moved=0 kept=0 synced=125 orphaned=0 repeated=0
 ```
 
 - `delete` counts the imported events TimeTree no longer has; `moved` is the part of them that is now in another mapped calendar, where it is created again.
