@@ -249,22 +249,48 @@ describe('MembersPanel membership', () => {
     await waitFor(() => expect(calendarState.leaveCalendar).toHaveBeenCalledWith('cal-1', 'u1'));
   });
 
-  // The picker reports every step of a drag; each used to be a PUT.
-  it('saves a picked colour once, when the picker is closed on it', async () => {
+  // A drag reports every step; only letting go is a choice, so it is one PUT.
+  it('saves a colour dragged on the picker once, when it is let go', async () => {
     calendarState.updateMemberColor.mockResolvedValue(undefined);
     render(<MembersPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
-    const input = screen.getByLabelText('members.colorPicker');
+    fireEvent.click(screen.getByRole('button', { name: /members\.colorCustom/ }));
+    const area = screen.getByRole('slider', { name: 'members.colorShade' });
+    area.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 }) as DOMRect;
 
-    fireEvent.input(input, { target: { value: '#111111' } });
-    fireEvent.input(input, { target: { value: '#222222' } });
-    fireEvent.input(input, { target: { value: '#333333' } });
+    fireEvent.pointerDown(area, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(area, { clientX: 50, clientY: 50, pointerId: 1 });
+    fireEvent.pointerMove(area, { clientX: 100, clientY: 50, pointerId: 1 });
     expect(calendarState.updateMemberColor).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('members.colorCode')).toHaveValue('#800000');
 
-    fireEvent.change(input, { target: { value: '#333333' } });
+    fireEvent.pointerUp(area, { pointerId: 1 });
 
     await waitFor(() => expect(calendarState.updateMemberColor).toHaveBeenCalledTimes(1));
-    expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#333333');
+    expect(calendarState.updateMemberColor).toHaveBeenCalledWith('cal-1', 'u1', '#800000');
+  });
+
+  it('saves keyboard steps on the hue once they settle', async () => {
+    vi.useFakeTimers();
+    try {
+      calendarState.updateMemberColor.mockResolvedValue(undefined);
+      render(<MembersPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
+      fireEvent.click(screen.getByRole('button', { name: /members\.colorCustom/ }));
+      const hue = screen.getByRole('slider', { name: 'members.colorHue' });
+
+      fireEvent.keyDown(hue, { key: 'ArrowRight', shiftKey: true });
+      fireEvent.keyDown(hue, { key: 'ArrowRight', shiftKey: true });
+      expect(calendarState.updateMemberColor).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(700);
+      });
+      expect(calendarState.updateMemberColor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('saves a palette colour in one click, even one another member has', async () => {
@@ -300,7 +326,8 @@ describe('MembersPanel membership', () => {
     calendarState.updateMemberColor.mockResolvedValue(undefined);
     render(<MembersPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
-    const field = screen.getByLabelText('members.colorCustom');
+    fireEvent.click(screen.getByRole('button', { name: /members\.colorCustom/ }));
+    const field = screen.getByLabelText('members.colorCode');
 
     fireEvent.change(field, { target: { value: '0, 128, 255' } });
     fireEvent.keyDown(field, { key: 'Enter' });
@@ -313,7 +340,8 @@ describe('MembersPanel membership', () => {
   it('refuses text that is not a colour without saving', () => {
     render(<MembersPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'members.color: Hanako' }));
-    const field = screen.getByLabelText('members.colorCustom');
+    fireEvent.click(screen.getByRole('button', { name: /members\.colorCustom/ }));
+    const field = screen.getByLabelText('members.colorCode');
 
     fireEvent.change(field, { target: { value: 'red' } });
     fireEvent.click(screen.getByRole('button', { name: 'members.colorApply' }));

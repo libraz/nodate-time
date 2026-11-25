@@ -546,8 +546,11 @@ export const en: Record<TranslationKey, string> = {
 
   'members.color': 'Layer colour',
   'members.colorPalette': 'Palette',
-  'members.colorCustom': 'Custom RGB',
-  'members.colorPicker': 'Open colour picker',
+  'members.colorCustom': 'Custom',
+  'members.colorCode': 'Colour code',
+  'members.colorShade': 'Saturation and brightness',
+  'members.colorShadeValue': 'Saturation {s}%, brightness {v}%',
+  'members.colorHue': 'Hue',
   'members.colorApply': 'Apply',
   'members.colorInvalid': 'Enter #RRGGBB or R, G, B (0–255)',
   'members.colorInUse': 'In use',

@@ -13,14 +13,16 @@ import { usePanelCalendar } from '@/lib/use-panel-calendar';
 import { usePresence } from '@/lib/use-presence';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
-import { type Label, MEMBER_COLORS } from '@/types/calendar';
+import { COLOR_SWATCH_ROWS, type Label } from '@/types/calendar';
 
 const NAME_MAX = 50;
 
-/** The first palette colour no label carries yet, else the first. */
+const STANDARD_TONES: readonly string[] = COLOR_SWATCH_ROWS[1];
+
+/** The first standard-tone swatch no label carries yet, else the first. */
 function freshColor(labels: Label[]): string {
   const used = new Set(labels.map((l) => l.color.toUpperCase()));
-  return MEMBER_COLORS.find((c) => !used.has(c)) ?? MEMBER_COLORS[0];
+  return STANDARD_TONES.find((c) => !used.has(c)) ?? COLOR_SWATCH_ROWS[1][0];
 }
 
 /** Name and colour of one label, for both adding and editing. */

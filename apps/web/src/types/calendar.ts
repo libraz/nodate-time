@@ -119,3 +119,49 @@ export const MEMBER_COLORS = [
   '#42A5F5',
   '#FF7043',
 ] as const;
+
+/**
+ * The colour editor's palette: ten hue columns in spectrum order (the last
+ * neutral), each in a soft, a standard and a deep tone, row by row. The
+ * standard row keeps the member palette's colours.
+ */
+export const COLOR_SWATCH_ROWS = [
+  [
+    '#F59A9A',
+    '#FFAA8C',
+    '#F9CB7A',
+    '#FEE08A',
+    '#8EE3BC',
+    '#8ADAD6',
+    '#9BD3FB',
+    '#D6C2EE',
+    '#F9A9C1',
+    '#C9C9CE',
+  ],
+  [
+    '#E73B3B',
+    '#FF7043',
+    '#F5A623',
+    '#FDC02D',
+    '#2ECC87',
+    '#26B5B0',
+    '#47B2F7',
+    '#B38BDC',
+    '#F35F8C',
+    '#8F8F8F',
+  ],
+  [
+    '#B3261E',
+    '#D5501F',
+    '#C47A06',
+    '#C99A00',
+    '#18935E',
+    '#157F7B',
+    '#2273C9',
+    '#7C55B5',
+    '#C23A66',
+    '#55555A',
+  ],
+] as const;
+
+export const COLOR_SWATCHES: readonly string[] = COLOR_SWATCH_ROWS.flat();

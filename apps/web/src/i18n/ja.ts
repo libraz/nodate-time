@@ -560,8 +560,11 @@ export const ja = {
   // Members admin
   'members.color': 'レイヤーの色',
   'members.colorPalette': 'パレットから選ぶ',
-  'members.colorCustom': 'RGB で指定',
-  'members.colorPicker': 'カラーピッカーを開く',
+  'members.colorCustom': 'カスタム',
+  'members.colorCode': 'カラーコード',
+  'members.colorShade': '彩度と明るさ',
+  'members.colorShadeValue': '彩度 {s}%、明るさ {v}%',
+  'members.colorHue': '色相',
   'members.colorApply': '適用',
   'members.colorInvalid': '#RRGGBB か R, G, B（0〜255）で入力してください',
   'members.colorInUse': '使用中',
