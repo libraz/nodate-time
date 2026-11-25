@@ -14,6 +14,7 @@ import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
 import type { components } from '@/lib/api-schema';
 import { useAuthConfig } from '@/lib/auth-config';
+import { APP_NAME } from '@/lib/brand';
 import {
   ApiError,
   client,
@@ -591,7 +592,7 @@ export function ProfileSection() {
       <Section
         id="app-passwords"
         title={t('settings.appPasswords')}
-        description={t('appPasswords.description')}
+        description={t('appPasswords.description', { app: APP_NAME })}
       >
         <AppPasswords />
       </Section>

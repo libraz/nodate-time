@@ -7,6 +7,7 @@ import { ConfirmSheet } from '@/components/confirm-sheet';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { useT } from '@/i18n';
 import type { components } from '@/lib/api-schema';
+import { APP_NAME } from '@/lib/brand';
 import { client, errorMessage, isAbortError } from '@/lib/client';
 import { copyText } from '@/lib/clipboard';
 import { formatDateTime } from '@/lib/format-datetime';
@@ -391,15 +392,15 @@ export function AppPasswords() {
       <div className="space-y-2">
         <HelpDisclosure title={t('appPasswords.stopTitle')}>
           <ol className="list-decimal space-y-2 pl-5">
-            <li>{t('appPasswords.stopStepRevoke')}</li>
-            <li>{t('appPasswords.stopStepIphone')}</li>
-            <li>{t('appPasswords.stopStepMac')}</li>
+            <li>{t('appPasswords.stopStepRevoke', { app: APP_NAME })}</li>
+            <li>{t('appPasswords.stopStepIphone', { app: APP_NAME })}</li>
+            <li>{t('appPasswords.stopStepMac', { app: APP_NAME })}</li>
           </ol>
-          <p>{t('appPasswords.stopNotePassword')}</p>
+          <p>{t('appPasswords.stopNotePassword', { app: APP_NAME })}</p>
           <p>{t('appPasswords.stopNoteMember')}</p>
         </HelpDisclosure>
         <HelpDisclosure title={t('appPasswords.stepsTitle')}>
-          <p>{t('appPasswords.whatIsAppPassword')}</p>
+          <p>{t('appPasswords.whatIsAppPassword', { app: APP_NAME })}</p>
           <p>{t('appPasswords.stepsServer', { server: serverHost ?? window.location.host })}</p>
           <div>
             <p className="font-medium text-[var(--color-text-primary)]">
@@ -429,7 +430,7 @@ export function AppPasswords() {
       <ConfirmSheet
         open={pendingRevoke !== null}
         title={t('appPasswords.confirmRevoke', { name: pendingRevoke?.name ?? '' })}
-        hint={t('appPasswords.confirmRevokeHint')}
+        hint={t('appPasswords.confirmRevokeHint', { app: APP_NAME })}
         confirmLabel={t('appPasswords.revoke')}
         busy={revoking}
         onConfirm={() => pendingRevoke && revoke(pendingRevoke)}
@@ -532,7 +533,7 @@ function CreatedCard({ created, onCopy, onClose }: CreatedCardProps) {
         {t('appPasswords.createdTitle')}
       </p>
       <p className="mt-1 text-footnote text-[var(--color-text-secondary)]">
-        {t('appPasswords.whatIsAppPassword')}
+        {t('appPasswords.whatIsAppPassword', { app: APP_NAME })}
       </p>
       <dl className="mt-4 space-y-2 text-body">
         <CardRow label={t('appPasswords.server')}>
@@ -658,7 +659,7 @@ function ProfileCard({
               ? t('appPasswords.profileStepInstallMac')
               : t('appPasswords.profileStepInstallIos')}
           </Step>
-          <Step n={3}>{t('appPasswords.profileStepDone')}</Step>
+          <Step n={3}>{t('appPasswords.profileStepDone', { app: APP_NAME })}</Step>
         </ol>
       </div>
 

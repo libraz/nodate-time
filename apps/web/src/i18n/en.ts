@@ -373,7 +373,7 @@ export const en: Record<TranslationKey, string> = {
   'sessions.revoked': 'Signed out',
   'settings.appPasswords': 'Calendar app sync',
   'appPasswords.description':
-    'Show your Nodate Time events in the Calendar app on an iPhone or Mac. Events you add or change there show up in Nodate Time too.',
+    'Show your {app} events in the Calendar app on an iPhone or Mac. Events you add or change there show up in {app} too.',
   'appPasswords.sessionsNote':
     'Signing out here does not stop calendar app sync. To stop it, use Calendar app sync.',
   'appPasswords.sessionsLink': 'See synced devices',
@@ -409,7 +409,7 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.profileTitle': 'Add “{name}”',
   'appPasswords.profileRemaining': '{time} left',
   'appPasswords.profileQrLabel': 'QR code that sets up the device',
-  'appPasswords.profileStepDone': 'Open the Calendar app and your Nodate Time events are there.',
+  'appPasswords.profileStepDone': 'Open the Calendar app and your {app} events are there.',
   'appPasswords.profileWaiting': 'Waiting for the device to open it',
   'appPasswords.profileOpened': 'Opened on the device. Finish installing it there',
   'appPasswords.profileSynced': 'Connected. Sync has started',
@@ -432,12 +432,12 @@ export const en: Record<TranslationKey, string> = {
   'appPasswords.revoked': 'Stopped syncing',
   'appPasswords.confirmRevoke': 'Stop syncing “{name}”?',
   'appPasswords.confirmRevokeHint':
-    'The device will no longer connect to Nodate Time. Events already on it are not removed, so delete the account in the device’s settings too.',
+    'The device will no longer connect to {app}. Events already on it are not removed, so delete the account in the device’s settings too.',
   'appPasswords.createdTitle': 'What to enter in the calendar app',
   'appPasswords.shownOnce':
     'The password cannot be shown again once you close this. Close it only after entering it in the calendar app.',
   'appPasswords.whatIsAppPassword':
-    'This password is only for calendar apps. It is separate from the password you sign in to Nodate Time with, and each device gets its own.',
+    'This password is only for calendar apps. It is separate from the password you sign in to {app} with, and each device gets its own.',
   'appPasswords.server': 'Server',
   'appPasswords.username': 'User name',
   'appPasswords.password': 'Password',
@@ -452,13 +452,13 @@ export const en: Record<TranslationKey, string> = {
     'Calendar app → Settings → Accounts → + → Other CalDAV Account → Manual',
   'appPasswords.stopTitle': 'To stop syncing',
   'appPasswords.stopStepRevoke':
-    'Under Synced devices, choose Stop syncing for that device. It can no longer connect to Nodate Time.',
+    'Under Synced devices, choose Stop syncing for that device. It can no longer connect to {app}.',
   'appPasswords.stopStepIphone':
-    'On an iPhone or iPad, remove the Nodate Time profile in Settings → General → VPN & Device Management. If you set it up manually, remove it in Settings → Calendar → Accounts.',
+    'On an iPhone or iPad, remove the {app} profile in Settings → General → VPN & Device Management. If you set it up manually, remove it in Settings → Calendar → Accounts.',
   'appPasswords.stopStepMac':
-    'On a Mac, type “Profiles” into the search field in System Settings and remove the Nodate Time profile. If you set it up manually, remove it in Internet Accounts.',
+    'On a Mac, type “Profiles” into the search field in System Settings and remove the {app} profile. If you set it up manually, remove it in Internet Accounts.',
   'appPasswords.stopNotePassword':
-    'Changing your Nodate Time password or signing out does not stop sync. If you lose a device, choose Stop syncing here first.',
+    'Changing your {app} password or signing out does not stop sync. If you lose a device, choose Stop syncing here first.',
   'appPasswords.stopNoteMember':
     'When you leave a calendar or are removed from it, it disappears from your devices at their next sync.',
   'appPasswords.limitsTitle': 'What syncs and what does not',

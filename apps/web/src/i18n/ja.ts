@@ -386,7 +386,7 @@ export const ja = {
   'sessions.revoked': 'ログアウトした',
   'settings.appPasswords': 'カレンダーアプリとの同期',
   'appPasswords.description':
-    'iPhone や Mac の「カレンダー」アプリに Nodate Time の予定を表示できます。アプリで追加・変更した予定も Nodate Time に反映されます。',
+    'iPhone や Mac の「カレンダー」アプリに {app} の予定を表示できます。アプリで追加・変更した予定も {app} に反映されます。',
   'appPasswords.sessionsNote':
     'ここでログアウトしても、カレンダーアプリの同期は止まりません。同期を止めるときは「カレンダーアプリとの同期」で操作してください。',
   'appPasswords.sessionsLink': '同期している端末を見る',
@@ -423,7 +423,7 @@ export const ja = {
   'appPasswords.profileTitle': '「{name}」を追加する',
   'appPasswords.profileRemaining': '残り {time}',
   'appPasswords.profileQrLabel': '端末に設定を入れる QR コード',
-  'appPasswords.profileStepDone': '「カレンダー」アプリを開くと、Nodate Time の予定が表示されます。',
+  'appPasswords.profileStepDone': '「カレンダー」アプリを開くと、{app} の予定が表示されます。',
   'appPasswords.profileWaiting': '端末で開かれるのを待っています',
   'appPasswords.profileOpened': '端末で開かれました。インストールを続けてください',
   'appPasswords.profileSynced': '接続できました。同期が始まっています',
@@ -446,12 +446,12 @@ export const ja = {
   'appPasswords.revoked': '同期を止めました',
   'appPasswords.confirmRevoke': '「{name}」の同期を止めますか？',
   'appPasswords.confirmRevokeHint':
-    'この端末は Nodate Time に接続できなくなります。端末に残っている予定は自動では消えないので、端末の設定からアカウントも削除してください。',
+    'この端末は {app} に接続できなくなります。端末に残っている予定は自動では消えないので、端末の設定からアカウントも削除してください。',
   'appPasswords.createdTitle': 'カレンダーアプリに入力する情報',
   'appPasswords.shownOnce':
     'パスワードはこの画面を閉じると二度と表示できません。カレンダーアプリに入力し終えてから閉じてください。',
   'appPasswords.whatIsAppPassword':
-    'このパスワードは、カレンダーアプリ専用です。Nodate Time にログインするときのパスワードとは別のもので、端末ごとに作ります。',
+    'このパスワードは、カレンダーアプリ専用です。{app} にログインするときのパスワードとは別のもので、端末ごとに作ります。',
   'appPasswords.server': 'サーバ',
   'appPasswords.username': 'ユーザー名',
   'appPasswords.password': 'パスワード',
@@ -466,13 +466,13 @@ export const ja = {
     '「カレンダー」アプリ →「設定」→「アカウント」→「+」→「その他の CalDAV アカウント」→「手動」',
   'appPasswords.stopTitle': '同期をやめたいとき',
   'appPasswords.stopStepRevoke':
-    '「同期している端末」で、その端末の「同期を止める」を押します。これで端末は Nodate Time に接続できなくなります。',
+    '「同期している端末」で、その端末の「同期を止める」を押します。これで端末は {app} に接続できなくなります。',
   'appPasswords.stopStepIphone':
-    'iPhone・iPad では「設定」→「一般」→「VPN とデバイス管理」で Nodate Time のプロファイルを削除します。手動で設定したときは「設定」→「カレンダー」→「アカウント」から削除します。',
+    'iPhone・iPad では「設定」→「一般」→「VPN とデバイス管理」で {app} のプロファイルを削除します。手動で設定したときは「設定」→「カレンダー」→「アカウント」から削除します。',
   'appPasswords.stopStepMac':
-    'Mac では「システム設定」の検索欄に「プロファイル」と入力して Nodate Time のプロファイルを削除します。手動で設定したときは「インターネットアカウント」から削除します。',
+    'Mac では「システム設定」の検索欄に「プロファイル」と入力して {app} のプロファイルを削除します。手動で設定したときは「インターネットアカウント」から削除します。',
   'appPasswords.stopNotePassword':
-    'Nodate Time のパスワードを変えたりログアウトしたりしても、同期は止まりません。端末をなくしたときは、まずここで「同期を止める」を押してください。',
+    '{app} のパスワードを変えたりログアウトしたりしても、同期は止まりません。端末をなくしたときは、まずここで「同期を止める」を押してください。',
   'appPasswords.stopNoteMember':
     'カレンダーのメンバーから外れると、そのカレンダーは次の同期で端末からも消えます。',
   'appPasswords.limitsTitle': '同期されるもの・されないもの',
