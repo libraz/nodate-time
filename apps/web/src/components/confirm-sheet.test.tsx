@@ -95,3 +95,40 @@ describe('ConfirmSheet', () => {
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
   });
 });
+
+describe('ConfirmSheet on a desktop viewport', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubDesktop() {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockReturnValue({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }) as unknown as typeof window.matchMedia,
+    );
+  }
+
+  it('renders a centred dialog with Cancel before the action, keeping the same contract', async () => {
+    stubDesktop();
+    const { onConfirm, onCancel } = setup({ confirmText: 'Team' });
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveClass('confirm-dialog');
+    expect(dialog).not.toHaveClass('confirm-sheet');
+    expect(dialog).toHaveAccessibleName('Delete this?');
+    expect(dialog).toHaveAccessibleDescription('It cannot be undone');
+
+    const cancel = screen.getByRole('button', { name: 'Keep' });
+    const action = screen.getByRole('button', { name: 'Delete' });
+    expect(cancel.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await waitFor(() => expect(cancel).toHaveFocus());
+
+    expect(action).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText('Team'), { target: { value: 'Team' } });
+    fireEvent.click(action);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
