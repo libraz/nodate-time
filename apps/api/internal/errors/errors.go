@@ -139,6 +139,11 @@ var (
 	EventExceptionNotFound = &Spec{Status: 404, Code: "EVENT.EXCEPTION_NOT_FOUND", Message: "That occurrence has no change to undo"}
 	SearchTooBroad         = &Spec{Status: 422, Code: "SEARCH.TOO_BROAD", Message: "The search covers too wide a range; narrow it"}
 	ExportRangeTooLarge    = &Spec{Status: 422, Code: "EXPORT.RANGE_TOO_LARGE", Message: "The export range holds too many events; narrow it"}
+
+	// EventLabelUnknown names a labelId that is no label of the event's
+	// calendar. Distinct from a bad request so a client holding a label deleted
+	// elsewhere can reload the labels and retry.
+	EventLabelUnknown = &Spec{Status: 422, Code: "EVENT.LABEL_UNKNOWN", Message: "That label does not exist on this calendar"}
 )
 
 // --- Comment errors ---
@@ -257,6 +262,15 @@ var (
 	// back to ask for another one that cannot exist either; what they need to
 	// know is that the other end of it is gone.
 	InviteCalendarGone = &Spec{Status: 410, Code: "INVITE.CALENDAR_GONE", Message: "The calendar this link points to no longer exists"}
+)
+
+// --- Label errors ---
+
+var (
+	LabelNotFound     = &Spec{Status: 404, Code: "LABEL.NOT_FOUND", Message: "Label not found"}
+	LabelStale        = &Spec{Status: 412, Code: "LABEL.STALE", Message: "This label changed since you opened it"}
+	LabelNameTaken    = &Spec{Status: 409, Code: "LABEL.NAME_TAKEN", Message: "This calendar already has a label with that name"}
+	LabelLimitReached = &Spec{Status: 409, Code: "LABEL.LIMIT_REACHED", Message: "This calendar has the maximum number of labels"}
 )
 
 // --- Memo errors ---

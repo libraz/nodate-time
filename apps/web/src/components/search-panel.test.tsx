@@ -61,6 +61,7 @@ function event(id: string, calendarId: string, title: string): CalendarEvent {
     endAt: '2026-08-05T11:00:00+09:00',
     color: '#47B2F7',
     ownerId: 'u1',
+    labelId: null,
     ownerName: 'Owner',
     creatorId: 'u1',
     creatorName: 'Owner',

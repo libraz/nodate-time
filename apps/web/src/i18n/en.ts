@@ -175,6 +175,7 @@ export const en: Record<TranslationKey, string> = {
   'picker.prevYear': 'Previous year',
   'picker.nextYear': 'Next year',
   'picker.typeTime': 'Type a time',
+  'picker.applyTime': 'Use this time',
   'event.privateBusy': 'Busy',
   'event.showAsBusy': 'Busy',
   'event.showAsFree': 'Free',
@@ -1029,6 +1030,7 @@ export const en: Record<TranslationKey, string> = {
   'apiError.EVENT.RESTORE_CONFLICT':
     'This event cannot be restored because something now occupies its place',
   'apiError.EVENT.EXCEPTION_NOT_FOUND': 'That occurrence has no change to undo',
+  'apiError.EVENT.LABEL_UNKNOWN': 'This label is not on the calendar. Choose the label again',
   'apiError.SEARCH.TOO_BROAD': 'The search range is too wide. Narrow it',
   'apiError.EXPORT.RANGE_TOO_LARGE': 'The export range holds too many events. Narrow it',
   'apiError.MEMBER.LIMIT_REACHED': 'This calendar has reached its member limit',
@@ -1043,6 +1045,10 @@ export const en: Record<TranslationKey, string> = {
   'apiError.ADMIN.ALREADY_ADMIN': 'This user is already an instance administrator',
   'apiError.ADMIN.USER_NOT_FOUND': 'User not found',
   'apiError.APP_PASSWORD.NOT_FOUND': 'App password not found',
+  'apiError.LABEL.NOT_FOUND': 'Label not found',
+  'apiError.LABEL.STALE': 'Someone else changed this label while you had it open. Reload it first',
+  'apiError.LABEL.NAME_TAKEN': 'This calendar already has a label with that name',
+  'apiError.LABEL.LIMIT_REACHED': 'This calendar has reached its label limit',
   'apiError.APP_PASSWORD.LIMIT_REACHED':
     'You have reached the device limit. Stop syncing a device you no longer use',
   'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':

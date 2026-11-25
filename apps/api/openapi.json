@@ -878,6 +878,10 @@
             ],
             "type": "string"
           },
+          "labelId": {
+            "description": "public ID of a label of this calendar; omit for none",
+            "type": "string"
+          },
           "location": {
             "maxLength": 500,
             "type": "string"
@@ -1018,6 +1022,36 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "CreateLabelInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CreateLabelInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "description": "#RRGGBB; stored upper-case",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "type": "string"
+          },
+          "name": {
+            "description": "trimmed before it is stored; 1 to 50 characters after trimming",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
         "type": "object"
       },
       "CreateMemoInputBody": {
@@ -1241,7 +1275,7 @@
             "type": "string"
           },
           "color": {
-            "description": "read-only; the owner's colour on this calendar",
+            "description": "read-only; the label's colour when the event has one, else the owner's colour on this calendar",
             "type": "string"
           },
           "createdAt": {
@@ -1293,6 +1327,13 @@
               "milestone"
             ],
             "type": "string"
+          },
+          "labelId": {
+            "description": "public ID of the event's label on this calendar; null when it has none",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "location": {
             "type": "string"
@@ -1389,6 +1430,7 @@
           "endAt",
           "timezone",
           "color",
+          "labelId",
           "location",
           "memo",
           "url",
@@ -1791,21 +1833,34 @@
       "LabelResponse": {
         "additionalProperties": false,
         "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/LabelResponse.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
           "color": {
+            "description": "upper-case #RRGGBB",
+            "type": "string"
+          },
+          "etag": {
             "type": "string"
           },
           "id": {
             "type": "string"
           },
-          "nameKey": {
-            "description": "i18n key for label name (e.g. 'label.1')",
+          "name": {
             "type": "string"
           }
         },
         "required": [
           "id",
-          "nameKey",
-          "color"
+          "name",
+          "color",
+          "etag"
         ],
         "type": "object"
       },
@@ -2271,6 +2326,13 @@
               "conditional"
             ],
             "type": "string"
+          },
+          "labelId": {
+            "description": "public ID of a label of this calendar; null or an empty string removes the label",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "location": {
             "maxLength": 500,
@@ -3674,6 +3736,38 @@
           "body": {
             "description": "omit to keep the current text",
             "maxLength": 16000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateLabelInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateLabelInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "color": {
+            "description": "#RRGGBB; stored upper-case",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "trimmed before it is stored; 1 to 50 characters after trimming",
+            "maxLength": 100,
             "minLength": 1,
             "type": [
               "string",
@@ -8813,7 +8907,355 @@
             "description": "Error"
           }
         },
-        "summary": "List calendar labels (colors)",
+        "summary": "List the labels a calendar's events can be filed under",
+        "tags": [
+          "Label"
+        ]
+      },
+      "post": {
+        "operationId": "create-label",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calendarId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLabelInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Create a label",
+        "tags": [
+          "Label"
+        ]
+      }
+    },
+    "/calendars/{calendarId}/labels/{labelId}": {
+      "delete": {
+        "operationId": "delete-label",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calendarId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "labelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Delete a label; events filed under it fall back to their owner's colour",
+        "tags": [
+          "Label"
+        ]
+      },
+      "patch": {
+        "operationId": "update-label",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calendarId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "labelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLabelInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumaError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Rename or recolour a label",
         "tags": [
           "Label"
         ]

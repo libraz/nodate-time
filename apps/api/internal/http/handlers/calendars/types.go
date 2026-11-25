@@ -46,10 +46,13 @@ type MemberResponse struct {
 	Color     string `json:"color"`
 }
 
+// LabelResponse is a named colour a calendar's events can be filed under.
 type LabelResponse struct {
-	ID      string `json:"id"`
-	NameKey string `json:"nameKey" doc:"i18n key for label name (e.g. 'label.1')"`
-	Color   string `json:"color"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color" doc:"upper-case #RRGGBB"`
+	// ETag names this revision of the label; send it as If-Match to change or delete it.
+	ETag string `json:"etag"`
 }
 
 // --- Inputs/Outputs ---
@@ -215,3 +218,37 @@ type ListLabelsInput struct {
 type ListLabelsOutput struct {
 	Body []LabelResponse
 }
+
+type CreateLabelInput struct {
+	CalendarID string `path:"calendarId"`
+	Body       struct {
+		Name  string `json:"name" minLength:"1" maxLength:"100" doc:"trimmed before it is stored; 1 to 50 characters after trimming"`
+		Color string `json:"color" pattern:"^#[0-9A-Fa-f]{6}$" doc:"#RRGGBB; stored upper-case"`
+	}
+}
+type CreateLabelOutput struct {
+	ETag string `header:"ETag"`
+	Body LabelResponse
+}
+
+// UpdateLabelInput is a merge patch; neither member can be cleared.
+type UpdateLabelInput struct {
+	CalendarID string               `path:"calendarId"`
+	LabelID    string               `path:"labelId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
+	Body       struct {
+		Name  patch.Field[string] `json:"name,omitzero" minLength:"1" maxLength:"100" required:"false" doc:"trimmed before it is stored; 1 to 50 characters after trimming"`
+		Color patch.Field[string] `json:"color,omitzero" pattern:"^#[0-9A-Fa-f]{6}$" required:"false" doc:"#RRGGBB; stored upper-case"`
+	}
+}
+type UpdateLabelOutput struct {
+	ETag string `header:"ETag"`
+	Body LabelResponse
+}
+
+type DeleteLabelInput struct {
+	CalendarID string               `path:"calendarId"`
+	LabelID    string               `path:"labelId"`
+	IfMatch    precondition.IfMatch `header:"If-Match" required:"true"`
+}
+type DeleteLabelOutput struct{}

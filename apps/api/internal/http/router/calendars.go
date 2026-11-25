@@ -147,9 +147,40 @@ func registerCalendars(g apiGroups, deps Deps) {
 		OperationID: "list-labels",
 		Method:      http.MethodGet,
 		Path:        "/calendars/{calendarId}/labels",
-		Summary:     "List calendar labels (colors)",
+		Summary:     "List the labels a calendar's events can be filed under",
 		Tags:        []string{"Label"},
 	}, calendars.ListLabels(calDeps))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "create-label",
+		Method:        http.MethodPost,
+		Path:          "/calendars/{calendarId}/labels",
+		Summary:       "Create a label",
+		Tags:          []string{"Label"},
+		DefaultStatus: http.StatusCreated,
+		Errors: errorStatuses(apierrors.BadRequest, apierrors.CalendarRoleRequired,
+			apierrors.LabelNameTaken, apierrors.LabelLimitReached),
+	}, calendars.CreateLabel(calDeps))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "update-label",
+		Method:      http.MethodPatch,
+		Path:        "/calendars/{calendarId}/labels/{labelId}",
+		Summary:     "Rename or recolour a label",
+		Tags:        []string{"Label"},
+		Errors: preconditionedErrors(apierrors.LabelStale, apierrors.LabelNotFound, apierrors.LabelNameTaken,
+			apierrors.CalendarRoleRequired, apierrors.Validation),
+	}, calendars.UpdateLabel(calDeps))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "delete-label",
+		Method:        http.MethodDelete,
+		Path:          "/calendars/{calendarId}/labels/{labelId}",
+		Summary:       "Delete a label; events filed under it fall back to their owner's colour",
+		Tags:          []string{"Label"},
+		DefaultStatus: http.StatusNoContent,
+		Errors:        preconditionedErrors(apierrors.LabelStale, apierrors.LabelNotFound, apierrors.CalendarRoleRequired),
+	}, calendars.DeleteLabel(calDeps))
 
 	// Export / Import
 	huma.Register(api, huma.Operation{

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -18,7 +17,6 @@ import (
 	"github.com/libraz/nodate-time/apps/api/internal/http/calresolve"
 	"github.com/libraz/nodate-time/apps/api/internal/http/middleware"
 	"github.com/libraz/nodate-time/apps/api/internal/http/precondition"
-	"github.com/libraz/nodate-time/apps/api/internal/memberpalette"
 	"github.com/libraz/nodate-time/apps/api/internal/storage"
 )
 
@@ -868,33 +866,4 @@ func logOwnerReassigned(
 		}
 	}
 	return nil
-}
-
-// labelPalette builds the colour list, one entry per colour, with the name as
-// an i18n key so the client can localize it.
-func labelPalette() []LabelResponse {
-	labels := make([]LabelResponse, len(memberpalette.Colors))
-	for i, c := range memberpalette.Colors {
-		id := strconv.Itoa(i + 1)
-		labels[i] = LabelResponse{ID: id, NameKey: "label." + id, Color: c}
-	}
-	return labels
-}
-
-// ListLabels returns the predefined color palette. Names are returned as i18n
-// keys (label.1 .. label.10) so the frontend can localize them.
-//
-// The same list is repeated in the web client's MEMBER_COLORS, because the
-// first calendar is created before there is one to ask. Both sides are pinned
-// by a test: a palette that drifts hands out a colour the calendar's own list
-// does not contain.
-func ListLabels(deps Deps) func(context.Context, *ListLabelsInput) (*ListLabelsOutput, error) {
-	labels := labelPalette()
-	return func(ctx context.Context, in *ListLabelsInput) (*ListLabelsOutput, error) {
-		userID, _ := middleware.ActorFromContext(ctx)
-		if _, err := resolveCalendar(ctx, deps, in.CalendarID, userID); err != nil {
-			return nil, apierrors.Respond(ctx, err)
-		}
-		return &ListLabelsOutput{Body: labels}, nil
-	}
 }

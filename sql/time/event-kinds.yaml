@@ -26,3 +26,17 @@ kinds:
     family: calendar
     subject: album_photos
     required_payload_keys: [photoId]
+
+  # Per-calendar event labels.
+  - kind: calendar.label.created
+    family: calendar
+    subject: calendar_labels
+    required_payload_keys: [labelId]
+  - kind: calendar.label.updated
+    family: calendar
+    subject: calendar_labels
+    required_payload_keys: [labelId]
+  - kind: calendar.label.deleted
+    family: calendar
+    subject: calendar_labels
+    required_payload_keys: [labelId]

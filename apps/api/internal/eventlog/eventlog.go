@@ -86,6 +86,9 @@ const (
 	TypePhotoUploaded = "calendar.photo.uploaded"
 	TypePhotoUpdated  = "calendar.photo.updated"
 	TypePhotoDeleted  = "calendar.photo.deleted"
+	TypeLabelCreated  = "calendar.label.created"
+	TypeLabelUpdated  = "calendar.label.updated"
+	TypeLabelDeleted  = "calendar.label.deleted"
 )
 
 // Tables a kind's subject can name, and the payload key each one's public id
@@ -95,6 +98,7 @@ const (
 	subjectMemo   = "calendar_memos"
 	subjectPhoto  = "album_photos"
 	subjectInvite = "calendar_invites"
+	subjectLabel  = "calendar_labels"
 )
 
 var subjectPayloadKey = map[string]string{
@@ -102,6 +106,7 @@ var subjectPayloadKey = map[string]string{
 	subjectMemo:   "memoId",
 	subjectPhoto:  "photoId",
 	subjectInvite: "inviteId",
+	subjectLabel:  "labelId",
 }
 
 // kinds maps every kind to the table its subject_public_id names, empty when
@@ -149,6 +154,9 @@ var kinds = map[string]string{
 	TypePhotoUploaded:               subjectPhoto,
 	TypePhotoUpdated:                subjectPhoto,
 	TypePhotoDeleted:                subjectPhoto,
+	TypeLabelCreated:                subjectLabel,
+	TypeLabelUpdated:                subjectLabel,
+	TypeLabelDeleted:                subjectLabel,
 }
 
 // labelKeys names the payload key the registry gives Entry.Summary on the

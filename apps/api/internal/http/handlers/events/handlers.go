@@ -345,17 +345,30 @@ type userBrief struct {
 	avatarURL string
 }
 
-// people is the identity and calendar colour of everyone a response names.
+// people is the identity and calendar colour of everyone a response names,
+// and the label of every event row it draws.
 type people struct {
 	briefs map[uint32]userBrief
 	colors map[uint32]string
+	labels map[uint32]eventLabel
 }
 
-// loadPeople reads owners and creators in one query however many there are.
-// A listing that asked per person cost a round trip per member of a shared
-// calendar, on every month change and for every calendar shown at once.
-func loadPeople(ctx context.Context, deps Deps, calID uint32, userIDs []uint32) (people, error) {
-	p := people{briefs: map[uint32]userBrief{}, colors: map[uint32]string{}}
+// loadPeople reads owners and creators in one query however many there are,
+// and the labels of eventIDs in one more. A listing that asked per person cost
+// a round trip per member of a shared calendar, on every month change and for
+// every calendar shown at once. eventIDs are the rows drawn: the series for an
+// expanded occurrence, the override's own row for an edited one.
+func loadPeople(ctx context.Context, deps Deps, calID uint32, userIDs, eventIDs []uint32) (people, error) {
+	p := people{briefs: map[uint32]userBrief{}, colors: map[uint32]string{}, labels: map[uint32]eventLabel{}}
+	if len(eventIDs) > 0 {
+		labels, err := deps.Queries.ListEventLabelsByEvents(ctx, eventIDs)
+		if err != nil {
+			return p, err
+		}
+		for _, l := range labels {
+			p.labels[l.EventID] = eventLabel{publicID: pubIDToHex(l.LabelPublicID), color: l.Color}
+		}
+	}
 	if len(userIDs) == 0 {
 		return p, nil
 	}
@@ -383,16 +396,21 @@ func loadPeople(ctx context.Context, deps Deps, calID uint32, userIDs []uint32) 
 }
 
 // apply fills in the fields that are not columns on the event row: the
-// owner's identity, the colour their membership carries, and the creator's
-// identity.
+// owner's identity, the colour their membership carries or the event's label
+// overrides, and the creator's identity.
 func (p people) apply(resp *EventResponse, e generated.CalendarEvent) {
 	owner := p.briefs[e.OwnerUserID]
 	resp.OwnerID = owner.publicID
 	resp.OwnerName = owner.name
 	resp.OwnerAvatarURL = owner.avatarURL
-	resp.Color = defaultEventColor
+	resp.ownerColor = defaultEventColor
 	if c, ok := p.colors[e.OwnerUserID]; ok {
-		resp.Color = c
+		resp.ownerColor = c
+	}
+	resp.Color, resp.LabelID = resp.ownerColor, nil
+	if l, ok := p.labels[e.ID]; ok {
+		id := l.publicID
+		resp.Color, resp.LabelID = l.color, &id
 	}
 	applyCreator(resp, p.briefs[e.CreatedByUserID])
 }
@@ -418,7 +436,7 @@ func applyCreator(resp *EventResponse, b userBrief) {
 // renders the event without identities and in the default colour rather than
 // failing a write that has already happened.
 func decorate(ctx context.Context, deps Deps, resp *EventResponse, e generated.CalendarEvent, calID uint32) {
-	p, err := loadPeople(ctx, deps, calID, []uint32{e.OwnerUserID, e.CreatedByUserID})
+	p, err := loadPeople(ctx, deps, calID, []uint32{e.OwnerUserID, e.CreatedByUserID}, []uint32{e.ID})
 	if err != nil {
 		slog.WarnContext(ctx, "failed to read event people", "eventID", e.ID, "error", err)
 	}
@@ -734,6 +752,12 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 			if spec != nil {
 				return spec
 			}
+			var labelID uint32
+			if in.Body.LabelID != nil {
+				if labelID, spec = resolveLabel(ctx, q, cal.ID, *in.Body.LabelID); spec != nil {
+					return spec
+				}
+			}
 			participants, partErr := validateEventParticipants(ctx, q, cal.ID, in.Body.ParticipantIDs)
 			if partErr != nil {
 				return partErr
@@ -765,7 +789,10 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 				RecurrenceRule:     ruleData,
 				RecurrenceEnd:      recEnd,
 			}, attendeeUserIDs, nil)
-			return err
+			if err != nil || labelID == 0 {
+				return err
+			}
+			return q.SetEventLabel(ctx, generated.SetEventLabelParams{EventID: created.ID, LabelID: labelID})
 		})
 		if err != nil {
 			var spec *apierrors.Spec
@@ -791,7 +818,7 @@ func CreateEvent(deps Deps) func(context.Context, *CreateEventInput) (*CreateEve
 func touchesHiddenField(b *PatchEventInput) bool {
 	body := &b.Body
 	return body.Location.Present() || body.Memo.Present() || body.URL.Present() ||
-		body.Visibility != "" || body.OwnerID != nil || body.ParticipantIDs != nil
+		body.Visibility != "" || body.OwnerID != nil || body.ParticipantIDs != nil || body.LabelID.Present()
 }
 
 // checkTag compares the caller's If-Match with the revision the write is
@@ -814,8 +841,10 @@ func checkTag(ifMatch precondition.IfMatch, w eventAccess) error {
 
 // resolvedPatch is a patch laid over the row it changes.
 type resolvedPatch struct {
-	edit  eventEdit
-	label patch.Field[string]
+	edit       eventEdit
+	blockLabel patch.Field[string]
+	// labelID is the label the edited row ends up under, 0 for none.
+	labelID uint32
 }
 
 // resolvePatch lays a patch over the stored row and checks everything the
@@ -902,6 +931,16 @@ func resolvePatch(ctx context.Context, q *generated.Queries, in *PatchEventInput
 	if err != nil {
 		return resolvedPatch{}, err
 	}
+	var labelID uint32
+	if v, ok := body.LabelID.Get(); ok {
+		if labelID, spec = resolveLabel(ctx, q, w.cal.ID, v); spec != nil {
+			return resolvedPatch{}, spec
+		}
+	} else if !body.LabelID.IsNull() {
+		if labelID, err = storedLabel(ctx, q, base.ID); err != nil {
+			return resolvedPatch{}, err
+		}
+	}
 
 	resolved := &UpdateEventInput{Scope: in.Scope}
 	r := &resolved.Body
@@ -934,7 +973,8 @@ func resolvePatch(ctx context.Context, q *generated.Queries, in *PatchEventInput
 			ownerID:      ownerID,
 			participants: participants,
 		},
-		label: body.BlockLabel,
+		blockLabel: body.BlockLabel,
+		labelID:    labelID,
 	}, nil
 }
 
@@ -1052,9 +1092,13 @@ func UpdateEvent(deps Deps) func(context.Context, *PatchEventInput) (*PatchEvent
 			if err != nil {
 				return err
 			}
-			if resolved.label.Present() {
-				edited, err = setBlockLabel(ctx, q, edited, resolved.label)
+			if resolved.blockLabel.Present() {
+				if edited, err = setBlockLabel(ctx, q, edited, resolved.blockLabel); err != nil {
+					return err
+				}
 			}
+			wholeSeries := !w.scope.confined && !w.splitsSeries(in.Scope)
+			edited, err = applyEventLabel(ctx, q, edited, resolved.labelID, wholeSeries)
 			return err
 		})
 		if err != nil {

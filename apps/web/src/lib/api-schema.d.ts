@@ -826,14 +826,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List calendar labels (colors) */
+        /** List the labels a calendar's events can be filed under */
         get: operations["list-labels"];
         put?: never;
-        post?: never;
+        /** Create a label */
+        post: operations["create-label"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/calendars/{calendarId}/labels/{labelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a label; events filed under it fall back to their owner's colour */
+        delete: operations["delete-label"];
+        options?: never;
+        head?: never;
+        /** Rename or recolour a label */
+        patch: operations["update-label"];
         trace?: never;
     };
     "/calendars/{calendarId}/member-candidates": {
@@ -1710,6 +1729,8 @@ export interface components {
              * @enum {string}
              */
             flexibility?: "fixed" | "negotiable" | "conditional";
+            /** @description public ID of a label of this calendar; omit for none */
+            labelId?: string;
             location?: string;
             memo?: string;
             /**
@@ -1768,6 +1789,18 @@ export interface components {
              * @enum {string}
              */
             role: "editor" | "viewer";
+        };
+        CreateLabelInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/CreateLabelInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description #RRGGBB; stored upper-case */
+            color: string;
+            /** @description trimmed before it is stored; 1 to 50 characters after trimming */
+            name: string;
         };
         CreateMemoInputBody: {
             /**
@@ -1852,7 +1885,7 @@ export interface components {
             /** @description free-text label of a block; absent on any other kind */
             blockLabel?: string;
             calendarId: string;
-            /** @description read-only; the owner's colour on this calendar */
+            /** @description read-only; the label's colour when the event has one, else the owner's colour on this calendar */
             color: string;
             /** Format: date-time */
             createdAt: string;
@@ -1871,6 +1904,8 @@ export interface components {
             isRecurrence: boolean;
             /** @enum {string} */
             kind: "event" | "block" | "free" | "milestone";
+            /** @description public ID of the event's label on this calendar; null when it has none */
+            labelId: string | null;
             location: string;
             memo: string;
             /** Format: int64 */
@@ -2037,10 +2072,17 @@ export interface components {
             useCount: number;
         };
         LabelResponse: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/LabelResponse.json
+             */
+            readonly $schema?: string;
+            /** @description upper-case #RRGGBB */
             color: string;
+            etag: string;
             id: string;
-            /** @description i18n key for label name (e.g. 'label.1') */
-            nameKey: string;
+            name: string;
         };
         ListAllowedEmailsOutputBody: {
             /**
@@ -2202,6 +2244,8 @@ export interface components {
             endDate?: string;
             /** @enum {string} */
             flexibility?: "fixed" | "negotiable" | "conditional";
+            /** @description public ID of a label of this calendar; null or an empty string removes the label */
+            labelId?: string | null;
             location?: string | null;
             memo?: string | null;
             /**
@@ -2687,6 +2731,18 @@ export interface components {
             readonly $schema?: string;
             /** @description omit to keep the current text */
             body?: string | null;
+        };
+        UpdateLabelInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateLabelInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description #RRGGBB; stored upper-case */
+            color?: string | null;
+            /** @description trimmed before it is stored; 1 to 50 characters after trimming */
+            name?: string | null;
         };
         UpdateMemberColorInputBody: {
             /**
@@ -6200,6 +6256,266 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "create-label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                calendarId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLabelInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "delete-label": {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": string;
+            };
+            path: {
+                calendarId: string;
+                labelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+        };
+    };
+    "update-label": {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": string;
+            };
+            path: {
+                calendarId: string;
+                labelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLabelInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HumaError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

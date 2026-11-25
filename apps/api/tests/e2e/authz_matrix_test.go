@@ -59,6 +59,7 @@ const (
 	mxPhoto      mxChild = "photo"
 	mxPending    mxChild = "unconfirmed photo"
 	mxInvite     mxChild = "invite"
+	mxLabel      mxChild = "label"
 	mxMember     mxChild = "member"
 	// mxTrashed is a deleted event, which the restore path names.
 	mxTrashed mxChild = "deleted event"
@@ -205,6 +206,11 @@ func mxRows() []mxRow {
 			userID: subject, body: mxJSON(map[string]any{"color": "#F35F8C"})},
 		{method: "DELETE", path: cal + "/members/{userId}", group: mxProtected, allow: mxManage, child: mxMember, userID: subject},
 		{method: "GET", path: cal + "/labels", group: mxProtected, allow: mxRead},
+		{method: "POST", path: cal + "/labels", group: mxProtected, allow: mxManage,
+			body: mxJSON(map[string]any{"name": "Matrix label", "color": "#1A7F5A"})},
+		{method: "PATCH", path: cal + "/labels/{labelId}", group: mxProtected, allow: mxManage, child: mxLabel,
+			body: mxJSON(map[string]any{"color": "#3366CC"})},
+		{method: "DELETE", path: cal + "/labels/{labelId}", group: mxProtected, allow: mxManage, child: mxLabel},
 		{method: "GET", path: cal + "/export", group: mxProtected, allow: mxRead},
 		{method: "POST", path: cal + "/import", group: mxProtected, allow: mxWrite, body: mxJSON(map[string]any{"ics": mxICS})},
 		{method: "GET", path: cal + "/activity", group: mxProtected, allow: mxRead},
@@ -431,6 +437,12 @@ func (w *mxWorld) child(kind mxChild) string {
 		require.NotEmpty(w.t, pres.UploadURL)
 		helpers.UploadToSignedURL(w.t, pres.UploadURL, "image/png", image)
 		id = pres.CoverID
+	case mxLabel:
+		var l struct {
+			ID string `json:"id"`
+		}
+		helpers.DoJSON(w.t, http.MethodPost, w.calURL+"/labels", w.owner(), map[string]any{"name": "Matrix label", "color": "#1A7F5A"}, &l)
+		id = l.ID
 	case mxInvite:
 		var inv struct {
 			ID string `json:"id"`
@@ -515,7 +527,7 @@ func (w *mxWorld) url(r mxRow, calendarID, eventID string, childID string) strin
 				return childID
 			}
 			return r.userID(w)
-		case "memoId", "itemId", "commentId", "attachmentId", "photoId", "inviteId":
+		case "memoId", "itemId", "commentId", "attachmentId", "photoId", "inviteId", "labelId":
 			if childID != "" {
 				return childID
 			}
@@ -539,6 +551,7 @@ func (w *mxWorld) snapshot() string {
 		w.calURL + "/events?start=2026-06-01&end=2026-06-30",
 		w.calURL + "/memos",
 		w.calURL + "/invites",
+		w.calURL + "/labels",
 		w.calURL + "/events/" + w.event + "/checklist",
 		w.calURL + "/events/" + w.event + "/activities",
 		w.calURL + "/events/" + w.event + "/attachments",

@@ -108,6 +108,7 @@ type payloadFields struct {
 	MemoID     string `json:"memoId"`
 	PhotoID    string `json:"photoId"`
 	InviteID   string `json:"inviteId"`
+	LabelID    string `json:"labelId"`
 	UserID     string `json:"userId"`
 	CalendarID string `json:"calendarId"`
 	// OriginalStart names the occurrence of a series the row is about.
@@ -123,7 +124,7 @@ func (f payloadFields) label() string {
 // entityID is the public id of what the row is about. The registries name it
 // per kind (eventId, memoId, ...), and a membership row is about its user.
 func (f payloadFields) entityID() string {
-	return cmp.Or(f.EventID, f.MemoID, f.PhotoID, f.InviteID, f.UserID, f.CalendarID)
+	return cmp.Or(f.EventID, f.MemoID, f.PhotoID, f.InviteID, f.LabelID, f.UserID, f.CalendarID)
 }
 
 func readPayload(raw json.RawMessage) payloadFields {

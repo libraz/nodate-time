@@ -103,6 +103,10 @@ func withhold(resp *EventResponse, d eventacl.Decision) {
 	if !d.URL {
 		resp.URL = ""
 	}
+	// The label is a detail: a reader who may not write it does not see it.
+	if d.DetailsHidden && resp.LabelID != nil {
+		resp.LabelID, resp.Color = nil, resp.ownerColor
+	}
 	resp.DetailsHidden = d.DetailsHidden
 }
 
@@ -206,8 +210,8 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		items := kept.Items()
 
 		// Attendees and people are read for what is kept, each in one query.
-		var eventIDs, userIDs []uint32
-		seenEvent, seenUser := map[uint32]bool{}, map[uint32]bool{}
+		var eventIDs, userIDs, shownIDs []uint32
+		seenEvent, seenUser, seenShown := map[uint32]bool{}, map[uint32]bool{}, map[uint32]bool{}
 		sourceOf := make([]uint32, len(items))
 		parentOf := map[uint32]uint32{}
 		for i, it := range items {
@@ -217,6 +221,10 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 				e = it.expanded.Event
 				sourceOf[i] = e.ID
 				parentOf[e.ID] = it.row.ID
+			}
+			if !seenShown[e.ID] {
+				seenShown[e.ID] = true
+				shownIDs = append(shownIDs, e.ID)
 			}
 			if !seenEvent[sourceOf[i]] && parentOf[sourceOf[i]] == 0 {
 				seenEvent[sourceOf[i]] = true
@@ -233,7 +241,7 @@ func ListEvents(deps Deps) func(context.Context, *ListEventsInput) (*ListEventsO
 		if err != nil {
 			return nil, apierrors.Internal(ctx, err)
 		}
-		who, err := loadPeople(ctx, deps, cal.ID, userIDs)
+		who, err := loadPeople(ctx, deps, cal.ID, userIDs, shownIDs)
 		if err != nil {
 			return nil, apierrors.Internal(ctx, err)
 		}

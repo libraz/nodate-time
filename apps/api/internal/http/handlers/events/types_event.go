@@ -38,10 +38,13 @@ type EventResponse struct {
 	StartDate *string `json:"startDate,omitempty"`
 	EndDate   *string `json:"endDate,omitempty"`
 	Timezone  string  `json:"timezone"`
-	// Color is derived from the owner's colour on the calendar, not stored
-	// per event: an event belongs to a person's layer, and the layer is
-	// what carries the colour. Writes ignore it.
-	Color    string `json:"color" doc:"read-only; the owner's colour on this calendar"`
+	// Color is derived, not stored per event: the label's colour when the
+	// event is filed under one, else the colour of the owner's layer. Writes
+	// ignore it.
+	Color string `json:"color" doc:"read-only; the label's colour when the event has one, else the owner's colour on this calendar"`
+	// LabelID is the calendar label the event is filed under.
+	LabelID *string `json:"labelId" doc:"public ID of the event's label on this calendar; null when it has none"`
+
 	Location string `json:"location"`
 	Memo     string `json:"memo"`
 	URL      string `json:"url"`
@@ -82,6 +85,9 @@ type EventResponse struct {
 	Etag string `json:"etag"`
 	// SeriesEtag names the series row of a recurring event's occurrence.
 	SeriesEtag string `json:"seriesEtag,omitempty"`
+
+	// ownerColor is the owner's colour, which a reader denied the label sees.
+	ownerColor string
 }
 
 // --- Inputs/Outputs ---
@@ -136,6 +142,7 @@ type CreateEventInput struct {
 		NotificationOffset *int             `json:"notificationOffset,omitempty" minimum:"0" maximum:"10080" required:"false" doc:"minutes before the start"`
 		ParticipantIDs     []string         `json:"participantIds,omitempty" required:"false"`
 		OwnerID            *string          `json:"ownerId,omitempty" required:"false" doc:"public user ID of the owning member; defaults to the caller"`
+		LabelID            *string          `json:"labelId,omitempty" required:"false" doc:"public ID of a label of this calendar; omit for none"`
 		RecurrenceRule     *json.RawMessage `json:"recurrenceRule,omitempty" required:"false" doc:"Weekly rules with interval > 1 use a fixed Sunday week start (WKST=SU). until is YYYY-MM-DD for an all-day series and an RFC 3339 instant otherwise."`
 	}
 }
@@ -172,6 +179,7 @@ type PatchEventInput struct {
 		NotificationOffset patch.Field[int]             `json:"notificationOffset,omitzero" required:"false" minimum:"0" maximum:"10080" doc:"minutes before the start; null clears it"`
 		ParticipantIDs     []string                     `json:"participantIds,omitempty" required:"false" doc:"full participant list; an empty array removes all participants"`
 		OwnerID            *string                      `json:"ownerId,omitempty" required:"false" doc:"public user ID of the owning member"`
+		LabelID            patch.Field[string]          `json:"labelId,omitzero" required:"false" doc:"public ID of a label of this calendar; null or an empty string removes the label"`
 		RecurrenceRule     patch.Field[json.RawMessage] `json:"recurrenceRule,omitzero" required:"false" doc:"full recurrence rule; null makes the event non-recurring. until is YYYY-MM-DD for an all-day series and an RFC 3339 instant otherwise."`
 	}
 }

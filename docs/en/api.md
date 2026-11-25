@@ -47,11 +47,11 @@ Checks run in a fixed order, so the status says which one failed first:
 A write to a resource that others can edit names the version it replaces.
 
 - Every resource that can be written conditionally carries `etag` in each list item and in the single-resource response, and the single `GET` also returns it as an `ETag` header.
-- Send it back as `If-Match`. A missing header is 428, an `If-Match` that is not a valid entity tag is 400 `REQUEST.BAD_IF_MATCH`, and a stale one is 412 with a resource code: `EVENT.STALE`, `CALENDAR.STALE`, `MEMO.STALE`, `COMMENT.STALE`, `CHECKLIST.STALE`, `ALBUM.STALE`, `SCHEDULE_POLL.STALE`, `SCHEDULE_POLL.RESPONSE_STALE`. Weak validators (`W/`) and lists of tags never match; `*` matches any existing row.
+- Send it back as `If-Match`. A missing header is 428, an `If-Match` that is not a valid entity tag is 400 `REQUEST.BAD_IF_MATCH`, and a stale one is 412 with a resource code: `EVENT.STALE`, `CALENDAR.STALE`, `MEMO.STALE`, `COMMENT.STALE`, `CHECKLIST.STALE`, `ALBUM.STALE`, `LABEL.STALE`, `SCHEDULE_POLL.STALE`, `SCHEDULE_POLL.RESPONSE_STALE`. Weak validators (`W/`) and lists of tags never match; `*` matches any existing row.
 - A successful write answers with the new `etag` in the body and the `ETag` header. Reload on 412 and let the user decide again.
 - Edits use `PATCH` with merge-patch semantics: an omitted field is unchanged, `null` clears a nullable field, and an array replaces the whole array. Replacing a single value (RSVP, member role, member color, availability sharing, poll answer) is `PUT`.
 
-Guarded: events (`PATCH`, `DELETE`, undoing an occurrence change), calendars, memos, checklist items, comments, album photos, schedule polls (`PATCH`, cancel, finalize, delete) and your own poll answer (`PUT .../response`, whose version is on `GET .../response`).
+Guarded: events (`PATCH`, `DELETE`, undoing an occurrence change), calendars, calendar labels, memos, checklist items, comments, album photos, schedule polls (`PATCH`, cancel, finalize, delete) and your own poll answer (`PUT .../response`, whose version is on `GET .../response`).
 
 Unconditional writes, and why:
 
@@ -66,11 +66,11 @@ Unconditional writes, and why:
 
 ### Lists
 
-| Envelope              | Used by                                                                                                                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `{items, nextCursor}` | Walkable lists: calendar activity, event history, album photos, comments. Pass `nextCursor` back to continue; it is empty at the end.                                           |
-| `{items, hasMore}`    | Lists cut by a range or a count: `GET /calendars/{calendarId}/events`, `GET /share/{token}/events`, `GET /search`, member candidates. `hasMore` says the cut dropped rows.      |
-| Bare array            | Lists bounded by a limit enforced when rows are written: members, checklist, invites, attachments (100), calendars, instance admins, allowed e-mails (500 each), sessions (50). |
+| Envelope              | Used by                                                                                                                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{items, nextCursor}` | Walkable lists: calendar activity, event history, album photos, comments. Pass `nextCursor` back to continue; it is empty at the end.                                                                 |
+| `{items, hasMore}`    | Lists cut by a range or a count: `GET /calendars/{calendarId}/events`, `GET /share/{token}/events`, `GET /search`, member candidates. `hasMore` says the cut dropped rows.                            |
+| Bare array            | Lists bounded by a limit enforced when rows are written: members, checklist, invites, attachments (100), calendars, instance admins, allowed e-mails (500 each), sessions, calendar labels (50 each). |
 
 Adding past a cap is refused with a `*.LIMIT_REACHED` 409. Sessions are the exception: the 51st sign-in revokes the oldest one. An export over its range limit is 422 `EXPORT.RANGE_TOO_LARGE`.
 
@@ -96,7 +96,7 @@ An all-day event is dates, not instants.
 | `private`      | Title, times, kind, show-as, owner and attendees; location, memo and URL withheld; `detailsHidden` is true | Times only, as busy time: `title` is `null`, `detailsHidden` is true |
 | `confidential` | Not listed; reads answer 404                                                                               | Not listed                                                           |
 
-A response with `detailsHidden: true` is a reduced view. Writing a field that view withholds is refused with 403 `EVENT.DETAILS_HIDDEN`, so a client cannot overwrite a value it never saw.
+A response with `detailsHidden: true` is a reduced view. Writing a field that view withholds is refused with 403 `EVENT.DETAILS_HIDDEN`, so a client cannot overwrite a value it never saw. The view also withholds the event's label: `labelId` is `null` and `color` is the owner's.
 
 ### Recurring events
 
@@ -112,6 +112,19 @@ Writes on a recurring event take `scope`:
 - `following` splits the series at the occurrence. The earlier part is cut short, and an edit also creates a new series from that occurrence on, which the response returns; a delete answers 204. A split on the first occurrence acts like `all`. A fixed `count` is divided between the two parts by the occurrences the rule generates. If the edit changes the rule or `allDay`, changes to later occurrences are dropped. `following`, and deleting a whole series, are limited to the event's owner and the people who manage the calendar; an attendee who was granted edit rights cannot. `following` is refused on a task-owned event (409 `EVENT.TASK_OWNED`) and on an event that does not repeat (400 `EVENT.NOT_RECURRING`).
 - When a `following` edit moves the occurrence to another day and sends no rule, the new series moves with it: a weekly rule's weekdays and a monthly rule's days of the month shift by the same number of days. A shift that takes a day of the month outside 1 to 31 is 422 `REQUEST.VALIDATION`; send the rule you want with the edit instead. A split at the Feb 28 that stands in for Feb 29 returns a monthly rule with an interval of 12 on the 29th, which keeps the same dates.
 - Cancelling one occurrence (`DELETE ...?scope=this`) can be undone with `DELETE /calendars/{calendarId}/events/{eventId}/exceptions/{occurrenceDate}` (`YYYY-MM-DD`, guarded by the series `etag`, 204). An occurrence with nothing to undo is 404 `EVENT.EXCEPTION_NOT_FOUND`. A `following` delete cannot be undone.
+
+### Labels
+
+`/calendars/{calendarId}/labels` holds the named colours a calendar's events can be filed under. Every member can list them, in the order they were created. An `owner` or `manager` creates (`POST`), renames or recolours (`PATCH`) and deletes (`DELETE`) them; an `editor` or `viewer` gets 403.
+
+- `name` is trimmed, and must then be 1 to 50 characters with no control characters (400 otherwise). Names are unique within a calendar and compared exactly, so `ライブ` and `らいぶ` are two names; a name already taken is 409 `LABEL.NAME_TAKEN`. `color` is `#RRGGBB` and is stored upper-case. Neither can be cleared: `null` is 422 `REQUEST.VALIDATION`.
+- A `PATCH` that leaves both values as they are changes nothing and returns the label as it was.
+- A calendar holds at most 50 labels (409 `LABEL.LIMIT_REACHED`).
+- An event has at most one label, as `labelId`, and its `color` is then the label's instead of the owner's. Send `labelId` on create, or on `PATCH`, where `null` or `""` removes the label and leaving it out keeps it. Any member who may edit the event may set it.
+- A `labelId` that is not a label of the event's calendar is 422 `EVENT.LABEL_UNKNOWN`. The label may have been deleted since the client read the list, so reload the labels before asking again.
+- Deleting a label keeps its events, which go back to their owner's colour.
+- On a recurring event, changing the label with `scope=all` also changes it on the occurrences already edited on their own. An occurrence edited with `this`, or the new series a `following` edit creates, takes the label the edit sends, or else the label of the row it was made from.
+- The share page paints every event in the calendar's colour and shows no labels. CalDAV does not carry them.
 
 ### Restoring a deleted event
 

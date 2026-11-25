@@ -94,21 +94,18 @@ export type Memo = Wire<'MemoResponse'>;
 
 export type CalendarView = 'month' | 'week' | 'list' | 'year';
 
-export interface Label {
-  id: string;
-  nameKey: string;
-  color: string;
-}
+/** A named colour a calendar's events can be filed under. */
+export type Label = Wire<'LabelResponse'>;
 
 export const FALLBACK_LABEL_COLOR = '#47B2F7';
 
 /**
  * The palette a calendar's layers are drawn from.
  *
- * The same ten colours the API serves at `/calendars/{id}/labels`. They are
- * repeated here because the first calendar is created before there is one to
- * ask, and the two lists are pinned by a test on each side: a palette that
- * drifts hands out a colour the calendar's own list does not contain.
+ * The same ten colours as the server's member palette (`memberpalette`). They
+ * are repeated here because the first calendar is created before there is one
+ * to ask, and the two lists are pinned by a test on each side: a palette that
+ * drifts hands out a colour the server's list does not contain.
  */
 export const MEMBER_COLORS = [
   '#47B2F7',

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { FALLBACK_LABEL_COLOR, MEMBER_COLORS } from './calendar';
 
-// The same list the API serves at /calendars/{id}/labels, pinned on both
-// sides. A palette that drifts hands out a colour the calendar's own list does
-// not contain, which shows up as a swatch nobody can select again.
-const SERVED_PALETTE = [
+// The server's member palette (memberpalette), pinned on both sides. A palette
+// that drifts hands out a colour the server's list does not contain, which
+// shows up as a swatch nobody can select again.
+const SERVER_PALETTE = [
   '#47B2F7',
   '#F35F8C',
   '#B38BDC',
@@ -18,11 +18,11 @@ const SERVED_PALETTE = [
 ];
 
 describe('member palette', () => {
-  it('matches the one the API serves', () => {
-    expect([...MEMBER_COLORS]).toEqual(SERVED_PALETTE);
+  it("matches the server's member palette", () => {
+    expect([...MEMBER_COLORS]).toEqual(SERVER_PALETTE);
   });
 
   it('falls back to a colour that is in the palette', () => {
-    expect(SERVED_PALETTE).toContain(FALLBACK_LABEL_COLOR);
+    expect(SERVER_PALETTE).toContain(FALLBACK_LABEL_COLOR);
   });
 });

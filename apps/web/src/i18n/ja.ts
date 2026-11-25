@@ -177,6 +177,7 @@ export const ja = {
   'picker.prevYear': '前年',
   'picker.nextYear': '翌年',
   'picker.typeTime': '時刻を入力',
+  'picker.applyTime': 'この時刻にする',
   'event.privateBusy': '予定あり',
   'event.showAsBusy': '予定あり',
   'event.showAsFree': '空き',
@@ -1034,6 +1035,7 @@ export const ja = {
   'apiError.EVENT.NOT_DELETED': 'この予定は削除されていません',
   'apiError.EVENT.RESTORE_CONFLICT': '同じ場所が既に使われているため、この予定を復元できません',
   'apiError.EVENT.EXCEPTION_NOT_FOUND': 'この回には取り消せる変更がありません',
+  'apiError.EVENT.LABEL_UNKNOWN': 'このラベルはカレンダーにありません。ラベルを選び直してください',
   'apiError.SEARCH.TOO_BROAD': '検索範囲が広すぎます。範囲を狭めてください',
   'apiError.EXPORT.RANGE_TOO_LARGE': '書き出す期間の予定が多すぎます。期間を狭めてください',
   'apiError.MEMBER.LIMIT_REACHED': 'このカレンダーのメンバー数が上限に達しています',
@@ -1048,6 +1050,10 @@ export const ja = {
   'apiError.ADMIN.ALREADY_ADMIN': 'このユーザーは既にインスタンス管理者です',
   'apiError.ADMIN.USER_NOT_FOUND': 'ユーザーが見つかりません',
   'apiError.APP_PASSWORD.NOT_FOUND': 'アプリパスワードが見つかりません',
+  'apiError.LABEL.NOT_FOUND': 'ラベルが見つかりません',
+  'apiError.LABEL.STALE': '開いている間に他の人がこのラベルを変更しました。読み込み直してください',
+  'apiError.LABEL.NAME_TAKEN': 'このカレンダーには同じ名前のラベルがあります',
+  'apiError.LABEL.LIMIT_REACHED': 'このカレンダーのラベル数が上限に達しています',
   'apiError.APP_PASSWORD.LIMIT_REACHED':
     '同期できる端末の数が上限に達しています。使っていない端末の同期を止めてください',
   'apiError.APP_PASSWORD.EMAIL_UNVERIFIED':

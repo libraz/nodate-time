@@ -264,8 +264,8 @@ func renderHits(ctx context.Context, deps Deps, hits []searchHit) ([]EventRespon
 	sourceOf := make([]uint32, len(hits))
 	parentOf := map[uint32]uint32{}
 	shownOf := make([]generated.CalendarEvent, len(hits))
-	userIDs := map[uint32][]uint32{}
-	seenUser := map[[2]uint32]bool{}
+	userIDs, shownIDs := map[uint32][]uint32{}, map[uint32][]uint32{}
+	seenUser, seenShown := map[[2]uint32]bool{}, map[uint32]bool{}
 	for i, h := range hits {
 		e := h.row
 		if h.series && h.inst.IsOverride {
@@ -273,6 +273,10 @@ func renderHits(ctx context.Context, deps Deps, hits []searchHit) ([]EventRespon
 			parentOf[e.ID] = h.row.ID
 		}
 		shownOf[i], sourceOf[i] = e, e.ID
+		if !seenShown[e.ID] {
+			seenShown[e.ID] = true
+			shownIDs[h.cal.ID] = append(shownIDs[h.cal.ID], e.ID)
+		}
 		if !seenEvent[e.ID] && parentOf[e.ID] == 0 {
 			seenEvent[e.ID] = true
 			eventIDs = append(eventIDs, e.ID)
@@ -290,7 +294,7 @@ func renderHits(ctx context.Context, deps Deps, hits []searchHit) ([]EventRespon
 	}
 	who := map[uint32]people{}
 	for calID, ids := range userIDs {
-		if who[calID], err = loadPeople(ctx, deps, calID, ids); err != nil {
+		if who[calID], err = loadPeople(ctx, deps, calID, ids, shownIDs[calID]); err != nil {
 			return nil, err
 		}
 	}

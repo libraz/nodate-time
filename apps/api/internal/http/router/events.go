@@ -39,7 +39,8 @@ func registerEvents(g apiGroups, deps Deps) {
 		Tags:          []string{"Event"},
 		DefaultStatus: http.StatusCreated,
 		Errors: errorStatuses(apierrors.BadRequest, apierrors.EventAllDayShape, apierrors.Validation,
-			apierrors.EventDateInvalid, apierrors.EventDateRangeInvalid, apierrors.EventOccurrenceForm),
+			apierrors.EventDateInvalid, apierrors.EventDateRangeInvalid, apierrors.EventOccurrenceForm,
+			apierrors.EventLabelUnknown),
 	}, events.CreateEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{
@@ -51,7 +52,8 @@ func registerEvents(g apiGroups, deps Deps) {
 		Errors: preconditionedErrors(apierrors.EventNotFound, apierrors.EventDetailsHidden, apierrors.EventEditDenied,
 			apierrors.EventStale, apierrors.Validation,
 			apierrors.EventAllDayShape, apierrors.EventDateInvalid, apierrors.EventDateRangeInvalid,
-			apierrors.EventOccurrenceForm, apierrors.EventTaskOwned, apierrors.EventNotRecurring),
+			apierrors.EventOccurrenceForm, apierrors.EventTaskOwned, apierrors.EventNotRecurring,
+			apierrors.EventLabelUnknown),
 	}, events.UpdateEvent(evtDeps))
 
 	huma.Register(api, huma.Operation{

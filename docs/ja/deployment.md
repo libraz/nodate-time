@@ -61,6 +61,7 @@ API は `/dav/` で CalDAV を提供し、同梱の nginx は `/api/dav/` とし
 - 資格情報は HTTP Basic で送られるので、エンドポイントには TLS 越しに到達できる必要があります。
 - リダイレクトとメソッドの通過は、スタックの外から確かめます。`curl -i https://app.example.com/.well-known/caldav` は `Location: /api/dav/` 付きの 301、`curl -i -X PROPFIND https://app.example.com/api/dav/` は `WWW-Authenticate: Basic` ヘッダ付きの 401 を返します。
 - [既存環境の更新](#既存環境の更新)の `caldav.sql` の手順が、アプリパスワードとクライアントが付けたリソース名のテーブルを作ります。これが無い DB では、CalDAV とアプリパスワードのエンドポイントが失敗します。
+- [既存環境の更新](#既存環境の更新)の `event-labels.sql` の手順が、カレンダーのラベルのテーブルを作ります。これが無い DB では、ラベルのエンドポイントと予定の読み出しが失敗します。
 
 ## バックアップ
 
@@ -81,7 +82,7 @@ docker compose -f compose.prod.yml exec -T mysql \
 1. 終日の行を分類します。`sql/core/tools/classify-all-day.sql` を DB に対して流します。読み取りだけを行います。先に `@nf_http_cutoff` に、他のプロダクトによる終日の行の正規化がこの DB に届いた UTC の時刻を設定します。レポートは各終日の行がどう変換されるかを示し、最後に、判断が要る行ごとに `INSERT` を 1 本出力します。それらの行の form と zone を埋めて実行します。入れ先の `core_upgrade_0004_decisions` は、手順 2 の初回の実行が作るテーブルです。
 2. `sql/core/upgrades/*.sql` を、番号順にすべて。他のプロダクトと共有するテーブルを変更するもので、必ず最初に当てます。これが済むまで後続の手順は実行を拒否します。`0004-all-day-canonical.sql` はすべての終日の行を正規の形に変換し、それを強制する制約を足します。未判定の行や、ほかに解消すべき指摘が残っている間は、`public_id` で行を列挙して止まります。解消してからもう一度流します。`--force` は付けません。
 3. `sql/time/upgrades/from-v0.1.0.sql` を、まだ当てていない DB にだけ。`album_photos.retired_at` 列がなければ未適用です。新しい API が一度でもリクエストを処理したら、二度と流しません。
-4. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql`、`caldav.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 3 を済ませたどの DB にも当てられます。
+4. 機能ごとのファイルを、`schedule-polls.sql`、`calendar-covers.sql`、`caldav.sql`、`event-labels.sql` の順に。足りないものだけを足し、ビューは置き換えるので、手順 3 を済ませたどの DB にも当てられます。
 5. `sql/time/upgrades/triggers.sql` を機能ファイルの後に。この層のトリガーをすべて DROP して作り直します。MySQL はトリガーを不可分に置き換えられないので、その間に走った削除はトリガーを通りません。書き込む側をすべて止めるのはこのためです。
 6. 適合性検査 `sql/core/conformance/run.sh --mode all`。結果が契約どおりになっているかを確かめます。データの検査は手順 2 が済んでいることを前提にします。
 7. 新しい API を起動します。

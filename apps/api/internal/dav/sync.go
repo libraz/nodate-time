@@ -92,6 +92,9 @@ var logActions = map[string]logAction{
 	eventlog.TypePhotoUploaded:               actionIgnore,
 	eventlog.TypePhotoUpdated:                actionIgnore,
 	eventlog.TypePhotoDeleted:                actionIgnore,
+	eventlog.TypeLabelCreated:                actionIgnore,
+	eventlog.TypeLabelUpdated:                actionIgnore,
+	eventlog.TypeLabelDeleted:                actionIgnore,
 	eventlog.TypeWorkspaceMemberAdded:        actionIgnore,
 	eventlog.TypeWorkspaceMemberRoleChanged:  actionIgnore,
 }

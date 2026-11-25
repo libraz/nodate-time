@@ -137,7 +137,10 @@ var operationConventions = []convention{
 	put("confirm-calendar-cover", calPath+"/cover", reasonUnused),
 	create("presign-calendar-cover", calPath+"/cover/presign"),
 	removeUnguarded("delete-calendar-cover", calPath+"/cover", reasonUnused),
-	read("list-labels", calPath+"/labels", listNone),
+	read("list-labels", calPath+"/labels", listArray),
+	create("create-label", calPath+"/labels"),
+	patch("update-label", calPath+"/labels/{labelId}"),
+	remove("delete-label", calPath+"/labels/{labelId}"),
 
 	// Members
 	read("list-member-candidates", calPath+"/member-candidates", listWindow),

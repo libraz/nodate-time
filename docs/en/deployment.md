@@ -61,6 +61,7 @@ The API serves CalDAV at `/dav/`, published as `/api/dav/` by the bundled nginx.
 - Credentials travel in HTTP Basic, so the endpoint has to be reached over TLS.
 - Check the redirect and the method pass-through from outside the stack: `curl -i https://app.example.com/.well-known/caldav` answers 301 with `Location: /api/dav/`, and `curl -i -X PROPFIND https://app.example.com/api/dav/` answers 401 with a `WWW-Authenticate: Basic` header.
 - The `caldav.sql` step of [Upgrading](#upgrading) creates the tables behind app passwords and the client-chosen resource names; a database that lacks them fails on CalDAV requests and on the app password endpoints.
+- The `event-labels.sql` step of [Upgrading](#upgrading) creates the tables behind calendar labels; a database that lacks them fails on the label endpoints and on every event read.
 
 ## Backups
 
@@ -81,7 +82,7 @@ Back up both volumes first, as described in [Backups](#backups). A database that
 1. Classify the all-day rows. Run `sql/core/tools/classify-all-day.sql` against the database; it only reads. Set `@nf_http_cutoff` first, to the UTC time at which the other product's normalisation of all-day rows reached this database. The report lists how each all-day row will be converted and ends with one `INSERT` per row that needs a decision. Fill in the form and zone of those rows and run the statements: they go into `core_upgrade_0004_decisions`, a table that step 2 creates on its first run.
 2. `sql/core/upgrades/*.sql`, every file, in number order. These change the tables shared with other products and always come first; the later steps refuse to run until they have. `0004-all-day-canonical.sql` converts every all-day row to its canonical form and adds the constraints that enforce it. It stops, listing the rows by `public_id`, while any row is undecided or any other finding remains; settle those and run it again. Apply it without `--force`.
 3. `sql/time/upgrades/from-v0.1.0.sql`, only on a database that has not had it, which is one without the `album_photos.retired_at` column. Once the new API has served a request it is never run again.
-4. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`, `caldav.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 3.
+4. The feature files, in this order: `schedule-polls.sql`, `calendar-covers.sql`, `caldav.sql`, `event-labels.sql`. Each adds only what is missing and replaces views, so it applies to any database past step 3.
 5. `sql/time/upgrades/triggers.sql`, after the feature files. It drops and recreates every trigger of this layer. MySQL cannot replace a trigger atomically, so a delete running in between would miss it; this is why every writer is stopped.
 6. The conformance check, `sql/core/conformance/run.sh --mode all`, which confirms the result matches the contract. Its data checks need step 2 applied.
 7. Start the new API.

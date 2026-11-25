@@ -245,8 +245,8 @@ func TestCalendarLabels(t *testing.T) {
 		Color string `json:"color"`
 	}
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/calendars/"+tt.CalendarID+"/labels", tt.AccessToken, nil, &labels)
-	require.Len(t, labels, 10)
-	require.Equal(t, "#47B2F7", labels[0].Color)
+	// A calendar starts with no labels; its managers define them.
+	require.Empty(t, labels)
 }
 
 func TestCalendarLabelsRequireMembership(t *testing.T) {

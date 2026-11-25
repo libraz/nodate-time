@@ -13,6 +13,7 @@ export function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent
     timezone: 'Asia/Tokyo',
     color: '#47B2F7',
     ownerId: 'user-1',
+    labelId: null,
     ownerName: 'Owner',
     creatorId: 'user-1',
     creatorName: 'Owner',
