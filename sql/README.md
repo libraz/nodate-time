@@ -112,7 +112,7 @@ keeps its `DROP` through the generator's `RETIRED` list.
 
 `bash scripts/check-upgrade-path.sh` proves it. It loads three starting
 schemas: v0.1.0 and the one main carried before the core upgrades existed,
-each with `scripts/fixtures/v0.1.0-data.sql`, and f3c4d681, a database
+each with `scripts/fixtures/v0.1.0-data.sql`, and 7e9a601a, a database
 already past `from-v0.1.0.sql`, which skips it. It applies the upgrades
 twice. On the first pass, just before 0004, it plants
 `scripts/fixtures/pre-0004-data.sql` (all-day rows in the old shapes, with

@@ -4,7 +4,7 @@
 #   bash scripts/check-upgrade-path.sh
 #
 # For each starting state (the v0.1.0 schema, the schema main carried before
-# the core upgrades existed, and f3c4d681, a database already past
+# the core upgrades existed, and 7e9a601a, a database already past
 # from-v0.1.0.sql), on a scratch database:
 #   1. load that schema, plus scripts/fixtures/v0.1.0-data.sql for the states
 #      that run from-v0.1.0.sql
@@ -54,8 +54,8 @@ PREFIX="${TC_UPGRADE_CHECK_DB_PREFIX:-sdb_up_}"
 # state applies from-v0.1.0.sql and "skip" when it already has.
 STATES=(
   "v010:v0.1.0:run"
-  "head:ad8ab12:run"
-  "past:f3c4d681:skip"
+  "head:08d32dc:run"
+  "past:7e9a601a:skip"
 )
 
 if [[ ! "${DSN}" =~ ^([^:]+):([^@]*)@([^:/]+):([0-9]+)$ ]]; then
