@@ -1,0 +1,664 @@
+/* ============================================
+   SEMANTIC TOKENS — Glass Light (default)
+   iOS-inspired: System Blue, SF-style hierarchy,
+   frosted materials, grouped backgrounds
+   ============================================ */
+:root {
+  /* Surfaces — translucent frosted glass */
+  --color-surface: rgba(255, 255, 255, 0.6);
+  --color-surface-secondary: rgba(255, 255, 255, 0.4);
+  --color-surface-elevated: rgba(255, 255, 255, 0.72);
+  --color-surface-inset: rgba(0, 0, 0, 0.03);
+  --color-surface-app: transparent;
+
+  /* Text — iOS label hierarchy */
+  --color-text-primary: #000000;
+  /* Heavier than the iOS 0.6 / 0.3, which assume a white ground: on the tinted
+     glass backdrop they fell to ~3.3:1 and ~1.7:1 */
+  --color-text-secondary: rgba(60, 60, 67, 0.72);
+  --color-text-tertiary: rgba(60, 60, 67, 0.45);
+  --color-text-on-accent: #ffffff;
+
+  /* Borders — subtle hairlines on glass */
+  --color-border: rgba(255, 255, 255, 0.5);
+  --color-border-strong: rgba(60, 60, 67, 0.15);
+  --color-separator: rgba(60, 60, 67, 0.08);
+
+  /* Accent — iOS System Blue */
+  --color-accent: #007aff;
+  --color-accent-hover: #0066d6;
+  --color-accent-bg: rgba(0, 122, 255, 0.1);
+  --color-accent-subtle: rgba(0, 122, 255, 0.14);
+  /* Accent used as text or an icon on a surface. Same as the accent unless a
+     theme's fill colour is too light or too dark to read as ink. */
+  --color-accent-ink: var(--color-accent);
+  /* Hints and tips. The accent, except where the accent is a red that would
+     make a tip read as an error. */
+  --color-info: var(--color-accent);
+
+  /* Semantic */
+  --color-danger: #ff3b30;
+  --color-danger-bg: rgba(255, 59, 48, 0.1);
+  --color-success: #34c759;
+  --color-warning: #c27400;
+
+  /* Interaction */
+  --color-hover: rgba(255, 255, 255, 0.35);
+  --color-active: rgba(255, 255, 255, 0.5);
+  --color-overlay: rgba(0, 0, 0, 0.25);
+
+  /* Frosted glass materials */
+  --surface-glass: rgba(255, 255, 255, 0.55);
+  --surface-glass-heavy: rgba(255, 255, 255, 0.9);
+  --backdrop-blur: blur(40px) saturate(180%);
+  --backdrop-blur-heavy: blur(60px) saturate(200%);
+
+  /* Shadows — soft glow on glass */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.5);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(255, 255, 255, 0.4);
+
+  /* Radii — large, soft */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  /* Rows and small controls: capped so a theme's soft radius never turns a
+     36px row into a capsule. */
+  --radius-control: min(var(--radius-sm), 10px);
+
+  /* Day colors */
+  --color-sunday: #ff3b30;
+  --color-saturday: #007aff;
+
+  /* Background — soft cohesive gradient mesh visible through glass */
+  /* Cool and quiet: ice blue through slate to a hint of teal, so the frosted
+     surfaces read against it without the backdrop competing for attention. */
+  --app-bg: linear-gradient(
+    160deg,
+    #dce6f4 0%,
+    #e6ecf5 32%,
+    #eef1f6 54%,
+    #e1eaf4 78%,
+    #dbecea 100%
+  );
+  --glass-blob-1: radial-gradient(
+    ellipse 700px 500px at 10% 15%,
+    rgba(59, 130, 246, 0.13),
+    transparent
+  );
+  --glass-blob-2: radial-gradient(
+    ellipse 600px 500px at 85% 25%,
+    rgba(14, 165, 233, 0.08),
+    transparent
+  );
+  --glass-blob-3: radial-gradient(
+    ellipse 500px 400px at 50% 85%,
+    rgba(20, 184, 166, 0.07),
+    transparent
+  );
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Glass Dark — iOS dark mode materials
+   ============================================ */
+:root[data-mode="dark"] {
+  /* Surfaces — translucent dark glass */
+  --color-surface: rgba(30, 30, 32, 0.65);
+  --color-surface-secondary: rgba(44, 44, 48, 0.5);
+  --color-surface-elevated: rgba(50, 50, 54, 0.7);
+  --color-surface-inset: rgba(255, 255, 255, 0.07);
+  --color-surface-app: transparent;
+
+  /* Text — high contrast on dark glass */
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: rgba(235, 235, 245, 0.6);
+  --color-text-tertiary: rgba(235, 235, 245, 0.42);
+
+  /* Borders — light edges on dark glass */
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-separator: rgba(255, 255, 255, 0.06);
+
+  /* Accent — brighter blue for dark */
+  --color-accent: #0a84ff;
+  --color-accent-hover: #409cff;
+  --color-accent-bg: rgba(10, 132, 255, 0.18);
+  --color-accent-subtle: rgba(10, 132, 255, 0.22);
+
+  --color-danger: #ff453a;
+  --color-danger-bg: rgba(255, 69, 58, 0.18);
+  --color-success: #30d158;
+  --color-warning: #ffb340;
+
+  /* Interaction */
+  --color-hover: rgba(255, 255, 255, 0.06);
+  --color-active: rgba(255, 255, 255, 0.1);
+  --color-overlay: rgba(0, 0, 0, 0.55);
+
+  /* Frosted dark glass */
+  --surface-glass: rgba(30, 30, 34, 0.6);
+  --surface-glass-heavy: rgba(30, 30, 34, 0.9);
+
+  /* Shadows — subtle glow edges */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+
+  --color-sunday: #ff453a;
+  --color-saturday: #64b5f6;
+
+  /* Background — deep gradient visible through dark glass */
+  --app-bg: linear-gradient(160deg, #0a0e18 0%, #0d1424 30%, #0a1624 60%, #0a1818 100%);
+  --glass-blob-1: radial-gradient(
+    ellipse 700px 500px at 15% 15%,
+    rgba(59, 130, 246, 0.13),
+    transparent
+  );
+  --glass-blob-2: radial-gradient(
+    ellipse 600px 500px at 80% 30%,
+    rgba(56, 189, 248, 0.07),
+    transparent
+  );
+  --glass-blob-3: radial-gradient(
+    ellipse 500px 400px at 40% 85%,
+    rgba(6, 182, 212, 0.08),
+    transparent
+  );
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Classic Light — neutral white surfaces, flat chrome
+   ============================================ */
+:root[data-theme="classic"] {
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f5f5f5;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #f5f5f5;
+  --color-surface-app: #ffffff;
+
+  --color-text-primary: #212121;
+  --color-text-secondary: #6e6e6e;
+  --color-text-tertiary: #8c8c8c;
+
+  --color-border: #ededed;
+  --color-border-strong: #e0e0e0;
+  --color-separator: #ededed;
+
+  /* Deepened from the brand mint so white glyphs on a fill stay legible;
+     text in the accent takes a darker ink still. */
+  --color-accent: #16a366;
+  --color-accent-hover: #128a56;
+  --color-accent-bg: rgba(22, 163, 102, 0.09);
+  --color-accent-subtle: rgba(22, 163, 102, 0.14);
+  --color-accent-ink: #0b8550;
+
+  --color-danger: #e73b3b;
+  --color-danger-bg: rgba(231, 59, 59, 0.1);
+  --color-success: #2ecc87;
+  --color-warning: #e08e0b;
+
+  --color-hover: #f5f5f5;
+  --color-active: #eeeeee;
+  --color-overlay: rgba(0, 0, 0, 0.3);
+
+  /* Classic: solid surfaces, no blur */
+  --surface-glass: #ffffff;
+  --surface-glass-heavy: #ffffff;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --color-sunday: #ed3131;
+  --color-saturday: #1e5df1;
+
+  /* No gradient background */
+  --app-bg: #ffffff;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Classic Dark — near-black surfaces, flat chrome
+   ============================================ */
+:root[data-theme="classic"][data-mode="dark"] {
+  --color-surface: #1a1a1a;
+  --color-surface-secondary: #242424;
+  --color-surface-elevated: #2a2a2a;
+  --color-surface-inset: #1a1a1a;
+  --color-surface-app: #1a1a1a;
+
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #8f8f8f;
+  --color-text-tertiary: #666666;
+
+  --color-border: #333333;
+  --color-border-strong: #444444;
+  --color-separator: #333333;
+
+  --color-accent: #2ecc87;
+  --color-accent-hover: #34d88f;
+  --color-accent-bg: rgba(46, 204, 135, 0.12);
+  --color-accent-subtle: rgba(46, 204, 135, 0.15);
+  --color-accent-ink: #2ecc87;
+  /* The mint is light; dark glyphs on it clear AA where white does not */
+  --color-text-on-accent: #062b1b;
+
+  --color-danger: #e73b3b;
+  --color-danger-bg: rgba(231, 59, 59, 0.15);
+  --color-success: #2ecc87;
+  --color-warning: #f0a830;
+
+  --color-hover: #2a2a2a;
+  --color-active: #333333;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+
+  --surface-glass: #2a2a2a;
+  --surface-glass-heavy: #2a2a2a;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --color-sunday: #ff6961;
+  --color-saturday: #5b8def;
+
+  --app-bg: #1a1a1a;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Nothing Light — Industrial monochrome + red
+   ============================================ */
+:root[data-theme="nothing"] {
+  --color-surface: #fafafa;
+  --color-surface-secondary: #f0f0f0;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #e8e8e8;
+  --color-surface-app: #f0f0f0;
+
+  --color-text-primary: #000000;
+  --color-text-secondary: #555555;
+  --color-text-tertiary: #858585;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #d8d8d8;
+  --color-border-strong: #c0c0c0;
+  --color-separator: #e0e0e0;
+
+  --color-accent: #d71921;
+  --color-accent-hover: #b51419;
+  --color-accent-bg: rgba(215, 25, 33, 0.06);
+  --color-accent-subtle: rgba(215, 25, 33, 0.1);
+  /* Red is reserved for the signal; hints stay monochrome */
+  --color-info: #555555;
+
+  --color-danger: #d71921;
+  --color-danger-bg: rgba(215, 25, 33, 0.08);
+  --color-success: #00aa55;
+  --color-warning: #b36b00;
+
+  --color-hover: #e8e8e8;
+  --color-active: #e0e0e0;
+  --color-overlay: rgba(0, 0, 0, 0.3);
+
+  --surface-glass: #fafafa;
+  --surface-glass-heavy: #fafafa;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-elevated: none;
+
+  /* Nothing: squared-off, industrial */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+
+  --color-sunday: #d71921;
+  --color-saturday: #000000;
+
+  --app-bg: #f0f0f0;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Nothing Dark — True black OLED, Glyph UI
+   ============================================ */
+:root[data-theme="nothing"][data-mode="dark"] {
+  --color-surface: #000000;
+  --color-surface-secondary: #0d0d0d;
+  --color-surface-elevated: #141414;
+  --color-surface-inset: #080808;
+  --color-surface-app: #000000;
+
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #7a7a7a;
+  --color-text-tertiary: #5e5e5e;
+
+  --color-border: #1e1e1e;
+  --color-border-strong: #2a2a2a;
+  --color-separator: #141414;
+
+  --color-accent: #d71921;
+  --color-accent-hover: #ff2d35;
+  --color-accent-bg: rgba(215, 25, 33, 0.12);
+  --color-accent-subtle: rgba(215, 25, 33, 0.15);
+  /* Signal red reads as a fill on black but is too dim as text */
+  --color-accent-ink: #f03a40;
+  --color-info: #9a9a9a;
+
+  --color-danger: #d71921;
+  --color-danger-bg: rgba(215, 25, 33, 0.15);
+  --color-success: #00cc66;
+  --color-warning: #e0a030;
+
+  --color-hover: #0d0d0d;
+  --color-active: #141414;
+  --color-overlay: rgba(0, 0, 0, 0.7);
+
+  --surface-glass: #0d0d0d;
+  --surface-glass-heavy: #0d0d0d;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-elevated: none;
+
+  --color-sunday: #ff3b3b;
+  --color-saturday: #e8e8e8;
+
+  --app-bg: #000000;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Modern Light — refined productivity app
+   Cool neutrals, iris accent, crisp solid
+   surfaces, layered micro-shadows
+   ============================================ */
+:root[data-theme="modern"] {
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f7f8fa;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #f1f3f6;
+  --color-surface-app: #f4f5f8;
+
+  --color-text-primary: #14161c;
+  --color-text-secondary: #5c6370;
+  --color-text-tertiary: #868d9b;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #e7e9ee;
+  --color-border-strong: #d3d7df;
+  --color-separator: #eceef2;
+
+  --color-accent: #5b57d8;
+  --color-accent-hover: #4b47c4;
+  --color-accent-bg: rgba(91, 87, 216, 0.08);
+  --color-accent-subtle: rgba(91, 87, 216, 0.14);
+
+  --color-danger: #e5484d;
+  --color-danger-bg: rgba(229, 72, 77, 0.08);
+  --color-success: #147a4a;
+  --color-warning: #b45309;
+
+  --color-hover: #f1f3f6;
+  --color-active: #e9ecf1;
+  --color-overlay: rgba(20, 22, 28, 0.3);
+
+  /* Modern: solid surfaces, no blur */
+  --surface-glass: #ffffff;
+  --surface-glass-heavy: #ffffff;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  /* Layered, soft micro-shadows */
+  --shadow-sm: 0 1px 2px rgba(20, 22, 28, 0.04);
+  --shadow-md: 0 2px 4px rgba(20, 22, 28, 0.04), 0 4px 12px rgba(20, 22, 28, 0.05);
+  --shadow-lg: 0 4px 8px rgba(20, 22, 28, 0.05), 0 12px 28px rgba(20, 22, 28, 0.08);
+  --shadow-elevated: 0 8px 16px rgba(20, 22, 28, 0.06), 0 24px 48px rgba(20, 22, 28, 0.12);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --color-sunday: #d23439;
+  --color-saturday: #4666d6;
+
+  /* Subtle cool top glow, otherwise clean */
+  --app-bg: radial-gradient(120% 80% at 50% -10%, #eef0ff 0%, #f4f5f8 55%);
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Modern Dark — deep slate, luminous iris
+   ============================================ */
+:root[data-theme="modern"][data-mode="dark"] {
+  --color-surface: #1a1c22;
+  --color-surface-secondary: #1f2128;
+  --color-surface-elevated: #23262e;
+  --color-surface-inset: #16181d;
+  --color-surface-app: #101116;
+
+  --color-text-primary: #f2f3f5;
+  --color-text-secondary: #9ba1ad;
+  --color-text-tertiary: #6b7280;
+
+  --color-border: #2a2d36;
+  --color-border-strong: #383c47;
+  --color-separator: #23262e;
+
+  --color-accent: #7c79ff;
+  --color-accent-hover: #908dff;
+  --color-accent-bg: rgba(124, 121, 255, 0.16);
+  --color-accent-subtle: rgba(124, 121, 255, 0.24);
+  /* The iris accent is light; dark text on accent fills clears AA (white fails) */
+  --color-text-on-accent: #14161c;
+
+  --color-danger: #ff6369;
+  --color-danger-bg: rgba(255, 99, 105, 0.16);
+  --color-success: #3dd68c;
+  --color-warning: #f5b454;
+
+  --color-hover: #23262e;
+  --color-active: #2a2d36;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  --surface-glass: #1a1c22;
+  --surface-glass-heavy: #23262e;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.45), 0 12px 28px rgba(0, 0, 0, 0.55);
+  --shadow-elevated: 0 8px 16px rgba(0, 0, 0, 0.5), 0 24px 48px rgba(0, 0, 0, 0.6);
+
+  --color-sunday: #ff6369;
+  --color-saturday: #7e9bff;
+
+  --app-bg: radial-gradient(120% 80% at 50% -10%, #1a1b2e 0%, #101116 55%);
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}
+
+/* ============================================
+   Washi Light — 和: warm paper, sumi ink,
+   vermilion (朱) accent, Mincho typography
+   ============================================ */
+:root[data-theme="washi"] {
+  --color-surface: #fbf7ef;
+  --color-surface-secondary: #f4eee2;
+  --color-surface-elevated: #fffdf8;
+  --color-surface-inset: #efe8d9;
+  --color-surface-app: #f3ecdd;
+
+  --color-text-primary: #1c1a17;
+  --color-text-secondary: #6b6258;
+  --color-text-tertiary: #8f8675;
+  --color-text-on-accent: #fdf6ec;
+
+  --color-border: #e3d9c6;
+  --color-border-strong: #cdbfa6;
+  --color-separator: #e8ddc8;
+
+  /* 朱 — traditional vermilion */
+  --color-accent: #b8332c;
+  --color-accent-hover: #9c2820;
+  --color-accent-bg: rgba(184, 51, 44, 0.07);
+  --color-accent-subtle: rgba(184, 51, 44, 0.13);
+  /* 藍 — indigo, so a hint never borrows the vermilion of an error */
+  --color-info: #2f4a6d;
+
+  --color-danger: #a82b22;
+  --color-danger-bg: rgba(168, 43, 34, 0.09);
+  --color-success: #1e7a52;
+  --color-warning: #a86a12;
+
+  --color-hover: #f0e9da;
+  --color-active: #e9e0cd;
+  --color-overlay: rgba(40, 33, 23, 0.32);
+
+  /* Washi: solid paper surfaces, no blur */
+  --surface-glass: #fbf7ef;
+  --surface-glass-heavy: #fffdf8;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  /* Soft, warm-toned shadows */
+  --shadow-sm: 0 1px 2px rgba(60, 50, 35, 0.05);
+  --shadow-md: 0 2px 8px rgba(60, 50, 35, 0.07);
+  --shadow-lg: 0 6px 20px rgba(60, 50, 35, 0.09);
+  --shadow-elevated: 0 12px 32px rgba(60, 50, 35, 0.13);
+
+  /* Restrained, near-square radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Optical correction — Mincho reads finer/smaller than the sans themes, so
+     nudge the reading & headline sizes up a step. The dense 10–14 calendar
+     range is deliberately left on the base scale to avoid cell overflow. */
+  --text-callout: 16px;
+  --text-subhead: 17px;
+  --text-title: 19px;
+  --text-heading: 22px;
+  --text-display: 26px;
+  --text-hero: 32px;
+
+  --color-sunday: #c4302b;
+  --color-saturday: #2a4b8d;
+
+  --app-bg: #f3ecdd;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Washi Dark — 墨: sumi night, gofun off-white,
+   glowing vermilion
+   ============================================ */
+:root[data-theme="washi"][data-mode="dark"] {
+  --color-surface: #211f1c;
+  --color-surface-secondary: #1a1815;
+  --color-surface-elevated: #2a2723;
+  --color-surface-inset: #181613;
+  --color-surface-app: #141210;
+
+  --color-text-primary: #ece4d6;
+  --color-text-secondary: #a89e8c;
+  --color-text-tertiary: #7a7060;
+
+  --color-border: #38332b;
+  --color-border-strong: #4a4339;
+  --color-separator: #2a2620;
+
+  /* Deepened vermilion so off-white button labels clear AA while the accent
+     still reads against the sumi surface */
+  --color-accent: #c93f33;
+  --color-accent-hover: #e0584c;
+  --color-accent-bg: rgba(201, 63, 51, 0.15);
+  --color-accent-subtle: rgba(201, 63, 51, 0.22);
+  --color-accent-ink: #e8675b;
+  --color-info: #8fa8cc;
+
+  --color-danger: #e0584c;
+  --color-danger-bg: rgba(224, 88, 76, 0.15);
+  --color-success: #5cc08a;
+  --color-warning: #d9a441;
+
+  --color-hover: #2a2723;
+  --color-active: #322e29;
+  --color-overlay: rgba(0, 0, 0, 0.62);
+
+  --surface-glass: #211f1c;
+  --surface-glass-heavy: #2a2723;
+  --backdrop-blur: none;
+  --backdrop-blur-heavy: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  --color-sunday: #e8645a;
+  --color-saturday: #7b9cd8;
+
+  --app-bg: #141210;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}

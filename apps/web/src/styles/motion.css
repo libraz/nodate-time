@@ -1,0 +1,571 @@
+/* ============================================
+   Glass — material & motion refinements
+   ============================================ */
+
+/* Frosted material: a faint light edge catches the top of glass surfaces */
+:root:not([data-theme]) .glass-surface {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+:root:not([data-theme]) .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-elevated),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+:root[data-mode="dark"]:not([data-theme]) .glass-surface {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+:root[data-mode="dark"]:not([data-theme]) .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-elevated),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Ambient gradient drift — slow, GPU-cheap, only when motion is welcome */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-theme]) .app-bg::before {
+    animation: glass-drift 26s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+}
+@keyframes glass-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.02);
+  }
+  to {
+    transform: translate3d(-1.5%, -2%, 0) scale(1.08);
+  }
+}
+
+/* Today badge — soft accent glow lifts it off the grid (glass only) */
+:root:not([data-theme]) .today-badge {
+  box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+/* Weekly timeline — glowing "now" indicator dot (glass only) */
+:root:not([data-theme]) .now-dot {
+  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--color-accent) 60%, transparent);
+}
+
+/* Selected day — soft tinted fill on glass, crisp ring on flat themes */
+.day-selected {
+  background: var(--color-accent-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-subtle);
+}
+:root[data-theme="classic"] .day-selected,
+:root[data-theme="nothing"] .day-selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+/* Washi — a faint vermilion wash inside a hanko-like seal ring */
+:root[data-theme="washi"] .day-selected {
+  background: var(--color-accent-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+/* Pinned month label in the phone scroller. Frosted like the header, but it
+   sits on the grid rather than floating over it: a hairline, not an elevation
+   shadow, which would smear across the week pinned beneath it. */
+.month-sticky-header {
+  background: var(--surface-glass-heavy);
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  border-bottom: 1px solid var(--color-separator);
+}
+
+/* Event chips and timed blocks take their colour from --evt. The tint is mixed
+   into an opaque-enough surface and the text toward the primary ink, so a light
+   label colour still reads on a translucent cell in both modes. */
+.event-chip {
+  background: color-mix(in srgb, var(--evt) 15%, var(--color-surface-elevated));
+  color: color-mix(in srgb, var(--evt) 68%, var(--color-text-primary));
+  transition: background-color 0.15s ease;
+}
+.event-block {
+  background: color-mix(in srgb, var(--evt) 14%, var(--color-surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--evt) 36%, transparent);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.2s ease;
+}
+.event-block-title {
+  color: color-mix(in srgb, var(--evt) 50%, var(--color-text-primary));
+}
+@media (hover: hover) and (pointer: fine) {
+  .event-chip:hover {
+    background-color: color-mix(in srgb, var(--evt) 24%, var(--color-surface-elevated));
+  }
+  .event-block:hover {
+    background-color: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
+    box-shadow: var(--shadow-md);
+  }
+}
+/* A block in a time column keeps its box on the hour rules but paints 2px
+   short, so back-to-back events read as two blocks instead of one. */
+.event-block.event-block-stacked {
+  isolation: isolate;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.event-block-stacked::before {
+  content: "";
+  position: absolute;
+  inset: -1px -1px 1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--evt) 14%, var(--color-surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--evt) 36%, transparent);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .event-block-stacked:hover::before {
+    background-color: color-mix(in srgb, var(--evt) 20%, var(--color-surface-elevated));
+    border-color: color-mix(in srgb, var(--evt) 55%, transparent);
+  }
+}
+
+/* The block under the pointer during a move: lifted off the grid. */
+.event-block-lifted {
+  box-shadow: var(--shadow-elevated);
+  transform: scale(1.02);
+}
+
+/* Multi-day bars — glassy sheen on glass, clean flat fill elsewhere */
+.event-bar {
+  background-color: var(--evt);
+  color: var(--evt-ink);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+:root[data-theme] .event-bar {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+:root[data-theme="nothing"] .event-bar {
+  box-shadow: none;
+}
+
+/* Availability states. The modifier sits on the element that paints the fill:
+   the chip, the bar, a plain block, or the ::before layer of a stacked block
+   (whose own box is transparent). Declared after the hover rules so they win. */
+.event-chip.evt-tentative,
+.event-block:not(.event-block-stacked).evt-tentative,
+.event-block-stacked.evt-tentative::before {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--evt) 30%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+}
+.event-bar.evt-tentative {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.35) 0 2px,
+    transparent 2px 6px
+  );
+}
+.event-chip.evt-free,
+.event-bar.evt-free,
+.event-block:not(.event-block-stacked).evt-free,
+.event-block-stacked.evt-free::before {
+  background-color: transparent;
+  outline: 1px dashed var(--evt);
+  outline-offset: -1px;
+}
+.event-chip.evt-free,
+.event-bar.evt-free {
+  color: var(--color-text-secondary);
+}
+.event-block-stacked.evt-free::before {
+  border-color: transparent;
+}
+.event-chip.evt-oof,
+.event-bar.evt-oof,
+.event-block:not(.event-block-stacked).evt-oof {
+  background-color: color-mix(in srgb, var(--evt) 45%, var(--color-text-tertiary));
+}
+.event-block-stacked.evt-oof::before {
+  background-color: color-mix(in srgb, var(--evt) 45%, var(--color-text-tertiary));
+}
+.evt-marker {
+  font-size: 0.75em;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* The month dot: solid for busy, a ring for free, half filled for tentative. */
+.evt-dot {
+  background-color: var(--evt);
+  box-sizing: border-box;
+}
+.evt-free .evt-dot {
+  background-color: transparent;
+  border: 1px solid var(--evt);
+}
+.evt-tentative .evt-dot {
+  background-image: linear-gradient(90deg, var(--evt) 50%, transparent 50%);
+  background-color: transparent;
+  border: 1px solid var(--evt);
+}
+
+/* Calendar entrance — gentle settle when the month changes */
+@media (prefers-reduced-motion: no-preference) {
+  .calendar-enter {
+    animation: calendar-enter 0.34s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}
+@keyframes calendar-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A turned month arrives from the side it was scrolled from. */
+.calendar-enter[data-dir="1"] {
+  animation-name: calendar-enter-next;
+}
+.calendar-enter[data-dir="-1"] {
+  animation-name: calendar-enter-prev;
+}
+@keyframes calendar-enter-next {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes calendar-enter-prev {
+  from {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* FAB — accent glow on glass */
+.fab-button {
+  box-shadow: var(--shadow-elevated);
+}
+:root:not([data-theme]) .fab-button {
+  box-shadow:
+    var(--shadow-elevated),
+    0 8px 24px -6px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+
+/* ============================================
+   Dialogs — entrance motion
+   ============================================ */
+
+/* Backdrop: gentle fade, with a subtle blur on glass */
+.modal-backdrop {
+  animation: backdrop-in 0.24s ease both;
+}
+:root:not([data-theme]) .modal-backdrop {
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Surface entrances — only when motion is welcome */
+@media (prefers-reduced-motion: no-preference) {
+  .bottom-sheet {
+    animation: sheet-up 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .modal-panel {
+    animation: modal-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .dropdown-panel {
+    animation: dropdown-in 0.16s ease both;
+    transform-origin: top center;
+  }
+  .side-panel {
+    animation: side-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .drawer-panel {
+    animation: drawer-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  /* Event modal: a soft spring on open, a quick pop on close. */
+  .modal-panel.modal-enter {
+    animation: modal-spring-in 0.4s cubic-bezier(0.34, 1.45, 0.5, 1) both;
+  }
+  .modal-panel.modal-exit {
+    animation: modal-pop-out 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  .backdrop-out {
+    animation: backdrop-fade-out 0.22s ease both;
+  }
+}
+
+@keyframes modal-spring-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes modal-pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+@keyframes backdrop-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* The mobile event sheet is driven by inline transform (swipe + spring), so the
+   shared bottom-sheet keyframe is suppressed to avoid fighting the inline value. */
+.bottom-sheet.event-sheet {
+  animation: none;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes side-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ============================================
+   Per-theme motion character
+   Themes differ in *feel*, not only color: Modern is crisp and quick,
+   Washi is calm and ink-like, Nothing is mechanical and instant. Only the
+   timing of the existing entrances is retuned, all inside the reduced-motion
+   guard so users who opt out are unaffected.
+   ============================================ */
+@media (prefers-reduced-motion: no-preference) {
+  /* Modern — snappy & precise: shorter, with a quick decelerating ease */
+  :root[data-theme="modern"] .modal-panel {
+    animation-duration: 0.2s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .bottom-sheet {
+    animation-duration: 0.28s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .dropdown-panel {
+    animation-duration: 0.12s;
+  }
+  :root[data-theme="modern"] .side-panel {
+    animation-duration: 0.26s;
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  :root[data-theme="modern"] .calendar-enter {
+    animation-duration: 0.24s;
+  }
+  :root[data-theme="modern"] .segmented-control::before {
+    transition-duration: 0.22s;
+  }
+  :root[data-theme="modern"] .btn-primary:active,
+  :root[data-theme="modern"] .btn-secondary:active {
+    transform: scale(0.97);
+  }
+
+  /* Washi — calm, like ink settling on paper: slower, soft symmetric ease,
+     and a press that sinks by opacity rather than scale */
+  :root[data-theme="washi"] .modal-panel {
+    animation-duration: 0.44s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .bottom-sheet {
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .dropdown-panel {
+    animation-duration: 0.22s;
+    animation-timing-function: ease-out;
+  }
+  :root[data-theme="washi"] .side-panel {
+    animation-duration: 0.46s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .calendar-enter {
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .modal-backdrop {
+    animation-duration: 0.4s;
+  }
+  :root[data-theme="washi"] .segmented-control::before {
+    transition-duration: 0.5s;
+    transition-timing-function: cubic-bezier(0.25, 0.7, 0.25, 1);
+  }
+  :root[data-theme="washi"] .btn-primary:active,
+  :root[data-theme="washi"] .btn-secondary:active {
+    transform: none;
+    opacity: 0.78;
+  }
+
+  /* Nothing — mechanical & instant: minimal, near-linear motion */
+  :root[data-theme="nothing"] .modal-panel {
+    animation-duration: 0.14s;
+    animation-timing-function: cubic-bezier(0.3, 0, 0, 1);
+  }
+  :root[data-theme="nothing"] .dropdown-panel {
+    animation-duration: 0.08s;
+    animation-timing-function: linear;
+  }
+  :root[data-theme="nothing"] .calendar-enter {
+    animation-duration: 0.18s;
+  }
+  :root[data-theme="nothing"] .segmented-control::before {
+    transition-duration: 0.12s;
+    transition-timing-function: steps(3, end);
+  }
+}
+
+/* Exits and reveals. After the per-theme block on purpose: a theme slows the
+   entrance, but the exit has to finish inside usePresence's EXIT_MS. */
+@media (prefers-reduced-motion: no-preference) {
+  :root .side-panel.side-panel-exit {
+    animation: side-out 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  :root .modal-backdrop.backdrop-out {
+    animation-duration: 0.2s;
+  }
+  .reveal-in {
+    animation: reveal-in 0.32s var(--ease-out) both;
+  }
+  /* A mark that appears in place: a small overshoot reads as "done". */
+  .pop-in {
+    animation: pop-in 0.3s var(--ease-press) both;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes side-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ============================================
+   Auth & year — branded staggered entrance
+   ============================================ */
+@media (prefers-reduced-motion: no-preference) {
+  .auth-brand {
+    animation: auth-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .auth-card {
+    animation: auth-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.08s both;
+  }
+  .auth-footer {
+    animation: auth-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.16s both;
+  }
+  .year-card {
+    animation: auth-rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Auth brand mark — accent glow on glass */
+:root:not([data-theme]) .auth-brand-mark {
+  box-shadow: 0 10px 30px -6px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}

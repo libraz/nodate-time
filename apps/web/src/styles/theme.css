@@ -1,0 +1,41 @@
+@theme {
+  /* Event label colors (data-driven, not theme-dependent) */
+  --color-label-blue: #3b82f6;
+  --color-label-pink: #ec4899;
+  --color-label-purple: #a855f7;
+  --color-label-gray: #9ca3af;
+  --color-label-dark: #6b7280;
+  --color-label-black: #374151;
+  --color-label-yellow: #f59e0b;
+  --color-label-red: #ef4444;
+  --color-label-green: #22c55e;
+  --color-label-orange: #f97316;
+  --color-label-cyan: #06b6d4;
+  --color-label-teal: #14b8a6;
+
+  /* Day-of-week colors */
+  --color-tt-sunday: #ef4444;
+  --color-tt-saturday: #3b82f6;
+
+  /* Font stack */
+  --font-sans:
+    "Inter", -apple-system, "system-ui", "Helvetica Neue", Helvetica, Arial, "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", Meiryo, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+
+  /* Type scale — semantic, ascending. Size-only so line-height stays
+     wherever each element already sets it (leading-* / defaults). */
+  --text-micro: 10px; /* dense counts, tiny tags */
+  --text-caption: 11px; /* captions, weekday headers */
+  --text-footnote: 12px; /* secondary captions, hints */
+  --text-body: 13px; /* dense body (lists, cells) */
+  --text-default: 14px; /* default body / controls */
+  --text-callout: 15px; /* emphasized body */
+  --text-subhead: 16px; /* subheadings, CTAs */
+  /* Headline range — opened up for clearer hierarchy (~1.16 ratio). The
+     dense 10–16 range above is left untouched so calendar/controls don't
+     reflow; only the sparse, large display sizes grow. */
+  --text-title: 18px; /* section / dialog titles */
+  --text-heading: 21px; /* view headings */
+  --text-display: 25px; /* large display figures */
+  --text-hero: 31px; /* hero / brand numerals */
+}

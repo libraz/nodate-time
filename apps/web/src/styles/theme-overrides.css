@@ -1,0 +1,395 @@
+/* ============================================
+   Modern — refined typography
+   ============================================ */
+:root[data-theme="modern"] {
+  --font-sans:
+    "Hanken Grotesk", "Noto Sans JP", -apple-system, "system-ui", "Helvetica Neue", Helvetica,
+    Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* Crisper, slightly tighter active segment to suit the flat surfaces */
+:root[data-theme="modern"] .segmented-control {
+  background: var(--color-surface-inset);
+  border: 1px solid var(--color-separator);
+}
+
+:root[data-theme="modern"] .segmented-control::before {
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Elevated surfaces: crisp hairline + faint top highlight for a crafted feel */
+:root[data-theme="modern"] .glass-surface,
+:root[data-theme="modern"] .glass-surface-heavy {
+  border: 1px solid var(--color-border);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="modern"][data-mode="dark"] .glass-surface,
+:root[data-theme="modern"][data-mode="dark"] .glass-surface-heavy {
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Primary button: subtle vertical sheen + tinted accent shadow */
+:root[data-theme="modern"] .btn-primary {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 90%, white),
+    var(--color-accent)
+  );
+  box-shadow:
+    0 1px 2px rgba(20, 22, 28, 0.12),
+    0 6px 16px -6px color-mix(in srgb, var(--color-accent) 55%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Accent lift for today, the now indicator, and the FAB — cool, not glowy */
+:root[data-theme="modern"] .today-badge {
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+:root[data-theme="modern"] .now-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+:root[data-theme="modern"] .fab-button {
+  box-shadow:
+    var(--shadow-elevated),
+    0 8px 24px -8px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+/* --- Modern forms: crisp inset fields, hairline cards, neutral secondary --- */
+
+/* Text fields: solid surface with a faint inset, cool accent focus ring */
+:root[data-theme="modern"] .input-modern {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: inset 0 1px 2px rgba(20, 22, 28, 0.03);
+}
+:root[data-theme="modern"][data-mode="dark"] .input-modern {
+  background: var(--color-surface-inset);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+:root[data-theme="modern"] .input-modern:focus {
+  border-color: var(--color-accent);
+  box-shadow:
+    inset 0 1px 2px rgba(20, 22, 28, 0.03),
+    0 0 0 3px var(--color-accent-bg);
+}
+
+/* Grouped form sections read as subtly elevated cards */
+:root[data-theme="modern"] .card-section {
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Secondary actions go neutral; date/time pills get a hairline */
+:root[data-theme="modern"] .btn-secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+:root[data-theme="modern"] .pill-button {
+  border: 1px solid var(--color-border-strong);
+}
+
+/* Dark precedence — out-specify the generic [data-mode="dark"] form rules */
+:root[data-theme="modern"][data-mode="dark"] .btn-secondary {
+  background: var(--color-surface);
+}
+:root[data-theme="modern"][data-mode="dark"] .segmented-control {
+  background: var(--color-surface-inset);
+}
+:root[data-theme="modern"][data-mode="dark"] .segmented-control::before {
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Toggle knob: tighter, crisper shadow */
+:root[data-theme="modern"] .toggle-knob {
+  box-shadow: 0 1px 2px rgba(20, 22, 28, 0.22);
+}
+
+/* ============================================
+   Washi — 明朝体 (Mincho) global overrides
+   ============================================ */
+
+/* All text → Mincho serif. Uses pre-installed system Mincho on Apple /
+   Windows; falls back to Noto Serif JP, then a generic serif. */
+:root[data-theme="washi"] {
+  --font-sans:
+    "Hiragino Mincho ProN", "Hiragino Mincho Pro", "YuMincho", "Yu Mincho", "Noto Serif JP",
+    "Songti SC", "Source Han Serif", serif;
+  letter-spacing: 0.01em;
+  text-rendering: optimizeLegibility;
+}
+
+/* Weight calibration — system Mincho ships only two real weights (≈W3 / W6).
+   Requesting 500/700 synthesises an ugly faux-bold, so collapse the utility
+   weights onto the two genuine ones: emphasis → 600 (W6), the rest → 400 (W3).
+   Hierarchy then comes from size, which is exactly the Mincho way. */
+:root[data-theme="washi"] :is(.font-medium, .font-semibold, .font-bold) {
+  font-weight: 600;
+}
+:root[data-theme="washi"] .font-light {
+  font-weight: 400;
+}
+
+/* Warm paper depth — a soft top light and a faint floor shade */
+:root[data-theme="washi"] .app-bg::before {
+  background:
+    radial-gradient(120% 90% at 50% -5%, rgba(255, 251, 240, 0.7), transparent 55%),
+    radial-gradient(110% 80% at 50% 105%, rgba(120, 90, 50, 0.06), transparent 55%);
+}
+:root[data-theme="washi"][data-mode="dark"] .app-bg::before {
+  background:
+    radial-gradient(120% 90% at 50% -5%, rgba(60, 52, 42, 0.5), transparent 55%),
+    radial-gradient(110% 80% at 50% 105%, rgba(0, 0, 0, 0.35), transparent 55%);
+}
+
+/* A whisper of paper grain. No ruled lines: a fixed pitch never lines up with
+   the calendar columns and reads as a second, misaligned grid. */
+:root[data-theme="washi"] .app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="washi"][data-mode="dark"] .app-bg::after {
+  opacity: 0.12;
+  mix-blend-mode: screen;
+}
+
+/* Today: a soft sumi-warm shadow under the vermilion badge */
+:root[data-theme="washi"] .today-badge {
+  box-shadow: 0 2px 6px -1px rgba(120, 40, 30, 0.3);
+}
+
+/* Headings & primary actions: refined Mincho with generous tracking */
+:root[data-theme="washi"] .btn-primary,
+:root[data-theme="washi"] .btn-secondary {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* Inputs keep Mincho for a consistent editorial voice */
+:root[data-theme="washi"] .input-modern {
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+}
+:root[data-theme="washi"] .input-modern:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+/* Form sections read as sheets of washi — warm rule + faint top light */
+:root[data-theme="washi"] .card-section {
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 252, 244, 0.6),
+    var(--shadow-sm);
+}
+:root[data-theme="washi"][data-mode="dark"] .card-section {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 250, 235, 0.04),
+    var(--shadow-sm);
+}
+
+/* Secondary actions sit on warm paper, not neutral grey */
+:root[data-theme="washi"] .btn-secondary {
+  background: var(--color-surface-inset);
+  color: var(--color-text-primary);
+}
+:root[data-theme="washi"][data-mode="dark"] .btn-secondary {
+  background: var(--color-surface-inset);
+}
+
+/* Date/time pills: vermilion-inked Mincho with a faint seal border */
+:root[data-theme="washi"] .pill-button {
+  font-family: var(--font-sans);
+  letter-spacing: 0.03em;
+  border: 1px solid var(--color-accent-subtle);
+}
+
+/* Toggle reads like a seal stone — gently squared track & knob */
+:root[data-theme="washi"] .toggle-track {
+  border-radius: 4px;
+}
+:root[data-theme="washi"] .toggle-knob {
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(60, 40, 25, 0.28);
+}
+
+/* Vermilion hairline atop sheets & dropdowns, like a tate-gaki rule */
+:root[data-theme="washi"] .bottom-sheet {
+  border-top: 1.5px solid var(--color-accent);
+}
+
+:root[data-theme="washi"] .dropdown-panel {
+  border: 1px solid var(--color-border-strong);
+  border-top: 1.5px solid var(--color-accent);
+}
+
+/* Thin seal-line scrollbar */
+:root[data-theme="washi"] ::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+:root[data-theme="washi"] ::-webkit-scrollbar-thumb {
+  background: var(--color-accent-subtle);
+}
+
+/* ============================================
+   Nothing — Glyph-inspired global overrides
+   ============================================ */
+
+/* Dot matrix background. Dots only: ruled lines at a fixed pitch cut through
+   the calendar cells off their own grid. */
+:root[data-theme="nothing"] .app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, #0000000a 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .app-bg::after {
+  background-image: radial-gradient(circle, #ffffff0a 0.8px, transparent 0.8px);
+}
+
+/* All text → monospace */
+:root[data-theme="nothing"] {
+  --font-sans: "Roboto Mono", "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+/* Buttons: industrial, squared, uppercase, tracked */
+:root[data-theme="nothing"] .btn-primary {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+:root[data-theme="nothing"] .btn-secondary {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+  font-weight: 500;
+  /* Neutral: red is the primary action's and danger's colour, not Cancel's */
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text-primary);
+}
+
+/* Inputs: squared, thin border */
+:root[data-theme="nothing"][data-mode="dark"] .btn-secondary {
+  background: transparent;
+}
+
+/* The today jump is a pill elsewhere; here it takes the squared corner */
+:root[data-theme="nothing"] .today-button {
+  border-radius: 0;
+}
+
+:root[data-theme="nothing"] .input-modern {
+  border-radius: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-inset);
+  font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+/* Segmented control: squared, minimal */
+:root[data-theme="nothing"] .segmented-control {
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  padding: 2px;
+  gap: 0;
+}
+
+:root[data-theme="nothing"] .segmented-control button {
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: "Roboto Mono", "SF Mono", "Menlo", monospace;
+}
+
+:root[data-theme="nothing"] .segmented-control::before {
+  border-radius: 0;
+  background: var(--color-text-primary);
+  box-shadow: none;
+}
+
+:root[data-theme="nothing"] .segmented-control > button[data-active="true"] {
+  color: var(--color-surface);
+}
+
+/* Red glow on accent elements (dark mode) */
+:root[data-theme="nothing"][data-mode="dark"] .btn-primary {
+  box-shadow:
+    0 0 20px rgba(215, 25, 33, 0.25),
+    0 0 4px rgba(215, 25, 33, 0.4);
+}
+
+:root[data-theme="nothing"][data-mode="dark"] .btn-primary:hover {
+  box-shadow:
+    0 0 30px rgba(215, 25, 33, 0.35),
+    0 0 6px rgba(215, 25, 33, 0.5);
+}
+
+/* Glass surface in Nothing: no blur, just solid dark surface with border */
+:root[data-theme="nothing"] .glass-surface,
+:root[data-theme="nothing"] .glass-surface-heavy {
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+}
+
+/* App chrome keeps only the edge it shares with the content, so the header and
+   sidebar meet in one hairline instead of a doubled one framed by the viewport */
+:root[data-theme="nothing"] .app-header {
+  border-width: 0 0 1px;
+}
+:root[data-theme="nothing"] .app-sidebar {
+  border-width: 0 1px 0 0;
+}
+:root[data-theme="nothing"] .app-tabbar {
+  border-width: 1px 0 0;
+}
+
+/* Scrollbar: thin red accent line (webkit) */
+:root[data-theme="nothing"] ::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+
+:root[data-theme="nothing"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-theme="nothing"] ::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+}
+
+/* A full-page scroller keeps its cards clear of the visible scrollbar line
+   that Washi and Nothing draw; the other themes hide it and stay flush. */
+:root:is([data-theme="washi"], [data-theme="nothing"]) .page-scroll {
+  padding-right: 8px;
+}

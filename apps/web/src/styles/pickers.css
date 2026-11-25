@@ -1,0 +1,175 @@
+/* Member colour swatches: a ring in the swatch's own colour marks the choice. */
+.member-swatch {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  transition: transform 0.15s ease;
+}
+.member-swatch:hover {
+  transform: scale(1.08);
+}
+.member-swatch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.member-swatch[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px var(--color-surface-elevated),
+    0 0 0 3.5px var(--swatch);
+}
+/* Colour picker: a saturation/brightness field over the hue, and a hue rail */
+.color-area {
+  background-color: var(--hue);
+  background-image:
+    linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+}
+.color-hue {
+  background: linear-gradient(
+    to right,
+    #f00 0%,
+    #ff0 16.67%,
+    #0f0 33.33%,
+    #0ff 50%,
+    #00f 66.67%,
+    #f0f 83.33%,
+    #f00 100%
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+}
+.color-thumb {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  border: 3px solid #fff;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.18),
+    0 2px 6px rgb(0 0 0 / 0.28);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 0.12s ease;
+}
+.color-area .color-thumb {
+  top: auto;
+}
+.color-area:active .color-thumb,
+.color-hue:active .color-thumb {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+.color-area:focus-visible,
+.color-hue:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.color-preview {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 12%, transparent);
+}
+.color-option {
+  transition: background-color 0.15s ease;
+}
+.color-option:hover {
+  background-color: var(--color-hover);
+}
+.color-option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.color-ring {
+  transition: transform 0.15s ease;
+}
+.color-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+.color-ring > span {
+  box-shadow: 0 0 0 2px var(--color-surface-elevated);
+}
+.color-ring:hover::before,
+.color-ring.is-active::before {
+  opacity: 1;
+}
+.color-ring:active {
+  transform: scale(0.94);
+}
+.color-ring:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .color-thumb,
+  .color-ring,
+  .color-ring::before {
+    transition: none;
+  }
+}
+.member-color-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Date picker: a turned month slides in from the side it was turned toward. */
+@media (prefers-reduced-motion: no-preference) {
+  .picker-turn[data-dir="1"] {
+    animation: picker-turn-next 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+  .picker-turn[data-dir="-1"] {
+    animation: picker-turn-prev 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}
+@keyframes picker-turn-next {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes picker-turn-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Time picker wheels: rows fade toward the edges, and where scroll-driven
+   animations exist each row also shrinks away from the band like a drum. */
+.time-wheel {
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+}
+.time-wheel::-webkit-scrollbar {
+  display: none;
+}
+.time-wheel-row {
+  scroll-snap-align: center;
+}
+@supports (animation-timeline: view()) {
+  .time-wheel-row {
+    animation: time-wheel-drum linear both;
+    animation-timeline: view();
+  }
+}
+/* Entering at the bottom the row faces down, leaving at the top it faces up. */
+@keyframes time-wheel-drum {
+  0% {
+    transform: perspective(320px) rotateX(-48deg) scale(0.86);
+  }
+  50% {
+    transform: none;
+  }
+  100% {
+    transform: perspective(320px) rotateX(48deg) scale(0.86);
+  }
+}

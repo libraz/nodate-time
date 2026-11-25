@@ -1,0 +1,173 @@
+/* ============================================
+   Auth — atmospheric depth & form polish
+   ============================================ */
+
+/* Full-viewport decorative layer behind the card. Orbs and grain only
+   render on the default glass theme; every other theme (selected via a
+   data-theme attribute) keeps its own deliberately clean backdrop. */
+.auth-atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.auth-orb,
+.auth-grain {
+  display: none;
+}
+
+:root:not([data-theme]) .auth-orb {
+  display: block;
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(64px);
+  opacity: 0.5;
+}
+
+:root:not([data-theme]) .auth-orb-1 {
+  width: 380px;
+  height: 380px;
+  left: -90px;
+  top: -70px;
+  background: radial-gradient(
+    circle at 35% 35%,
+    color-mix(in srgb, var(--color-accent) 60%, transparent),
+    transparent 70%
+  );
+  animation: auth-float-a 19s ease-in-out infinite alternate;
+}
+
+:root:not([data-theme]) .auth-orb-2 {
+  width: 320px;
+  height: 320px;
+  right: -90px;
+  top: 14%;
+  background: radial-gradient(circle at 40% 40%, rgba(56, 189, 248, 0.4), transparent 70%);
+  animation: auth-float-b 23s ease-in-out infinite alternate;
+}
+
+:root:not([data-theme]) .auth-orb-3 {
+  width: 440px;
+  height: 440px;
+  left: 28%;
+  bottom: -190px;
+  background: radial-gradient(circle at 50% 50%, rgba(20, 184, 166, 0.3), transparent 70%);
+  animation: auth-float-c 27s ease-in-out infinite alternate;
+}
+
+/* Fine film grain for tactile, non-digital depth */
+:root:not([data-theme]) .auth-grain {
+  display: block;
+  position: absolute;
+  inset: -50%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-orb {
+    animation: none !important;
+  }
+}
+
+@keyframes auth-float-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(44px, 34px, 0) scale(1.14);
+  }
+}
+@keyframes auth-float-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  to {
+    transform: translate3d(-52px, 42px, 0) scale(1);
+  }
+}
+@keyframes auth-float-c {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(34px, -44px, 0) scale(1.12);
+  }
+}
+
+/* Brand mark — soft pulsing accent halo (glass only) */
+.auth-halo {
+  display: none;
+}
+:root:not([data-theme]) .auth-halo {
+  display: block;
+  position: absolute;
+  inset: -9px;
+  border-radius: 22px;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-accent) 45%, transparent),
+    transparent 70%
+  );
+  filter: blur(9px);
+  z-index: -1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-theme]) .auth-halo {
+    animation: auth-halo-pulse 3.6s ease-in-out infinite;
+  }
+}
+@keyframes auth-halo-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.85;
+  }
+}
+
+/* Brand wordmark — subtle gradient ink toward the accent (glass only) */
+:root:not([data-theme]) .auth-title {
+  background: linear-gradient(
+    118deg,
+    var(--color-text-primary),
+    color-mix(in srgb, var(--color-accent) 70%, var(--color-text-primary))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Form fields — staggered settle in (delay set inline per field) */
+@media (prefers-reduced-motion: no-preference) {
+  .auth-field {
+    animation: auth-rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+
+/* Submit button — loading spinner */
+.auth-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--color-text-on-accent) 35%, transparent);
+  border-top-color: var(--color-text-on-accent);
+  animation: auth-spin 0.6s linear infinite;
+}
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-spinner {
+    animation-duration: 1.4s;
+  }
+}

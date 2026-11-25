@@ -1,0 +1,225 @@
+/* ============================================
+   Hover-revealed controls
+   Hidden until the row is hovered only where a pointer can hover; touch
+   screens always show them, and keyboard focus reveals them anywhere.
+   ============================================ */
+.reveal-on-hover {
+  transition: opacity 150ms;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reveal-on-hover:not(:focus-within) {
+    opacity: 0;
+  }
+
+  .group:hover .reveal-on-hover {
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   Glass surface utility
+   ============================================ */
+.glass-surface {
+  background: var(--surface-glass);
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  box-shadow: var(--shadow-lg);
+}
+
+.glass-surface-heavy {
+  background: var(--surface-glass-heavy);
+  backdrop-filter: var(--backdrop-blur-heavy);
+  -webkit-backdrop-filter: var(--backdrop-blur-heavy);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* ============================================
+   Theme transition (smooth switching)
+   ============================================ */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.3s ease,
+    color 0.2s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    fill 0.2s ease,
+    stroke 0.2s ease !important;
+}
+
+/* ============================================
+   Global styles
+   ============================================ */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  background: var(--color-surface-app);
+  color: var(--color-text-primary);
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  /* iOS-style font feature: proportional figures */
+  font-feature-settings: "cv11";
+}
+
+/* Dark mode segmented control */
+:root[data-mode="dark"] .segmented-control {
+  background: rgba(118, 118, 128, 0.24);
+}
+
+:root[data-mode="dark"] .segmented-control::before {
+  background: rgba(99, 99, 102, 0.56);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-mode="dark"] .btn-secondary {
+  background: rgba(118, 118, 128, 0.24);
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@layer base {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* iOS zooms into a focused field set below 16px, so on touch the small type
+   steps are floored there; larger steps (a title field) keep their size. */
+@media (pointer: coarse) {
+  :is(input, textarea, select):is(
+    .text-micro,
+    .text-caption,
+    .text-footnote,
+    .text-body,
+    .text-default,
+    .text-callout,
+    .input-compact
+  ) {
+    font-size: 16px;
+  }
+}
+
+/* Accent-tinted text selection — applies across themes via tokens */
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-text-primary);
+}
+
+/* The part of a search result the query matched. */
+.search-mark {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* Keyboard focus rings on interactive controls. :where() keeps specificity
+   at zero so component styles still win; only the outline is contributed. */
+:where(button, [role="button"], a[href], summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Checkbox shape follows the theme's corner language
+   ============================================ */
+
+/* The inline checkbox SVGs default to rx="3" (Glass/Classic). Each theme that
+   carries a distinct corner identity restyles the box via the CSS rx property:
+   Modern softens, Washi and Nothing square off to read as a carved stamp / chip. */
+:root[data-theme="modern"] .checkbox-box {
+  rx: 5px;
+}
+
+:root[data-theme="washi"] .checkbox-box {
+  rx: 1px;
+}
+
+:root[data-theme="nothing"] .checkbox-box {
+  rx: 0;
+}
+
+/* ============================================
+   Optical tracking — letter-spacing follows size
+   ============================================ */
+
+/* Sans themes: tighten large display text so headlines read as one shape
+   rather than spaced-out letters. Small/body text keeps the global -0.01em. */
+:root:not([data-theme="washi"]) :is(.text-display, .text-hero) {
+  letter-spacing: -0.022em;
+}
+:root:not([data-theme="washi"]) :is(.text-title, .text-heading) {
+  letter-spacing: -0.012em;
+}
+
+/* Washi (Mincho): fullwidth Japanese glyphs crowd under negative tracking, so
+   give headlines a touch of air and enable proportional kana/punctuation
+   kerning (palt) for a refined editorial rhythm. */
+:root[data-theme="washi"],
+:root[data-theme="washi"] body {
+  font-feature-settings: "palt" 1;
+}
+:root[data-theme="washi"] :is(.text-title, .text-heading, .text-display, .text-hero) {
+  letter-spacing: 0.02em;
+}
+
+/* ============================================
+   Multi-line leading — comfortable vertical rhythm
+   ============================================ */
+
+/* Scoped to inherently multi-line elements (editors and wrapped text) so
+   single-line rows, cells, and labels keep their tight leading. */
+textarea,
+.whitespace-pre-wrap,
+.whitespace-pre-line {
+  line-height: 1.55;
+}
+
+/* Washi (Mincho) reads best with more open leading */
+:root[data-theme="washi"] textarea,
+:root[data-theme="washi"] .whitespace-pre-wrap,
+:root[data-theme="washi"] .whitespace-pre-line {
+  line-height: 1.75;
+}
+
+/* ============================================
+   App background with gradient mesh (glass only)
+   ============================================ */
+.app-bg {
+  background: var(--app-bg);
+}
+
+.app-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: var(--glass-blob-1), var(--glass-blob-2), var(--glass-blob-3);
+  pointer-events: none;
+  z-index: 0;
+}

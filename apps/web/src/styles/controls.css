@@ -1,0 +1,436 @@
+/* ============================================
+   Segmented control — iOS UISegmentedControl
+   ============================================ */
+.segmented-control {
+  /* Equal-width segments sized to the longest label, with one thumb that
+     slides to the active segment. The count and index come from :has() below,
+     so every segmented control gets this without its markup knowing. */
+  --seg-n: 1;
+  --seg-i: 0;
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border-radius: 8px;
+  background: rgba(118, 118, 128, 0.12);
+  padding: 2px;
+  gap: 0;
+}
+
+.segmented-control::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--seg-n));
+  transform: translateX(calc(var(--seg-i) * 100%));
+  border-radius: 7px;
+  background: var(--color-surface);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0.5px 0 rgba(0, 0, 0, 0.04);
+  transition:
+    transform 0.34s cubic-bezier(0.3, 0.75, 0.2, 1),
+    opacity 0.2s ease;
+}
+.segmented-control:not(:has(> [data-active="true"]))::before {
+  opacity: 0;
+}
+.segmented-control:has(> :nth-child(2):last-child) {
+  --seg-n: 2;
+}
+.segmented-control:has(> :nth-child(3):last-child) {
+  --seg-n: 3;
+}
+.segmented-control:has(> :nth-child(4):last-child) {
+  --seg-n: 4;
+}
+.segmented-control:has(> :nth-child(5):last-child) {
+  --seg-n: 5;
+}
+.segmented-control:has(> :nth-child(6):last-child) {
+  --seg-n: 6;
+}
+.segmented-control:has(> :nth-child(2)[data-active="true"]) {
+  --seg-i: 1;
+}
+.segmented-control:has(> :nth-child(3)[data-active="true"]) {
+  --seg-i: 2;
+}
+.segmented-control:has(> :nth-child(4)[data-active="true"]) {
+  --seg-i: 3;
+}
+.segmented-control:has(> :nth-child(5)[data-active="true"]) {
+  --seg-i: 4;
+}
+.segmented-control:has(> :nth-child(6)[data-active="true"]) {
+  --seg-i: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-control::before {
+    transition: none;
+  }
+}
+
+.segmented-control > button {
+  position: relative;
+  z-index: 1;
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
+  color: var(--color-text-secondary);
+}
+
+.segmented-control > button:hover {
+  color: var(--color-text-primary);
+}
+
+.segmented-control > button[data-active="true"] {
+  color: var(--color-text-primary);
+}
+
+/* Form controls and buttons sit in the components layer so a utility on the
+   element (h-8, text-footnote, rounded-xl) overrides their defaults. Unlayered,
+   they silently beat every utility and a header button rendered 50px tall. */
+@layer components {
+  /* ============================================
+     Modern input style — iOS text field
+     ============================================ */
+  .input-modern {
+    height: 44px;
+    width: 100%;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--color-border-strong);
+    padding: 0 16px;
+    font-size: 16px;
+    color: var(--color-text-primary);
+    background: var(--color-surface-inset);
+    outline: none;
+    transition:
+      box-shadow 0.2s ease,
+      border-color 0.2s ease;
+  }
+
+  .input-modern:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-bg);
+  }
+
+  .input-modern::placeholder {
+    color: var(--color-text-tertiary);
+  }
+
+  /* A field set inside dense chrome (sidebars, toolbars), not a form. */
+  .input-compact {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: min(var(--radius-sm), 8px);
+  }
+
+  /* Adornment padding for icon fields; declared after .input-modern so it wins
+     the shorthand `padding` within the same layer. */
+  .input-leading-icon {
+    padding-left: 2.75rem;
+  }
+  .input-trailing-action {
+    padding-right: 3rem;
+  }
+
+  /* ============================================
+     Button styles — iOS-style
+     ============================================ */
+  .btn-primary {
+    height: 44px;
+    border-radius: var(--radius-sm);
+    background: var(--color-accent);
+    color: var(--color-text-on-accent);
+    font-size: 16px;
+    font-weight: 600;
+    transition:
+      opacity 0.15s ease,
+      transform 0.1s ease;
+  }
+
+  .btn-primary:hover {
+    opacity: 0.88;
+  }
+
+  .btn-primary:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+
+  .btn-secondary {
+    height: 44px;
+    border-radius: var(--radius-sm);
+    background: rgba(118, 118, 128, 0.12);
+    color: var(--color-accent-ink);
+    font-size: 16px;
+    font-weight: 600;
+    transition:
+      opacity 0.15s ease,
+      transform 0.1s ease;
+  }
+
+  .btn-secondary:hover {
+    opacity: 0.88;
+  }
+
+  .btn-secondary:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+
+  /* Smaller step of either button, for inline rows and panel toolbars. */
+  .btn-sm {
+    height: 36px;
+    padding-inline: 14px;
+    font-size: var(--text-default);
+    border-radius: var(--radius-control);
+  }
+
+  /* Destructive tone of .btn-secondary: same shape, danger ink on a danger tint. */
+  .btn-danger {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
+}
+
+/* ============================================
+   Motion tokens, icon buttons, small controls
+   ============================================ */
+:root {
+  /* Decelerating entrance; a press that springs back a little past rest. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-press: cubic-bezier(0.3, 1.5, 0.55, 1);
+}
+
+@layer base {
+  /* Japanese wraps between phrases rather than leaving one kana on the last
+     line; headings balance their lines, prose avoids a lone last word. */
+  h1,
+  h2,
+  h3,
+  h4,
+  p,
+  legend {
+    word-break: auto-phrase;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Every button eases its colour changes instead of snapping. Transform is
+     left out on purpose: dragged blocks move by inline transform. */
+  button {
+    transition-property: background-color, color, border-color, opacity, box-shadow;
+    transition-duration: 0.15s;
+    transition-timing-function: ease;
+  }
+
+  /* A colour input shows its colour, shaped by the element's own border and
+     radius, instead of the browser's inset square inside a padded frame. */
+  input[type="color"] {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: inherit;
+  }
+  input[type="color"]::-moz-color-swatch {
+    border: none;
+    border-radius: inherit;
+  }
+}
+
+@layer components {
+  /* Square icon-only button. Size comes from h-/w- utilities; the shape, the
+     hover tint and a press that gives are the same everywhere. */
+  .icon-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 1;
+    border-radius: var(--radius-control);
+    color: var(--color-text-secondary);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      opacity 0.15s ease,
+      transform 0.28s var(--ease-press);
+  }
+  .icon-btn:active {
+    background: var(--color-active);
+    transform: scale(0.9);
+    transition-duration: 0.08s;
+  }
+  .icon-btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  /* On touch, a small icon button reaches 44px through an invisible margin
+     rather than a bigger box. `absolute`/`fixed` utilities still win. */
+  @media (pointer: coarse) {
+    .icon-btn {
+      position: relative;
+    }
+    .icon-btn::after {
+      content: "";
+      position: absolute;
+      inset: min(0px, calc((100% - 44px) / 2));
+    }
+  }
+  .icon-btn-accent {
+    background: var(--color-accent);
+    color: var(--color-text-on-accent);
+    box-shadow: 0 2px 8px -3px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  }
+  .icon-btn-accent:active {
+    background: color-mix(in srgb, var(--color-accent) 85%, black);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .icon-btn:hover {
+      background: var(--color-hover);
+      color: var(--color-text-primary);
+    }
+    .icon-btn-accent:hover {
+      background: color-mix(in srgb, var(--color-accent) 90%, black);
+      color: var(--color-text-on-accent);
+    }
+    .icon-btn-danger:hover {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+  }
+
+  /* A boxed note in one tone: a full hairline border and a light tint of the
+     same colour, never a one-sided stripe on a rounded box. */
+  .callout {
+    --callout: var(--color-info);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--callout) 28%, transparent);
+    background: color-mix(in srgb, var(--callout) 10%, transparent);
+  }
+  .callout-warning {
+    --callout: var(--color-warning);
+  }
+  .callout-danger {
+    --callout: var(--color-danger);
+  }
+  .callout-icon {
+    flex-shrink: 0;
+    margin-top: 0.125rem;
+    color: var(--callout);
+  }
+  .callout-title {
+    font-weight: 600;
+    color: color-mix(in srgb, var(--callout) 72%, var(--color-text-primary));
+  }
+
+  /* Inline busy indicator in the current text colour. */
+  .spinner {
+    display: inline-block;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-top-color: currentColor;
+    animation: auth-spin 0.7s linear infinite;
+  }
+
+  /* Click-or-drop image picker; the overlay shows the action or the upload. */
+  .image-upload-tile {
+    display: block;
+    cursor: pointer;
+    background: var(--color-hover);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+    transition: box-shadow 0.15s ease;
+  }
+  .image-upload-tile[data-empty] {
+    background: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
+    box-shadow: none;
+    border: 1.5px dashed color-mix(in srgb, var(--color-text-tertiary) 55%, transparent);
+    color: var(--color-text-tertiary);
+  }
+  .image-upload-tile:focus-visible,
+  .image-upload-tile[data-dragging] {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--color-surface),
+      0 0 0 4px var(--color-accent);
+  }
+  .image-upload-tile[data-dragging] {
+    border-color: var(--color-accent);
+  }
+  .image-upload-tile:disabled {
+    cursor: progress;
+  }
+  .image-upload-tile-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: rgb(0 0 0 / 0.42);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .image-upload-tile[data-empty] .image-upload-tile-overlay {
+    color: var(--color-text-tertiary);
+    background: transparent;
+    backdrop-filter: none;
+    opacity: 1;
+  }
+  .image-upload-tile:hover .image-upload-tile-overlay,
+  .image-upload-tile:focus-visible .image-upload-tile-overlay,
+  .image-upload-tile[data-dragging] .image-upload-tile-overlay,
+  .image-upload-tile[aria-busy="true"] .image-upload-tile-overlay {
+    opacity: 1;
+  }
+  .image-upload-tile[data-empty]:hover .image-upload-tile-overlay,
+  .image-upload-tile[data-empty][data-dragging] .image-upload-tile-overlay {
+    color: var(--color-accent-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn:active {
+    transform: none;
+  }
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}

@@ -26,7 +26,7 @@ interface ToastState {
 /** How long a toast stays up; one with an action stays longer, so it can be reached. */
 const TOAST_MS = 4000;
 const ACTION_TOAST_MS = 10_000;
-/** Matches the toast-out animation in index.css. */
+/** Matches the toast-out animation in styles/components.css. */
 const EXIT_MS = 180;
 
 let nextId = 1;

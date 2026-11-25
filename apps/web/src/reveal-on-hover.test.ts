@@ -4,10 +4,15 @@ import { describe, expect, it } from 'vitest';
 // The module name is a variable so the DOM-only type environment is not asked
 // to resolve it.
 const fsModule = 'node:fs';
-const { readFileSync } = (await import(/* @vite-ignore */ fsModule)) as {
+const { readdirSync, readFileSync } = (await import(/* @vite-ignore */ fsModule)) as {
+  readdirSync: (path: string) => string[];
   readFileSync: (path: string, encoding: 'utf8') => string;
 };
-const css = readFileSync('src/index.css', 'utf8');
+// The stylesheet is split across src/styles, imported in order by index.css.
+const css = readdirSync('src/styles')
+  .filter((name) => name.endsWith('.css'))
+  .map((name) => readFileSync(`src/styles/${name}`, 'utf8'))
+  .join('\n');
 
 const sources = import.meta.glob(['./**/*.tsx', '!./**/*.test.tsx'], {
   query: '?raw',
