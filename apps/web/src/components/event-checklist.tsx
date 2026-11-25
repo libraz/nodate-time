@@ -6,7 +6,103 @@ import { isSubmitEnter } from '@/lib/keys';
 import { toast } from '@/lib/toast';
 import type { ChecklistItem } from '@/types/calendar';
 
-export function ChecklistSection({
+/** A checklist item of an event not created yet, kept until the event is saved. */
+export interface DraftChecklistItem {
+  key: string;
+  title: string;
+  done: boolean;
+}
+
+/** The checklist of an event not created yet, including text typed but not added. */
+export interface DraftChecklist {
+  items: DraftChecklistItem[];
+  pending: string;
+}
+
+export const EMPTY_DRAFT_CHECKLIST: DraftChecklist = { items: [], pending: '' };
+
+/**
+ * Writes a new event's draft checklist, in order, once the event exists. Text
+ * still in the field is added too: pressing Save is how a phone user finishes.
+ * Reports whether every item was written.
+ */
+export async function saveDraftChecklist(
+  calendarId: string,
+  eventId: string,
+  draft: DraftChecklist,
+): Promise<boolean> {
+  const pending = draft.pending.trim();
+  const items = pending ? [...draft.items, { key: '', title: pending, done: false }] : draft.items;
+  try {
+    for (const [sortOrder, item] of items.entries()) {
+      const { data: created } = await client.POST(
+        '/calendars/{calendarId}/events/{eventId}/checklist',
+        { params: { path: { calendarId, eventId } }, body: { title: item.title, sortOrder } },
+      );
+      if (created && item.done) {
+        await client.PATCH('/calendars/{calendarId}/events/{eventId}/checklist/{itemId}', {
+          params: {
+            path: { calendarId, eventId, itemId: created.id },
+            header: { 'If-Match': created.etag },
+          },
+          body: { done: true },
+        });
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type ChecklistSectionProps =
+  | { calendarId: string; eventId: string; editable: boolean; draft?: undefined }
+  | { draft: DraftChecklist; onDraftChange: (draft: DraftChecklist) => void };
+
+/**
+ * An event's checklist. A saved event's items are written as they change; a
+ * new event's are held as a draft and written by `saveDraftChecklist` once it
+ * has been created.
+ */
+export function ChecklistSection(props: ChecklistSectionProps) {
+  if (props.draft) return <DraftChecklistSection {...props} />;
+  return <SavedChecklistSection {...props} />;
+}
+
+function DraftChecklistSection({
+  draft,
+  onDraftChange,
+}: {
+  draft: DraftChecklist;
+  onDraftChange: (draft: DraftChecklist) => void;
+}) {
+  const add = () => {
+    const title = draft.pending.trim();
+    if (!title) return;
+    onDraftChange({
+      items: [...draft.items, { key: crypto.randomUUID(), title, done: false }],
+      pending: '',
+    });
+  };
+  return (
+    <ChecklistView
+      rows={draft.items.map((i) => ({ id: i.key, title: i.title, done: i.done }))}
+      editable
+      newTitle={draft.pending}
+      onNewTitleChange={(pending) => onDraftChange({ ...draft, pending })}
+      onAdd={add}
+      onToggle={(id) =>
+        onDraftChange({
+          ...draft,
+          items: draft.items.map((i) => (i.key === id ? { ...i, done: !i.done } : i)),
+        })
+      }
+      onDelete={(id) => onDraftChange({ ...draft, items: draft.items.filter((i) => i.key !== id) })}
+    />
+  );
+}
+
+function SavedChecklistSection({
   calendarId,
   eventId,
   editable,
@@ -128,6 +224,58 @@ export function ChecklistSection({
     }
   };
 
+  const byId = (id: string) => items.find((i) => i.id === id);
+  return (
+    <ChecklistView
+      rows={items}
+      editable={editable}
+      loading={isLoading}
+      loadError={loadError}
+      newTitle={newTitle}
+      onNewTitleChange={setNewTitle}
+      onAdd={handleAdd}
+      onToggle={(id) => {
+        const item = byId(id);
+        if (item) handleToggle(item);
+      }}
+      onDelete={(id) => {
+        const item = byId(id);
+        if (item) handleDelete(item);
+      }}
+    />
+  );
+}
+
+interface ChecklistRow {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+interface ChecklistViewProps {
+  rows: ChecklistRow[];
+  editable: boolean;
+  loading?: boolean;
+  loadError?: string | null;
+  newTitle: string;
+  onNewTitleChange: (title: string) => void;
+  onAdd: () => void;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+}
+
+function ChecklistView({
+  rows: items,
+  editable,
+  loading: isLoading = false,
+  loadError = null,
+  newTitle,
+  onNewTitleChange: setNewTitle,
+  onAdd: handleAdd,
+  onToggle,
+  onDelete,
+}: ChecklistViewProps) {
+  const t = useT();
   return (
     <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -164,7 +312,7 @@ export function ChecklistSection({
               <LabelledButton
                 label={item.title}
                 pressed={item.done}
-                onClick={() => handleToggle(item)}
+                onClick={() => onToggle(item.id)}
                 disabled={!editable}
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--color-border)] disabled:cursor-default"
                 style={{
@@ -197,7 +345,7 @@ export function ChecklistSection({
               {editable && (
                 <LabelledButton
                   label={t('common.delete')}
-                  onClick={() => handleDelete(item)}
+                  onClick={() => onDelete(item.id)}
                   className="reveal-on-hover text-[var(--color-text-tertiary)] hover:text-[var(--color-danger)]"
                 >
                   <svg

@@ -170,7 +170,8 @@ interface CalendarState {
    */
   updateMemberColor: (calendarId: string, memberId: string, color: string) => Promise<void>;
 
-  addEvent: (calendarId: string, evt: EventInput) => Promise<void>;
+  /** Creates the event and resolves to its id. */
+  addEvent: (calendarId: string, evt: EventInput) => Promise<string>;
   /**
    * Applies a partial update. `etag` is the version of the copy the edit
    * started from -- the listing's `etag`, or `seriesEtag` for a scope over the
@@ -664,18 +665,19 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       body: createBody(evt),
     });
     const newEvt = toEvent(present(data), calendarId);
-    if (currentAccountGeneration !== accountGeneration) return;
+    if (currentAccountGeneration !== accountGeneration) return newEvt.id;
     if (newEvt.recurrenceRule) {
       // The POST returns a single un-expanded master row, so appending it would
       // show only one occurrence. Re-fetch the visible range to pull the fully
       // expanded instances instead.
       const { start, end } = get().visibleRange();
       await get().fetchEvents(start, end);
-      return;
+      return newEvt.id;
     }
     set((s) => ({
       events: [...s.events, { ...newEvt, calendarId }],
     }));
+    return newEvt.id;
   },
 
   async updateEvent(calendarId, eventId, evt, scope, etag) {

@@ -1633,3 +1633,83 @@ describe('EventModal label', () => {
     expect(await savedPatch()).not.toHaveProperty('labelId');
   });
 });
+
+/**
+ * A checklist written while the event is being created has nowhere to go
+ * until the event exists, so it is held and written right after the create.
+ * The form used to offer no checklist at all before the first save, which
+ * left people looking for it on the screen they were on.
+ */
+describe('EventModal checklist on a new event', () => {
+  beforeEach(() => {
+    uiState.editingEventId = null;
+    calendarState.addEvent.mockResolvedValue('ev-new');
+    typed.post.mockImplementation(async (_path: string, init?: { body?: { title?: string } }) => ({
+      data: { id: `item-${init?.body?.title}`, etag: 'i-etag' },
+    }));
+  });
+
+  function checklistField(): HTMLElement {
+    return screen.getByPlaceholderText('event.checklistPlaceholder');
+  }
+
+  it('writes the items under the created event, in order, including text left in the field', async () => {
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Shoot' } });
+    fireEvent.change(checklistField(), { target: { value: 'Camera' } });
+    fireEvent.click(screen.getByRole('button', { name: 'checklist.add' }));
+    fireEvent.change(checklistField(), { target: { value: 'Lights' } });
+    fireEvent.click(screen.getByRole('button', { name: 'checklist.add' }));
+    // Ticked before saving: it has to arrive ticked.
+    fireEvent.click(screen.getByRole('button', { name: 'Lights' }));
+    fireEvent.change(checklistField(), { target: { value: 'Tripod' } });
+    expect(typed.post).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(typed.post).toHaveBeenCalledTimes(3));
+    const posted = typed.post.mock.calls.map(([path, init]) => [path, init.params.path, init.body]);
+    expect(posted).toEqual([
+      [
+        '/calendars/{calendarId}/events/{eventId}/checklist',
+        { calendarId: 'cal-1', eventId: 'ev-new' },
+        { title: 'Camera', sortOrder: 0 },
+      ],
+      [
+        '/calendars/{calendarId}/events/{eventId}/checklist',
+        { calendarId: 'cal-1', eventId: 'ev-new' },
+        { title: 'Lights', sortOrder: 1 },
+      ],
+      [
+        '/calendars/{calendarId}/events/{eventId}/checklist',
+        { calendarId: 'cal-1', eventId: 'ev-new' },
+        { title: 'Tripod', sortOrder: 2 },
+      ],
+    ]);
+    await waitFor(() => expect(typed.patch).toHaveBeenCalledTimes(1));
+    expect(typed.patch.mock.calls[0]?.[1]).toMatchObject({
+      params: { path: { itemId: 'item-Lights' }, header: { 'If-Match': 'i-etag' } },
+      body: { done: true },
+    });
+  });
+
+  it('asks before closing over a checklist that has not been saved', () => {
+    render(<EventModal />);
+    fireEvent.change(checklistField(), { target: { value: 'Camera' } });
+    fireEvent.click(screen.getByRole('button', { name: 'checklist.add' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('common.discardTitle');
+  });
+
+  it('says so when the event was made but an item was not', async () => {
+    typed.post.mockRejectedValue(new Error('boom'));
+    render(<EventModal />);
+    fireEvent.change(titleField(), { target: { value: 'Shoot' } });
+    fireEvent.change(checklistField(), { target: { value: 'Camera' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('checklist.saveFailed'));
+  });
+});

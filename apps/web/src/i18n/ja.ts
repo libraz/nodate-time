@@ -1094,6 +1094,7 @@ export const ja = {
   'invites.shareLink': 'リンクを共有',
   'invites.closeTitle': 'コピーしていないリンクがあります',
   'invites.closeAnyway': '閉じる',
+  'checklist.saveFailed': '予定は保存しましたが、チェックリストの一部を保存できませんでした',
   'checklist.add': '項目を追加',
   'checklist.deleted': '項目を削除しました',
   'restore.toast': '「{name}」を削除しました',

@@ -4,7 +4,12 @@ import { Avatar } from '@/components/avatar';
 import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { AttachmentsSection } from '@/components/event-attachments';
-import { ChecklistSection } from '@/components/event-checklist';
+import {
+  ChecklistSection,
+  type DraftChecklist,
+  EMPTY_DRAFT_CHECKLIST,
+  saveDraftChecklist,
+} from '@/components/event-checklist';
 import { CommentsSection } from '@/components/event-comments';
 import { EventPeople, ShowAsPicker } from '@/components/event-people';
 import { RecurrenceEditor } from '@/components/event-recurrence';
@@ -292,6 +297,8 @@ export function EventModal() {
   });
   // The form as it was opened or last saved; an edit is whatever differs from it.
   const initialForm = useRef<FormState | null>(null);
+  // A new event's checklist, written once the event has been created.
+  const [draftChecklist, setDraftChecklist] = useState<DraftChecklist>(EMPTY_DRAFT_CHECKLIST);
   // Which confirmation is up: discarding unsaved edits, or deleting the event.
   const [confirming, setConfirming] = useState<null | 'discard' | 'delete'>(null);
   // Optional fields (location/url/memo/reminder/visibility) collapse on create and
@@ -321,7 +328,12 @@ export function EventModal() {
     !form.allDay &&
     DateTime.fromISO(form.endAt, { zone: timezone }) <
       DateTime.fromISO(form.startAt, { zone: timezone });
-  const isDirty = editable && initialForm.current !== null && !formEqual(form, initialForm.current);
+  const hasDraftChecklist =
+    !editingEvent && (draftChecklist.items.length > 0 || draftChecklist.pending.trim() !== '');
+  const isDirty =
+    editable &&
+    initialForm.current !== null &&
+    (!formEqual(form, initialForm.current) || hasDraftChecklist);
   // Every way out of the editor asks first when it would throw edits away.
   const guardedClose = () => {
     if (closeTimer.current) return;
@@ -511,6 +523,7 @@ export function EventModal() {
     };
     setForm(opened);
     initialForm.current = opened;
+    setDraftChecklist(EMPTY_DRAFT_CHECKLIST);
     setShowMore(false);
   }, [
     editingEvent,
@@ -621,7 +634,11 @@ export function EventModal() {
           const etag = scope === 'all' ? (opened?.seriesEtag ?? opened?.etag) : opened?.etag;
           await updateEvent(editingEvent.calendarId, editingEvent.id, data, scope, etag);
         } else {
-          await addEvent(form.calendarId, data);
+          const createdId = await addEvent(form.calendarId, data);
+          if (!(await saveDraftChecklist(form.calendarId, createdId, draftChecklist))) {
+            toast.error(t('checklist.saveFailed'));
+          }
+          setDraftChecklist(EMPTY_DRAFT_CHECKLIST);
         }
         initialForm.current = form;
         setScopePrompt(null);
@@ -653,6 +670,7 @@ export function EventModal() {
     },
     [
       form,
+      draftChecklist,
       fetchLabels,
       editingEvent,
       isRecurringInstance,
@@ -1286,6 +1304,11 @@ export function EventModal() {
             </div>
           </div>
         </>
+      )}
+
+      {/* A new event's checklist is part of the form, saved along with it. */}
+      {!editingEvent && editable && (
+        <ChecklistSection draft={draftChecklist} onDraftChange={setDraftChecklist} />
       )}
 
       {/* The sections below write as they change, unlike the form above. */}
