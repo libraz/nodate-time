@@ -2829,6 +2829,11 @@ export interface components {
             name?: string | null;
             /** @description IANA timezone */
             timezone?: string | null;
+            /**
+             * @description First day of the week for calendar grids
+             * @enum {string|null}
+             */
+            weekStart?: "mon" | "sun" | "sat" | null;
         };
         UserResponse: {
             /**
@@ -2848,6 +2853,8 @@ export interface components {
             locale: string;
             name: string;
             timezone: string;
+            /** @enum {string} */
+            weekStart: "mon" | "sun" | "sat";
         };
     };
     responses: never;

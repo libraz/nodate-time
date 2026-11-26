@@ -26,7 +26,7 @@ INSERT INTO users (public_id, email, display_name, avatar_url, locale, timezone)
 VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: UpdateUser :exec
-UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ? WHERE id = ?;
+UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ?, week_start = ? WHERE id = ?;
 
 -- SetUserAvatarObject points the user at a picture they uploaded. The external
 -- URL is deliberately left where it is: the object is preferred while it

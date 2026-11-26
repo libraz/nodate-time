@@ -13,6 +13,7 @@ type UserResponse struct {
 	AvatarURL string `json:"avatarUrl,omitempty"`
 	Locale    string `json:"locale"`
 	Timezone  string `json:"timezone"`
+	WeekStart string `json:"weekStart" enum:"mon,sun,sat"`
 	// IsAdmin reflects a live grant in instance_admins, not a column on the
 	// user: revoking it leaves the record that it was ever held.
 	IsAdmin bool `json:"isAdmin"`
@@ -98,9 +99,10 @@ type GetMeOutput struct {
 // the members can be cleared, so an explicit null is refused.
 type UpdateUserInput struct {
 	Body struct {
-		Name     patch.Field[string] `json:"name,omitzero" required:"false" doc:"1 to 100 characters"`
-		Locale   patch.Field[string] `json:"locale,omitzero" required:"false" doc:"BCP 47 tag, at most 35 characters"`
-		Timezone patch.Field[string] `json:"timezone,omitzero" required:"false" doc:"IANA timezone"`
+		Name      patch.Field[string] `json:"name,omitzero" required:"false" doc:"1 to 100 characters"`
+		Locale    patch.Field[string] `json:"locale,omitzero" required:"false" doc:"BCP 47 tag, at most 35 characters"`
+		Timezone  patch.Field[string] `json:"timezone,omitzero" required:"false" doc:"IANA timezone"`
+		WeekStart patch.Field[string] `json:"weekStart,omitzero" required:"false" enum:"mon,sun,sat" doc:"First day of the week for calendar grids"`
 	}
 }
 

@@ -81,6 +81,7 @@ func mapUser(u generated.User) UserResponse {
 		Email:         u.Email,
 		Locale:        u.Locale,
 		Timezone:      u.Timezone,
+		WeekStart:     string(u.WeekStart),
 		EmailVerified: u.EmailVerifiedAt.Valid,
 		CreatedAt:     u.CreatedAt,
 	}
@@ -574,6 +575,12 @@ func UpdateUser(deps Deps) func(context.Context, *UpdateUserInput) (*UpdateUserO
 			}
 		}
 
+		// The enum tag has already refused anything outside the set.
+		weekStart, weekStartSet, ok := patchedString(in.Body.WeekStart, 1, maxWeekStartLen)
+		if !ok {
+			return nil, apierrors.ToHuma(apierrors.Validation)
+		}
+
 		err := dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			current, err := q.GetUserByIDForUpdate(ctx, userID)
 			if err != nil {
@@ -587,6 +594,7 @@ func UpdateUser(deps Deps) func(context.Context, *UpdateUserInput) (*UpdateUserO
 				AvatarURL: current.AvatarURL,
 				Timezone:  current.Timezone,
 				Locale:    current.Locale,
+				WeekStart: current.WeekStart,
 				ID:        userID,
 			}
 			if nameSet {
@@ -597,6 +605,9 @@ func UpdateUser(deps Deps) func(context.Context, *UpdateUserInput) (*UpdateUserO
 			}
 			if timezoneSet {
 				params.Timezone = timezone
+			}
+			if weekStartSet {
+				params.WeekStart = generated.UsersWeekStart(weekStart)
 			}
 			return q.UpdateUser(ctx, params)
 		})
@@ -615,6 +626,8 @@ const (
 	maxUserNameLen = 100
 	maxLocaleLen   = 35
 	maxTimezoneLen = 64
+	// maxWeekStartLen only bounds patchedString; the enum tag defines the set.
+	maxWeekStartLen = 3
 )
 
 // patchedString reads a patch member that cannot be null. set reports whether

@@ -315,7 +315,7 @@ func (q *Queries) TouchUserLastLogin(ctx context.Context, id uint32) error {
 }
 
 const updateUser = `-- name: UpdateUser :exec
-UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ? WHERE id = ?
+UPDATE users SET display_name = ?, avatar_url = ?, timezone = ?, locale = ?, week_start = ? WHERE id = ?
 `
 
 type UpdateUserParams struct {
@@ -323,6 +323,7 @@ type UpdateUserParams struct {
 	AvatarURL   sql.NullString `json:"avatarUrl"`
 	Timezone    string         `json:"timezone"`
 	Locale      string         `json:"locale"`
+	WeekStart   UsersWeekStart `json:"weekStart"`
 	ID          uint32         `json:"id"`
 }
 
@@ -332,6 +333,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.AvatarURL,
 		arg.Timezone,
 		arg.Locale,
+		arg.WeekStart,
 		arg.ID,
 	)
 	return err

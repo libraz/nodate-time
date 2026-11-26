@@ -11,9 +11,10 @@ import (
 )
 
 type patchedUser struct {
-	Name     string `json:"name"`
-	Locale   string `json:"locale"`
-	Timezone string `json:"timezone"`
+	Name      string `json:"name"`
+	Locale    string `json:"locale"`
+	Timezone  string `json:"timezone"`
+	WeekStart string `json:"weekStart"`
 }
 
 func patchUser(t *testing.T, token string, body map[string]any) (int, []byte) {
@@ -33,17 +34,17 @@ func TestUserPatchChangesOnlyWhatIsSent(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var got patchedUser
 	require.NoError(t, json.Unmarshal(raw, &got))
-	require.Equal(t, patchedUser{Name: "Renamed", Locale: before.Locale, Timezone: before.Timezone}, got)
+	require.Equal(t, patchedUser{Name: "Renamed", Locale: before.Locale, Timezone: before.Timezone, WeekStart: before.WeekStart}, got)
 
 	status, raw = patchUser(t, tt.AccessToken, map[string]any{"timezone": "America/New_York", "locale": "en"})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &got))
-	require.Equal(t, patchedUser{Name: "Renamed", Locale: "en", Timezone: "America/New_York"}, got)
+	require.Equal(t, patchedUser{Name: "Renamed", Locale: "en", Timezone: "America/New_York", WeekStart: before.WeekStart}, got)
 
 	status, raw = patchUser(t, tt.AccessToken, map[string]any{})
 	require.Equal(t, http.StatusOK, status, "an empty patch changes nothing: %s", raw)
 	require.NoError(t, json.Unmarshal(raw, &got))
-	require.Equal(t, patchedUser{Name: "Renamed", Locale: "en", Timezone: "America/New_York"}, got)
+	require.Equal(t, patchedUser{Name: "Renamed", Locale: "en", Timezone: "America/New_York", WeekStart: before.WeekStart}, got)
 }
 
 func TestUserPatchRefusesWhatCannotBeCleared(t *testing.T) {
@@ -69,6 +70,68 @@ func TestUserPatchRefusesWhatCannotBeCleared(t *testing.T) {
 	var after patchedUser
 	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &after)
 	require.Equal(t, tt.Name, after.Name, "a refused patch changes nothing")
+}
+
+func TestUserPatchWeekStart(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	var before patchedUser
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &before)
+	require.Contains(t, []string{"mon", "sun", "sat"}, before.WeekStart)
+
+	for _, ws := range []string{"mon", "sun", "sat"} {
+		status, raw := patchUser(t, tt.AccessToken, map[string]any{"weekStart": ws})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var got patchedUser
+		require.NoError(t, json.Unmarshal(raw, &got))
+		require.Equal(t, ws, got.WeekStart)
+
+		var reread patchedUser
+		helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &reread)
+		require.Equal(t, ws, reread.WeekStart, "GET reflects the saved value")
+	}
+
+	// Leave it somewhere other than where it started, then patch another member.
+	other := "sat"
+	if before.WeekStart == "sat" {
+		other = "sun"
+	}
+	status, raw := patchUser(t, tt.AccessToken, map[string]any{"weekStart": other})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	status, raw = patchUser(t, tt.AccessToken, map[string]any{"name": "Renamed"})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var got patchedUser
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Equal(t, other, got.WeekStart, "an omitted weekStart is left alone")
+}
+
+func TestUserPatchRefusesBadWeekStart(t *testing.T) {
+	bootstrap(t)
+	t.Parallel()
+
+	tt := helpers.NewTenant(t, testServerURL)
+	var before patchedUser
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &before)
+
+	for name, v := range map[string]any{
+		"null":      nil,
+		"empty":     "",
+		"uppercase": "MON",
+		"unknown":   "tue",
+		"non-ASCII": "月曜",
+		"number":    1,
+		"boolean":   true,
+	} {
+		status, raw := patchUser(t, tt.AccessToken, map[string]any{"weekStart": v})
+		require.Equal(t, http.StatusUnprocessableEntity, status, "%s: %s", name, raw)
+		require.Equal(t, "REQUEST.VALIDATION", adCode(t, raw), name)
+	}
+
+	var after patchedUser
+	helpers.DoJSON(t, http.MethodGet, testServerURL+"/user", tt.AccessToken, nil, &after)
+	require.Equal(t, before.WeekStart, after.WeekStart, "a refused patch changes nothing")
 }
 
 func TestUserPutIsGone(t *testing.T) {

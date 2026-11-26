@@ -4008,6 +4008,18 @@
               "string",
               "null"
             ]
+          },
+          "weekStart": {
+            "description": "First day of the week for calendar grids",
+            "enum": [
+              "mon",
+              "sun",
+              "sat"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -4054,6 +4066,14 @@
           },
           "timezone": {
             "type": "string"
+          },
+          "weekStart": {
+            "enum": [
+              "mon",
+              "sun",
+              "sat"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -4062,6 +4082,7 @@
           "email",
           "locale",
           "timezone",
+          "weekStart",
           "isAdmin",
           "emailVerified",
           "hasPassword",
