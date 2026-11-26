@@ -32,7 +32,7 @@ It is self-hosted: a Go REST API and a React single-page app on MySQL and any S3
 - **Admin** — OAuth provider settings and an allowlist of permitted sign-in emails and domains. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Export and import** — export as iCal or CSV, import iCal. [API overview](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md)
 - **Calendar app sync** — a CalDAV server for iOS, macOS and other calendar apps, signed in with per-device app passwords; an iPhone or Mac is set up from a QR code or link. [App passwords](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#app-passwords) · [CalDAV](https://github.com/libraz/nodate-time/blob/main/docs/en/api.md#caldav)
-- **Languages and themes** — English and Japanese, five themes, light, dark or system color mode, an in-app tour and help page.
+- **Languages and themes** — English and Japanese, five themes, light, dark or system color mode, a week that starts on Monday, Sunday or Saturday, an in-app tour and help page.
 - **Self-hosting** — one compose file with TLS, object storage and upgrade scripts. [Deployment](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md)
 - **Migrating from TimeTree** — `importtimetree` copies shared calendars with who owns and created each event, and can keep following them with `-sync`. [Migrating from TimeTree](https://github.com/libraz/nodate-time/blob/main/docs/en/deployment.md#migrating-from-timetree)
 - **Metrics and profiling** — Prometheus metrics, pprof and a per-dependency health report on a separate listener. [Observability](https://github.com/libraz/nodate-time/blob/main/docs/en/observability.md)

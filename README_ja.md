@@ -32,7 +32,7 @@
 - **管理者機能** — OAuth プロバイダ設定と、サインインを許可するメール・ドメインのアロウリスト。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **エクスポートとインポート** — エクスポートは iCal と CSV、インポートは iCal。[API 概要](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md)
 - **カレンダーアプリとの同期** — iOS・macOS などのカレンダーアプリ向けの CalDAV サーバー。端末ごとのアプリパスワードでサインインし、iPhone と Mac は QR コードかリンクから設定できます。[アプリパスワード](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#アプリパスワード) · [CalDAV](https://github.com/libraz/nodate-time/blob/main/docs/ja/api.md#caldav)
-- **多言語とテーマ** — 日本語と英語、5 種類のテーマ、ライト・ダーク・システム連動のカラーモード、アプリ内ツアーとヘルプページ。
+- **多言語とテーマ** — 日本語と英語、5 種類のテーマ、ライト・ダーク・システム連動のカラーモード、月曜・日曜・土曜から選べる週の開始日、アプリ内ツアーとヘルプページ。
 - **自己ホスト** — TLS、オブジェクトストレージ、更新手順をそろえた compose ファイル 1 つ。[デプロイ](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md)
 - **TimeTree からの移行** — `importtimetree` が共有カレンダーを、予定ごとの担当者と作成者を保ったまま取り込みます。`-sync` で取り込み後も追従できます。[TimeTree からの移行](https://github.com/libraz/nodate-time/blob/main/docs/ja/deployment.md#timetree-からの移行)
 - **メトリクスとプロファイル** — Prometheus メトリクス、pprof、依存先ごとのヘルスレポートを別リスナーで提供。[可観測性](https://github.com/libraz/nodate-time/blob/main/docs/ja/observability.md)
