@@ -106,7 +106,7 @@ docker compose -f compose.prod.yml exec -T mysql bash -euc '
   if ! mysql -uroot "$MYSQL_DATABASE" -e "SELECT retired_at FROM album_photos LIMIT 0" 2>/dev/null; then
     apply "$up/from-v0.1.0.sql"
   fi
-  for f in schedule-polls calendar-covers caldav triggers; do apply "$up/$f.sql"; done
+  for f in schedule-polls calendar-covers caldav event-labels triggers; do apply "$up/$f.sql"; done
   bash /tmp/upgrade-sql/core/conformance/run.sh \
     --dsn "root:$MYSQL_ROOT_PASSWORD@127.0.0.1:3306/$MYSQL_DATABASE" --mode all
   rm -rf /tmp/upgrade-sql
