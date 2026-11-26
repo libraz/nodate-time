@@ -27,7 +27,7 @@ import { useCalendarStore } from '@/stores/calendar-store';
 
 const PANEL_WIDTH = 400;
 
-export const FIELD_LABEL: Record<FilterField, TranslationKey> = {
+const FIELD_LABEL: Record<FilterField, TranslationKey> = {
   involved: 'filter.field.involved',
   owner: 'filter.field.owner',
   creator: 'filter.field.creator',
@@ -40,6 +40,19 @@ const FIELD_HINT: Record<FilterField, TranslationKey> = {
   creator: 'filter.hint.creator',
   participant: 'filter.hint.participant',
 };
+
+/** One condition in words, e.g. "誰の予定: A・B を除く". */
+export function conditionSummary(
+  row: FilterCondition,
+  nameOf: (p: FilterPerson) => string,
+  t: ReturnType<typeof useT>,
+): string {
+  const names = row.people.map(nameOf).join(t('filter.nameJoin'));
+  return t(row.exclude ? 'filter.summaryExclude' : 'filter.summaryInclude', {
+    field: t(FIELD_LABEL[row.field]),
+    names: names || t('filter.nobody'),
+  });
+}
 
 /** Which control the panel is open from; each control anchors its own popover. */
 type PanelHost = 'header-desktop' | 'header-mobile' | 'bar';
@@ -133,6 +146,9 @@ function EventFilterPanel({
   const [draft, setDraft] = useState<EventFilter>(() => ({ match: 'all', conditions: [newRow()] }));
   const active = isFilterActive(filter);
   const shown = active ? filter : draft;
+  // One condition is edited at a time; the rest read as a line each.
+  const [openId, setOpenId] = useState<string | undefined>(() => shown.conditions[0]?.id);
+  const openRow = shown.conditions.find((c) => c.id === openId) ?? shown.conditions.at(-1);
   const effectiveCount = effectiveConditions(shown).length;
 
   useOutsideClose([floatingRef, anchorRef], close, true);
@@ -153,8 +169,15 @@ function EventFilterPanel({
   const removeRow = (id: string) =>
     commit({ ...shown, conditions: shown.conditions.filter((c) => c.id !== id) });
   const clearAll = () => {
+    const row = newRow();
     setEventFilter(EMPTY_FILTER);
-    setDraft({ match: 'all', conditions: [newRow()] });
+    setDraft({ match: 'all', conditions: [row] });
+    setOpenId(row.id);
+  };
+  const addRow = () => {
+    const row = newRow();
+    commit({ ...shown, conditions: [...shown.conditions, row] });
+    setOpenId(row.id);
   };
 
   return (
@@ -211,6 +234,8 @@ function EventFilterPanel({
             key={row.id}
             row={row}
             index={i}
+            open={row.id === openRow?.id}
+            onOpen={() => setOpenId(row.id)}
             candidates={candidates}
             removable={shown.conditions.length > 1 || row.people.length > 0}
             onChange={(patch) => updateRow(row.id, patch)}
@@ -219,11 +244,11 @@ function EventFilterPanel({
         ))}
       </div>
 
-      <div className="shrink-0 px-0.5 pt-2 sm:px-3 sm:pb-3">
+      <div className="shrink-0 px-0.5 pt-1.5 sm:px-3 sm:pb-2.5">
         <button
           type="button"
-          onClick={() => commit({ ...shown, conditions: [...shown.conditions, newRow()] })}
-          className="flex h-10 w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-[var(--color-border-strong)] text-default font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-hover)]"
+          onClick={addRow}
+          className="inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 text-footnote font-medium text-[var(--color-accent-ink)] transition-colors hover:bg-[var(--color-hover)]"
         >
           <PlusIcon />
           {t('filter.addCondition')}
@@ -236,6 +261,8 @@ function EventFilterPanel({
 function ConditionCard({
   row,
   index,
+  open,
+  onOpen,
   candidates,
   removable,
   onChange,
@@ -243,18 +270,18 @@ function ConditionCard({
 }: {
   row: FilterCondition;
   index: number;
+  open: boolean;
+  onOpen: () => void;
   candidates: ReturnType<typeof useCandidates>;
   removable: boolean;
   onChange: (patch: Partial<FilterCondition>) => void;
   onRemove: () => void;
 }) {
   const t = useT();
-  const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState('');
   const chosen = new Set(row.people.map((p) => p.id));
-  // Nobody chosen yet: the list is the next step, so it is already open.
-  const listOpen = picking || row.people.length === 0;
-  const nameOf = (p: FilterPerson) => (p.id === candidates.meId ? t('filter.me') : p.name);
+  const nameOf = (p: FilterPerson) =>
+    p.id === candidates.meId ? t('filter.me') : resolvePerson(p, candidates.people).name;
   const q = query.trim().toLowerCase();
   const listed = q
     ? candidates.people.filter((p) => p.name.toLowerCase().includes(q))
@@ -265,12 +292,42 @@ function ConditionCard({
       people: chosen.has(p.id) ? row.people.filter((x) => x.id !== p.id) : [...row.people, p],
     });
 
+  const removeButton = removable && (
+    <button
+      type="button"
+      onClick={onRemove}
+      aria-label={t('filter.removeCondition')}
+      className="icon-btn h-8 w-8 shrink-0 rounded-full text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+    >
+      <CloseIcon size={13} />
+    </button>
+  );
+
+  if (!open) {
+    return (
+      <section
+        aria-label={t('filter.conditionN', { n: index + 1 })}
+        className="flex items-center gap-1 rounded-[var(--radius-md)] bg-[var(--color-surface)] pr-1.5 ring-1 ring-[var(--color-border)]"
+      >
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-expanded={false}
+          className="min-w-0 flex-1 truncate rounded-[var(--radius-md)] px-3.5 py-3 text-left text-default text-[var(--color-text-primary)] hover:bg-[var(--color-hover)]"
+        >
+          {conditionSummary(row, nameOf, t)}
+        </button>
+        {removeButton}
+      </section>
+    );
+  }
+
   return (
     <section
       aria-label={t('filter.conditionN', { n: index + 1 })}
-      className="reveal-in rounded-[var(--radius-md)] bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border)]"
+      className="reveal-in rounded-[var(--radius-md)] bg-[var(--color-surface)] p-2.5 ring-1 ring-[var(--color-border)]"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <div
           className="segmented-control min-w-0 flex-1"
           role="radiogroup"
@@ -284,6 +341,7 @@ function ConditionCard({
               role="radio"
               aria-checked={row.field === f}
               data-active={row.field === f}
+              title={t(FIELD_HINT[f])}
               onClick={() => onChange({ field: f })}
               className="!px-1 !text-footnote"
             >
@@ -291,63 +349,35 @@ function ConditionCard({
             </button>
           ))}
         </div>
-        {removable && (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={t('filter.removeCondition')}
-            className="icon-btn h-8 w-8 shrink-0 rounded-full text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
-          >
-            <CloseIcon size={14} />
-          </button>
-        )}
+        {removeButton}
       </div>
-      <p className="mt-1.5 px-0.5 text-caption text-[var(--color-text-tertiary)]">
-        {t(FIELD_HINT[row.field])}
-      </p>
+
+      <div className="mt-2">
+        {candidates.people.length >= SEARCHABLE_FROM && (
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('filter.searchPeople')}
+            aria-label={t('filter.searchPeople')}
+            className="input-modern mb-1.5 h-9 w-full px-3 text-default"
+          />
+        )}
+        <CandidateList
+          candidates={candidates}
+          listed={listed}
+          chosen={chosen}
+          muted={row.exclude}
+          nameOf={nameOf}
+          onToggle={toggle}
+        />
+      </div>
 
       {row.people.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {row.people.map((p) => {
-            const live = resolvePerson(p, candidates.people);
-            return (
-              <span
-                key={p.id}
-                className={`pop-in inline-flex h-7 max-w-[11rem] items-center gap-1.5 rounded-full pr-1 pl-0.5 text-footnote font-medium ${
-                  row.exclude
-                    ? 'bg-[var(--color-surface-inset)] text-[var(--color-text-secondary)]'
-                    : 'bg-[var(--color-accent-bg)] text-[var(--color-accent-ink)]'
-                }`}
-              >
-                <PersonAvatar person={live} size="h-6 w-6" muted={row.exclude} />
-                <span className={`truncate ${row.exclude ? 'line-through decoration-1' : ''}`}>
-                  {nameOf(live)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => toggle(p)}
-                  aria-label={t('filter.removePerson', { name: nameOf(live) })}
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full opacity-70 hover:bg-[var(--color-hover)] hover:opacity-100"
-                >
-                  <CloseIcon size={10} />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {row.people.length > 0 && (
-        <div className="mt-2.5 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setPicking((v) => !v)}
-            aria-expanded={listOpen}
-            className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-footnote font-medium text-[var(--color-accent-ink)] hover:bg-[var(--color-hover)]"
-          >
-            <PlusIcon size={13} />
-            {t('filter.choosePeople')}
-          </button>
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-2.5 pl-1">
+          <span className="text-footnote tabular-nums text-[var(--color-text-secondary)]">
+            {t('filter.chosenCount', { count: row.people.length })}
+          </span>
           <div className="segmented-control" role="radiogroup" aria-label={t('filter.opLabel')}>
             {([false, true] as const).map((ex) => (
               // biome-ignore lint/a11y/useSemanticElements: the segmented control styles buttons, not radio inputs
@@ -366,28 +396,6 @@ function ConditionCard({
           </div>
         </div>
       )}
-
-      {listOpen && (
-        <div className="mt-2.5 border-t border-[var(--color-border)] pt-2">
-          {candidates.people.length >= SEARCHABLE_FROM && (
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('filter.searchPeople')}
-              aria-label={t('filter.searchPeople')}
-              className="input-modern mb-1.5 h-9 w-full px-3 text-default"
-            />
-          )}
-          <CandidateList
-            candidates={candidates}
-            listed={listed}
-            chosen={chosen}
-            nameOf={nameOf}
-            onToggle={toggle}
-          />
-        </div>
-      )}
     </section>
   );
 }
@@ -396,12 +404,14 @@ function CandidateList({
   candidates,
   listed,
   chosen,
+  muted,
   nameOf,
   onToggle,
 }: {
   candidates: ReturnType<typeof useCandidates>;
   listed: FilterPerson[];
   chosen: Set<string>;
+  muted: boolean;
   nameOf: (p: FilterPerson) => string;
   onToggle: (p: FilterPerson) => void;
 }) {
@@ -439,8 +449,12 @@ function CandidateList({
                 on ? 'bg-[var(--color-accent-bg)]' : 'hover:bg-[var(--color-hover)]'
               }`}
             >
-              <PersonAvatar person={p} size="h-8 w-8" />
-              <span className="min-w-0 flex-1 truncate text-default text-[var(--color-text-primary)]">
+              <PersonAvatar person={p} size="h-8 w-8" muted={on && muted} />
+              <span
+                className={`min-w-0 flex-1 truncate text-default text-[var(--color-text-primary)] ${
+                  on && muted ? 'line-through decoration-1 opacity-70' : ''
+                }`}
+              >
                 {nameOf(p)}
               </span>
               <span
@@ -462,10 +476,10 @@ function CandidateList({
 }
 
 /**
- * A person as the calendar draws them: their picture inside a ring of their
- * layer colour, so a chosen name reads as the colour it brings to the grid.
+ * A person in their layer colour. A photo would hide that colour, so a photo
+ * sits inside a ring of it.
  */
-export function PersonAvatar({
+function PersonAvatar({
   person,
   size,
   muted = false,
@@ -474,10 +488,13 @@ export function PersonAvatar({
   size: string;
   muted?: boolean;
 }) {
+  const ringed = Boolean(person.avatarUrl);
   return (
     <span
-      className={`${size} relative flex shrink-0 items-center justify-center rounded-full p-[2px] transition-opacity ${muted ? 'opacity-60' : ''}`}
-      style={{ background: person.color ?? 'var(--color-border-strong)' }}
+      className={`${size} relative flex shrink-0 items-center justify-center rounded-full transition-opacity ${
+        ringed ? 'p-[2px]' : ''
+      } ${muted ? 'opacity-50' : ''}`}
+      style={ringed ? { background: person.color ?? 'var(--color-border-strong)' } : undefined}
     >
       <Avatar
         src={person.avatarUrl}
@@ -485,7 +502,7 @@ export function PersonAvatar({
         color={person.avatarUrl ? undefined : person.color}
         round
         size="h-full w-full"
-        className="text-micro ring-2 ring-[var(--color-surface)]"
+        className={`text-micro ${ringed ? 'ring-2 ring-[var(--color-surface)]' : ''}`}
       />
     </span>
   );
@@ -526,7 +543,7 @@ function PlusIcon({ size = 15 }: { size?: number }) {
   );
 }
 
-export function CloseIcon({ size }: { size: number }) {
+function CloseIcon({ size }: { size: number }) {
   return (
     <svg
       width={size}

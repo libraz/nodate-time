@@ -47,7 +47,7 @@ afterEach(() => {
 describe('EventFilterBar', () => {
   it('is absent while nothing is filtered', () => {
     render(<EventFilterBar />);
-    expect(screen.queryByText('Filtered')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
   });
 
   it('summarises the first condition with live names and counts the rest', () => {
@@ -57,7 +57,6 @@ describe('EventFilterBar', () => {
       membersMap: { 'cal-1': [{ id: 'a', name: 'Aiko', color: '#e11', role: 'editor' } as Member] },
     });
     render(<EventFilterBar />);
-    expect(screen.getByText('Filtered')).toBeInTheDocument();
     expect(screen.getByText(/Whose: Aiko, Me/)).toBeInTheDocument();
     expect(screen.getByText('+1 more')).toBeInTheDocument();
   });
@@ -75,6 +74,6 @@ describe('EventFilterBar', () => {
     render(<EventFilterBar />);
     await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(useCalendarStore.getState().eventFilter).toEqual(EMPTY_FILTER);
-    expect(screen.queryByText('Filtered')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
   });
 });

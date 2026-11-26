@@ -100,6 +100,20 @@ describe('EventFilterPanel', () => {
     expect(useCalendarStore.getState().eventFilter.conditions).toHaveLength(2);
   });
 
+  it('edits one condition at a time and keeps the others as a line', async () => {
+    const { user, dialog } = await openPanel();
+    await user.click(within(dialog).getByRole('button', { name: 'Aiko' }));
+    await user.click(within(dialog).getByRole('button', { name: /Add condition/ }));
+
+    const first = within(dialog).getByRole('region', { name: 'Condition 1' });
+    expect(within(first).queryByRole('radiogroup')).toBeNull();
+    await user.click(within(first).getByRole('button', { name: /Involves: Aiko/ }));
+
+    const second = within(dialog).getByRole('region', { name: 'Condition 2' });
+    expect(within(second).getByRole('button', { name: /Involves: nobody yet/ })).toBeTruthy();
+    expect(within(first).getByRole('radiogroup', { name: 'Filter by' })).toBeTruthy();
+  });
+
   it('clears everything in one step', async () => {
     const { user, dialog } = await openPanel();
     await user.click(within(dialog).getByRole('button', { name: 'Aiko' }));
