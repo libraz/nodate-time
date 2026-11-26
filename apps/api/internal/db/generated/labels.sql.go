@@ -14,8 +14,8 @@ const countCalendarLabels = `-- name: CountCalendarLabels :one
 SELECT COUNT(*) FROM calendar_labels WHERE calendar_id = ?
 `
 
-// CountCalendarLabels is read under the calendar's manage lock by the write
-// that would add to it.
+// CountCalendarLabels is read under the calendar row's exclusive lock by the
+// write that would add to it.
 func (q *Queries) CountCalendarLabels(ctx context.Context, calendarID uint32) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countCalendarLabels, calendarID)
 	var count int64

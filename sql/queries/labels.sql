@@ -5,8 +5,8 @@ SELECT * FROM calendar_labels
 WHERE calendar_id = ?
 ORDER BY id;
 
--- CountCalendarLabels is read under the calendar's manage lock by the write
--- that would add to it.
+-- CountCalendarLabels is read under the calendar row's exclusive lock by the
+-- write that would add to it.
 -- name: CountCalendarLabels :one
 SELECT COUNT(*) FROM calendar_labels WHERE calendar_id = ?;
 

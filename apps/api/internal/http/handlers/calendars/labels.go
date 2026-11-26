@@ -148,6 +148,11 @@ func CreateLabel(deps Deps) func(context.Context, *CreateLabelInput) (*CreateLab
 
 		var created generated.CalendarLabel
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
+			// Each manager holds only their own membership row, so the cap is
+			// counted under the calendar row: two managers cannot both find room.
+			if err := calresolve.LockExclusive(ctx, q, cal.ID); err != nil {
+				return err
+			}
 			if _, err := calresolve.LockManage(ctx, q, cal.ID, userID); err != nil {
 				return err
 			}
