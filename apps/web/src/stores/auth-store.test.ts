@@ -57,6 +57,7 @@ const sampleUser = {
   email: 'alice@example.com',
   locale: 'ja',
   timezone: 'Asia/Tokyo',
+  weekStart: 'sun' as const,
   hasPassword: true,
 };
 

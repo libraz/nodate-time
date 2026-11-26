@@ -30,6 +30,7 @@ const alice = {
   email: 'a@x.test',
   locale: 'ja',
   timezone: 'Asia/Tokyo',
+  weekStart: 'sun' as const,
   hasPassword: true,
 };
 const bob = {

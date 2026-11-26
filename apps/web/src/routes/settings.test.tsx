@@ -84,6 +84,7 @@ vi.mock('@/stores/calendar-store', () => ({
 const authState = {
   user: { id: 'u1', name: 'Me', email: 'me@example.com', locale: 'ja', timezone: 'Asia/Tokyo' },
   isAuthenticated: true,
+  saveAccountPreference: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock('@/stores/auth-store', () => ({
@@ -94,7 +95,7 @@ const uiState = {
   locale: 'ja',
   theme: 'light',
   colorMode: 'light',
-  weekStart: 0,
+  weekStart: 'sun',
   timezone: 'Asia/Tokyo',
   holidaysCountry: 'JP' as string | null,
   setTheme: vi.fn(),
@@ -745,6 +746,25 @@ describe('AppearanceSection holidays', () => {
     // jsdom reports en-US, so anything but the old hardcoded 'JP' is the point.
     expect(uiState.setHolidaysCountry).toHaveBeenCalledWith('US');
     uiState.holidaysCountry = 'JP';
+  });
+});
+
+describe('AppearanceSection week start', () => {
+  it('offers Monday, Sunday and Saturday', () => {
+    render(<AppearanceSection />);
+    const group = screen.getByRole('group', { name: 'settings.weekStart' });
+    expect(
+      within(group)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['settings.monday', 'settings.sunday', 'settings.saturday']);
+  });
+
+  it('saves the chosen start to the account', () => {
+    render(<AppearanceSection />);
+    const group = screen.getByRole('group', { name: 'settings.weekStart' });
+    fireEvent.click(within(group).getByRole('button', { name: 'settings.saturday' }));
+    expect(authState.saveAccountPreference).toHaveBeenCalledWith({ weekStart: 'sat' });
   });
 });
 

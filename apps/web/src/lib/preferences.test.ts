@@ -19,6 +19,14 @@ describe('accountPreferences', () => {
     expect(accountPreferences({ timezone: 'Mars/Olympus_Mons' })).toEqual({});
   });
 
+  it('reads a week start the account stores', () => {
+    expect(accountPreferences({ weekStart: 'sat' })).toEqual({ weekStart: 'sat' });
+  });
+
+  it.each(['', 'MON', 'tue', '1'])('drops the week start %j', (weekStart) => {
+    expect(accountPreferences({ weekStart })).toEqual({});
+  });
+
   it('reports nothing for an account that stores nothing', () => {
     expect(accountPreferences({})).toEqual({});
   });

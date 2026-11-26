@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { getT, type Locale } from '@/i18n';
 import type { components } from '@/lib/api-schema';
 import { ApiError, client, createApiClient, endSession, errorMessage, present } from '@/lib/client';
+import type { WeekStart } from '@/lib/date-utils';
 import { resizeImageForAvatar } from '@/lib/image-resize';
 import { accountPreferences, detectLocale, detectTimezone } from '@/lib/preferences';
 import { hasToken, isSessionStorageEvent, SESSION_EXPIRED_EVENT, setToken } from '@/lib/session';
@@ -17,6 +18,7 @@ interface User {
   avatarUrl?: string;
   locale: string;
   timezone: string;
+  weekStart: WeekStart;
   /** Reflects a live instance-admin grant, not a flag on the account. */
   isAdmin?: boolean;
   /**
@@ -59,7 +61,11 @@ interface AuthState {
    * a language or timezone chosen on one device is meant to be waiting on the
    * next one, and the UI store has no idea who is signed in.
    */
-  saveAccountPreference: (prefs: { locale?: Locale; timezone?: string }) => Promise<void>;
+  saveAccountPreference: (prefs: {
+    locale?: Locale;
+    timezone?: string;
+    weekStart?: WeekStart;
+  }) => Promise<void>;
   uploadAvatar: (file: File) => Promise<void>;
   removeAvatar: () => Promise<void>;
   clearError: () => void;

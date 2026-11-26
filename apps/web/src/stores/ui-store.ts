@@ -1,7 +1,7 @@
 import type { DateTime } from 'luxon';
 import { create } from 'zustand';
 import type { Locale } from '@/i18n';
-import { nowInZone } from '@/lib/date-utils';
+import { isWeekStart, nowInZone, type WeekStart } from '@/lib/date-utils';
 import { detectHolidayCountry } from '@/lib/holidays';
 import type { AccountPreferences } from '@/lib/preferences';
 import { detectTimezone } from '@/lib/preferences';
@@ -58,6 +58,7 @@ interface UiState {
   colorMode: ColorMode;
   locale: Locale;
   timezone: string;
+  weekStart: WeekStart;
   holidaysCountry: string | null;
 
   setCalendarView: (view: CalendarView) => void;
@@ -111,6 +112,8 @@ function openingDates(zone: string): { selectedDate: DateTime; currentMonth: Dat
   return { selectedDate: today, currentMonth: today.startOf('month') };
 }
 
+const storedWeekStart = loadJson<unknown>('weekStart', 'sun');
+const initialWeekStart: WeekStart = isWeekStart(storedWeekStart) ? storedWeekStart : 'sun';
 const initialTimezone = loadJson<string>('timezone', detectTimezone());
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -137,6 +140,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   colorMode: loadJson<ColorMode>('colorMode', 'system'),
   locale: loadJson<Locale>('locale', 'ja'),
   timezone: initialTimezone,
+  weekStart: initialWeekStart,
   holidaysCountry: loadJson<string | null>('holidaysCountry', detectHolidayCountry()),
 
   setCalendarView: (view) => set({ calendarView: view }),
@@ -256,6 +260,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (prefs.locale) {
       saveJson('locale', prefs.locale);
       set({ locale: prefs.locale });
+    }
+    if (prefs.weekStart) {
+      saveJson('weekStart', prefs.weekStart);
+      set({ weekStart: prefs.weekStart });
     }
     if (prefs.timezone) {
       saveJson('timezone', prefs.timezone);

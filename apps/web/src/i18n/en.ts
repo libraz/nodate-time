@@ -302,6 +302,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.weekStart': 'Week starts on',
   'settings.sunday': 'Sunday',
   'settings.monday': 'Monday',
+  'settings.saturday': 'Saturday',
   'settings.appearance': 'Appearance',
   'settings.openAll': 'All settings',
   'settings.theme': 'Theme',

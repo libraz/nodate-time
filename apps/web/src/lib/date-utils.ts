@@ -157,3 +157,31 @@ export function formatYear(date: DateTime, locale: Locale = 'ja'): string {
 export function jsDayOfWeek(dt: DateTime): number {
   return dt.weekday % 7;
 }
+
+/** First day of the week, as stored on the account and sent over the wire. */
+export type WeekStart = 'mon' | 'sun' | 'sat';
+
+export function isWeekStart(v: unknown): v is WeekStart {
+  return v === 'mon' || v === 'sun' || v === 'sat';
+}
+
+/** Luxon weekday (1 = Monday .. 7 = Sunday) the week starts on. */
+export function weekStartWeekday(ws: WeekStart): number {
+  return ws === 'mon' ? 1 : ws === 'sat' ? 6 : 7;
+}
+
+/** Zero-based column of `dt` in a week that starts on `ws`. */
+export function columnOf(dt: DateTime, ws: WeekStart): number {
+  return (dt.weekday - weekStartWeekday(ws) + 7) % 7;
+}
+
+/** Sunday-first weekday indexes (as `getWeekdayLabel` takes) in header order for `ws`. */
+export function weekdayOrder(ws: WeekStart): number[] {
+  const first = weekStartWeekday(ws) % 7;
+  return Array.from({ length: 7 }, (_, i) => (first + i) % 7);
+}
+
+/** Midnight of the first day of the week containing `dt`. */
+export function startOfWeekFor(dt: DateTime, ws: WeekStart): DateTime {
+  return dt.startOf('day').minus({ days: columnOf(dt, ws) });
+}

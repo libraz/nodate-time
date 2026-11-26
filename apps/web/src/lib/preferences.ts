@@ -1,4 +1,5 @@
 import type { Locale } from '@/i18n';
+import { isWeekStart, type WeekStart } from '@/lib/date-utils';
 
 /** The locales this application is translated into. */
 const SUPPORTED_LOCALES: Locale[] = ['ja', 'en'];
@@ -33,6 +34,7 @@ export function detectLocale(): Locale {
 export interface AccountPreferences {
   locale?: Locale;
   timezone?: string;
+  weekStart?: WeekStart;
 }
 
 /**
@@ -43,11 +45,13 @@ export interface AccountPreferences {
 export function accountPreferences(user: {
   locale?: string;
   timezone?: string;
+  weekStart?: string;
 }): AccountPreferences {
   const prefs: AccountPreferences = {};
   const locale = SUPPORTED_LOCALES.find((l) => l === user.locale);
   if (locale) prefs.locale = locale;
   if (user.timezone && isKnownTimezone(user.timezone)) prefs.timezone = user.timezone;
+  if (isWeekStart(user.weekStart)) prefs.weekStart = user.weekStart;
   return prefs;
 }
 

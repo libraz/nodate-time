@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { detectHolidayCountry } from '@/lib/holidays';
 import { useUiStore } from './ui-store';
 
@@ -208,5 +208,37 @@ describe('persisted preferences', () => {
     // picked for one country's users rather than derived.
     expect(useUiStore.getInitialState().holidaysCountry).toBe(detectHolidayCountry());
     expect(useUiStore.getInitialState().holidaysCountry).toBe('US');
+  });
+});
+
+describe('weekStart', () => {
+  it('starts on Sunday when nothing is stored', () => {
+    expect(useUiStore.getInitialState().weekStart).toBe('sun');
+  });
+
+  it('adopts and persists an account week start', () => {
+    useUiStore.getState().adoptAccountPreferences({ weekStart: 'mon' });
+    expect(useUiStore.getState().weekStart).toBe('mon');
+    expect(localStorage.getItem('tt_weekStart')).toBe('"mon"');
+  });
+
+  it('leaves the week start alone when the preferences carry none', () => {
+    useUiStore.setState({ weekStart: 'sat' });
+    useUiStore.getState().adoptAccountPreferences({ locale: 'en' });
+    expect(useUiStore.getState().weekStart).toBe('sat');
+  });
+
+  it('reads a stored week start on load', async () => {
+    localStorage.setItem('tt_weekStart', '"sat"');
+    vi.resetModules();
+    const { useUiStore: fresh } = await import('./ui-store');
+    expect(fresh.getState().weekStart).toBe('sat');
+  });
+
+  it.each(['"tue"', '"MON"', '1', 'null', '{bad'])('ignores the stored value %s', async (raw) => {
+    localStorage.setItem('tt_weekStart', raw);
+    vi.resetModules();
+    const { useUiStore: fresh } = await import('./ui-store');
+    expect(fresh.getState().weekStart).toBe('sun');
   });
 });

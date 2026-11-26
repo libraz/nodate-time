@@ -1,6 +1,7 @@
 import { DateTime, Settings } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  columnOf,
   fetchWindow,
   formatMonthYear,
   formatRelativeTime,
@@ -11,8 +12,13 @@ import {
   getWeekdayLabel,
   gridRange,
   isToday,
+  isWeekStart,
   jsDayOfWeek,
   nowInZone,
+  startOfWeekFor,
+  type WeekStart,
+  weekdayOrder,
+  weekStartWeekday,
 } from './date-utils';
 
 describe('getMonthDays', () => {
@@ -234,5 +240,115 @@ describe('fetchWindow', () => {
       .plus({ days: 1 })
       .diff(DateTime.fromISO(start, { zone: 'UTC' }), 'days').days;
     expect(days).toBe(366);
+  });
+});
+
+describe('isWeekStart', () => {
+  it('accepts exactly the three starts', () => {
+    expect(['mon', 'sun', 'sat'].every(isWeekStart)).toBe(true);
+  });
+
+  it.each([['MON'], ['tue'], [''], [0], [1], [null], [undefined]])('rejects %s', (v) => {
+    expect(isWeekStart(v)).toBe(false);
+  });
+});
+
+describe('weekStartWeekday', () => {
+  it('maps each start to its Luxon weekday', () => {
+    expect(weekStartWeekday('mon')).toBe(1);
+    expect(weekStartWeekday('sat')).toBe(6);
+    expect(weekStartWeekday('sun')).toBe(7);
+  });
+});
+
+describe('weekdayOrder', () => {
+  it('lists Sunday-first label indexes from the week start', () => {
+    expect(weekdayOrder('sun')).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(weekdayOrder('mon')).toEqual([1, 2, 3, 4, 5, 6, 0]);
+    expect(weekdayOrder('sat')).toEqual([6, 0, 1, 2, 3, 4, 5]);
+  });
+});
+
+/*
+ * Pairwise model (coverwise, strength 2, 23 rows, seed 1):
+ *   weekStart:    mon | sun | sat
+ *   firstWeekday: mon | tue | wed | thu | fri | sat | sun   (weekday the month starts on)
+ *   monthLength:  28 | 30 | 31
+ * A month is anchored on a Monday (2026-06-01) shifted to the row's weekday; the
+ * functions are pure on the date, so only the weekday and the length matter.
+ */
+describe('columnOf / startOfWeekFor over week start x first weekday x month length', () => {
+  const MONDAY = DateTime.fromISO('2026-06-01', { zone: 'utc' });
+  const OFFSET: Record<string, number> = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
+  const JS_INDEX: Record<string, number> = {
+    mon: 1,
+    tue: 2,
+    wed: 3,
+    thu: 4,
+    fri: 5,
+    sat: 6,
+    sun: 0,
+  };
+  const ROWS: [WeekStart, string, number][] = [
+    ['mon', 'wed', 28],
+    ['sun', 'wed', 31],
+    ['sat', 'fri', 28],
+    ['sat', 'sun', 31],
+    ['sun', 'sun', 30],
+    ['sun', 'fri', 28],
+    ['mon', 'sat', 31],
+    ['sun', 'tue', 31],
+    ['mon', 'mon', 30],
+    ['sun', 'mon', 31],
+    ['sun', 'thu', 30],
+    ['mon', 'fri', 30],
+    ['mon', 'thu', 31],
+    ['sun', 'sat', 28],
+    ['sun', 'fri', 31],
+    ['mon', 'sun', 28],
+    ['sat', 'tue', 30],
+    ['sat', 'mon', 28],
+    ['mon', 'tue', 28],
+    ['sat', 'thu', 28],
+    ['sat', 'wed', 30],
+    ['sat', 'sat', 31],
+    ['sat', 'sat', 30],
+  ];
+
+  it.each(ROWS)('%s start, month starting %s, %i days', (ws, firstWeekday, length) => {
+    const first = MONDAY.plus({ days: OFFSET[firstWeekday] });
+    const last = first.plus({ days: length - 1 });
+
+    // The column is where the weekday sits in the header order.
+    const col = columnOf(first, ws);
+    expect(col).toBe(weekdayOrder(ws).indexOf(JS_INDEX[firstWeekday] as number));
+
+    // The week's first day is the start weekday, no more than six days back.
+    const weekStart = startOfWeekFor(first, ws);
+    expect(weekStart.weekday).toBe(weekStartWeekday(ws));
+    expect(first.diff(weekStart, 'days').days).toBe(col);
+    expect(col).toBeGreaterThanOrEqual(0);
+    expect(col).toBeLessThanOrEqual(6);
+
+    // Leading blanks plus the month fill whole rows.
+    const rows = Math.ceil((col + length) / 7);
+    const gridStart = startOfWeekFor(first, ws);
+    const lastRowStart = startOfWeekFor(last, ws);
+    expect(Math.round(lastRowStart.diff(gridStart, 'days').days / 7) + 1).toBe(rows);
+  });
+
+  it('is its own start for a date that already begins the week', () => {
+    const sunday = DateTime.fromISO('2026-06-07', { zone: 'utc' });
+    expect(columnOf(sunday, 'sun')).toBe(0);
+    expect(columnOf(sunday, 'mon')).toBe(6);
+    expect(columnOf(sunday, 'sat')).toBe(1);
+    expect(startOfWeekFor(sunday, 'sun').toISODate()).toBe('2026-06-07');
+    expect(startOfWeekFor(sunday, 'mon').toISODate()).toBe('2026-06-01');
+    expect(startOfWeekFor(sunday, 'sat').toISODate()).toBe('2026-06-06');
+  });
+
+  it('drops the time of day', () => {
+    const noon = DateTime.fromISO('2026-06-10T15:30:00', { zone: 'utc' });
+    expect(startOfWeekFor(noon, 'mon').toISO()).toBe('2026-06-08T00:00:00.000Z');
   });
 });

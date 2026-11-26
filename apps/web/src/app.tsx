@@ -207,6 +207,7 @@ function MobileSettingsView() {
   const theme = useUiStore((s) => s.theme);
   const colorMode = useUiStore((s) => s.colorMode);
   const locale = useUiStore((s) => s.locale);
+  const weekStart = useUiStore((s) => s.weekStart);
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
   const saveAccountPreference = useAuthStore((s) => s.saveAccountPreference);
@@ -275,6 +276,35 @@ function MobileSettingsView() {
               className="flex-1"
             >
               {v === 'ja' ? '\u65E5\u672C\u8A9E' : 'English'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <span className="mb-2 block text-body text-[var(--color-text-primary)]">
+          {t('settings.weekStart')}
+        </span>
+        <div className="segmented-control w-full">
+          {(
+            [
+              { value: 'mon', label: t('settings.monday') },
+              { value: 'sun', label: t('settings.sunday') },
+              { value: 'sat', label: t('settings.saturday') },
+            ] as const
+          ).map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              data-active={weekStart === o.value}
+              onClick={() => {
+                saveAccountPreference({ weekStart: o.value }).catch((e) =>
+                  toast.error(errorMessage(e)),
+                );
+              }}
+              className="flex-1"
+            >
+              {o.label}
             </button>
           ))}
         </div>

@@ -20,6 +20,7 @@ import {
   filenameFromDisposition,
   isAbortError,
 } from '@/lib/client';
+import type { WeekStart } from '@/lib/date-utils';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
 import { canManage } from '@/lib/permissions';
@@ -781,6 +782,7 @@ export function AppearanceSection() {
   const colorMode = useUiStore((s) => s.colorMode);
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
+  const weekStart = useUiStore((s) => s.weekStart);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const setTheme = useUiStore((s) => s.setTheme);
   const setColorMode = useUiStore((s) => s.setColorMode);
@@ -795,7 +797,7 @@ export function AppearanceSection() {
   // Language and timezone belong to the account: they decide what every date
   // on screen says, and a person reading the same calendar on a phone and a
   // laptop is entitled to the same answer on both.
-  const savePreference = (prefs: { locale?: Locale; timezone?: string }) => {
+  const savePreference = (prefs: { locale?: Locale; timezone?: string; weekStart?: WeekStart }) => {
     saveAccountPreference(prefs).catch((e) => toast.error(errorMessage(e)));
   };
 
@@ -830,6 +832,18 @@ export function AppearanceSection() {
             options={[
               { value: 'ja', label: '日本語' },
               { value: 'en', label: 'English' },
+            ]}
+          />
+        </FieldRow>
+        <FieldRow label={t('settings.weekStart')}>
+          <SegmentedControl
+            ariaLabel={t('settings.weekStart')}
+            value={weekStart}
+            onChange={(next) => savePreference({ weekStart: next })}
+            options={[
+              { value: 'mon', label: t('settings.monday') },
+              { value: 'sun', label: t('settings.sunday') },
+              { value: 'sat', label: t('settings.saturday') },
             ]}
           />
         </FieldRow>

@@ -309,6 +309,7 @@ export const ja = {
   'settings.weekStart': '週の開始日',
   'settings.sunday': '日曜日',
   'settings.monday': '月曜日',
+  'settings.saturday': '土曜日',
   'settings.appearance': '外観',
   'settings.openAll': 'すべての設定',
   'settings.theme': 'テーマ',
