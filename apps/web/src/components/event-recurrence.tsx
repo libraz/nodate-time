@@ -2,13 +2,14 @@ import { DateTime } from 'luxon';
 import { CustomSelect } from '@/components/custom-select';
 import { DateTimeField } from '@/components/date-time-fields';
 import { type Locale, type TranslationKey, useT } from '@/i18n';
-import { getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { getWeekdayLabel, jsDayOfWeek, weekdayOrder } from '@/lib/date-utils';
 import {
   getNthWeekday,
+  presetToRule,
   rebuildPresetRule,
   ruleToPreset,
-  UI_WEEK_START,
   WEEKDAY_CODES,
+  wkstFor,
 } from '@/lib/recurrence-preset';
 import { useUiStore } from '@/stores/ui-store';
 import type { RecurrencePreset, RecurrenceRule } from '@/types/calendar';
@@ -113,6 +114,7 @@ export function RecurrenceEditor({
 }: RecurrenceEditorProps) {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
+  const weekStart = useUiStore((s) => s.weekStart);
   return (
     <>
       {/* Recurrence */}
@@ -156,7 +158,9 @@ export function RecurrenceEditor({
             onChange((f) => ({
               ...f,
               preset: next,
-              rule: rebuildPresetRule(next, start, f.rule),
+              rule: f.rule
+                ? rebuildPresetRule(next, start, f.rule)
+                : presetToRule(next, start, weekStart),
             }));
           }}
         />
@@ -205,7 +209,7 @@ export function RecurrenceEditor({
                     const base: RecurrenceRule = { ...kept, freq };
                     if (freq === 'weekly') {
                       base.byDay = [dayCode];
-                      base.wkst = UI_WEEK_START;
+                      base.wkst = wkstFor(weekStart);
                     }
                     if (freq === 'monthly') base.byMonthDay = [start.day];
                     return { ...f, rule: base };
@@ -222,7 +226,8 @@ export function RecurrenceEditor({
                 {t('event.recurrenceWeekdaysLabel')}
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {WEEKDAY_CODES.map((code, idx) => {
+                {weekdayOrder(weekStart).map((idx) => {
+                  const code = WEEKDAY_CODES[idx] ?? 'SU';
                   const selected = rule?.byDay?.includes(code) ?? false;
                   return (
                     <button

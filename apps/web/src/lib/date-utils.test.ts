@@ -24,7 +24,7 @@ import {
 describe('getMonthDays', () => {
   it('starts the grid on Sunday and covers the whole month', () => {
     // April 2026: 1st is a Wednesday
-    const days = getMonthDays(2026, 3);
+    const days = getMonthDays(2026, 3, 'sun');
     const first = days[0];
     expect((first?.weekday ?? 0) % 7).toBe(0); // Sunday
     // First cell is the Sunday before/at April 1
@@ -35,20 +35,69 @@ describe('getMonthDays', () => {
 
   it('returns 35 cells when the month fits in 5 weeks', () => {
     // February 2026 starts on Sunday and has 28 days -> exactly 4 weeks, padded to 35
-    const days = getMonthDays(2026, 1);
+    const days = getMonthDays(2026, 1, 'sun');
     expect(days.length).toBe(35);
   });
 
   it('returns 42 cells when the month needs 6 weeks', () => {
     // August 2026: 1st is a Saturday, 31 days -> needs 6 weeks
-    const days = getMonthDays(2026, 7);
+    const days = getMonthDays(2026, 7, 'sun');
     expect(days.length).toBe(42);
+  });
+});
+
+// Model: weekStart (mon | sun | sat) x weekday of the 1st (Sun..Sat) x month
+// length (28 | 29 | 30 | 31), chosen so every pair of values appears and both
+// sides of the 5-vs-6-row threshold are hit.
+describe('getMonthDays by week start', () => {
+  it.each([
+    // [label, ws, year, month0, first cell, cells]
+    ['Apr 2026 (Wed, 30)', 'mon', 2026, 3, '2026-03-30', 35],
+    ['Apr 2026 (Wed, 30)', 'sun', 2026, 3, '2026-03-29', 35],
+    ['Apr 2026 (Wed, 30)', 'sat', 2026, 3, '2026-03-28', 35],
+    ['Aug 2026 (Sat, 31)', 'mon', 2026, 7, '2026-07-27', 42],
+    ['Aug 2026 (Sat, 31)', 'sun', 2026, 7, '2026-07-26', 42],
+    ['Aug 2026 (Sat, 31)', 'sat', 2026, 7, '2026-08-01', 35],
+    ['Feb 2026 (Sun, 28)', 'mon', 2026, 1, '2026-01-26', 35],
+    ['Feb 2026 (Sun, 28)', 'sun', 2026, 1, '2026-02-01', 35],
+    ['Feb 2026 (Sun, 28)', 'sat', 2026, 1, '2026-01-31', 35],
+    ['Mar 2026 (Sun, 31)', 'mon', 2026, 2, '2026-02-23', 42],
+    ['Mar 2026 (Sun, 31)', 'sun', 2026, 2, '2026-03-01', 35],
+    ['Jun 2026 (Mon, 30)', 'mon', 2026, 5, '2026-06-01', 35],
+    ['Jun 2026 (Mon, 30)', 'sun', 2026, 5, '2026-05-31', 35],
+    ['Jun 2026 (Mon, 30)', 'sat', 2026, 5, '2026-05-30', 35],
+    ['Jan 2026 (Thu, 31)', 'mon', 2026, 0, '2025-12-29', 35],
+    ['Jan 2026 (Thu, 31)', 'sun', 2026, 0, '2025-12-28', 35],
+    ['Jan 2026 (Thu, 31)', 'sat', 2026, 0, '2025-12-27', 42],
+    ['Feb 2028 (Tue, 29)', 'mon', 2028, 1, '2028-01-31', 35],
+    ['Feb 2028 (Tue, 29)', 'sat', 2028, 1, '2028-01-29', 35],
+  ] as const)('%s, %s start', (_label, ws, year, month, first, cells) => {
+    const days = getMonthDays(year, month, ws);
+    expect(days[0]?.toISODate()).toBe(first);
+    expect(days).toHaveLength(cells);
+    for (const [i, day] of days.entries()) expect(columnOf(day, ws)).toBe(i % 7);
+  });
+});
+
+describe('getWeekDays by week start', () => {
+  it.each([
+    ['mon', '2026-04-22', '2026-04-20', '2026-04-26'],
+    ['sun', '2026-04-22', '2026-04-19', '2026-04-25'],
+    ['sat', '2026-04-22', '2026-04-18', '2026-04-24'],
+    // The start day itself opens its own week; the day before closes the last.
+    ['sat', '2026-04-25', '2026-04-25', '2026-05-01'],
+    ['mon', '2026-04-19', '2026-04-13', '2026-04-19'],
+  ] as const)('%s week around %s runs %s to %s', (ws, date, first, last) => {
+    const week = getWeekDays(DateTime.fromISO(date), ws);
+    expect(week).toHaveLength(7);
+    expect(week[0]?.toISODate()).toBe(first);
+    expect(week[6]?.toISODate()).toBe(last);
   });
 });
 
 describe('getWeekDays', () => {
   it('returns 7 Sunday-aligned days', () => {
-    const week = getWeekDays(DateTime.local(2026, 4, 22)); // Wednesday
+    const week = getWeekDays(DateTime.local(2026, 4, 22), 'sun'); // Wednesday
     expect(week).toHaveLength(7);
     expect(week[0]?.toISODate()).toBe('2026-04-19'); // Sunday
     expect(week[6]?.toISODate()).toBe('2026-04-25'); // Saturday
@@ -192,8 +241,8 @@ describe('gridRange', () => {
     // March. Asking for the month alone leaves them permanently blank, which
     // reads as an empty day rather than one nobody asked about.
     const month = DateTime.fromISO('2026-04-01T00:00:00', { zone: 'Asia/Tokyo' });
-    const { start, end } = gridRange(month, 'Asia/Tokyo');
-    const days = getMonthDays(2026, 3, 'Asia/Tokyo');
+    const { start, end } = gridRange(month, 'sun', 'Asia/Tokyo');
+    const days = getMonthDays(2026, 3, 'sun', 'Asia/Tokyo');
 
     expect(start).toBe(days[0]?.toISODate());
     expect(end).toBe(days[days.length - 1]?.toISODate());
@@ -203,7 +252,7 @@ describe('gridRange', () => {
 
   it('spans a whole grid for a month that starts on a Sunday', () => {
     const month = DateTime.fromISO('2026-03-01T00:00:00', { zone: 'UTC' });
-    const { start, end } = gridRange(month, 'UTC');
+    const { start, end } = gridRange(month, 'sun', 'UTC');
     expect(start).toBe('2026-03-01');
     expect(DateTime.fromISO(end).diff(DateTime.fromISO(start), 'days').days).toBeGreaterThan(27);
   });

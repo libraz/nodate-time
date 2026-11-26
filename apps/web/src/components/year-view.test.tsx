@@ -1,12 +1,14 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WeekStart } from '@/lib/date-utils';
 import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
 const uiState = {
   locale: 'ja',
+  weekStart: 'sun' as WeekStart,
   // A year that is not the current one: the fixture stays valid, and the view
   // has to load holidays for the years it draws rather than for "now".
   currentMonth: DateTime.local(2025, 6, 1),
@@ -78,6 +80,57 @@ describe('YearView holidays', () => {
     // cell of May (May 1 is a Thursday, so the grid starts on Apr 27).
     const may = () => dayCells(container, 4);
     await waitFor(() => expect(colorOf(may()[9])).toBe('var(--color-sunday)'));
+  });
+});
+
+describe('YearView week start', () => {
+  afterEach(() => {
+    uiState.weekStart = 'sun';
+  });
+
+  /** Header letters and colours of the nth month card. */
+  function header(container: HTMLElement, monthIndex: number) {
+    const row = container.querySelectorAll('.year-card')[monthIndex]?.children[1];
+    return Array.from(row?.children ?? []).map((el) => ({
+      text: el.textContent,
+      color: colorOf(el),
+    }));
+  }
+
+  it('opens the header on Monday and keeps Sunday red in the last column', () => {
+    uiState.weekStart = 'mon';
+    const { container } = render(<YearView />);
+
+    const cols = header(container, 0);
+    expect(cols.map((c) => c.text)).toEqual(['月', '火', '水', '木', '金', '土', '日']);
+    expect(cols[5]?.color).toBe('var(--color-saturday)');
+    expect(cols[6]?.color).toBe('var(--color-sunday)');
+    expect(cols[0]?.color).toBe('');
+  });
+
+  it('opens the header on Saturday', () => {
+    uiState.weekStart = 'sat';
+    const { container } = render(<YearView />);
+
+    expect(header(container, 0).map((c) => c.text)).toEqual([
+      '土',
+      '日',
+      '月',
+      '火',
+      '水',
+      '木',
+      '金',
+    ]);
+  });
+
+  it('starts the first row of a month on the chosen day', () => {
+    uiState.weekStart = 'mon';
+    const { container } = render(<YearView />);
+
+    // June 2025 starts on a Sunday, so a Monday grid opens on 2025-05-26.
+    const cells = dayCells(container, 5);
+    expect(cells[0]?.textContent).toBe('26');
+    expect(cells[6]?.textContent).toBe('1');
   });
 });
 

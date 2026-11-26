@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatSheetDay, PublicDaySheet } from '@/components/public-day-sheet';
 import { useT } from '@/i18n';
 import { client } from '@/lib/client';
-import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
+import { formatMonthYear, getWeekdayLabel, nowInZone, weekdayOrder } from '@/lib/date-utils';
 import {
   type PublicCalendar,
   publishesEvents,
@@ -26,6 +26,7 @@ export function EmbeddedCalendarView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
+  const weekStart = useUiStore((s) => s.weekStart);
   const { token } = Route.useParams();
   const [calendar, setCalendar] = useState<PublicCalendar | null>(null);
   const [failure, setFailure] = useState<ShareFailure | null>(null);
@@ -55,8 +56,8 @@ export function EmbeddedCalendarView() {
     hasMore,
     failure: eventsFailure,
     retry: retryEvents,
-  } = usePublicEvents(token, publishes, currentMonth, timezone);
-  const { weeks, eventsOn } = usePublicMonthGrid(events, currentMonth, timezone);
+  } = usePublicEvents(token, publishes, currentMonth, timezone, weekStart);
+  const { weeks, eventsOn } = usePublicMonthGrid(events, currentMonth, timezone, weekStart);
   const shownFailure = failure ?? (calendar && !publishes ? 'gone' : eventsFailure);
 
   if (shownFailure) {
@@ -156,7 +157,7 @@ export function EmbeddedCalendarView() {
       {/* Grid */}
       <div className="flex-1">
         <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
-          {Array.from({ length: 7 }, (_, i) => {
+          {weekdayOrder(weekStart).map((i) => {
             const label = getWeekdayLabel(i, locale);
             return (
               <div

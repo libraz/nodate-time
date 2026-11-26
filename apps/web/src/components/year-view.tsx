@@ -1,5 +1,12 @@
 import { useMemo } from 'react';
-import { dayInZone, getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
+import {
+  dayInZone,
+  getMonthDays,
+  getWeekdayLabel,
+  isToday,
+  jsDayOfWeek,
+  weekdayOrder,
+} from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useIsEventShown } from '@/lib/use-shown-events';
@@ -11,6 +18,7 @@ export function YearView() {
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
   const timezone = useUiStore((s) => s.timezone);
+  const weekStart = useUiStore((s) => s.weekStart);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
@@ -56,7 +64,7 @@ export function YearView() {
           months then fall into four rows of a quarter each. */}
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4">
         {months.map((m) => {
-          const days = getMonthDays(currentMonth.year, m, timezone);
+          const days = getMonthDays(currentMonth.year, m, weekStart, timezone);
           const monthLabel = dayInZone(currentMonth.year, m + 1, 1, timezone)
             .setLocale(locale)
             .toFormat(locale === 'ja' ? 'M月' : 'MMM');
@@ -86,7 +94,7 @@ export function YearView() {
                 </span>
               </div>
               <div className="grid grid-cols-7 gap-px text-center text-micro font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
-                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                {weekdayOrder(weekStart).map((i) => (
                   <span
                     key={i}
                     style={

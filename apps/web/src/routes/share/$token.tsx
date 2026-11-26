@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatSheetDay, PublicDaySheet } from '@/components/public-day-sheet';
 import { useT } from '@/i18n';
 import { client, errorMessage } from '@/lib/client';
-import { formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
+import { formatMonthYear, getWeekdayLabel, nowInZone, weekdayOrder } from '@/lib/date-utils';
 import {
   type PublicCalendar,
   publishesEvents,
@@ -33,6 +33,7 @@ export function SharedCalendarView() {
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
+  const weekStart = useUiStore((s) => s.weekStart);
   const { token } = Route.useParams();
   const { join } = Route.useSearch();
   const navigate = useNavigate();
@@ -110,9 +111,15 @@ export function SharedCalendarView() {
     hasMore,
     failure: eventsFailure,
     retry: retryEvents,
-  } = usePublicEvents(token, !!calendar && publishesEvents(calendar), currentMonth, timezone);
+  } = usePublicEvents(
+    token,
+    !!calendar && publishesEvents(calendar),
+    currentMonth,
+    timezone,
+    weekStart,
+  );
 
-  const { weeks, eventsOn } = usePublicMonthGrid(events, currentMonth, timezone);
+  const { weeks, eventsOn } = usePublicMonthGrid(events, currentMonth, timezone, weekStart);
 
   // A month whose events did not arrive is not an empty month: it is reported
   // the same way a calendar that did not arrive is.
@@ -254,7 +261,7 @@ export function SharedCalendarView() {
             <div className="flex-1 bg-[var(--color-surface)]">
               {/* Day of week header */}
               <div className="grid grid-cols-7 border-b border-[var(--color-border)]">
-                {Array.from({ length: 7 }, (_, i) => {
+                {weekdayOrder(weekStart).map((i) => {
                   const label = getWeekdayLabel(i, locale);
                   return (
                     <div

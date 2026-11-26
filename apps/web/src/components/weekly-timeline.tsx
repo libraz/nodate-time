@@ -84,6 +84,7 @@ export function WeeklyTimeline() {
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const locale = useUiStore((s) => s.locale);
   const timezone = useUiStore((s) => s.timezone);
+  const ws = useUiStore((s) => s.weekStart);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const events = useCalendarStore((s) => s.events);
@@ -237,7 +238,7 @@ export function WeeklyTimeline() {
   // The one week this view draws: its columns, in the viewer's zone. The
   // fetch window follows currentMonth, so that is re-anchored to this week
   // below rather than left to whichever path led into the view.
-  const days = useMemo(() => getWeekDays(selectedDate, timezone), [selectedDate, timezone]);
+  const days = useMemo(() => getWeekDays(selectedDate, ws, timezone), [selectedDate, ws, timezone]);
 
   useEffect(() => {
     if (selectedDate.year !== currentMonth.year || selectedDate.month !== currentMonth.month) {

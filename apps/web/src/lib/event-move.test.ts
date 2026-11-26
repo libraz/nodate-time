@@ -164,8 +164,27 @@ describe('moveSeriesRule', () => {
       count: 5,
     });
     expect(payload.recurrenceRule).toEqual(
-      rebuildPresetRule('weekly', tuesday, mondayWeekly.recurrenceRule),
+      rebuildPresetRule('weekly', tuesday, {
+        freq: 'weekly',
+        interval: 1,
+        byDay: ['MO'],
+        count: 5,
+      }),
     );
+  });
+
+  it.each(['MO', 'SU'] as const)('keeps the stored %s week start when the series moves', (wkst) => {
+    const stored = makeEvent({
+      isRecurrence: true,
+      recurrenceDate: '20260803',
+      startAt: '2026-08-03T10:00:00+09:00',
+      endAt: '2026-08-03T11:00:00+09:00',
+      recurrenceRule: { freq: 'weekly', interval: 1, byDay: ['MO'], wkst },
+    });
+
+    const payload = moveSeriesRule(stored, buildMovedEvent(stored, tuesday));
+
+    expect(payload.recurrenceRule).toMatchObject({ byDay: ['TU'], interval: 1, wkst });
   });
 
   it('reads the new start in the event zone, not the viewer’s', () => {

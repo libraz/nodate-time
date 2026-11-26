@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WeekStart } from '@/lib/date-utils';
 import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
@@ -26,6 +27,7 @@ const uiState = {
   // No holiday country: the grid then needs no holiday data to render.
   holidaysCountry: null,
   timezone: 'Asia/Tokyo',
+  weekStart: 'sun' as WeekStart,
   openEventModal,
   openDayDetail,
   setSelectedDate: vi.fn(),
@@ -109,6 +111,41 @@ function cellOf(isoDate: string): HTMLElement {
   if (!cell) throw new Error(`no cell for ${isoDate}`);
   return cell;
 }
+
+describe('CalendarGrid week start', () => {
+  afterEach(() => {
+    uiState.weekStart = 'sun';
+  });
+
+  const headerLabels = () =>
+    Array.from(document.querySelector('.grid.shrink-0.grid-cols-7')?.children ?? []).map(
+      (el) => el.textContent,
+    );
+
+  it('heads the columns from Sunday by default', async () => {
+    await renderGrid();
+
+    expect(headerLabels()).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+    // August 2026 starts on a Saturday.
+    expect(document.querySelector('[data-day]')?.getAttribute('data-day')).toBe('2026-07-26');
+  });
+
+  it('heads the columns from Monday and starts the rows there', async () => {
+    uiState.weekStart = 'mon';
+    await renderGrid();
+
+    expect(headerLabels()).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    expect(document.querySelector('[data-day]')?.getAttribute('data-day')).toBe('2026-07-27');
+  });
+
+  it('heads the columns from Saturday and starts the rows there', async () => {
+    uiState.weekStart = 'sat';
+    await renderGrid();
+
+    expect(headerLabels()).toEqual(['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(document.querySelector('[data-day]')?.getAttribute('data-day')).toBe('2026-08-01');
+  });
+});
 
 describe('CalendarGrid day number', () => {
   it('opens the day detail on its own day', async () => {

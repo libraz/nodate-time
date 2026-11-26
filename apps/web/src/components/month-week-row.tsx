@@ -101,7 +101,7 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
 };
 
 export interface MonthWeekRowProps {
-  /** Sunday the row starts on. */
+  /** First day of the row. */
   weekStart: DateTime;
   /** The events touching this week, as grouped by `bucketEventsByWeek`. */
   events: CalendarEvent[];
@@ -148,7 +148,7 @@ function barRadius(continuesLeft: boolean, continuesRight: boolean): string {
 }
 
 /**
- * One Sunday-aligned week of the month view: seven day cells with their
+ * One week of the month view: seven day cells with their
  * single-day chips, the multi-day bars drawn across them, and the drag ghost.
  *
  * Both month surfaces render this. They differ in density and in what a tap

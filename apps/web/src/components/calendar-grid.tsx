@@ -1,7 +1,7 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { MonthWeekRow } from '@/components/month-week-row';
-import { getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
+import { getMonthDays, getWeekdayLabel, weekdayOrder } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -37,6 +37,7 @@ export function CalendarGrid() {
     currentMonth.year + 1,
   ]);
   const timezone = useUiStore((s) => s.timezone);
+  const ws = useUiStore((s) => s.weekStart);
   const openEventModal = useUiStore((s) => s.openEventModal);
   const openDayDetail = useUiStore((s) => s.openDayDetail);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
@@ -96,14 +97,14 @@ export function CalendarGrid() {
     consumeClick,
     consumeDragEnd,
     handleEventPointerDown,
-  } = useMonthDrag({ timezone, requestUpdate });
+  } = useMonthDrag({ timezone, weekStart: ws, requestUpdate });
 
   // The month surface, and only that: the app mounts this for the month view
   // and the weekly timeline for the week. A week branch here was a second
   // implementation of a view this component never renders.
   const days = useMemo(
-    () => getMonthDays(currentMonth.year, currentMonth.month - 1, timezone),
-    [currentMonth, timezone],
+    () => getMonthDays(currentMonth.year, currentMonth.month - 1, ws, timezone),
+    [currentMonth, timezone, ws],
   );
 
   const visibleEvents = useMemo(() => events.filter(isShown), [events, isShown]);
@@ -118,8 +119,8 @@ export function CalendarGrid() {
   }, [days]);
 
   const buckets = useMemo(
-    () => bucketEventsByWeek(visibleEvents, timezone),
-    [visibleEvents, timezone],
+    () => bucketEventsByWeek(visibleEvents, timezone, ws),
+    [visibleEvents, timezone, ws],
   );
 
   // The month the grid is paging, so days either side of it can be greyed.
@@ -188,7 +189,7 @@ export function CalendarGrid() {
       onWheel={handleWheel}
     >
       <div className="grid shrink-0 grid-cols-7 border-b border-[var(--color-separator)]">
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        {weekdayOrder(ws).map((i) => (
           <div
             key={i}
             className="py-2.5 text-center text-body font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"

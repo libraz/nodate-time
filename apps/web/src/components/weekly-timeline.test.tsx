@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WeekStart } from '@/lib/date-utils';
 import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
@@ -37,6 +38,7 @@ const uiState = {
   selectedDate: DateTime.fromISO(DAY, { zone: ZONE }),
   currentMonth: DateTime.fromISO(DAY, { zone: ZONE }).startOf('month'),
   timezone: ZONE,
+  weekStart: 'sun' as WeekStart,
   openEventModal,
   setSelectedDate: vi.fn(),
   setCurrentMonth: vi.fn(),
@@ -304,7 +306,25 @@ describe('WeeklyTimeline week model', () => {
   afterEach(() => {
     uiState.selectedDate = DateTime.fromISO(DAY, { zone: ZONE });
     uiState.currentMonth = DateTime.fromISO(DAY, { zone: ZONE }).startOf('month');
+    uiState.weekStart = 'sun';
     calendarState.events = [probe];
+  });
+
+  const headerLabels = () =>
+    screen.getAllByText(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)$/).map((el) => el.textContent);
+
+  // 2026-03-08 is a Sunday: it closes a Monday week and opens a Sunday one.
+  it('draws the week from the chosen first day', () => {
+    uiState.weekStart = 'mon';
+    render(<WeeklyTimeline />);
+
+    expect(headerLabels()).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  });
+
+  it('draws a Sunday week by default', () => {
+    render(<WeeklyTimeline />);
+
+    expect(headerLabels()).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
   });
 
   // The events fetched follow currentMonth. Arriving at this week from a month

@@ -63,9 +63,10 @@ vi.mock('@/lib/client', async (importOriginal) => ({
   },
 }));
 
+const uiState = { locale: 'ja', timezone: 'Asia/Tokyo', weekStart: 'sun' };
+
 vi.mock('@/stores/ui-store', () => ({
-  useUiStore: (selector: (s: { locale: string; timezone: string }) => unknown) =>
-    selector({ locale: 'ja', timezone: 'Asia/Tokyo' }),
+  useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
 import { formatSheetDay } from '@/components/public-day-sheet';
@@ -99,6 +100,7 @@ function askedFor(fragment: string): string[] {
 }
 
 beforeEach(() => {
+  uiState.weekStart = 'sun';
   apiGet.mockReset();
   apiPost.mockReset();
   navigate.mockReset();
@@ -522,5 +524,31 @@ describe('share landing with join=1', () => {
 
     expect(await screen.findByText('apiError.INVITE.EXPIRED')).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('share landing week start', () => {
+  const headerLabels = () =>
+    Array.from(document.querySelector('.grid.grid-cols-7.border-b')?.children ?? []).map(
+      (el) => el.textContent,
+    );
+
+  it.each([
+    ['sun', ['日', '月', '火', '水', '木', '金', '土']],
+    ['mon', ['月', '火', '水', '木', '金', '土', '日']],
+    ['sat', ['土', '日', '月', '火', '水', '木', '金']],
+  ])('heads the columns from %s', async (weekStart, labels) => {
+    uiState.weekStart = weekStart;
+    apiGet.mockImplementation((path) =>
+      Promise.resolve(
+        String(path).includes('/events')
+          ? page()
+          : shareResponse({ joinable: false, spent: false }),
+      ),
+    );
+
+    render(<SharedCalendarView />);
+
+    await waitFor(() => expect(headerLabels()).toEqual(labels));
   });
 });

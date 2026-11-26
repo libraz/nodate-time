@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { presetToRule, rebuildPresetRule, ruleToPreset } from '@/lib/recurrence-preset';
+import { presetToRule, rebuildPresetRule, ruleToPreset, wkstFor } from '@/lib/recurrence-preset';
 
 let clampRecurrenceUntilDate: typeof import('./event-recurrence')['clampRecurrenceUntilDate'];
 let eventCommentText: typeof import('./event-comments')['eventCommentText'];
@@ -48,29 +48,42 @@ describe('event modal recurrence helpers', () => {
   });
 
   it('rebuilds start-date-derived weekly rules from the new start date', () => {
-    const rule = presetToRule('weekly', DateTime.fromISO('2026-07-07T09:00:00'));
+    const rule = presetToRule('weekly', DateTime.fromISO('2026-07-07T09:00:00'), 'sun');
 
     expect(rule).toMatchObject({ freq: 'weekly', interval: 1, byDay: ['TU'] });
   });
 
-  // The calendar grid starts its weeks on Sunday, and wkst is what makes a
-  // fortnightly rule count weeks the way the grid draws them.
+  // wkst is what makes a fortnightly rule count weeks the way the grid draws them.
   it('writes the Sunday week start on weekly presets', () => {
     const start = DateTime.fromISO('2026-07-07T09:00:00');
 
-    expect(presetToRule('weekly', start)).toEqual({
+    expect(presetToRule('weekly', start, 'sun')).toEqual({
       freq: 'weekly',
       interval: 1,
       byDay: ['TU'],
       wkst: 'SU',
     });
-    expect(presetToRule('weekdays', start)).toMatchObject({ wkst: 'SU' });
-    expect(presetToRule('daily', start)).not.toHaveProperty('wkst');
-    expect(presetToRule('monthly_date', start)).not.toHaveProperty('wkst');
+    expect(presetToRule('weekdays', start, 'sun')).toMatchObject({ wkst: 'SU' });
+    expect(presetToRule('daily', start, 'sun')).not.toHaveProperty('wkst');
+    expect(presetToRule('monthly_date', start, 'sun')).not.toHaveProperty('wkst');
+  });
+
+  it.each([
+    ['mon', 'MO'],
+    ['sun', 'SU'],
+    // The API takes no SA, so a Saturday grid writes SU.
+    ['sat', 'SU'],
+  ] as const)('maps a %s week start to wkst %s', (ws, wkst) => {
+    const start = DateTime.fromISO('2026-07-07T09:00:00');
+
+    expect(wkstFor(ws)).toBe(wkst);
+    expect(presetToRule('weekly', start, ws)).toMatchObject({ wkst });
+    expect(presetToRule('weekdays', start, ws)).toMatchObject({ wkst });
+    expect(presetToRule('daily', start, ws)).not.toHaveProperty('wkst');
   });
 
   it('writes monthly dates as arrays', () => {
-    expect(presetToRule('monthly_date', DateTime.fromISO('2026-07-21T09:00:00'))).toEqual({
+    expect(presetToRule('monthly_date', DateTime.fromISO('2026-07-21T09:00:00'), 'sun')).toEqual({
       freq: 'monthly',
       interval: 1,
       byMonthDay: [21],
@@ -108,7 +121,7 @@ describe('event modal recurrence helpers', () => {
   });
 
   it('rebuilds start-date-derived monthly nth rules from the new start date', () => {
-    const rule = presetToRule('monthly_nth', DateTime.fromISO('2026-07-21T09:00:00'));
+    const rule = presetToRule('monthly_nth', DateTime.fromISO('2026-07-21T09:00:00'), 'sun');
 
     expect(rule).toMatchObject({ freq: 'monthly', interval: 1, bySetPos: [3], byDay: ['TU'] });
   });

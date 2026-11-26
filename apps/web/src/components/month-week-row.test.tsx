@@ -381,3 +381,40 @@ describe('availability states', () => {
     expect(within(bar).getByText('event.showAsFree')).toHaveClass('sr-only');
   });
 });
+
+describe('MonthWeekRow starting on Monday', () => {
+  const MONDAY = DateTime.fromISO('2026-08-03T00:00:00', { zone: ZONE });
+
+  const colorOfDay = (isoDate: string) =>
+    cellOf(isoDate).querySelector<HTMLElement>('span.tabular-nums')?.getAttribute('style') ?? '';
+
+  it('puts Sunday in the last column and keeps its colour', async () => {
+    await renderRow({ weekStart: MONDAY, selectedDate: MONDAY });
+
+    const days = Array.from(document.querySelectorAll('[data-day]')).map((el) =>
+      el.getAttribute('data-day'),
+    );
+    expect(days[0]).toBe('2026-08-03');
+    expect(days[6]).toBe('2026-08-09');
+    expect(colorOfDay('2026-08-09')).toContain('var(--color-sunday)');
+    expect(colorOfDay('2026-08-08')).toContain('var(--color-saturday)');
+    expect(colorOfDay('2026-08-03')).toContain('var(--color-text-primary)');
+  });
+
+  it('places a bar by column from the row start', async () => {
+    await renderRow({
+      weekStart: MONDAY,
+      events: [
+        makeEvent({
+          id: 'b',
+          title: 'Bar',
+          startAt: '2026-08-09T10:00:00+09:00',
+          endAt: '2026-08-10T10:00:00+09:00',
+        }),
+      ],
+    });
+
+    // Sunday is column 6 of 7; the bar runs on past the row's end.
+    expect(screen.getByTitle('Bar').style.left).toContain('85.7143%');
+  });
+});

@@ -13,10 +13,15 @@ export function dayInZone(year: number, month: number, day: number, zone?: strin
     : DateTime.local(year, month, day);
 }
 
-export function getMonthDays(year: number, month: number, zone?: string): DateTime[] {
+export function getMonthDays(
+  year: number,
+  month: number,
+  ws: WeekStart,
+  zone?: string,
+): DateTime[] {
   const first = dayInZone(year, month + 1, 1, zone);
   const last = first.endOf('month').startOf('day');
-  const startDay = first.weekday % 7;
+  const startDay = columnOf(first, ws);
   const days: DateTime[] = [];
 
   for (let i = startDay - 1; i >= 0; i--) {
@@ -45,8 +50,12 @@ export function getMonthDays(year: number, month: number, zone?: string): DateTi
  * and after. Fetching the month itself leaves those cells permanently empty,
  * which reads as "nothing planned" rather than "not asked for".
  */
-export function gridRange(month: DateTime, zone?: string): { start: string; end: string } {
-  const days = getMonthDays(month.year, month.month - 1, zone);
+export function gridRange(
+  month: DateTime,
+  ws: WeekStart,
+  zone?: string,
+): { start: string; end: string } {
+  const days = getMonthDays(month.year, month.month - 1, ws, zone);
   const first = days[0];
   const last = days[days.length - 1];
   const fallback = month.toISODate() ?? '';
@@ -79,10 +88,9 @@ export function fetchWindow(view: CalendarView, month: DateTime): { start: strin
   return { start: from.toISODate() ?? fallback, end: to.toISODate() ?? fallback };
 }
 
-export function getWeekDays(date: DateTime, zone?: string): DateTime[] {
+export function getWeekDays(date: DateTime, ws: WeekStart, zone?: string): DateTime[] {
   const anchored = zone && zone.length > 0 ? date.setZone(zone, { keepLocalTime: true }) : date;
-  const dayOfWeek = anchored.weekday % 7;
-  const start = anchored.minus({ days: dayOfWeek }).startOf('day');
+  const start = startOfWeekFor(anchored, ws);
   const days: DateTime[] = [];
   for (let i = 0; i < 7; i++) {
     days.push(start.plus({ days: i }));

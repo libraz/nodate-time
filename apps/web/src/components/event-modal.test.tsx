@@ -103,6 +103,7 @@ interface PendingOpen {
 const uiState = {
   locale: 'ja' as 'ja' | 'en',
   timezone: 'Asia/Tokyo',
+  weekStart: 'sun' as 'mon' | 'sun' | 'sat',
   showEventModal: true,
   editingEventId: 'ev-1' as string | null,
   closeEventModal: vi.fn(),
@@ -239,6 +240,7 @@ beforeEach(() => {
   });
   uiState.locale = 'ja';
   uiState.timezone = 'Asia/Tokyo';
+  uiState.weekStart = 'sun';
   calendarState.events = [event];
   calendarState.calendars = [teamCalendar];
   calendarState.activeCalendarIds = ['cal-1'];
@@ -866,6 +868,17 @@ describe('EventModal canonical recurrence rules', () => {
       interval: 1,
       byDay: ['FR'],
       wkst: 'SU',
+    });
+  });
+
+  it('saves a weekly preset with the Monday week start when the week starts on Monday', async () => {
+    uiState.weekStart = 'mon';
+    const payload = await openAndPick('event.recurrenceWeekly');
+    expect(payload.recurrenceRule).toEqual({
+      freq: 'weekly',
+      interval: 1,
+      byDay: ['FR'],
+      wkst: 'MO',
     });
   });
 

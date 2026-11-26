@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WeekStart } from '@/lib/date-utils';
 import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
@@ -26,6 +27,7 @@ const uiState = {
   // No holiday country: the rows then need no holiday data to render.
   holidaysCountry: null,
   timezone: ZONE,
+  weekStart: 'sun' as WeekStart,
   scrollToTodaySignal: 0,
   openDayDetail: vi.fn(),
   openEventModal: vi.fn(),
@@ -107,6 +109,44 @@ function cellOf(isoDate: string): HTMLElement {
 function px(value: string): number {
   return Number.parseFloat(value);
 }
+
+describe('MonthScroll week start', () => {
+  afterEach(() => {
+    uiState.weekStart = 'sun';
+  });
+
+  const headerLabels = () =>
+    Array.from(document.querySelector('.grid.shrink-0.grid-cols-7')?.children ?? []).map(
+      (el) => el.textContent,
+    );
+  const weekDays = () =>
+    Array.from(document.querySelectorAll<HTMLElement>('[data-week]')).map(
+      (el) => DateTime.fromISO(el.dataset.week ?? '').weekday,
+    );
+
+  it('opens every row on Sunday by default', async () => {
+    await renderScroll([]);
+
+    expect(headerLabels()).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+    expect(new Set(weekDays())).toEqual(new Set([7]));
+  });
+
+  it('opens every row on Monday and heads the columns to match', async () => {
+    uiState.weekStart = 'mon';
+    await renderScroll([]);
+
+    expect(headerLabels()).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    expect(new Set(weekDays())).toEqual(new Set([1]));
+  });
+
+  it('opens every row on Saturday', async () => {
+    uiState.weekStart = 'sat';
+    await renderScroll([]);
+
+    expect(headerLabels()[0]).toBe('Sat');
+    expect(new Set(weekDays())).toEqual(new Set([6]));
+  });
+});
 
 /**
  * Reaching the edge of the mounted range re-anchors it: the anchor moves by a

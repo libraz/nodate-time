@@ -12,7 +12,7 @@ describe('month grid day boundaries', () => {
   ] as const)(
     'anchors every cell of %i-%i in %s to the start of its day',
     (year, month, zone, cells) => {
-      const days = getMonthDays(year, month, zone);
+      const days = getMonthDays(year, month, 'sun', zone);
       expect(days).toHaveLength(cells);
       for (const [index, day] of days.entries()) {
         expect(day.toMillis(), day.toISO() ?? '').toBe(day.startOf('day').toMillis());

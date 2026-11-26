@@ -8,7 +8,14 @@ import {
   useSheetPicker,
 } from '@/components/picker-surface';
 import { useT } from '@/i18n';
-import { formatMonthYear, formatYear, getWeekdayLabel, isToday } from '@/lib/date-utils';
+import {
+  columnOf,
+  formatMonthYear,
+  formatYear,
+  getWeekdayLabel,
+  isToday,
+  weekdayOrder,
+} from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useUiStore } from '@/stores/ui-store';
@@ -49,6 +56,7 @@ export function DatePickerDropdown({
   const t = useT();
   const locale = useUiStore((s) => s.locale);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
+  const weekStart = useUiStore((s) => s.weekStart);
   const sheet = useSheetPicker();
   const [viewMonth, setViewMonth] = useState(value.startOf('month'));
   const [mode, setMode] = useState<'days' | 'months'>('days');
@@ -113,14 +121,14 @@ export function DatePickerDropdown({
     if (next) moveFocus(e, next);
   };
 
-  const weekdays = [0, 1, 2, 3, 4, 5, 6].map((i) => {
-    const label = getWeekdayLabel(i, locale);
-    return locale === 'ja' ? label : label.slice(0, 2);
+  const weekdays = weekdayOrder(weekStart).map((dow) => {
+    const label = getWeekdayLabel(dow, locale);
+    return { dow, label: locale === 'ja' ? label : label.slice(0, 2) };
   });
 
   const { emptySlots, calendarDays, trailingSlots } = useMemo(() => {
     const first = viewMonth.startOf('month');
-    const startOffset = first.weekday % 7;
+    const startOffset = columnOf(first, weekStart);
     const daysInMonth = first.daysInMonth ?? 30;
     const days: DateTime[] = [];
     for (let d = 1; d <= daysInMonth; d++) days.push(first.set({ day: d }));
@@ -130,7 +138,7 @@ export function DatePickerDropdown({
       calendarDays: days,
       trailingSlots: PICKER_GRID_CELLS - startOffset - daysInMonth,
     };
-  }, [viewMonth]);
+  }, [viewMonth, weekStart]);
 
   const handleSelect = (day: DateTime) => {
     if (isBeforeMin(day)) return;
@@ -246,20 +254,20 @@ export function DatePickerDropdown({
       ) : (
         <>
           <div className="grid grid-cols-7">
-            {weekdays.map((wd, i) => (
+            {weekdays.map(({ dow, label }) => (
               <div
-                key={wd}
+                key={dow}
                 className="py-1 text-center text-caption font-medium"
                 style={{
                   color:
-                    i === 0
+                    dow === 0
                       ? 'var(--color-sunday)'
-                      : i === 6
+                      : dow === 6
                         ? 'var(--color-saturday)'
                         : 'var(--color-text-tertiary)',
                 }}
               >
-                {wd}
+                {label}
               </div>
             ))}
           </div>
@@ -289,8 +297,9 @@ export function DatePickerDropdown({
               const spanStart = inSpan && day.hasSame(span.start, 'day');
               const spanEnd = inSpan && day.hasSame(span.end, 'day');
               const isOtherEnd = range ? day.hasSame(range.other, 'day') : false;
-              const openLeft = !spanStart && (dayOfWeek === 0 || day.day === 1);
-              const openRight = !spanEnd && (dayOfWeek === 6 || day.day === calendarDays.length);
+              const column = columnOf(day, weekStart);
+              const openLeft = !spanStart && (column === 0 || day.day === 1);
+              const openRight = !spanEnd && (column === 6 || day.day === calendarDays.length);
               return (
                 <div
                   key={iso}

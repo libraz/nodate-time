@@ -1,7 +1,7 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { client, isAbortError } from '@/lib/client';
-import { getMonthDays, gridRange, nowInZone } from '@/lib/date-utils';
+import { getMonthDays, gridRange, nowInZone, type WeekStart } from '@/lib/date-utils';
 import {
   type PublicEvent,
   publicDayEvent,
@@ -31,11 +31,12 @@ export function usePublicEvents(
   enabled: boolean,
   month: DateTime,
   timezone: string,
+  weekStart: WeekStart = 'sun',
 ): PublicEvents {
   // The grid draws part of the neighbouring months, and the dates are days in
   // the zone this page renders -- both have to be said, or the edge cells stay
   // empty and an event near a month boundary lands in the wrong one.
-  const { start, end } = gridRange(month, timezone);
+  const { start, end } = gridRange(month, weekStart, timezone);
   const key = `${token}|${start}|${end}|${timezone}`;
   const [loaded, setLoaded] = useState<{
     key: string;
@@ -99,9 +100,10 @@ export function usePublicMonthGrid(
   events: PublicEvent[],
   month: DateTime,
   timezone: string,
+  weekStart: WeekStart = 'sun',
 ): { weeks: DateTime[][]; eventsOn: (day: DateTime) => PublicEvent[] } {
   return useMemo(() => {
-    const days = getMonthDays(month.year, month.month - 1, timezone);
+    const days = getMonthDays(month.year, month.month - 1, weekStart, timezone);
     const weeks: DateTime[][] = [];
     for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
     const first = days[0];
@@ -111,5 +113,5 @@ export function usePublicMonthGrid(
         ? bucketEventsByDay(events.map(publicDayEvent), timezone, first, last)
         : new Map();
     return { weeks, eventsOn: (day) => buckets.get(dayKey(day, timezone)) ?? [] };
-  }, [events, month, timezone]);
+  }, [events, month, timezone, weekStart]);
 }

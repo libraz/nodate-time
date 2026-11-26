@@ -6,7 +6,8 @@ import { DateTimeField, DateTimeRangeField } from './date-time-fields';
 
 // Mock the ui-store to provide locale
 vi.mock('@/stores/ui-store', () => ({
-  useUiStore: (selector: (s: { locale: string }) => string) => selector({ locale: 'en' }),
+  useUiStore: (selector: (s: { locale: string; weekStart: string }) => string) =>
+    selector({ locale: 'en', weekStart: 'sun' }),
 }));
 
 afterEach(cleanup);

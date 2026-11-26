@@ -1,7 +1,15 @@
 import type { DateTime } from 'luxon';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MonthWeekRow } from '@/components/month-week-row';
-import { dayInZone, formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/date-utils';
+import {
+  dayInZone,
+  formatMonthYear,
+  getWeekdayLabel,
+  nowInZone,
+  startOfWeekFor,
+  type WeekStart,
+  weekdayOrder,
+} from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
@@ -39,7 +47,11 @@ type ScrollItem =
   | { kind: 'header'; key: string; month: DateTime }
   | { kind: 'week'; key: string; dayKey: string; weekStart: DateTime };
 
-function buildItems(anchor: DateTime, zone: string): { items: ScrollItem[]; todayKey: string } {
+function buildItems(
+  anchor: DateTime,
+  zone: string,
+  weekStart: WeekStart,
+): { items: ScrollItem[]; todayKey: string } {
   const rangeStart = anchor.startOf('month').minus({ months: RANGE_MONTHS });
   const rangeEnd = anchor.startOf('month').plus({ months: RANGE_MONTHS }).endOf('month');
   const today = nowInZone(zone).startOf('day');
@@ -48,8 +60,8 @@ function buildItems(anchor: DateTime, zone: string): { items: ScrollItem[]; toda
   const seen = new Set<string>();
   let todayKey = '';
 
-  // First Sunday on or before the range start.
-  let ws = rangeStart.minus({ days: rangeStart.weekday % 7 }).startOf('day');
+  // First week-start day on or before the range start.
+  let ws = startOfWeekFor(rangeStart, weekStart);
 
   while (ws <= rangeEnd) {
     if (items.length === 0) {
@@ -84,6 +96,7 @@ export function MonthScroll() {
   const selectedDate = useUiStore((s) => s.selectedDate);
   const holidaysCountry = useUiStore((s) => s.holidaysCountry);
   const timezone = useUiStore((s) => s.timezone);
+  const weekStart = useUiStore((s) => s.weekStart);
   const scrollToTodaySignal = useUiStore((s) => s.scrollToTodaySignal);
   const openDayDetail = useUiStore((s) => s.openDayDetail);
   const openEventModal = useUiStore((s) => s.openEventModal);
@@ -120,8 +133,8 @@ export function MonthScroll() {
   const DOUBLE_TAP_MS = 260;
 
   const { items, todayKey } = useMemo(
-    () => buildItems(anchorMonth, timezone),
-    [anchorMonth, timezone],
+    () => buildItems(anchorMonth, timezone, weekStart),
+    [anchorMonth, timezone, weekStart],
   );
 
   const visibleEvents = useMemo(() => events.filter(isShown), [events, isShown]);
@@ -129,8 +142,8 @@ export function MonthScroll() {
   // Three years of weeks stay mounted, so a row that filtered the whole event
   // list on every render would do that work a few hundred times per frame.
   const buckets = useMemo(
-    () => bucketEventsByWeek(visibleEvents, timezone),
-    [visibleEvents, timezone],
+    () => bucketEventsByWeek(visibleEvents, timezone, weekStart),
+    [visibleEvents, timezone, weekStart],
   );
 
   // Single tap opens the day detail; a quick second tap on the same day starts a
@@ -163,7 +176,7 @@ export function MonthScroll() {
   );
 
   const { drag, dragLanding, landingWeeks, canMove, consumeClick, handleEventPointerDown } =
-    useMonthDrag({ timezone, requestUpdate });
+    useMonthDrag({ timezone, weekStart, requestUpdate });
 
   // Centralize the drag-suppressed click so the week row stays presentational.
   const handleEventClick = useCallback(
@@ -344,7 +357,7 @@ export function MonthScroll() {
     <div className="flex h-full select-none flex-col">
       {/* Fixed weekday labels */}
       <div className="grid shrink-0 grid-cols-7 border-b border-[var(--color-separator)]">
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        {weekdayOrder(weekStart).map((i) => (
           <div
             key={i}
             className="py-1.5 text-center text-caption font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"

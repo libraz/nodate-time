@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { allDayDates } from '@/lib/all-day';
-import { fromISOInZone } from '@/lib/date-utils';
+import { fromISOInZone, startOfWeekFor, type WeekStart } from '@/lib/date-utils';
 import { eventDayZone, toGridDay } from '@/lib/event-zone';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -76,14 +76,14 @@ export function eventOccupiesDay(evt: DayEvent, day: DateTime, zone: string): bo
 /** The empty bucket, shared so a week with no events keeps one stable identity. */
 export const NO_EVENTS: CalendarEvent[] = [];
 
-/** The Sunday that starts the week row a day belongs to. */
-export function startOfWeek(day: DateTime): DateTime {
-  return day.startOf('day').minus({ days: day.weekday % 7 });
+/** The first day of the week row a day belongs to. */
+export function startOfWeek(day: DateTime, ws: WeekStart): DateTime {
+  return startOfWeekFor(day, ws);
 }
 
-/** Identifies a week row: the yyyy-MM-dd of its Sunday. */
-export function weekKey(day: DateTime): string {
-  return startOfWeek(day).toFormat('yyyy-MM-dd');
+/** Identifies a week row: the yyyy-MM-dd of its first day. */
+export function weekKey(day: DateTime, ws: WeekStart): string {
+  return startOfWeek(day, ws).toFormat('yyyy-MM-dd');
 }
 
 /**
@@ -97,17 +97,18 @@ export function weekKey(day: DateTime): string {
 export function bucketEventsByWeek(
   events: CalendarEvent[],
   zone: string,
+  weekStart: WeekStart,
 ): Map<string, CalendarEvent[]> {
   const buckets = new Map<string, CalendarEvent[]>();
   for (const evt of events) {
     const endDay = eventEndDay(evt, zone);
-    let ws = startOfWeek(eventStartDay(evt, zone));
-    while (ws <= endDay) {
-      const key = ws.toFormat('yyyy-MM-dd');
+    let week = startOfWeek(eventStartDay(evt, zone), weekStart);
+    while (week <= endDay) {
+      const key = week.toFormat('yyyy-MM-dd');
       const bucket = buckets.get(key);
       if (bucket) bucket.push(evt);
       else buckets.set(key, [evt]);
-      ws = ws.plus({ weeks: 1 });
+      week = week.plus({ weeks: 1 });
     }
   }
   return buckets;
@@ -157,19 +158,19 @@ export function bucketEventsByDay<T extends DayEvent>(
  * Lets a drag hand its landing preview only to the rows that draw it, so a
  * pointer sample re-renders two rows instead of every mounted week.
  */
-export function weekKeysInRange(start: DateTime, end: DateTime): Set<string> {
+export function weekKeysInRange(start: DateTime, end: DateTime, ws: WeekStart): Set<string> {
   const keys = new Set<string>();
-  let ws = startOfWeek(start);
+  let week = startOfWeek(start, ws);
   const last = end.startOf('day');
-  while (ws <= last) {
-    keys.add(ws.toFormat('yyyy-MM-dd'));
-    ws = ws.plus({ weeks: 1 });
+  while (week <= last) {
+    keys.add(week.toFormat('yyyy-MM-dd'));
+    week = week.plus({ weeks: 1 });
   }
   return keys;
 }
 
 /**
- * Lays out multi-day events for a single Sunday-aligned week into non-overlapping
+ * Lays out multi-day events for a single week row into non-overlapping
  * horizontal tracks, returning each event's column span and track index. Single-day
  * events are intentionally excluded — callers render those as per-day chips.
  */
@@ -179,7 +180,7 @@ export function layoutWeek(
   zone: string,
 ): PositionedEvent[] {
   const gridStart = toGridDay(weekStart, zone);
-  const weekEnd = gridStart.plus({ days: 6 }); // start of the week's Saturday
+  const weekEnd = gridStart.plus({ days: 6 }); // start of the week's last day
   const tracks: { end: number }[] = [];
   const positioned: PositionedEvent[] = [];
 

@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { type PointerEvent as ReactPointerEvent, useCallback, useMemo, useRef } from 'react';
 import type { DragLanding } from '@/components/month-week-row';
-import { fromISOInZone } from '@/lib/date-utils';
+import { fromISOInZone, type WeekStart } from '@/lib/date-utils';
 import { buildMovedEvent } from '@/lib/event-move';
 import { eventDayZone } from '@/lib/event-zone';
 import type { EventPatch } from '@/stores/calendar-store';
@@ -66,9 +66,11 @@ function resolveDayKey(x: number, y: number): string | null {
  */
 export function useMonthDrag({
   timezone,
+  weekStart = 'sun',
   requestUpdate,
 }: {
   timezone: string;
+  weekStart?: WeekStart;
   requestUpdate: (evt: CalendarEvent, payload: EventPatch) => void;
 }) {
   const canMove = useCanMoveEvent();
@@ -111,8 +113,8 @@ export function useMonthDrag({
   // Only the rows the ghost crosses need it; every other row keeps the same
   // (null) prop and stays out of the re-render a pointer sample causes.
   const landingWeeks = useMemo(
-    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end) : null),
-    [dragLanding],
+    () => (dragLanding ? weekKeysInRange(dragLanding.start, dragLanding.end, weekStart) : null),
+    [dragLanding, weekStart],
   );
 
   const handleEventPointerDown = useCallback(
