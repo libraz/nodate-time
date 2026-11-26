@@ -136,7 +136,7 @@ export function ListView() {
                         <button
                           type="button"
                           onClick={() => openEventModal(evt.id)}
-                          className={`event-block ${showAsClass(evt.showAs)} flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3.5 py-2.5 text-left`}
+                          className={`event-block ${showAsClass(evt.showAs)} flex w-full items-start gap-3 rounded-[var(--radius-sm)] px-3.5 py-2.5 text-left`}
                           style={{ '--evt': evt.color } as CSSProperties}
                         >
                           <OwnerMark
@@ -158,6 +158,14 @@ export function ListView() {
                             {state && (
                               <p className="truncate text-footnote text-[var(--color-text-secondary)]">
                                 {state}
+                              </p>
+                            )}
+                            {evt.memo.trim() && (
+                              <p
+                                aria-hidden="true"
+                                className="line-clamp-2 whitespace-pre-line break-words text-footnote text-[var(--color-text-secondary)]"
+                              >
+                                {evt.memo}
                               </p>
                             )}
                           </div>

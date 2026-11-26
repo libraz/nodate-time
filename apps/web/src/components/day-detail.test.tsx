@@ -128,6 +128,27 @@ describe('DayDetail', () => {
   });
 });
 
+describe('DayDetail memo excerpt', () => {
+  it('shows the memo clamped to two lines and hidden from the accessible name', () => {
+    calendarState.events = [{ ...rehearsal, memo: 'No shellfish\nBring the score' }];
+
+    render(<DayDetail />);
+
+    const memo = screen.getByText(/No shellfish/);
+    expect(memo).toHaveClass('line-clamp-2', 'whitespace-pre-line', 'break-words');
+    expect(memo).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it.each(['', '  \n\t '])('has no memo paragraph for %j', (memo) => {
+    calendarState.events = [{ ...rehearsal, memo }];
+
+    const { container } = render(<DayDetail />);
+
+    expect(screen.getByText('Rehearsal')).toBeInTheDocument();
+    expect(container.querySelector('.line-clamp-2')).toBeNull();
+  });
+});
+
 describe('DayDetail availability states', () => {
   it('shows the showAs and flexibility labels as secondary text', () => {
     calendarState.events = [{ ...rehearsal, showAs: 'tentative', flexibility: 'conditional' }];

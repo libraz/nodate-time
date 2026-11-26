@@ -179,6 +179,14 @@ export function DayDetail() {
                               {state}
                             </p>
                           )}
+                          {evt.memo.trim() && (
+                            <p
+                              aria-hidden="true"
+                              className="mt-0.5 line-clamp-2 whitespace-pre-line break-words text-body text-[var(--color-text-tertiary)]"
+                            >
+                              {evt.memo}
+                            </p>
+                          )}
                         </span>
                       </button>
                     );

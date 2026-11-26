@@ -56,6 +56,32 @@ describe('ListView holidays', () => {
   });
 });
 
+describe('ListView memo excerpt', () => {
+  afterEach(() => {
+    calendarState.events = [newYear];
+  });
+
+  it('shows the memo clamped to two lines and hidden from the accessible name', () => {
+    calendarState.events = [{ ...newYear, memo: 'No shellfish\nBring the score' }];
+
+    render(<ListView />);
+
+    const memo = screen.getByText(/No shellfish/);
+    expect(memo).toHaveClass('line-clamp-2', 'whitespace-pre-line', 'break-words');
+    expect(memo).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('button', { name: /Shrine visit/ })).toHaveClass('items-start');
+  });
+
+  it.each(['', '  \n\t '])('has no memo paragraph for %j', (memo) => {
+    calendarState.events = [{ ...newYear, memo }];
+
+    const { container } = render(<ListView />);
+
+    expect(screen.getByText('Shrine visit')).toBeInTheDocument();
+    expect(container.querySelector('.line-clamp-2')).toBeNull();
+  });
+});
+
 describe('ListView availability states', () => {
   it('marks the row and states showAs and flexibility as secondary text', () => {
     calendarState.events = [
