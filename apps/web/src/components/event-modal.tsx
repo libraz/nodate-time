@@ -1,5 +1,15 @@
 import { DateTime } from 'luxon';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { Avatar } from '@/components/avatar';
 import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
@@ -179,7 +189,12 @@ function eventToForm(ev: CalendarEvent, timezone: string): FormState {
   };
 }
 
-export function EventModal() {
+/**
+ * The event editor, mounted once. On a phone it is a modal bottom sheet; on a
+ * desktop only its panel is portalled into `desktopSlot`, beside the calendar
+ * and non-modal, so the calendar stays usable while it is open.
+ */
+export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement | null }) {
   const t = useT();
   const timezone = useUiStore((s) => s.timezone);
   const showEventModal = useUiStore((s) => s.showEventModal);
@@ -188,6 +203,11 @@ export function EventModal() {
   const selectedDate = useUiStore((s) => s.selectedDate);
   const eventDraftStart = useUiStore((s) => s.eventDraftStart);
   const eventDraftEnd = useUiStore((s) => s.eventDraftEnd);
+  const eventDraftDay = useUiStore((s) => s.eventDraftDay);
+  const eventOpenSeq = useUiStore((s) => s.eventOpenSeq);
+  const pendingEventOpen = useUiStore((s) => s.pendingEventOpen);
+  const applyPendingEventOpen = useUiStore((s) => s.applyPendingEventOpen);
+  const clearPendingEventOpen = useUiStore((s) => s.clearPendingEventOpen);
 
   const calendars = useCalendarStore((s) => s.calendars);
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
@@ -204,7 +224,13 @@ export function EventModal() {
   const visibleRange = useCalendarStore((s) => s.visibleRange);
   const me = useAuthStore((s) => s.user);
 
-  const editingEvent = editingEventId ? events.find((e) => e.id === editingEventId) : null;
+  // The event as the form was built from it. Moving to another month drops the
+  // event from the store; without this a save would then create a duplicate.
+  const [openedEvent, setOpenedEvent] = useState<CalendarEvent | null>(null);
+  const editingEvent = editingEventId
+    ? (events.find((e) => e.id === editingEventId) ??
+      (openedEvent?.id === editingEventId ? openedEvent : null))
+    : null;
   // The zone an event's dates are anchored in. An existing event keeps the one
   // it was created in: its all-day dates and its recurrence grid are both
   // measured there, so re-anchoring it to whoever happens to have the modal
@@ -457,17 +483,20 @@ export function EventModal() {
   // a refetch: the store replaces the event object whenever the month reloads,
   // and rebuilding then would throw away what the user has typed.
   const populatedFor = useRef<string | null>(null);
+  const populateKey = `${editingEventId ?? 'new'}:${eventOpenSeq}`;
   const [remoteChanged, setRemoteChanged] = useState(false);
   useEffect(() => {
     if (!showEventModal) {
       populatedFor.current = null;
+      setOpenedEvent(null);
       return;
     }
-    const key = editingEventId ?? 'new';
+    const key = populateKey;
     if (populatedFor.current === key) return;
     if (editingEventId) {
       if (!editingEvent) return;
       populatedFor.current = key;
+      setOpenedEvent(editingEvent);
       openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
       setGrants({});
       const opened = eventToForm(editingEvent, timezone);
@@ -496,7 +525,9 @@ export function EventModal() {
     // A draft start (e.g. a clicked weekly slot) creates a timed event at that
     // hour; otherwise default to an all-day event on the selected day.
     const timed = eventDraftStart != null;
-    const base = (eventDraftStart ?? selectedDate).setZone(timezone, { keepLocalTime: true });
+    const base = (eventDraftStart ?? eventDraftDay ?? selectedDate).setZone(timezone, {
+      keepLocalTime: true,
+    });
     const start = timed
       ? base.set({ second: 0, millisecond: 0 })
       : base.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
@@ -529,10 +560,12 @@ export function EventModal() {
   }, [
     editingEvent,
     editingEventId,
+    populateKey,
     showEventModal,
     selectedDate,
     eventDraftStart,
     eventDraftEnd,
+    eventDraftDay,
     defaultCalendarId,
     calendars.length,
     closeEventModal,
@@ -554,7 +587,7 @@ export function EventModal() {
   const dirtyRef = useRef(false);
   dirtyRef.current = isDirty;
   useEffect(() => {
-    if (!showEventModal || !editingEvent || populatedFor.current !== editingEvent.id) return;
+    if (!showEventModal || !editingEvent || populatedFor.current !== populateKey) return;
     const base = initialForm.current;
     if (!base) return;
     const fresh = eventToForm(editingEvent, timezone);
@@ -566,7 +599,8 @@ export function EventModal() {
     setForm(fresh);
     initialForm.current = fresh;
     openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
-  }, [showEventModal, editingEvent, timezone]);
+    setOpenedEvent(editingEvent);
+  }, [showEventModal, editingEvent, populateKey, timezone]);
 
   const reloadRemote = () => {
     if (!editingEvent) return;
@@ -574,8 +608,33 @@ export function EventModal() {
     setForm(fresh);
     initialForm.current = fresh;
     openedEtags.current = { etag: editingEvent.etag, seriesEtag: editingEvent.seriesEtag };
+    setOpenedEvent(editingEvent);
     setRemoteChanged(false);
   };
+
+  // An open asked for while the editor is up: a closing editor takes it at once,
+  // unsaved edits are asked about first, and the event already open is a no-op.
+  useEffect(() => {
+    if (!pendingEventOpen) return;
+    if (closing) {
+      if (closeTimer.current) {
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+      setClosing(false);
+      applyPendingEventOpen();
+      return;
+    }
+    if (pendingEventOpen.eventId !== null && pendingEventOpen.eventId === editingEventId) {
+      clearPendingEventOpen();
+      return;
+    }
+    if (dirtyRef.current) {
+      setConfirming('discard');
+      return;
+    }
+    applyPendingEventOpen();
+  }, [pendingEventOpen, closing, editingEventId, applyPendingEventOpen, clearPendingEventOpen]);
 
   // Recurring events are always opened as an expanded instance (composite id),
   // so editing or deleting one must ask whether it applies to just this
@@ -723,18 +782,33 @@ export function EventModal() {
     }
     guardedClose();
   };
-  const panelRef = useModalA11y<HTMLDivElement>(showEventModal, dismiss, titleRef);
+  // A desktop panel without its slot is not on screen, so it does not join the stack.
+  const panelShown = showEventModal && (!isDesktop || desktopSlot !== null);
+  const panelRef = useModalA11y<HTMLDivElement>(panelShown, dismiss, titleRef, {
+    modal: !isDesktop,
+  });
   const scopeRef = useModalA11y<HTMLDivElement>(scopePrompt !== null, () => setScopePrompt(null));
   // The chooser is a dialog over a dialog, so it carries its own trap: without
   // one its buttons sit outside the modal's container and Tab walks straight
   // out of the page rather than around the question being asked. The two traps
   // do not fight — each only intercepts Tab at the edge of its own container,
-  // and the containers are disjoint — and the outer one keeps the scroll lock
-  // and the return-focus target for the whole time the chooser is up.
+  // and the containers are disjoint — and on a phone the outer one keeps the
+  // scroll lock and the return-focus target for the whole time the chooser is up.
+
+  // The memo grows with its text; the CSS cap (12 lines) turns the rest into a scroll.
+  const memoRef = useRef<HTMLTextAreaElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the text and the field appearing are the triggers
+  useLayoutEffect(() => {
+    const el = memoRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [form.memo, showEventModal, showMore, detailsHidden, isDesktop, desktopSlot]);
 
   if (!showEventModal && !closing) return null;
+  if (isDesktop && !desktopSlot) return null;
 
-  // The body of the modal. It is mounted once and placed by CSS, so every
+  // The body of the modal. It is mounted once, in whichever layout is shown, so every
   // section below asks the server for its contents once rather than per layout.
   const formContent = (
     <>
@@ -1195,13 +1269,14 @@ export function EventModal() {
                   </svg>
                   <textarea
                     data-1p-ignore
+                    ref={memoRef}
                     value={form.memo}
                     onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
                     readOnly={!editable}
                     placeholder={t('event.memo')}
                     maxLength={16000}
                     rows={2}
-                    className="flex-1 resize-none bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+                    className="max-h-[12lh] flex-1 resize-none overflow-y-auto bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
                   />
                 </div>
               </div>
@@ -1324,10 +1399,12 @@ export function EventModal() {
         </div>
       )}
 
+      {/* Keyed by event, so switching events in the open panel starts each section afresh. */}
       <div data-saves-immediately>
         {/* Checklist (edit mode only) */}
         {editingEvent && (
           <ChecklistSection
+            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
@@ -1337,6 +1414,7 @@ export function EventModal() {
         {/* Attachments (edit mode only) */}
         {editingEvent && (
           <AttachmentsSection
+            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
@@ -1346,6 +1424,7 @@ export function EventModal() {
         {/* Comments (edit mode only) */}
         {editingEvent && (
           <CommentsSection
+            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             canPost={canEdit(myRole)}
@@ -1374,6 +1453,7 @@ export function EventModal() {
             </span>
           </div>
           <HistoryTimeline
+            key={editingEvent.id}
             kind="event"
             calendarId={editingEvent.calendarId}
             entityId={seriesId(editingEvent.id)}
@@ -1401,96 +1481,116 @@ export function EventModal() {
     </>
   );
 
+  const panelLabel = editingEvent ? t('event.editEvent') : t('event.createEvent');
+  const onPanelKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!isSubmitEnter(e) || !(e.metaKey || e.ctrlKey)) return;
+    // The sections that save as they change keep Enter for themselves.
+    if ((e.target as HTMLElement).closest('[data-saves-immediately]')) return;
+    e.preventDefault();
+    void handleSave();
+  };
+  const panelBody = (
+    <>
+      {/* Grab zone: drag down to hold/dismiss. Generous height for easy grab. */}
+      <div
+        className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing sm:hidden"
+        onPointerDown={sheetDrag.onPointerDown}
+      >
+        <div className="drag-handle mx-auto h-1.5 w-11 rounded-full bg-[var(--color-text-tertiary)] opacity-40" />
+      </div>
+      <div className="flex-1 overflow-y-auto">{formContent}</div>
+      {/* Sticky action bar (clears the home-indicator safe area, which is
+          zero on a desktop viewport and leaves a plain 1rem there) */}
+      <div
+        className="flex gap-3 border-t border-[var(--color-border)] px-6 pt-4"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)' }}
+      >
+        <button
+          type="button"
+          onClick={guardedClose}
+          className="btn-secondary flex-1 py-3 text-default font-medium"
+        >
+          {editable ? t('common.cancel') : t('common.close')}
+        </button>
+        {editable && (
+          <button
+            type="button"
+            onClick={() => handleSave()}
+            disabled={saving || !form.title.trim() || endError}
+            className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+          >
+            {saving ? t('common.saving') : t('common.save')}
+          </button>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <>
-      <button
-        type="button"
-        aria-label={t('common.close')}
-        className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
-          closing ? 'backdrop-out' : ''
-        }`}
-        onClick={guardedClose}
-      />
-      {/* One panel for both layouts: CSS rests it on the bottom edge as a sheet
-          and centres it as a dialog from `sm` up. */}
-      <div className="pointer-events-none fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-4">
-        <div
-          ref={panelRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label={editingEvent ? t('event.editEvent') : t('event.createEvent')}
-          onKeyDown={(e) => {
-            if (!isSubmitEnter(e) || !(e.metaKey || e.ctrlKey)) return;
-            // The sections that save as they change keep Enter for themselves.
-            if ((e.target as HTMLElement).closest('[data-saves-immediately]')) return;
-            e.preventDefault();
-            void handleSave();
-          }}
-          className={`glass-surface-heavy pointer-events-auto flex w-full flex-col overflow-hidden ${
-            isDesktop
-              ? `modal-panel ${
-                  closing ? 'modal-exit' : 'modal-enter'
-                } max-h-[90dvh] max-w-[480px] ring-1 ring-[var(--color-border)]`
-              : 'bottom-sheet event-sheet max-h-[92dvh]'
-          }`}
-          style={
-            isDesktop
-              ? undefined
-              : {
-                  // At rest, drop the transform entirely: a lingering one makes
-                  // this a containing block, and anything fixed inside the sheet
-                  // would then be positioned against the sheet, not the viewport.
-                  transform: closing
-                    ? 'translateY(100%)'
-                    : sheetDragY
-                      ? sheetDragY
-                      : sheetIn
-                        ? 'none'
-                        : 'translateY(100%)',
-                  transition: sheetDragY
-                    ? 'none'
-                    : reduceMotion
+      {isDesktop && desktopSlot ? (
+        // Only the panel moves into the slot: the scope chooser and the
+        // confirmations stay here, since the panel's transform would capture
+        // their fixed positioning. Overlaid on the calendar below 1284px of row,
+        // beside it (pushing it narrower) from there up.
+        createPortal(
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-label={panelLabel}
+            onKeyDown={onPanelKeyDown}
+            className={`glass-surface-heavy side-panel flex h-full w-[400px] shrink-0 flex-col border-l border-[var(--color-border)] absolute inset-y-0 right-16 z-30 shadow-xl @min-[1284px]:relative @min-[1284px]:inset-auto @min-[1284px]:right-auto @min-[1284px]:z-auto @min-[1284px]:shadow-none ${
+              closing ? 'side-panel-exit' : ''
+            }`}
+          >
+            {panelBody}
+          </div>,
+          desktopSlot,
+        )
+      ) : (
+        <>
+          <button
+            type="button"
+            aria-label={t('common.close')}
+            className={`modal-backdrop fixed inset-0 z-50 bg-[var(--color-overlay)] ${
+              closing ? 'backdrop-out' : ''
+            }`}
+            onClick={guardedClose}
+          />
+          {/* The phone sheet rests on the bottom edge. */}
+          <div className="pointer-events-none fixed inset-0 z-50 flex flex-col justify-end">
+            <div
+              ref={panelRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={panelLabel}
+              onKeyDown={onPanelKeyDown}
+              className="glass-surface-heavy pointer-events-auto flex w-full flex-col overflow-hidden bottom-sheet event-sheet max-h-[92dvh]"
+              style={{
+                // At rest, drop the transform entirely: a lingering one makes
+                // this a containing block, and anything fixed inside the sheet
+                // would then be positioned against the sheet, not the viewport.
+                transform: closing
+                  ? 'translateY(100%)'
+                  : sheetDragY
+                    ? sheetDragY
+                    : sheetIn
                       ? 'none'
-                      : closing
-                        ? 'transform 0.24s cubic-bezier(0.4, 0, 1, 1)'
-                        : 'transform 0.42s cubic-bezier(0.34, 1.5, 0.5, 1)',
-                }
-          }
-        >
-          {/* Grab zone: drag down to hold/dismiss. Generous height for easy grab. */}
-          <div
-            className="shrink-0 cursor-grab touch-none pt-3 pb-2.5 active:cursor-grabbing sm:hidden"
-            onPointerDown={sheetDrag.onPointerDown}
-          >
-            <div className="drag-handle mx-auto h-1.5 w-11 rounded-full bg-[var(--color-text-tertiary)] opacity-40" />
-          </div>
-          <div className="flex-1 overflow-y-auto">{formContent}</div>
-          {/* Sticky action bar (clears the home-indicator safe area, which is
-              zero on a desktop viewport and leaves a plain 1rem there) */}
-          <div
-            className="flex gap-3 border-t border-[var(--color-border)] px-6 pt-4"
-            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)' }}
-          >
-            <button
-              type="button"
-              onClick={guardedClose}
-              className="btn-secondary flex-1 py-3 text-default font-medium"
+                      : 'translateY(100%)',
+                transition: sheetDragY
+                  ? 'none'
+                  : reduceMotion
+                    ? 'none'
+                    : closing
+                      ? 'transform 0.24s cubic-bezier(0.4, 0, 1, 1)'
+                      : 'transform 0.42s cubic-bezier(0.34, 1.5, 0.5, 1)',
+              }}
             >
-              {editable ? t('common.cancel') : t('common.close')}
-            </button>
-            {editable && (
-              <button
-                type="button"
-                onClick={() => handleSave()}
-                disabled={saving || !form.title.trim() || endError}
-                className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
-              >
-                {saving ? t('common.saving') : t('common.save')}
-              </button>
-            )}
+              {panelBody}
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* This-vs-series scope chooser for recurring occurrences */}
       {scopePrompt && (
@@ -1553,9 +1653,14 @@ export function EventModal() {
         cancelLabel={t('common.keepEditing')}
         onConfirm={() => {
           setConfirming(null);
-          requestClose();
+          // Asked over a queued open: discarding switches rather than closes.
+          if (pendingEventOpen) applyPendingEventOpen();
+          else requestClose();
         }}
-        onCancel={() => setConfirming(null)}
+        onCancel={() => {
+          setConfirming(null);
+          if (pendingEventOpen) clearPendingEventOpen();
+        }}
       />
       <ConfirmSheet
         open={confirming === 'delete'}

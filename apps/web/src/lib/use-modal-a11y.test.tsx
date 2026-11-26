@@ -24,6 +24,16 @@ function DialogWithInitialFocus() {
   );
 }
 
+function Panel({ onClose }: { onClose: () => void }) {
+  const ref = useModalA11y<HTMLDivElement>(true, onClose, undefined, { modal: false });
+  return (
+    <div ref={ref}>
+      <button type="button">First</button>
+      <button type="button">Last</button>
+    </div>
+  );
+}
+
 function rectList(): DOMRectList {
   const rects = [new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList;
   rects.item = (index: number) => rects[index] ?? null;
@@ -119,5 +129,88 @@ describe('useModalA11y', () => {
 
     rerender(<Harness open={false} />);
     expect(document.activeElement).toBe(trigger);
+  });
+});
+
+// A panel beside the page, not over it: the page stays scrollable and
+// reachable, and the panel answers the keyboard only while it holds focus.
+describe('useModalA11y with modal: false', () => {
+  it('neither locks the page nor traps Tab', () => {
+    render(<Panel onClose={() => {}} />);
+    for (const button of screen.getAllByRole('button')) {
+      vi.spyOn(button, 'getClientRects').mockReturnValue(rectList());
+    }
+
+    expect(document.body.style.overflow).not.toBe('hidden');
+
+    const last = screen.getByRole('button', { name: 'Last' });
+    last.focus();
+    const tab = fireEvent.keyDown(document, { key: 'Tab' });
+    expect(tab).toBe(true);
+    expect(document.activeElement).toBe(last);
+  });
+
+  it('answers Escape only while focus is inside it or nowhere', () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <input aria-label="Outside" />
+        <Panel onClose={onClose} />
+      </>,
+    );
+
+    screen.getByLabelText('Outside').focus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    screen.getByRole('button', { name: 'First' }).focus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves an Escape another handler already took', () => {
+    const onClose = vi.fn();
+    render(<Panel onClose={onClose} />);
+    screen.getByRole('button', { name: 'First' }).focus();
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    event.preventDefault();
+    document.dispatchEvent(event);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('returns focus only when it held focus as it closed', async () => {
+    function Harness({ open }: { open: boolean }) {
+      return (
+        <>
+          <button type="button">Trigger</button>
+          <input aria-label="Elsewhere" />
+          {open && <Panel onClose={() => {}} />}
+        </>
+      );
+    }
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue(rectList());
+    const { rerender } = render(<Harness open={false} />);
+    const trigger = screen.getByRole('button', { name: 'Trigger' });
+
+    trigger.focus();
+    rerender(<Harness open={true} />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText('First')));
+    rerender(<Harness open={false} />);
+    expect(document.activeElement).toBe(trigger);
+
+    trigger.focus();
+    rerender(<Harness open={true} />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText('First')));
+    const elsewhere = screen.getByLabelText('Elsewhere');
+    fireEvent.pointerDown(elsewhere);
+    elsewhere.focus();
+    rerender(<Harness open={false} />);
+    expect(document.activeElement).toBe(elsewhere);
   });
 });

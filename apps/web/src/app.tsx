@@ -469,6 +469,7 @@ export function App() {
   const rangeLoaded = useRef(false);
   const eventModalLoaded = useRef(false);
   if (showEventModal) eventModalLoaded.current = true;
+  const [eventSlot, setEventSlot] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (initDone.current) return;
@@ -663,10 +664,12 @@ export function App() {
         </output>
       )}
 
-      {/* PC layout: sidebar + calendar */}
-      <div className="relative z-[1] hidden flex-1 overflow-hidden sm:flex">
+      {/* PC layout: sidebar + calendar (+ event panel) */}
+      <div className="@container relative z-[1] hidden flex-1 overflow-hidden sm:flex">
         <LeftSidebar />
         {isDesktop && calendarContent}
+        {/* Where the desktop event panel portals to; always rendered so the slot never goes stale. */}
+        <div ref={setEventSlot} className="contents" />
         <RightSidebar />
       </div>
 
@@ -756,7 +759,7 @@ export function App() {
       {/* Event create/edit modal — top-level so its z-50 beats the bottom nav */}
       {eventModalLoaded.current && (
         <Deferred>
-          <EventModal />
+          <EventModal desktopSlot={eventSlot} />
         </Deferred>
       )}
 

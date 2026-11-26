@@ -24,12 +24,19 @@ const openModals: object[] = [];
  *
  * `initialFocus` names the control that should receive focus on open; without
  * it the first focusable element in the container does.
+ *
+ * `modal: false` is for a panel beside the page: no scroll lock or Tab trap,
+ * Escape only while focus is in the panel or nowhere, and focus goes back only
+ * if the panel held it as it closed. It still joins the stack, so a modal
+ * opened over it takes Escape first.
  */
 export function useModalA11y<T extends HTMLElement>(
   active: boolean,
   onClose: () => void,
   initialFocus?: RefObject<HTMLElement | null>,
+  options?: { modal?: boolean },
 ): RefObject<T | null> {
+  const modal = options?.modal ?? true;
   const ref = useRef<T | null>(null);
   // Read through a ref so a caller passing an inline closure does not re-run
   // the effect: re-running would restore and re-take focus on every render.
@@ -46,7 +53,7 @@ export function useModalA11y<T extends HTMLElement>(
     const self = {};
     openModals.push(self);
     const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (modal) document.body.style.overflow = 'hidden';
 
     const focusTimer = window.setTimeout(() => {
       const container = ref.current;
@@ -54,15 +61,32 @@ export function useModalA11y<T extends HTMLElement>(
       first?.focus();
     }, 0);
 
+    // Non-modal only. Removing the focused panel fires no event, so the last
+    // focus or press seen decides whether the panel held focus as it closed.
+    let focusInside = false;
+    const isInside = (node: EventTarget | null) =>
+      node instanceof Node && (ref.current?.contains(node) ?? false);
+    const onFocusIn = (e: FocusEvent) => {
+      focusInside = isInside(e.target);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (!isInside(e.target)) focusInside = false;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       // A modal opened over this one owns Escape and Tab until it closes.
       if (openModals[openModals.length - 1] !== self) return;
       if (e.key === 'Escape') {
+        if (!modal) {
+          if (e.defaultPrevented) return;
+          const focused = document.activeElement;
+          if (focused && focused !== document.body && !isInside(focused)) return;
+        }
         e.preventDefault();
         onCloseRef.current();
         return;
       }
-      if (e.key !== 'Tab') return;
+      if (e.key !== 'Tab' || !modal) return;
       const container = ref.current;
       if (!container) return;
       const focusable = visibleFocusable(container);
@@ -82,16 +106,22 @@ export function useModalA11y<T extends HTMLElement>(
     };
 
     document.addEventListener('keydown', onKeyDown);
+    if (!modal) {
+      document.addEventListener('focusin', onFocusIn);
+      document.addEventListener('pointerdown', onPointerDown, true);
+    }
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('pointerdown', onPointerDown, true);
       openModals.splice(openModals.indexOf(self), 1);
-      document.body.style.overflow = previousOverflow;
+      if (modal) document.body.style.overflow = previousOverflow;
       // An element that left the document while the modal was open cannot be
       // focused; leaving focus where it is beats throwing an error.
-      if (restoreTo?.isConnected) restoreTo.focus();
+      if (restoreTo?.isConnected && (modal || focusInside)) restoreTo.focus();
     };
-  }, [active, initialFocus]);
+  }, [active, initialFocus, modal]);
 
   return ref;
 }

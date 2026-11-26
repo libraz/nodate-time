@@ -36,6 +36,103 @@ describe('event modal', () => {
   });
 });
 
+// The desktop editor stays open beside the calendar, so a second open is a
+// request the editor answers (apply, or ask first), never an instant swap.
+describe('event modal opened again while open', () => {
+  const day = DateTime.local(2026, 4, 20);
+
+  beforeEach(() => {
+    useUiStore.setState({
+      eventOpenSeq: 0,
+      eventDraftDay: null,
+      pendingEventOpen: null,
+      eventDraftStart: null,
+      eventDraftEnd: null,
+      selectedDate: day,
+    });
+  });
+
+  it('opens a closed editor at once and counts the opening', () => {
+    useUiStore.getState().openEventModal();
+    const s = useUiStore.getState();
+    expect(s.showEventModal).toBe(true);
+    expect(s.eventOpenSeq).toBe(1);
+    expect(s.eventDraftDay?.toISODate()).toBe('2026-04-20');
+    expect(s.pendingEventOpen).toBeNull();
+  });
+
+  it('leaves the draft day empty when a start was given', () => {
+    useUiStore.getState().openEventModal(undefined, day.set({ hour: 10 }));
+    expect(useUiStore.getState().eventDraftDay).toBeNull();
+  });
+
+  it('queues an open made while the editor is open, without touching what it shows', () => {
+    useUiStore.getState().openEventModal('evt-1');
+    useUiStore.getState().setSelectedDate(DateTime.local(2026, 4, 22));
+    useUiStore.getState().openEventModal('evt-2');
+
+    const s = useUiStore.getState();
+    expect(s.editingEventId).toBe('evt-1');
+    expect(s.eventOpenSeq).toBe(1);
+    expect(s.pendingEventOpen).toMatchObject({
+      eventId: 'evt-2',
+      draftStart: null,
+      draftEnd: null,
+    });
+    expect(s.pendingEventOpen?.draftDay.toISODate()).toBe('2026-04-22');
+  });
+
+  it('applies a queued open and counts it', () => {
+    useUiStore.getState().openEventModal('evt-1');
+    useUiStore.getState().openEventModal();
+    useUiStore.getState().applyPendingEventOpen();
+
+    const s = useUiStore.getState();
+    expect(s.editingEventId).toBeNull();
+    expect(s.eventOpenSeq).toBe(2);
+    expect(s.eventDraftDay?.toISODate()).toBe('2026-04-20');
+    expect(s.pendingEventOpen).toBeNull();
+  });
+
+  it('applies a queued draft start and drops the draft day', () => {
+    const start = DateTime.local(2026, 4, 21, 9);
+    const end = DateTime.local(2026, 4, 21, 11);
+    useUiStore.getState().openEventModal('evt-1');
+    useUiStore.getState().openEventModal(undefined, start, end);
+    useUiStore.getState().applyPendingEventOpen();
+
+    const s = useUiStore.getState();
+    expect(s.eventDraftStart?.toISO()).toBe(start.toISO());
+    expect(s.eventDraftEnd?.toISO()).toBe(end.toISO());
+    expect(s.eventDraftDay).toBeNull();
+  });
+
+  it('drops a queued open on clear, leaving the editor as it was', () => {
+    useUiStore.getState().openEventModal('evt-1');
+    useUiStore.getState().openEventModal('evt-2');
+    useUiStore.getState().clearPendingEventOpen();
+
+    const s = useUiStore.getState();
+    expect(s.pendingEventOpen).toBeNull();
+    expect(s.editingEventId).toBe('evt-1');
+    expect(s.eventOpenSeq).toBe(1);
+  });
+
+  it.each([
+    ['closeEventModal', () => useUiStore.getState().closeEventModal()],
+    ['resetSessionUi', () => useUiStore.getState().resetSessionUi()],
+  ])('forgets the queued open and the draft day on %s', (_, end) => {
+    useUiStore.getState().openEventModal();
+    useUiStore.getState().openEventModal('evt-2');
+
+    end();
+
+    const s = useUiStore.getState();
+    expect(s.pendingEventOpen).toBeNull();
+    expect(s.eventDraftDay).toBeNull();
+  });
+});
+
 describe('day detail', () => {
   it('opens with the selected date and closes', () => {
     const date = DateTime.local(2026, 4, 20);

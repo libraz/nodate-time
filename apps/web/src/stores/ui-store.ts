@@ -13,6 +13,15 @@ export type RightPanelId = 'memo' | 'album' | 'members' | 'labels' | 'public' | 
 
 export type MobileTab = 'calendar' | 'memo' | 'search' | 'settings';
 
+/** An open asked for while the editor was already open, waiting for the editor's answer. */
+export interface PendingEventOpen {
+  eventId: string | null;
+  draftStart: DateTime | null;
+  draftEnd: DateTime | null;
+  /** The selected day when the open was asked for; a new draft without a start lands on it. */
+  draftDay: DateTime;
+}
+
 interface UiState {
   calendarView: CalendarView;
   selectedDate: DateTime;
@@ -23,6 +32,11 @@ interface UiState {
   eventDraftStart: DateTime | null;
   /** End of a range picked on the timeline; absent, a draft runs one hour. */
   eventDraftEnd: DateTime | null;
+  /** Day a new all-day draft opens on, fixed when the open happened. */
+  eventDraftDay: DateTime | null;
+  /** Counts editor openings, so the form rebuilds even when the id is unchanged. */
+  eventOpenSeq: number;
+  pendingEventOpen: PendingEventOpen | null;
   showDayDetail: boolean;
   rightPanel: RightPanelId;
   /**
@@ -49,7 +63,13 @@ interface UiState {
   setCalendarView: (view: CalendarView) => void;
   setSelectedDate: (date: DateTime) => void;
   setCurrentMonth: (date: DateTime) => void;
+  /**
+   * Opens the editor, or, while it is open, queues the request for the editor
+   * to apply or to confirm discarding unsaved edits first.
+   */
   openEventModal: (eventId?: string, draftStart?: DateTime, draftEnd?: DateTime) => void;
+  applyPendingEventOpen: () => void;
+  clearPendingEventOpen: () => void;
   closeEventModal: () => void;
   openDayDetail: (date: DateTime) => void;
   closeDayDetail: () => void;
@@ -100,6 +120,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   editingEventId: null,
   eventDraftStart: null,
   eventDraftEnd: null,
+  eventDraftDay: null,
+  eventOpenSeq: 0,
+  pendingEventOpen: null,
   showDayDetail: false,
   rightPanel: null,
   panelCalendarRequest: null,
@@ -121,12 +144,42 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCurrentMonth: (date) => set({ currentMonth: date }),
 
   openEventModal: (eventId, draftStart, draftEnd) =>
-    set({
-      showEventModal: true,
-      editingEventId: eventId ?? null,
-      eventDraftStart: draftStart ?? null,
-      eventDraftEnd: draftEnd ?? null,
+    set((s) => {
+      if (s.showEventModal) {
+        return {
+          pendingEventOpen: {
+            eventId: eventId ?? null,
+            draftStart: draftStart ?? null,
+            draftEnd: draftEnd ?? null,
+            draftDay: s.selectedDate,
+          },
+        };
+      }
+      return {
+        showEventModal: true,
+        editingEventId: eventId ?? null,
+        eventDraftStart: draftStart ?? null,
+        eventDraftEnd: draftEnd ?? null,
+        eventDraftDay: draftStart ? null : s.selectedDate,
+        eventOpenSeq: s.eventOpenSeq + 1,
+      };
     }),
+
+  applyPendingEventOpen: () =>
+    set((s) => {
+      const p = s.pendingEventOpen;
+      if (!p) return {};
+      return {
+        editingEventId: p.eventId,
+        eventDraftStart: p.draftStart,
+        eventDraftEnd: p.draftEnd,
+        eventDraftDay: p.draftStart ? null : p.draftDay,
+        eventOpenSeq: s.eventOpenSeq + 1,
+        pendingEventOpen: null,
+      };
+    }),
+
+  clearPendingEventOpen: () => set({ pendingEventOpen: null }),
 
   closeEventModal: () =>
     set({
@@ -134,6 +187,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       editingEventId: null,
       eventDraftStart: null,
       eventDraftEnd: null,
+      eventDraftDay: null,
+      pendingEventOpen: null,
     }),
 
   openDayDetail: (date) => set({ selectedDate: date, showDayDetail: true }),
@@ -225,6 +280,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       editingEventId: null,
       eventDraftStart: null,
       eventDraftEnd: null,
+      eventDraftDay: null,
+      pendingEventOpen: null,
       showDayDetail: false,
       rightPanel: null,
       panelCalendarRequest: null,

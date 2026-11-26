@@ -42,6 +42,8 @@ function keyboardIsTaken(e: KeyboardEvent): boolean {
   if (target?.closest('input, textarea, select, [contenteditable="true"], [role="listbox"]')) {
     return true;
   }
+  // A non-modal dialog owns the keys only while focus is inside it.
+  if (target?.closest('[role="dialog"]')) return true;
   return document.querySelector('[aria-modal="true"]') !== null;
 }
 

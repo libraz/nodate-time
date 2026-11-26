@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/client';
@@ -93,6 +93,13 @@ const event: CalendarEvent = {
   updatedAt: '2026-08-01T00:00:00Z',
 };
 
+interface PendingOpen {
+  eventId: string | null;
+  draftStart: DateTime | null;
+  draftEnd: DateTime | null;
+  draftDay: DateTime;
+}
+
 const uiState = {
   locale: 'ja' as 'ja' | 'en',
   timezone: 'Asia/Tokyo',
@@ -102,10 +109,34 @@ const uiState = {
   selectedDate: DateTime.fromISO('2026-08-07T00:00:00', { zone: 'Asia/Tokyo' }),
   eventDraftStart: null as DateTime | null,
   eventDraftEnd: null as DateTime | null,
+  eventOpenSeq: 1,
+  eventDraftDay: null as DateTime | null,
+  pendingEventOpen: null as PendingOpen | null,
+  applyPendingEventOpen: vi.fn(),
+  clearPendingEventOpen: vi.fn(),
 };
+
+/** What the real store's apply does, so a rerender shows the queued open. */
+function applyPending() {
+  const p = uiState.pendingEventOpen;
+  if (!p) return;
+  uiState.editingEventId = p.eventId;
+  uiState.eventDraftStart = p.draftStart;
+  uiState.eventDraftEnd = p.draftEnd;
+  uiState.eventDraftDay = p.draftStart ? null : p.draftDay;
+  uiState.eventOpenSeq += 1;
+  uiState.pendingEventOpen = null;
+}
 
 vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
+}));
+
+// Layout is a premise of every case: the phone sheet unless a case says desktop.
+const layout = vi.hoisted(() => ({ desktop: false }));
+
+vi.mock('@/lib/use-is-desktop', () => ({
+  useIsDesktop: () => layout.desktop,
 }));
 
 const teamCalendar = {
@@ -194,10 +225,18 @@ function titleField(): HTMLElement {
 }
 
 beforeEach(() => {
+  layout.desktop = false;
   uiState.showEventModal = true;
   uiState.editingEventId = 'ev-1';
   uiState.eventDraftStart = null;
   uiState.eventDraftEnd = null;
+  uiState.eventOpenSeq = 1;
+  uiState.eventDraftDay = null;
+  uiState.pendingEventOpen = null;
+  uiState.applyPendingEventOpen.mockImplementation(applyPending);
+  uiState.clearPendingEventOpen.mockImplementation(() => {
+    uiState.pendingEventOpen = null;
+  });
   uiState.locale = 'ja';
   uiState.timezone = 'Asia/Tokyo';
   calendarState.events = [event];
@@ -396,7 +435,12 @@ describe('EventModal scope chooser', () => {
   });
 });
 
+// The phone sheet is modal; the desktop panel's contract is in its own suite.
 describe('EventModal accessibility', () => {
+  beforeEach(() => {
+    layout.desktop = false;
+  });
+
   it('locks the background while it is open', () => {
     render(<EventModal />);
 
@@ -972,7 +1016,12 @@ describe('EventModal who and availability', () => {
   });
 });
 
+// On the phone sheet, which is the layout with a backdrop and a swipe.
 describe('EventModal unsaved edits', () => {
+  beforeEach(() => {
+    layout.desktop = false;
+  });
+
   async function editTitle() {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
@@ -1717,5 +1766,183 @@ describe('EventModal checklist on a new event', () => {
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('checklist.saveFailed'));
+  });
+});
+
+// Beside the calendar rather than over it: the calendar stays live, so a chip
+// clicked while the panel is open queues an open the panel answers.
+describe('EventModal desktop panel', () => {
+  const retro: CalendarEvent = { ...event, id: 'ev-2', title: 'Retro', etag: 'etag-2' };
+  let slot: HTMLDivElement;
+
+  beforeEach(() => {
+    layout.desktop = true;
+    slot = document.createElement('div');
+    document.body.appendChild(slot);
+  });
+
+  afterEach(() => {
+    slot.remove();
+  });
+
+  function queue(eventId: string | null) {
+    uiState.pendingEventOpen = {
+      eventId,
+      draftStart: null,
+      draftEnd: null,
+      draftDay: uiState.selectedDate,
+    };
+  }
+
+  function eventIdsFor(suffix: string): unknown[] {
+    return typed.get.mock.calls
+      .filter(([path]) => String(path).endsWith(suffix))
+      .map(([, init]) => init?.params?.path?.eventId);
+  }
+
+  it('sits in the slot as a panel, with no backdrop, no aria-modal and no scroll lock', () => {
+    render(<EventModal desktopSlot={slot} />);
+
+    const panel = screen.getByRole('dialog');
+    expect(slot.contains(panel)).toBe(true);
+    expect(panel).toHaveClass('side-panel');
+    expect(panel).not.toHaveAttribute('aria-modal');
+    expect(document.querySelector('.modal-backdrop')).toBeNull();
+    expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
+  it('shows nothing until the slot exists', () => {
+    render(<EventModal desktopSlot={null} />);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('applies a queued open at once when nothing is unsaved, and the sections read the new event', async () => {
+    calendarState.events = [event, retro];
+    const { rerender } = render(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    queue('ev-2');
+    rerender(<EventModal desktopSlot={slot} />);
+
+    expect(uiState.applyPendingEventOpen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    rerender(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Retro'));
+    for (const path of bodyPaths) {
+      await waitFor(() => expect(eventIdsFor(path)).toContain('ev-2'));
+    }
+  });
+
+  it('drops a queued open for the event already open', async () => {
+    const { rerender } = render(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    queue('ev-1');
+    rerender(<EventModal desktopSlot={slot} />);
+
+    expect(uiState.clearPendingEventOpen).toHaveBeenCalledTimes(1);
+    expect(uiState.applyPendingEventOpen).not.toHaveBeenCalled();
+  });
+
+  it('asks before a queued open throws edits away: keep editing drops it, discard applies it', async () => {
+    calendarState.events = [event, retro];
+    const { rerender } = render(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    fireEvent.change(titleField(), { target: { value: 'Standup moved' } });
+
+    queue('ev-2');
+    rerender(<EventModal desktopSlot={slot} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.keepEditing' }));
+
+    expect(uiState.clearPendingEventOpen).toHaveBeenCalledTimes(1);
+    expect(uiState.applyPendingEventOpen).not.toHaveBeenCalled();
+    expect(titleField()).toHaveValue('Standup moved');
+
+    queue('ev-2');
+    rerender(<EventModal desktopSlot={slot} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'common.discard' }));
+
+    expect(uiState.applyPendingEventOpen).toHaveBeenCalledTimes(1);
+    rerender(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Retro'));
+    expect(uiState.closeEventModal).not.toHaveBeenCalled();
+  });
+
+  it('stops a closing panel and opens the queued event instead', () => {
+    vi.useFakeTimers();
+    try {
+      calendarState.events = [event, retro];
+      const { rerender } = render(<EventModal desktopSlot={slot} />);
+      expect(titleField()).toHaveValue('Standup');
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'common.cancel' }),
+      );
+
+      queue('ev-2');
+      rerender(<EventModal desktopSlot={slot} />);
+      expect(uiState.applyPendingEventOpen).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(uiState.closeEventModal).not.toHaveBeenCalled();
+      rerender(<EventModal desktopSlot={slot} />);
+      expect(titleField()).toHaveValue('Retro');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Moving to another month drops the event from the store; a save that then
+  // took the editor for a new event would file a duplicate.
+  it('keeps saving as an update after the event leaves the store', async () => {
+    calendarState.updateEvent.mockResolvedValue(undefined);
+    const { rerender } = render(<EventModal desktopSlot={slot} />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    calendarState.events = [];
+    rerender(<EventModal desktopSlot={slot} />);
+
+    expect(within(screen.getByRole('dialog')).getByText('event.editEvent')).toBeInTheDocument();
+    fireEvent.change(titleField(), { target: { value: 'Standup moved' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(calendarState.updateEvent).toHaveBeenCalled());
+    expect(calendarState.updateEvent.mock.calls[0]?.slice(0, 2)).toEqual(['cal-1', 'ev-1']);
+    expect(calendarState.addEvent).not.toHaveBeenCalled();
+  });
+
+  it('moves a new draft to the day of a later open', async () => {
+    uiState.editingEventId = null;
+    calendarState.addEvent.mockResolvedValue('ev-new');
+    const { rerender } = render(<EventModal desktopSlot={slot} />);
+
+    uiState.eventOpenSeq = 2;
+    uiState.eventDraftDay = DateTime.fromISO('2026-08-20T00:00:00', { zone: 'Asia/Tokyo' });
+    rerender(<EventModal desktopSlot={slot} />);
+    fireEvent.change(titleField(), { target: { value: 'Shoot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(calendarState.addEvent).toHaveBeenCalled());
+    expect(calendarState.addEvent.mock.calls[0]?.[1]).toMatchObject({ startDate: '2026-08-20' });
+  });
+});
+
+describe('EventModal memo field', () => {
+  it('grows with its text, up to a cap past which it scrolls', () => {
+    let height = 120;
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
+      return this.getAttribute('placeholder') === 'event.memo' ? height : 0;
+    });
+    calendarState.events = [{ ...event, memo: 'one line' }];
+    render(<EventModal />);
+
+    const memo = screen.getByPlaceholderText('event.memo');
+    expect(memo.style.height).toBe('120px');
+    expect(memo).toHaveClass('max-h-[12lh]', 'overflow-y-auto');
+
+    height = 200;
+    fireEvent.change(memo, { target: { value: 'one line\nand another' } });
+    expect(memo.style.height).toBe('200px');
   });
 });
