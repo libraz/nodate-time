@@ -134,6 +134,7 @@ export function useSheetPicker(): boolean {
 export function PickerSurface({
   sheet,
   title,
+  dialogLabel,
   floatingRef,
   style,
   popoverClassName,
@@ -142,6 +143,12 @@ export function PickerSurface({
 }: {
   sheet: boolean;
   title?: string | undefined;
+  /**
+   * Makes the panel a modal dialog with this name. A panel the user works in
+   * rather than picks one value from needs it, so the calendar's own keyboard
+   * shortcuts stand down while it is open.
+   */
+  dialogLabel?: string | undefined;
   floatingRef: React.RefObject<HTMLDivElement | null>;
   style: React.CSSProperties;
   popoverClassName: string;
@@ -159,6 +166,9 @@ export function PickerSurface({
         <div
           ref={floatingRef}
           onKeyDown={onKeyDown}
+          {...(dialogLabel
+            ? { role: 'dialog', 'aria-modal': true, 'aria-label': dialogLabel }
+            : {})}
           className="glass-surface-heavy bottom-sheet fixed inset-x-0 bottom-0 z-[9999] flex max-h-[85dvh] flex-col rounded-t-[var(--radius-xl)] px-4 pt-2 pb-[max(env(safe-area-inset-bottom),16px)] ring-1 ring-[var(--color-border)]"
           style={{ boxShadow: 'var(--shadow-elevated)' }}
         >
@@ -182,6 +192,7 @@ export function PickerSurface({
     <div
       ref={floatingRef}
       onKeyDown={onKeyDown}
+      {...(dialogLabel ? { role: 'dialog', 'aria-modal': true, 'aria-label': dialogLabel } : {})}
       className={`dropdown-panel fixed z-[9999] bg-[var(--color-surface-elevated)] ring-1 ring-[var(--color-border)] ${popoverClassName}`}
       style={{ ...style, boxShadow: 'var(--shadow-elevated)', backdropFilter: 'blur(20px)' }}
     >

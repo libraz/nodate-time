@@ -52,6 +52,8 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
 
+import { EMPTY_FILTER } from '@/lib/event-filter';
+import { useCalendarStore } from '@/stores/calendar-store';
 import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { CalendarHeader } from './calendar-header';
 import { SchedulePollActionNotice } from './schedule-poll-actions';
@@ -159,5 +161,35 @@ describe('CalendarHeader profile menu', () => {
 
     await user.click(screen.getByRole('button', { name: 'elsewhere' }));
     expect(screen.queryByRole('menuitem', { name: 'Log out' })).toBeNull();
+  });
+});
+
+describe('member filter entry', () => {
+  afterEach(() => {
+    useCalendarStore.setState({ eventFilter: EMPTY_FILTER });
+    Object.assign(uiState, { mobileTab: undefined });
+  });
+
+  it('sits in the desktop header, and in the phone header on the calendar tab only', () => {
+    Object.assign(uiState, { mobileTab: 'memo' });
+    const { unmount } = render(<CalendarHeader />);
+    expect(screen.getAllByRole('button', { name: 'Filter events' })).toHaveLength(1);
+    unmount();
+
+    Object.assign(uiState, { mobileTab: 'calendar' });
+    render(<CalendarHeader />);
+    expect(screen.getAllByRole('button', { name: 'Filter events' })).toHaveLength(2);
+  });
+
+  it('carries the number of conditions while a filter is on', () => {
+    useCalendarStore.setState({
+      eventFilter: {
+        match: 'all',
+        conditions: [{ id: 'c', field: 'owner', exclude: false, people: [{ id: 'a', name: 'A' }] }],
+      },
+    });
+    render(<CalendarHeader />);
+    const button = screen.getByRole('button', { name: 'Filter events (1 active)' });
+    expect(button).toHaveAttribute('data-active', 'true');
   });
 });

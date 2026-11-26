@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
+import { EventFilterButton } from '@/components/event-filter-button';
 import { SchedulePollNavDesktop, SchedulePollNavMobile } from '@/components/schedule-poll-actions';
 import { useT } from '@/i18n';
 import { startCreateEvent } from '@/lib/create-event';
@@ -354,7 +355,7 @@ export function CalendarHeader() {
   return (
     <div className="glass-surface-heavy app-header sticky top-0 z-30">
       {/* Mobile header (< sm) */}
-      <div className="flex h-[48px] items-center gap-1 px-3 sm:hidden">
+      <div className="flex h-[48px] items-center gap-1 px-2.5 sm:hidden">
         {/* Left: drawer toggle + month label (follows scroll) + view switcher */}
         <button
           type="button"
@@ -378,7 +379,11 @@ export function CalendarHeader() {
           </svg>
         </button>
         <div className="flex min-w-0 items-center gap-1">
-          <span className="truncate text-title font-bold tabular-nums text-[var(--color-text-primary)]">
+          {/* Full size from 390px; below it the month shrinks rather than truncating to "2026年1…". */}
+          <span
+            className="truncate text-title font-bold tabular-nums text-[var(--color-text-primary)]"
+            style={{ fontSize: 'clamp(15px, 9vw - 17px, var(--text-title))' }}
+          >
             {viewTitle}
           </span>
 
@@ -386,7 +391,7 @@ export function CalendarHeader() {
             <button
               type="button"
               onClick={() => setShowViewMenu((s) => !s)}
-              className="flex h-7 items-center gap-0.5 rounded-full px-2 text-footnote font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
+              className="flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 text-footnote font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] active:bg-[var(--color-active)]"
               aria-haspopup="menu"
               aria-expanded={showViewMenu}
             >
@@ -446,12 +451,14 @@ export function CalendarHeader() {
         {/* Center: spacer */}
         <div className="flex-1" />
 
-        {/* Right: Today + create + avatar */}
-        <div className="flex items-center gap-1.5">
+        {/* Right: filter + Today + create + avatar */}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* The filter narrows the calendar views only; the other tabs have nothing it hides. */}
+          {mobileTab === 'calendar' && <EventFilterButton variant="mobile" />}
           <button
             type="button"
             onClick={goToToday}
-            className="today-button flex h-8 items-center rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent-ink)]"
+            className="today-button flex h-8 shrink-0 items-center whitespace-nowrap rounded-full bg-[var(--color-accent-bg)] px-2.5 text-footnote font-medium text-[var(--color-accent-ink)]"
           >
             <span className="leading-none">{t('calendar.today')}</span>
           </button>
@@ -567,6 +574,8 @@ export function CalendarHeader() {
               {t('calendar.year')}
             </button>
           </div>
+
+          <EventFilterButton variant="desktop" />
 
           <button
             type="button"

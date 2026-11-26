@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { CalendarGrid } from '@/components/calendar-grid';
 import { CalendarHeader } from '@/components/calendar-header';
+import { EventFilterBar } from '@/components/event-filter-bar';
 import { FabButton } from '@/components/fab-button';
 import { TipCard } from '@/components/guide';
 import { LeftSidebar } from '@/components/left-sidebar';
@@ -591,19 +592,22 @@ export function App() {
       onRetry={retryFailedLoads}
     />
   ) : (
-    <div className="relative flex-1 overflow-hidden">
-      {hiddenNotice}
-      {loadingNotice}
-      <Suspense fallback={null}>
-        {calendarView === 'month' && (
-          <div className="h-full">
-            <CalendarGrid />
-          </div>
-        )}
-        {calendarView === 'week' && <WeeklyTimeline />}
-        {calendarView === 'list' && <ListView />}
-        {calendarView === 'year' && <YearView />}
-      </Suspense>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <EventFilterBar />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {hiddenNotice}
+        {loadingNotice}
+        <Suspense fallback={null}>
+          {calendarView === 'month' && (
+            <div className="h-full">
+              <CalendarGrid />
+            </div>
+          )}
+          {calendarView === 'week' && <WeeklyTimeline />}
+          {calendarView === 'list' && <ListView />}
+          {calendarView === 'year' && <YearView />}
+        </Suspense>
+      </div>
     </div>
   );
 
@@ -615,20 +619,23 @@ export function App() {
       onRetry={retryFailedLoads}
     />
   ) : (
-    <div className="relative flex-1 overflow-hidden">
-      {hiddenNotice}
-      {loadingNotice}
-      <Suspense fallback={null}>
-        {calendarView === 'month' ? (
-          <MonthScroll />
-        ) : calendarView === 'week' ? (
-          <WeeklyTimeline />
-        ) : calendarView === 'list' ? (
-          <ListView />
-        ) : (
-          <YearView />
-        )}
-      </Suspense>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <EventFilterBar />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {hiddenNotice}
+        {loadingNotice}
+        <Suspense fallback={null}>
+          {calendarView === 'month' ? (
+            <MonthScroll />
+          ) : calendarView === 'week' ? (
+            <WeeklyTimeline />
+          ) : calendarView === 'list' ? (
+            <ListView />
+          ) : (
+            <YearView />
+          )}
+        </Suspense>
+      </div>
     </div>
   );
 

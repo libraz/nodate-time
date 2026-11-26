@@ -4,6 +4,7 @@ import { CustomSelect } from '@/components/custom-select';
 import { LabelledButton } from '@/components/labelled-button';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
+import { SEARCHABLE_FROM } from '@/lib/event-filter';
 import { memberOption } from '@/lib/member-option';
 import { showAsLabelKey } from '@/lib/permissions';
 import {
@@ -162,9 +163,6 @@ interface EventPeopleProps {
   onOwnerChange: (id: string) => void;
   onParticipantsChange: (ids: string[]) => void;
 }
-
-/** Lists past this length get a filter box. */
-const SEARCHABLE_FROM = 8;
 
 /**
  * Who an event is about: whose plan it is, and who else takes part. On a
