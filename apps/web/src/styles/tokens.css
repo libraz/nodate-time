@@ -662,3 +662,128 @@
 
   color-scheme: dark;
 }
+
+/* ============================================
+   Sakura Light — 春霞: blush ground, plum-brown ink,
+   deep rose (紅梅) accent, young-leaf green hints
+   ============================================ */
+:root[data-theme="sakura"] {
+  --color-surface: #fffafb;
+  --color-surface-secondary: #fbf2f4;
+  --color-surface-elevated: #ffffff;
+  --color-surface-inset: #f7eaee;
+  --color-surface-app: #fbf1f3;
+
+  --color-text-primary: #2e1f26;
+  --color-text-secondary: #6f5560;
+  --color-text-tertiary: #94798a;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #f0dde3;
+  --color-border-strong: #e2c4ce;
+  --color-separator: #f3e4e8;
+
+  --color-accent: #c0436c;
+  --color-accent-hover: #a7375c;
+  --color-accent-bg: rgba(192, 67, 108, 0.08);
+  --color-accent-subtle: rgba(192, 67, 108, 0.15);
+  /* One step deeper so accent text still clears AA on the blush ground */
+  --color-accent-ink: #b13b63;
+  /* 若葉 — leaf green, so a hint never reads as the rose of a selection */
+  --color-info: #4d7a5a;
+
+  /* Pulled toward orange so an error stays distinct from the rose accent */
+  --color-danger: #c2361f;
+  --color-danger-bg: rgba(194, 54, 31, 0.09);
+  --color-success: #2f7d55;
+  --color-warning: #9e5f0c;
+
+  --color-hover: #f9e9ee;
+  --color-active: #f4dde4;
+  --color-overlay: rgba(60, 28, 42, 0.28);
+
+  /* A light spring haze: floating chrome is a veil, not frosted glass */
+  --surface-glass: rgba(255, 250, 251, 0.8);
+  --surface-glass-heavy: rgba(255, 252, 253, 0.92);
+  --backdrop-blur: blur(14px) saturate(130%);
+  --backdrop-blur-heavy: blur(22px) saturate(140%);
+
+  /* Rose-tinted, diffuse shadows */
+  --shadow-sm: 0 1px 2px rgba(120, 40, 70, 0.05);
+  --shadow-md: 0 4px 14px -2px rgba(120, 40, 70, 0.09);
+  --shadow-lg: 0 10px 28px -6px rgba(120, 40, 70, 0.13);
+  --shadow-elevated: 0 18px 44px -10px rgba(120, 40, 70, 0.2);
+
+  /* Petal-soft corners */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+
+  --color-sunday: #c8344a;
+  --color-saturday: #4a6fb0;
+
+  --app-bg: #fbf1f3;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: light;
+}
+
+/* ============================================
+   Sakura Dark — 夜桜: plum night, petal-white ink,
+   rose lit from below
+   ============================================ */
+:root[data-theme="sakura"][data-mode="dark"] {
+  --color-surface: #211a1e;
+  --color-surface-secondary: #1b1519;
+  --color-surface-elevated: #2a2126;
+  --color-surface-inset: #161114;
+  --color-surface-app: #171215;
+
+  --color-text-primary: #f4e7ec;
+  --color-text-secondary: #b8a1ab;
+  --color-text-tertiary: #8a7480;
+
+  --color-border: #3a2d33;
+  --color-border-strong: #4d3b44;
+  --color-separator: #2c2227;
+
+  /* Fill deep enough for white labels; text and icons take the lit petal */
+  --color-accent: #b9466c;
+  --color-accent-hover: #cf5a81;
+  --color-accent-bg: rgba(232, 120, 160, 0.13);
+  --color-accent-subtle: rgba(232, 120, 160, 0.22);
+  --color-accent-ink: #f08aab;
+  --color-info: #8fc0a0;
+
+  --color-danger: #ef6a55;
+  --color-danger-bg: rgba(239, 106, 85, 0.15);
+  --color-success: #6cc795;
+  --color-warning: #e0ad52;
+
+  --color-hover: #2a2126;
+  --color-active: #33282e;
+  --color-overlay: rgba(8, 4, 6, 0.6);
+
+  --surface-glass: rgba(33, 26, 30, 0.82);
+  --surface-glass-heavy: rgba(42, 33, 38, 0.92);
+  --backdrop-blur: blur(14px) saturate(130%);
+  --backdrop-blur-heavy: blur(22px) saturate(140%);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 28px -6px rgba(0, 0, 0, 0.55);
+  --shadow-elevated: 0 18px 44px -10px rgba(0, 0, 0, 0.65);
+
+  --color-sunday: #f0778a;
+  --color-saturday: #8ba8e0;
+
+  --app-bg: #171215;
+  --glass-blob-1: none;
+  --glass-blob-2: none;
+  --glass-blob-3: none;
+
+  color-scheme: dark;
+}

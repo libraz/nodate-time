@@ -316,6 +316,7 @@ export const ja = {
   'settings.themeGlass': 'Glass',
   'settings.themeModern': 'Modern',
   'settings.themeWashi': 'Washi',
+  'settings.themeSakura': 'Sakura',
   'settings.themeClassic': 'Classic',
   'settings.themeNothing': 'Nothing',
   'settings.colorMode': 'カラーモード',

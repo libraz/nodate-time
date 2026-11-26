@@ -86,8 +86,10 @@
 
 /* Secondary actions go neutral; date/time pills get a hairline */
 :root[data-theme="modern"] .btn-secondary {
-  background: var(--color-surface);
   border: 1px solid var(--color-border-strong);
+}
+:root[data-theme="modern"] .btn-secondary:not(.btn-danger) {
+  background: var(--color-surface);
   color: var(--color-text-primary);
 }
 :root[data-theme="modern"] .pill-button {
@@ -95,7 +97,7 @@
 }
 
 /* Dark precedence — out-specify the generic [data-mode="dark"] form rules */
-:root[data-theme="modern"][data-mode="dark"] .btn-secondary {
+:root[data-theme="modern"][data-mode="dark"] .btn-secondary:not(.btn-danger) {
   background: var(--color-surface);
 }
 :root[data-theme="modern"][data-mode="dark"] .segmented-control {
@@ -205,11 +207,11 @@
 }
 
 /* Secondary actions sit on warm paper, not neutral grey */
-:root[data-theme="washi"] .btn-secondary {
+:root[data-theme="washi"] .btn-secondary:not(.btn-danger) {
   background: var(--color-surface-inset);
   color: var(--color-text-primary);
 }
-:root[data-theme="washi"][data-mode="dark"] .btn-secondary {
+:root[data-theme="washi"][data-mode="dark"] .btn-secondary:not(.btn-danger) {
   background: var(--color-surface-inset);
 }
 
@@ -247,6 +249,128 @@
 
 :root[data-theme="washi"] ::-webkit-scrollbar-thumb {
   background: var(--color-accent-subtle);
+}
+
+/* ============================================
+   Sakura — rounded type, petal-soft shapes, a drift of petals
+   ============================================ */
+
+/* Rounded gothic with real weights (Zen Maru Gothic); Hiragino Maru Gothic
+   ships one weight only, so it is the fallback rather than the first choice. */
+:root[data-theme="sakura"] {
+  --font-sans:
+    "Zen Maru Gothic", "Hiragino Maru Gothic ProN", -apple-system, "system-ui", "Hiragino Sans",
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  letter-spacing: 0.01em;
+}
+
+/* A soft light from above, in the ground's own hue */
+:root[data-theme="sakura"] .app-bg::before {
+  background: radial-gradient(120% 70% at 50% -10%, rgba(255, 255, 255, 0.75), transparent 60%);
+}
+:root[data-theme="sakura"][data-mode="dark"] .app-bg::before {
+  background: radial-gradient(120% 70% at 50% -10%, rgba(120, 60, 85, 0.22), transparent 60%);
+}
+
+/* Petals drifting in from two corners, clear of the calendar's middle */
+:root[data-theme="sakura"] .app-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 420 420'%3E%3Cdefs%3E%3Cpath id='p' d='M0 12C-7 7-10-1-7-7C-5-11-2-11 0-8C2-11 5-11 7-7C10-1 7 7 0 12Z'/%3E%3C/defs%3E%3Cg fill='%23d46a8f'%3E%3Cuse href='%23p' transform='translate(352 58) rotate(-24) scale(2.6)'/%3E%3Cuse href='%23p' fill-opacity='.75' transform='translate(290 122) rotate(38) scale(2)'/%3E%3Cuse href='%23p' fill-opacity='.6' transform='translate(382 172) rotate(-70) scale(1.7)'/%3E%3Cuse href='%23p' fill-opacity='.5' transform='translate(220 52) rotate(12) scale(1.4)'/%3E%3Cuse href='%23p' fill-opacity='.45' transform='translate(314 240) rotate(64) scale(1.2)'/%3E%3Cuse href='%23p' fill-opacity='.35' transform='translate(196 170) rotate(-40)'/%3E%3Cuse href='%23p' fill-opacity='.3' transform='translate(252 302) rotate(20) scale(.85)'/%3E%3Cuse href='%23p' fill-opacity='.25' transform='translate(140 96) rotate(80) scale(.75)'/%3E%3C/g%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 420 420'%3E%3Cdefs%3E%3Cpath id='p' d='M0 12C-7 7-10-1-7-7C-5-11-2-11 0-8C2-11 5-11 7-7C10-1 7 7 0 12Z'/%3E%3C/defs%3E%3Cg fill='%23d46a8f'%3E%3Cuse href='%23p' transform='translate(352 58) rotate(-24) scale(2.6)'/%3E%3Cuse href='%23p' fill-opacity='.75' transform='translate(290 122) rotate(38) scale(2)'/%3E%3Cuse href='%23p' fill-opacity='.6' transform='translate(382 172) rotate(-70) scale(1.7)'/%3E%3Cuse href='%23p' fill-opacity='.5' transform='translate(220 52) rotate(12) scale(1.4)'/%3E%3Cuse href='%23p' fill-opacity='.45' transform='translate(314 240) rotate(64) scale(1.2)'/%3E%3Cuse href='%23p' fill-opacity='.35' transform='translate(196 170) rotate(-40)'/%3E%3Cuse href='%23p' fill-opacity='.3' transform='translate(252 302) rotate(20) scale(.85)'/%3E%3Cuse href='%23p' fill-opacity='.25' transform='translate(140 96) rotate(80) scale(.75)'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position:
+    right -70px top -50px,
+    left -150px bottom -130px;
+  background-size:
+    440px 440px,
+    320px 320px;
+  opacity: 0.2;
+  pointer-events: none;
+  z-index: 0;
+}
+:root[data-theme="sakura"][data-mode="dark"] .app-bg::after {
+  opacity: 0.1;
+}
+
+/* Primary and secondary actions are full capsules, the theme's signature */
+:root[data-theme="sakura"] :is(.btn-primary, .btn-secondary) {
+  border-radius: 999px;
+}
+:root[data-theme="sakura"] .btn-primary {
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+:root[data-theme="sakura"] .btn-secondary:not(.btn-danger) {
+  background: var(--color-accent-bg);
+}
+
+/* Segmented control: a capsule track with a floating petal-white thumb */
+:root[data-theme="sakura"] .segmented-control {
+  border-radius: 999px;
+  background: var(--color-surface-inset);
+  padding: 3px;
+}
+:root[data-theme="sakura"] .segmented-control::before {
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--seg-n));
+  border-radius: 999px;
+  background: var(--color-surface-elevated);
+  box-shadow: 0 2px 8px -2px rgba(120, 40, 70, 0.22);
+}
+:root[data-theme="sakura"][data-mode="dark"] .segmented-control {
+  background: var(--color-surface-inset);
+}
+:root[data-theme="sakura"][data-mode="dark"] .segmented-control::before {
+  background: var(--color-surface-elevated);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+}
+
+/* Fields: soft white wells; focus blooms as a wide rose halo */
+:root[data-theme="sakura"] .input-modern {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+}
+:root[data-theme="sakura"][data-mode="dark"] .input-modern {
+  background: var(--color-surface-inset);
+}
+:root[data-theme="sakura"] .input-modern:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 4px var(--color-accent-bg);
+}
+
+:root[data-theme="sakura"] .card-section {
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-theme="sakura"] .pill-button {
+  border-radius: 999px;
+  border: 1px solid var(--color-accent-subtle);
+}
+
+:root[data-theme="sakura"] .dropdown-panel {
+  border: 1px solid var(--color-border-strong);
+}
+
+/* Accent lift: today, the now line and the FAB glow faintly rose */
+:root[data-theme="sakura"] .today-badge {
+  box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--color-accent) 50%, transparent);
+}
+:root[data-theme="sakura"] .now-dot {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+:root[data-theme="sakura"] .fab-button {
+  box-shadow:
+    var(--shadow-elevated),
+    0 10px 26px -8px color-mix(in srgb, var(--color-accent) 60%, transparent);
+}
+
+:root[data-theme="sakura"] .toggle-knob {
+  box-shadow: 0 2px 4px rgba(120, 40, 70, 0.25);
 }
 
 /* ============================================
@@ -289,14 +413,16 @@
   letter-spacing: 0.1em;
   font-size: 12px;
   font-weight: 500;
-  /* Neutral: red is the primary action's and danger's colour, not Cancel's */
   border: 1px solid var(--color-border-strong);
+}
+/* Neutral: red is the primary action's and danger's colour, not Cancel's */
+:root[data-theme="nothing"] .btn-secondary:not(.btn-danger) {
   background: transparent;
   color: var(--color-text-primary);
 }
 
 /* Inputs: squared, thin border */
-:root[data-theme="nothing"][data-mode="dark"] .btn-secondary {
+:root[data-theme="nothing"][data-mode="dark"] .btn-secondary:not(.btn-danger) {
   background: transparent;
 }
 

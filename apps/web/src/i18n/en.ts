@@ -309,6 +309,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.themeGlass': 'Glass',
   'settings.themeModern': 'Modern',
   'settings.themeWashi': 'Washi',
+  'settings.themeSakura': 'Sakura',
   'settings.themeClassic': 'Classic',
   'settings.themeNothing': 'Nothing',
   'settings.colorMode': 'Color mode',

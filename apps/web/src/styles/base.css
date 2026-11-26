@@ -84,7 +84,7 @@ body,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-:root[data-mode="dark"] .btn-secondary {
+:root[data-mode="dark"] .btn-secondary:not(.btn-danger) {
   background: rgba(118, 118, 128, 0.24);
 }
 
