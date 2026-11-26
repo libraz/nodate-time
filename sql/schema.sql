@@ -1326,7 +1326,7 @@ CREATE TABLE users (
   locale VARCHAR(16) NOT NULL DEFAULT 'en' COMMENT 'Preferred locale tag (BCP 47)',
   timezone VARCHAR(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL DEFAULT 'UTC' COMMENT 'Preferred IANA timezone (independent of locale)',
   country CHAR(2) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'ISO 3166-1 alpha-2 country (independent of locale); drives default holiday subscription',
-  week_start ENUM('mon','sun','sat') NOT NULL DEFAULT 'mon' COMMENT 'Preferred first day of the week for calendar grids',
+  week_start ENUM('mon','sun','sat') NOT NULL DEFAULT 'sun' COMMENT 'Preferred first day of the week for calendar grids',
   working_days CHAR(7) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL COMMENT 'User override of workspace working_days; NULL = inherit',
   working_hours_start TIME NULL COMMENT 'User override of workspace working_hours_start; NULL = inherit',
   working_hours_end TIME NULL COMMENT 'User override of workspace working_hours_end; NULL = inherit',

@@ -13,6 +13,8 @@
 #      Just before 0004 the first pass loads scripts/fixtures/pre-0004-data.sql
 #      (all-day rows in the old shapes and the operator's decisions) and runs
 #      classify-all-day.sql over them
+#      After pass 1 no user may hold week_start 'mon'; one is then set back to
+#      'mon' and must still hold it after pass 2
 #   3. check the rewritten rows (fixture states) and the values 0004 gives
 #      the pre-0004 rows (every state), run the conformance suite
 #      (--mode all), and compare the schema against a fresh load of the
@@ -250,6 +252,36 @@ check_all_day() {
   return "${rc}"
 }
 
+# check_week_start_moved DB: after the first pass no user may still hold the
+# old default; the fixtures must have given 0005 at least one row to move.
+check_week_start_moved() {
+  local out
+  out="$(sql "$1" <<<"SELECT COUNT(*) FROM users; SELECT COUNT(*) FROM users WHERE week_start = 'mon';")" || return 1
+  if [[ "$(sed -n 1p <<<"${out}")" -eq 0 ]]; then
+    echo "  week_start check has no user rows to look at" >&2
+    return 1
+  fi
+  if [[ "$(sed -n 2p <<<"${out}")" -ne 0 ]]; then
+    echo "  users still on week_start 'mon' after 0005: $(sed -n 2p <<<"${out}")" >&2
+    return 1
+  fi
+}
+
+# set_week_start_mon DB: put one user back on 'mon', as a user's own choice.
+set_week_start_mon() {
+  sql "$1" <<<"UPDATE users SET week_start = 'mon', updated_at = updated_at ORDER BY id LIMIT 1;"
+}
+
+# check_week_start_kept DB: the re-run must not rewrite that choice.
+check_week_start_kept() {
+  local n
+  n="$(sql "$1" <<<"SELECT COUNT(*) FROM users WHERE week_start = 'mon';")" || return 1
+  if [[ "${n}" -ne 1 ]]; then
+    echo "  0005 re-run changed a chosen week_start: ${n} users on 'mon', expected 1" >&2
+    return 1
+  fi
+}
+
 failed=0
 fresh="${PREFIX}fresh"
 
@@ -275,7 +307,15 @@ for state in "${STATES[@]}"; do
   for pass in 1 2; do
     echo "  upgrade pass ${pass}"
     apply_upgrades "${db}" "${release}" "${pass}" || { ok=0; break; }
+    if [[ "${pass}" == 1 ]]; then
+      echo "  week_start moved off 'mon'"
+      check_week_start_moved "${db}" && set_week_start_mon "${db}" || { ok=0; break; }
+    fi
   done
+  if [[ ${ok} -eq 1 ]]; then
+    echo "  week_start choice kept on re-run"
+    check_week_start_kept "${db}" || ok=0
+  fi
   if [[ ${ok} -eq 1 && "${release}" == run ]]; then
     echo "  rewritten rows"
     check_rows "${db}" || ok=0

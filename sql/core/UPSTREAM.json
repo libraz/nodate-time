@@ -1,7 +1,7 @@
 {
   "repository": "git@github.com:libraz/nodate-flow.git",
   "sourcePath": "sql/core",
-  "ref": "b108713ea840b222c42da9fb566e1dff28924183",
+  "ref": "16cce7f90a2ab59bc05bb57844d7a3c4c28df8d5",
   "files": [
     {
       "path": "IMPORTERS.md",
@@ -9,7 +9,7 @@
     },
     {
       "path": "PROTOCOL.md",
-      "sha256": "405557f97acd4039307007f13c1af490108b62b88384197f845ac30e2db641e7"
+      "sha256": "dbd2c53fb4a57d4227e6fc0f8f840db14582f3c3a7ef471b92c56dcc5a6388f8"
     },
     {
       "path": "all-day/fixtures.json",
@@ -301,7 +301,7 @@
     },
     {
       "path": "tables/users.sql",
-      "sha256": "7e94358b4ec52a50dbc20a29a4228bc0ff4784ff4547626ac0f20691bffd1190"
+      "sha256": "b90821b12c23b8b691a4c3040f4e8ea23b71967f1bc3c406c9a3db052a65980a"
     },
     {
       "path": "tables/workspace_invites.sql",
@@ -406,6 +406,10 @@
     {
       "path": "upgrades/0004-all-day-canonical.sql",
       "sha256": "35e7c74865defa9a8ff2e8069bc9badf2df1822c9b00b725a9306c243ef0c9b1"
+    },
+    {
+      "path": "upgrades/0005-week-start-sunday.sql",
+      "sha256": "4a7a39ae84daa88e633b658d551c337363c91d99cd9bcd5429f291aae174244e"
     }
   ]
 }

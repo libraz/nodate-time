@@ -617,7 +617,9 @@ shipped upgrade is never edited; a later change is a new file.
 
 An upgrade that rewrites data first makes the changes that do not alter
 meaning, then lists by `public_id` any rows that still violate the new
-constraint and stops, before it adds the constraint.
+constraint and stops, before it adds the constraint. When a default changes on
+a column where a chosen value cannot be distinguished from the old default, an
+upgrade may rewrite rows still holding the old default to the new one.
 
 An upgrade that writes `calendar_events` rows may set
 `@nf_item_projection_engine` for the length of its transaction, and clears it
