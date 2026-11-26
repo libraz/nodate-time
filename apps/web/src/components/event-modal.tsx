@@ -1400,11 +1400,10 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
       )}
 
       {/* Keyed by event, so switching events in the open panel starts each section afresh. */}
-      <div data-saves-immediately>
+      <div data-saves-immediately key={editingEvent?.id}>
         {/* Checklist (edit mode only) */}
         {editingEvent && (
           <ChecklistSection
-            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
@@ -1414,7 +1413,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         {/* Attachments (edit mode only) */}
         {editingEvent && (
           <AttachmentsSection
-            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
@@ -1424,7 +1422,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         {/* Comments (edit mode only) */}
         {editingEvent && (
           <CommentsSection
-            key={editingEvent.id}
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             canPost={canEdit(myRole)}

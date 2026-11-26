@@ -1387,6 +1387,16 @@ describe('EventModal immediate sections', () => {
     expect(screen.getByRole('heading', { name: 'event.savedImmediately' })).toBeInTheDocument();
   });
 
+  it('renders the checklist, attachments and comments without colliding keys', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const collisions = error.mock.calls.filter((c) => String(c[0]).includes('same key'));
+    error.mockRestore();
+    expect(collisions).toEqual([]);
+  });
+
   it('has no such heading on create, where those sections are absent', () => {
     uiState.editingEventId = null;
     render(<EventModal />);
