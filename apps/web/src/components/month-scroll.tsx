@@ -31,6 +31,9 @@ const EDGE_EXTEND_PX = 700;
 
 const MONTH_HEADER_H = 28;
 
+/** Longest a smooth scroll is assumed to run where `scrollend` never fires. */
+const SMOOTH_SCROLL_MS = 500;
+
 type ScrollItem =
   | { kind: 'header'; key: string; month: DateTime }
   | { kind: 'week'; key: string; dayKey: string; weekStart: DateTime };
@@ -96,6 +99,10 @@ export function MonthScroll() {
   const pendingScrollRef = useRef<{ month?: string; today?: boolean; smooth: boolean } | null>(
     null,
   );
+  // The week at the top of the viewport and its offset from the container top.
+  const readAnchorRef = useRef<{ week: string; offset: number } | null>(null);
+  // Ends the smooth scroll in flight; null when none is.
+  const endSmoothRef = useRef<(() => void) | null>(null);
   const lastTapRef = useRef({ key: '', time: 0 });
   const tapTimerRef = useRef(0);
   const [anchorMonth, setAnchorMonth] = useState(() => nowInZone(timezone).startOf('month'));
@@ -169,35 +176,64 @@ export function MonthScroll() {
     [consumeClick, openEventModal],
   );
 
-  const scrollToWeek = useCallback((weekKey: string, smooth: boolean) => {
+  // Rows grow with their events, so the week being read is recorded to be held in place.
+  const recordReadAnchor = useCallback(() => {
     const container = scrollRef.current;
-    if (!container || !weekKey) return false;
-    const el = container.querySelector<HTMLElement>(`[data-week="${weekKey.slice(2)}"]`);
-    if (!el) return false;
-    const cRect = container.getBoundingClientRect();
-    const tRect = el.getBoundingClientRect();
-    const delta = tRect.top - cRect.top - MONTH_HEADER_H;
-    container.scrollTo({
-      top: container.scrollTop + delta,
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-    return true;
+    if (!container) return;
+    const cTop = container.getBoundingClientRect().top;
+    for (const row of container.querySelectorAll<HTMLElement>('[data-week]')) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom > cTop + MONTH_HEADER_H) {
+        readAnchorRef.current = { week: row.dataset.week ?? '', offset: rect.top - cTop };
+        return;
+      }
+    }
+    readAnchorRef.current = null;
   }, []);
 
-  const scrollToMonth = useCallback((monthKey: string, smooth: boolean) => {
-    const container = scrollRef.current;
-    if (!container || !monthKey) return false;
-    const el = container.querySelector<HTMLElement>(`[data-month="${monthKey}"]`);
-    if (!el) return false;
-    const cRect = container.getBoundingClientRect();
-    const tRect = el.getBoundingClientRect();
-    const delta = tRect.top - cRect.top - MONTH_HEADER_H;
-    container.scrollTo({
-      top: container.scrollTop + delta,
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-    return true;
+  const beginSmoothScroll = useCallback((container: HTMLElement) => {
+    endSmoothRef.current?.();
+    const end = () => {
+      window.clearTimeout(timer);
+      container.removeEventListener('scrollend', end);
+      if (endSmoothRef.current === end) endSmoothRef.current = null;
+    };
+    const timer = window.setTimeout(end, SMOOTH_SCROLL_MS);
+    container.addEventListener('scrollend', end);
+    endSmoothRef.current = end;
   }, []);
+
+  const scrollToTarget = useCallback(
+    (selector: string, smooth: boolean) => {
+      const container = scrollRef.current;
+      if (!container) return false;
+      const el = container.querySelector<HTMLElement>(selector);
+      if (!el) return false;
+      const cRect = container.getBoundingClientRect();
+      const tRect = el.getBoundingClientRect();
+      const delta = tRect.top - cRect.top - MONTH_HEADER_H;
+      if (smooth) beginSmoothScroll(container);
+      container.scrollTo({
+        top: container.scrollTop + delta,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+      recordReadAnchor();
+      return true;
+    },
+    [beginSmoothScroll, recordReadAnchor],
+  );
+
+  const scrollToWeek = useCallback(
+    (weekKey: string, smooth: boolean) =>
+      !!weekKey && scrollToTarget(`[data-week="${weekKey.slice(2)}"]`, smooth),
+    [scrollToTarget],
+  );
+
+  const scrollToMonth = useCallback(
+    (monthKey: string, smooth: boolean) =>
+      !!monthKey && scrollToTarget(`[data-month="${monthKey}"]`, smooth),
+    [scrollToTarget],
+  );
 
   const scrollToToday = useCallback(
     (smooth: boolean) => {
@@ -242,6 +278,22 @@ export function MonthScroll() {
     }
   }, [setCurrentMonth, timezone]);
 
+  // Holds the read week in place as rows resize. Declared before the pending-scroll
+  // effect so a rebuild landing in the same commit still reads as pending.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `buckets` is what resizes the rows
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    const anchor = readAnchorRef.current;
+    if (!container || !anchor) return;
+    if (pendingScrollRef.current !== null || endSmoothRef.current !== null) return;
+    const row = container.querySelector<HTMLElement>(`[data-week="${anchor.week}"]`);
+    if (!row) return;
+    const drift =
+      row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset;
+    if (drift) container.scrollTop += drift;
+    recordReadAnchor();
+  }, [buckets, recordReadAnchor]);
+
   useLayoutEffect(() => {
     if (!anchorKey) return;
     const pending = pendingScrollRef.current;
@@ -277,14 +329,16 @@ export function MonthScroll() {
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = 0;
       updateActiveMonth();
+      recordReadAnchor();
       maybeExtendRange();
     });
-  }, [maybeExtendRange, updateActiveMonth]);
+  }, [maybeExtendRange, recordReadAnchor, updateActiveMonth]);
 
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      endSmoothRef.current?.();
     };
   }, []);
 

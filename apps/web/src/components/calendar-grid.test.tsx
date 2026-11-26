@@ -66,7 +66,7 @@ function spanEvent(
   };
 }
 
-// Five events on one day against three visible tracks: two are out of sight.
+// Five events on one day: more than an empty week's three tracks.
 const defaultEvents = [event('a', 1), event('b', 2), event('c', 3), event('d', 4), event('e', 5)];
 
 const calendarState = {
@@ -101,40 +101,150 @@ async function renderGrid() {
   });
 }
 
-describe('CalendarGrid overflow indicator', () => {
-  it('opens the day detail on the day it counts', async () => {
+function cellOf(isoDate: string): HTMLElement {
+  const cell = document.querySelector<HTMLElement>(`[data-day="${isoDate}"]`);
+  if (!cell) throw new Error(`no cell for ${isoDate}`);
+  return cell;
+}
+
+describe('CalendarGrid day number', () => {
+  it('opens the day detail on its own day', async () => {
     const user = userEvent.setup();
-    // The grid re-renders once the (empty) holiday load settles.
-    await act(async () => {
-      render(<CalendarGrid />);
+    await renderGrid();
+
+    const date = within(cellOf('2026-08-05')).getByRole('button', {
+      name: 'calendar.openDayDetail',
     });
-
-    const more = screen.getByRole('button', { name: 'calendar.moreEvents' });
-    expect(more).toHaveTextContent('+2');
-
-    await user.click(more);
+    await user.click(date);
 
     expect(openDayDetail).toHaveBeenCalledTimes(1);
     const opened = openDayDetail.mock.calls[0]?.[0] as DateTime;
     expect(opened.toFormat('yyyy-MM-dd')).toBe('2026-08-05');
   });
 
-  // The chip sits in a container that hands its clicks to the day button
+  // The number sits in a container that hands its clicks to the day button
   // behind it, so a handler alone is not enough -- it has to take pointer
   // events back. The stylesheet is not loaded here, so the class is the
   // evidence available.
   it('takes pointer events back from its container', async () => {
-    // The grid re-renders once the (empty) holiday load settles.
-    await act(async () => {
-      render(<CalendarGrid />);
+    await renderGrid();
+
+    const date = within(cellOf('2026-08-05')).getByRole('button', {
+      name: 'calendar.openDayDetail',
     });
+    expect(date.className).toContain('pointer-events-auto');
+    expect(date.closest('.pointer-events-none')).not.toBeNull();
+  });
+});
 
-    const more = screen.getByRole('button', { name: 'calendar.moreEvents' });
-    expect(more.className).toContain('pointer-events-auto');
+describe('CalendarGrid every event', () => {
+  it('draws all five events of a crowded day and no "+N"', async () => {
+    await renderGrid();
 
-    const blocked = more.closest('.pointer-events-none');
-    expect(blocked).not.toBeNull();
-    expect(blocked?.querySelector('.pointer-events-auto')).not.toBeNull();
+    const cell = cellOf('2026-08-05');
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      expect(within(cell).getByRole('button', { name: new RegExp(`Event ${id}`) })).toBeTruthy();
+    }
+    expect(screen.queryByText(/^\+\d/)).toBeNull();
+  });
+});
+
+/** The scrolling container that holds the week rows. */
+function rowsOf(): HTMLElement {
+  const rows = document.querySelector<HTMLElement>('[data-dir]');
+  if (!rows) throw new Error('no rows container');
+  return rows;
+}
+
+function mockScroll(
+  el: HTMLElement,
+  m: { scrollHeight: number; clientHeight: number; scrollTop: number },
+) {
+  Object.defineProperty(el, 'scrollHeight', { configurable: true, value: m.scrollHeight });
+  Object.defineProperty(el, 'clientHeight', { configurable: true, value: m.clientHeight });
+  Object.defineProperty(el, 'scrollTop', {
+    configurable: true,
+    writable: true,
+    value: m.scrollTop,
+  });
+}
+
+// A row grows with its events, so the month can be taller than the grid.
+describe('CalendarGrid rows layout', () => {
+  it('lets a row grow past its share and scrolls the rows, not the weekday header', async () => {
+    await renderGrid();
+
+    const rows = rowsOf();
+    expect(rows.style.gridTemplateRows).toContain('minmax(min-content, 1fr)');
+    expect(rows.className).toContain('overflow-y-auto');
+    expect(rows.textContent).not.toContain('Sun');
+    expect(rows.parentElement?.textContent).toContain('Sun');
+  });
+});
+
+describe('CalendarGrid wheel', () => {
+  it('turns the month when the rows fit', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 600, clientHeight: 600, scrollTop: 0 });
+
+    fireEvent.wheel(rowsOf(), { deltaY: 100 });
+    expect(uiState.navigateMonth).toHaveBeenCalledWith(1);
+  });
+
+  it('scrolls an overflowing month instead of turning it', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 900, clientHeight: 600, scrollTop: 100 });
+
+    fireEvent.wheel(rowsOf(), { deltaY: 100 });
+    fireEvent.wheel(rowsOf(), { deltaY: -100 });
+    expect(uiState.navigateMonth).not.toHaveBeenCalled();
+  });
+
+  it('turns to the next month at the bottom edge', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 900, clientHeight: 600, scrollTop: 300 });
+
+    fireEvent.wheel(rowsOf(), { deltaY: 100 });
+    expect(uiState.navigateMonth).toHaveBeenCalledWith(1);
+  });
+
+  it('turns to the previous month at the top edge', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 900, clientHeight: 600, scrollTop: 0 });
+
+    fireEvent.wheel(rowsOf(), { deltaY: -100 });
+    expect(uiState.navigateMonth).toHaveBeenCalledWith(-1);
+  });
+
+  it('does not turn at the top edge when wheeling down', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 900, clientHeight: 600, scrollTop: 0 });
+
+    fireEvent.wheel(rowsOf(), { deltaY: 100 });
+    expect(uiState.navigateMonth).not.toHaveBeenCalled();
+  });
+});
+
+describe('CalendarGrid vertical swipe', () => {
+  function swipeUp(target: HTMLElement) {
+    fireEvent.touchStart(target, { touches: [{ clientX: 100, clientY: 400 }] });
+    fireEvent.touchEnd(target, { changedTouches: [{ clientX: 100, clientY: 200 }] });
+  }
+
+  it('switches to the week when the rows fit', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 600, clientHeight: 600, scrollTop: 0 });
+
+    swipeUp(cellOf('2026-08-05'));
+    expect(uiState.setCalendarView).toHaveBeenCalledWith('week');
+  });
+
+  it('leaves the swipe to scroll an overflowing month', async () => {
+    await renderGrid();
+    mockScroll(rowsOf(), { scrollHeight: 900, clientHeight: 600, scrollTop: 100 });
+
+    swipeUp(cellOf('2026-08-05'));
+    expect(uiState.setCalendarView).not.toHaveBeenCalled();
   });
 });
 
@@ -175,9 +285,8 @@ describe('CalendarGrid track metrics', () => {
 });
 
 // Tracks are held for a bar's whole span, so a bar can end up on a high track
-// because of crowding on days it shares with nothing else. Those quiet days
-// must still account for it.
-describe('CalendarGrid multi-day bars past the visible tracks', () => {
+// because of crowding on days it shares with nothing else.
+describe('CalendarGrid multi-day bars on deep tracks', () => {
   // Sunday 2026-08-02 through Saturday 2026-08-08 is one grid row.
   const shortBars = ['s1', 's2', 's3'].map((id) =>
     spanEvent(id, `Short ${id}`, '2026-08-02', '2026-08-06'),
@@ -194,34 +303,18 @@ describe('CalendarGrid multi-day bars past the visible tracks', () => {
     expect(bar.style.top).toBe('0px');
   });
 
-  it('offers a +N on a day whose only event sits past the visible tracks', async () => {
+  it('draws a bar on the fourth track on a day whose crowd has ended', async () => {
     // Three bars run Sunday to Thursday; a fourth starts on that Thursday, so it
-    // can only take the fourth track -- and Friday holds nothing else.
+    // takes the fourth track -- and Friday holds nothing else.
     calendarState.events = [
       ...['a', 'b', 'c'].map((id) => spanEvent(id, `Crowd ${id}`, '2026-08-02', '2026-08-07')),
       spanEvent('late', 'Late trip', '2026-08-06', '2026-08-09'),
     ];
     await renderGrid();
 
-    expect(screen.queryByTitle('Late trip')).toBeNull();
-
-    const friday = document.querySelector<HTMLElement>('[data-day="2026-08-07"]');
-    expect(friday).not.toBeNull();
-    // biome-ignore lint/style/noNonNullAssertion: asserted non-null above
-    const more = within(friday!).getByRole('button', { name: 'calendar.moreEvents' });
-    expect(more).toHaveTextContent('+1');
-  });
-
-  it('never counts an overflow below zero', async () => {
-    calendarState.events = [
-      ...['a', 'b', 'c', 'd'].map((id) => spanEvent(id, `Crowd ${id}`, '2026-08-02', '2026-08-07')),
-      spanEvent('late', 'Late trip', '2026-08-06', '2026-08-09'),
-    ];
-    await renderGrid();
-
-    for (const more of screen.getAllByRole('button', { name: 'calendar.moreEvents' })) {
-      expect(more.textContent).toMatch(/^\+[1-9]\d*$/);
-    }
+    // Comfortable track pitch is 21px.
+    expect(screen.getByTitle('Late trip').style.top).toBe('63px');
+    expect(screen.queryByText(/^\+\d/)).toBeNull();
   });
 });
 

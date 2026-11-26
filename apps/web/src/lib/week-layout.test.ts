@@ -11,9 +11,10 @@ import {
   isMultiDay,
   layoutDayCell,
   layoutWeek,
-  MAX_VISIBLE_TRACKS,
+  MIN_TRACKS,
   weekKey,
   weekKeysInRange,
+  weekTrackCount,
 } from './week-layout';
 
 const ZONE = 'Asia/Tokyo';
@@ -239,13 +240,13 @@ describe('layoutWeek', () => {
     expect(layoutWeek(weekStart, [evt], ZONE)).toHaveLength(0);
   });
 
-  it('exposes a sensible visible-track limit', () => {
-    expect(MAX_VISIBLE_TRACKS).toBeGreaterThan(0);
+  it('keeps an empty week three tracks tall', () => {
+    expect(MIN_TRACKS).toBe(3);
   });
 
   it('gives the longest bar the lowest track when several start together', () => {
     // Three short bars listed before the long one: on plain first-fit the long
-    // bar lands last, on a track no cell draws, and vanishes for the whole week.
+    // bar lands on the deepest track, pushing the whole row taller.
     const shorts = ['s1', 's2', 's3'].map((id) =>
       makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-23T00:00:00+09:00' }),
     );
@@ -350,22 +351,20 @@ describe('layoutDayCell', () => {
     const positioned = layoutWeek(weekStart, [...shortBars, longBar], ZONE);
     const friday = layoutDayCell(5, positioned, []);
 
-    const drawn = positioned.filter(
-      (p) => friday.reserved.includes(p.track) && p.track < MAX_VISIBLE_TRACKS,
-    );
-    expect(drawn.map((p) => p.event.id)).toContain('long');
-    expect(friday.overflow).toBe(0);
+    const drawn = positioned.filter((p) => friday.reserved.includes(p.track));
+    expect(drawn.map((p) => p.event.id)).toEqual(['long']);
+    expect(friday).not.toHaveProperty('overflow');
   });
 
-  it('counts the crowded days that lose a bar', () => {
+  it('reserves a track for every bar on a crowded day', () => {
     const positioned = layoutWeek(weekStart, [...shortBars, longBar], ZONE);
-    // Four bars overlap on Sunday and only three tracks are drawn.
-    expect(layoutDayCell(0, positioned, []).overflow).toBe(1);
+    // Four bars overlap on Sunday and every one keeps its track.
+    expect([...layoutDayCell(0, positioned, []).reserved].sort()).toEqual([0, 1, 2, 3]);
   });
 
-  it('reports a bar the cell cannot draw as overflow rather than nothing', () => {
+  it('reserves the fourth track for a bar that alone occupies the day', () => {
     // Three bars run Sunday to Thursday and a fourth starts on that Thursday, so
-    // it can only take the fourth track -- but it alone occupies Friday.
+    // it takes the fourth track -- and it alone occupies Friday.
     const crowd = ['a', 'b', 'c'].map((id) =>
       makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-24T00:00:00+09:00' }),
     );
@@ -375,35 +374,25 @@ describe('layoutDayCell', () => {
       endAt: '2026-04-26T00:00:00+09:00',
     });
     const positioned = layoutWeek(weekStart, [...crowd, late], ZONE);
-    expect(positioned.find((p) => p.event.id === 'late')?.track).toBe(MAX_VISIBLE_TRACKS);
+    expect(positioned.find((p) => p.event.id === 'late')?.track).toBe(3);
 
     const friday = layoutDayCell(5, positioned, []);
-    expect(friday.reserved).toEqual([MAX_VISIBLE_TRACKS]);
-    expect(friday.overflow).toBe(1);
+    expect(friday.reserved).toEqual([3]);
   });
 
-  it('never reports a negative overflow', () => {
-    const positioned = layoutWeek(
-      weekStart,
-      [
-        ...['a', 'b', 'c', 'd'].map((id) =>
-          makeEvent({
-            id,
-            startAt: '2026-04-19T00:00:00+09:00',
-            endAt: '2026-04-24T00:00:00+09:00',
-          }),
-        ),
-        makeEvent({
-          id: 'late',
-          startAt: '2026-04-23T00:00:00+09:00',
-          endAt: '2026-04-26T00:00:00+09:00',
-        }),
-      ],
-      ZONE,
+  it('places five single-day chips beside four bars, each on its own track', () => {
+    const bars = ['a', 'b', 'c', 'd'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-24T00:00:00+09:00' }),
     );
-    for (let col = 0; col < 7; col++) {
-      expect(layoutDayCell(col, positioned, []).overflow).toBeGreaterThanOrEqual(0);
-    }
+    const positioned = layoutWeek(weekStart, bars, ZONE);
+    const singles = ['v', 'w', 'x', 'y', 'z'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-21T10:00:00+09:00', endAt: '2026-04-21T11:00:00+09:00' }),
+    );
+    const tuesday = layoutDayCell(2, positioned, singles);
+
+    expect([...tuesday.reserved].sort()).toEqual([0, 1, 2, 3]);
+    expect(tuesday.singleSlots.map((s) => s.track)).toEqual([4, 5, 6, 7, 8]);
+    expect(tuesday.singleSlots.map((s) => s.evt.id).sort()).toEqual(['v', 'w', 'x', 'y', 'z']);
   });
 
   it('fills the tracks the bars leave free with single-day chips', () => {
@@ -418,9 +407,8 @@ describe('layoutDayCell', () => {
     );
     const friday = layoutDayCell(5, positioned, singles);
 
-    // The bar holds track 0, so the chips start at track 1 and the third is cut.
-    expect(friday.singleSlots.map((s) => s.track)).toEqual([1, 2]);
-    expect(friday.overflow).toBe(1);
+    // The bar holds track 0, so the chips start at track 1 and none is cut.
+    expect(friday.singleSlots.map((s) => s.track)).toEqual([1, 2, 3]);
   });
 
   it('orders single-day chips all-day first and then by start, whatever the input order', () => {
@@ -435,9 +423,62 @@ describe('layoutDayCell', () => {
 
     const friday = layoutDayCell(5, [], singles);
 
-    // Three tracks are drawn; the latest-starting event is the one hidden.
-    expect(friday.singleSlots.map((s) => s.evt.id)).toEqual(['day', 'eight', 'nine']);
-    expect(friday.overflow).toBe(1);
+    // Every chip is placed, the latest-starting one on the deepest track.
+    expect(friday.singleSlots.map((s) => s.evt.id)).toEqual(['day', 'eight', 'nine', 'ten']);
+    expect(friday.singleSlots.map((s) => s.track)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('weekTrackCount', () => {
+  const weekStart = DateTime.fromISO('2026-04-19T00:00:00', { zone: ZONE }); // Sunday
+  const cellsOf = (positioned: ReturnType<typeof layoutWeek>, singles: CalendarEvent[][]) =>
+    Array.from({ length: 7 }, (_, col) => layoutDayCell(col, positioned, singles[col] ?? []));
+
+  it('keeps an empty week at the minimum', () => {
+    expect(weekTrackCount(cellsOf([], []))).toBe(MIN_TRACKS);
+  });
+
+  it('keeps a week under the minimum at the minimum', () => {
+    const one = makeEvent({
+      startAt: '2026-04-21T10:00:00+09:00',
+      endAt: '2026-04-21T11:00:00+09:00',
+    });
+    expect(weekTrackCount(cellsOf([], [[], [], [one]]))).toBe(MIN_TRACKS);
+  });
+
+  it('grows to the deepest single-day chip of any day', () => {
+    const singles = Array.from({ length: 8 }, (_, i) =>
+      makeEvent({
+        id: `s${i}`,
+        startAt: '2026-04-24T10:00:00+09:00',
+        endAt: '2026-04-24T11:00:00+09:00',
+      }),
+    );
+    expect(weekTrackCount(cellsOf([], [[], [], [], [], [], singles]))).toBe(8);
+  });
+
+  it('grows to the deepest bar even on a day with no chips', () => {
+    const crowd = ['a', 'b', 'c'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-24T00:00:00+09:00' }),
+    );
+    const late = makeEvent({
+      id: 'late',
+      startAt: '2026-04-23T00:00:00+09:00',
+      endAt: '2026-04-26T00:00:00+09:00',
+    });
+    const positioned = layoutWeek(weekStart, [...crowd, late], ZONE);
+    expect(weekTrackCount(cellsOf(positioned, []))).toBe(4);
+  });
+
+  it('counts chips stacked under bars', () => {
+    const bars = ['a', 'b', 'c', 'd'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-19T00:00:00+09:00', endAt: '2026-04-24T00:00:00+09:00' }),
+    );
+    const positioned = layoutWeek(weekStart, bars, ZONE);
+    const singles = ['v', 'w', 'x', 'y', 'z'].map((id) =>
+      makeEvent({ id, startAt: '2026-04-21T10:00:00+09:00', endAt: '2026-04-21T11:00:00+09:00' }),
+    );
+    expect(weekTrackCount(cellsOf(positioned, [[], [], singles]))).toBe(9);
   });
 });
 

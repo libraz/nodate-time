@@ -247,4 +247,38 @@ describe('embedded calendar', () => {
       vi.useRealTimers();
     }
   });
+
+  it('draws every event of a crowded day and no "+N"', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-10T03:00:00Z'));
+    try {
+      const titles = ['One', 'Two', 'Three', 'Four', 'Five'];
+      apiGet.mockImplementation((path) =>
+        Promise.resolve(
+          String(path).includes('/events')
+            ? page(
+                titles.map((title, i) => ({
+                  id: `e${i}`,
+                  title,
+                  detailsHidden: false,
+                  allDay: false,
+                  startAt: `2026-11-10T0${i}:00:00Z`,
+                  endAt: `2026-11-10T0${i}:30:00Z`,
+                  timezone: 'Asia/Tokyo',
+                  color: '#000',
+                })),
+              )
+            : calendar(),
+        ),
+      );
+
+      render(<EmbeddedCalendarView />);
+      for (const title of titles) {
+        expect(await screen.findByText(title)).toBeTruthy();
+      }
+      expect(screen.queryByText(/^\+\d/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

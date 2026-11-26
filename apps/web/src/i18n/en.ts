@@ -54,7 +54,7 @@ export const en: Record<TranslationKey, string> = {
   'calendar.deleteCalendar': 'Delete calendar',
   'calendar.deleteWarning':
     'The events, memos and album in "{name}" go with it, for everyone. This cannot be undone.',
-  'calendar.moreEvents': '{count} more events',
+  'calendar.openDayDetail': 'Open the events of {date}',
 
   'weekday.sun': 'Sun',
   'weekday.mon': 'Mon',

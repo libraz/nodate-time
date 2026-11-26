@@ -327,7 +327,7 @@ export function SharedCalendarView() {
                             {day.day}
                           </span>
                         </div>
-                        {dayEvents.slice(0, 3).map((evt) => (
+                        {dayEvents.map((evt) => (
                           <div
                             key={evt.id}
                             className="mb-0.5 truncate rounded px-1 py-0.5 text-micro leading-tight text-white sm:text-caption"
@@ -336,11 +336,6 @@ export function SharedCalendarView() {
                             {evt.detailsHidden ? t('share.busy') : evt.title}
                           </div>
                         ))}
-                        {dayEvents.length > 3 && (
-                          <div className="text-center text-micro tabular-nums text-[var(--color-text-secondary)]">
-                            +{dayEvents.length - 3}
-                          </div>
-                        )}
                       </div>
                     );
                   })}

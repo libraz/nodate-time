@@ -13,7 +13,7 @@ import {
   isMultiDay,
   layoutDayCell,
   layoutWeek,
-  MAX_VISIBLE_TRACKS,
+  weekTrackCount,
 } from '@/lib/week-layout';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -30,12 +30,6 @@ export interface DragLanding {
  * A day cell stacks its chips in fixed slots while multi-day bars are drawn in
  * an overlay above the cells, so the two only line up while both are measured
  * from the same numbers.
- *
- * `overflowH` is reserved whether or not a cell shows a "+N". A badge added to
- * a body sized for the tracks alone compresses every slot under it, which walks
- * the chips off the bars they belong with; and sizing the body per cell would
- * make a row change height as its events arrive, moving every row below it in
- * the mobile scroller.
  */
 interface WeekRowMetrics {
   /** Space above the day number. */
@@ -44,8 +38,6 @@ interface WeekRowMetrics {
   dateRowH: number;
   /** Vertical pitch of one event track. */
   slotH: number;
-  /** Height of the "+N" row kept free below the tracks. */
-  overflowH: number;
 }
 
 /** Gap between tracks: a chip or bar is drawn this much shorter than its slot. */
@@ -53,9 +45,6 @@ const TRACK_GAP = 1;
 
 /** Horizontal inset of a chip inside its cell (cell px-1 plus chip mx-0.5). */
 const CHIP_INSET = 6;
-
-/** Names the track slots so an empty one keeps its identity across renders. */
-const TRACK_SLOTS = Array.from({ length: MAX_VISIBLE_TRACKS }, (_, track) => `t${track}`);
 
 /** Comfortable is the pointer-sized desktop grid, compact the mobile scroller. */
 export type WeekRowDensity = 'comfortable' | 'compact';
@@ -70,7 +59,6 @@ interface DensityStyle {
   /** Diameter of the owner's mark on a chip; zero keeps the plain colour dot. */
   markSize: number;
   bar: string;
-  overflow: string;
   cursorMovable: string;
   cursorFixed: string;
   /** Whether a timed chip leads with its start time; a phone cell is too narrow for both. */
@@ -81,7 +69,7 @@ interface DensityStyle {
 
 const DENSITY: Record<WeekRowDensity, DensityStyle> = {
   comfortable: {
-    metrics: { padTop: 6, dateRowH: 28, slotH: 21, overflowH: 16 },
+    metrics: { padTop: 6, dateRowH: 28, slotH: 21 },
     dayBackdrop:
       'transition-colors hover:bg-[var(--color-hover)] focus-visible:bg-[var(--color-hover)] focus-visible:outline-none',
     dayNumber: 'h-7 w-7 text-callout',
@@ -90,14 +78,13 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     dot: 'h-1.5 w-1.5',
     markSize: 14,
     bar: 'gap-1 px-2 text-caption',
-    overflow: 'text-caption',
     cursorMovable: 'cursor-grab active:cursor-grabbing',
     cursorFixed: 'cursor-pointer',
     chipTime: true,
     label: 'truncate',
   },
   compact: {
-    metrics: { padTop: 4, dateRowH: 24, slotH: 15, overflowH: 13 },
+    metrics: { padTop: 4, dateRowH: 24, slotH: 15 },
     dayBackdrop: 'touch-manipulation transition-colors active:bg-[var(--color-active)]',
     dayNumber: 'h-6 w-6 text-body',
     chip: 'gap-0.5 rounded-[4px] px-1 text-micro',
@@ -105,7 +92,6 @@ const DENSITY: Record<WeekRowDensity, DensityStyle> = {
     dot: 'h-1 w-1',
     markSize: 0,
     bar: 'gap-1 px-2 text-micro',
-    overflow: 'text-micro',
     cursorMovable: 'active:cursor-grabbing',
     cursorFixed: '',
     chipTime: false,
@@ -141,8 +127,8 @@ export interface MonthWeekRowProps {
   onDayDoubleClick?: (date: DateTime) => void;
   /** Given, a hovered day shows a "+" that starts a new event on it. */
   onCreateOnDay?: (date: DateTime) => void;
-  /** Given, the "+N" is a button; otherwise it is a badge the cell tap covers. */
-  onOverflowClick?: (date: DateTime) => void;
+  /** Given, the day number is a button that opens the day's detail. */
+  onDateClick?: (date: DateTime) => void;
   onEventClick: (eventId: string) => void;
   onEventPointerDown: (evt: CalendarEvent, e: ReactPointerEvent) => void;
   canMoveEvent: (evt: CalendarEvent) => boolean;
@@ -183,7 +169,7 @@ function MonthWeekRowImpl({
   onDayClick,
   onDayDoubleClick,
   onCreateOnDay,
-  onOverflowClick,
+  onDateClick,
   onEventClick,
   onEventPointerDown,
   canMoveEvent,
@@ -217,14 +203,17 @@ function MonthWeekRowImpl({
 
   const cells = useMemo(
     () =>
-      week.map((dt) =>
-        layoutDayCell(
-          jsDayOfWeek(dt),
-          positioned,
-          singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? [],
-        ),
+      week.map((dt, col) =>
+        layoutDayCell(col, positioned, singleDayMap.get(dt.toFormat('yyyy-MM-dd')) ?? []),
       ),
     [week, positioned, singleDayMap],
+  );
+
+  // Track keys are stable per index, so an empty slot keeps its identity across renders.
+  const trackCount = weekTrackCount(cells);
+  const trackSlots = useMemo(
+    () => Array.from({ length: trackCount }, (_, track) => `t${track}`),
+    [trackCount],
   );
 
   // Segment of the drag ghost that falls inside this week (grid-aligned, spans
@@ -236,12 +225,12 @@ function MonthWeekRowImpl({
     const segStart = dragLanding.start < weekStart ? weekStart : dragLanding.start;
     const segEnd = dragLanding.end > weekEnd ? weekEnd : dragLanding.end;
     return {
-      startCol: jsDayOfWeek(segStart),
+      startCol: Math.round(segStart.diff(weekStart, 'days').days),
       span: Math.round(segEnd.diff(segStart, 'days').days) + 1,
     };
   }, [dragLanding, weekStart]);
 
-  const bodyH = MAX_VISIBLE_TRACKS * metrics.slotH + metrics.overflowH;
+  const bodyH = trackCount * metrics.slotH;
   const overlayTop = metrics.padTop + metrics.dateRowH;
   const colLeft = (col: number) => `calc(${(col * 100) / 7}% + ${CHIP_INSET}px)`;
   const colWidth = (span: number) => `calc(${(span * 100) / 7}% - ${CHIP_INSET * 2}px)`;
@@ -253,10 +242,24 @@ function MonthWeekRowImpl({
         const isoDate = dt.toFormat('yyyy-MM-dd');
         const dow = jsDayOfWeek(dt);
         const holiday = getHoliday(holidaysCountry, isoDate);
-        const { reserved = [], singleSlots = [], overflow = 0 } = cells[dIdx] ?? {};
+        const { reserved = [], singleSlots = [] } = cells[dIdx] ?? {};
         const isSelected = dt.hasSame(selectedDate, 'day');
         const outsideMonth =
           pagedMonth !== null && (dt.month !== pagedMonth.month || dt.year !== pagedMonth.year);
+        const dayNumber = today ? (
+          <span
+            className={`today-badge flex items-center justify-center rounded-full bg-[var(--color-accent)] font-medium tabular-nums text-[var(--color-text-on-accent)] ${style.dayNumber}`}
+          >
+            {dt.day}
+          </span>
+        ) : (
+          <span
+            className={`flex items-center justify-center font-medium tabular-nums ${style.dayNumber}`}
+            style={{ color: dateColor(dow, !!holiday) }}
+          >
+            {dt.day}
+          </span>
+        );
 
         return (
           <div
@@ -280,19 +283,18 @@ function MonthWeekRowImpl({
             {/* Content passes pointer events through to the day button, except event chips. */}
             <div className="pointer-events-none relative z-10 flex w-full flex-col">
               <div className="flex w-full items-center pl-0.5" style={{ height: metrics.dateRowH }}>
-                {today ? (
-                  <span
-                    className={`today-badge flex items-center justify-center rounded-full bg-[var(--color-accent)] font-medium tabular-nums text-[var(--color-text-on-accent)] ${style.dayNumber}`}
+                {onDateClick ? (
+                  // Opts back into pointer events: its container hands them to the day button.
+                  <button
+                    type="button"
+                    onClick={() => onDateClick(dt)}
+                    aria-label={t('calendar.openDayDetail', { date: isoDate })}
+                    className="pointer-events-auto shrink-0 rounded-full hover:bg-[var(--color-hover)]"
                   >
-                    {dt.day}
-                  </span>
+                    {dayNumber}
+                  </button>
                 ) : (
-                  <span
-                    className={`flex items-center justify-center font-medium tabular-nums ${style.dayNumber}`}
-                    style={{ color: dateColor(dow, !!holiday) }}
-                  >
-                    {dt.day}
-                  </span>
+                  dayNumber
                 )}
                 {onCreateOnDay && (
                   <button
@@ -330,7 +332,7 @@ function MonthWeekRowImpl({
               </div>
 
               <div className="flex w-full flex-col" style={{ height: bodyH }}>
-                {TRACK_SLOTS.map((slotKey, slot) => {
+                {trackSlots.map((slotKey, slot) => {
                   const filler = reserved.includes(slot)
                     ? undefined
                     : singleSlots.find((s) => s.track === slot);
@@ -393,33 +395,6 @@ function MonthWeekRowImpl({
                     </button>
                   );
                 })}
-
-                {/* The cell draws three tracks, so the rest of the day is reached
-                    through the day detail. Where the badge is a button it has to
-                    opt back into pointer events: its container hands them to the
-                    day button behind it. */}
-                <div
-                  className="flex w-full items-center justify-center"
-                  style={{ height: metrics.overflowH }}
-                >
-                  {overflow > 0 &&
-                    (onOverflowClick ? (
-                      <button
-                        type="button"
-                        onClick={() => onOverflowClick(dt)}
-                        aria-label={t('calendar.moreEvents', { count: overflow })}
-                        className={`pointer-events-auto font-medium text-[var(--color-accent-ink)] hover:underline ${style.overflow}`}
-                      >
-                        +{overflow}
-                      </button>
-                    ) : (
-                      <span
-                        className={`font-medium text-[var(--color-accent-ink)] ${style.overflow}`}
-                      >
-                        +{overflow}
-                      </span>
-                    ))}
-                </div>
               </div>
             </div>
           </div>
@@ -432,7 +407,6 @@ function MonthWeekRowImpl({
         style={{ top: overlayTop }}
       >
         {positioned.map((p) => {
-          if (p.track >= MAX_VISIBLE_TRACKS) return null;
           const start = fromISOInZone(p.event.startAt, zone);
           return (
             <button

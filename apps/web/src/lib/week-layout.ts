@@ -4,8 +4,8 @@ import { fromISOInZone } from '@/lib/date-utils';
 import { eventDayZone, toGridDay } from '@/lib/event-zone';
 import type { CalendarEvent } from '@/types/calendar';
 
-/** Maximum number of event tracks rendered per day cell before collapsing into a "+N" overflow. */
-export const MAX_VISIBLE_TRACKS = 3;
+/** Fewest event tracks a week row is drawn with, so an empty week keeps the month's shape. */
+export const MIN_TRACKS = 3;
 
 export interface PositionedEvent {
   event: CalendarEvent;
@@ -183,9 +183,8 @@ export function layoutWeek(
   const tracks: { end: number }[] = [];
   const positioned: PositionedEvent[] = [];
 
-  // Earliest start first, and on a tie the longest bar first: only the last few
-  // tracks of a crowded week are hidden, and the event that loses its track
-  // should be the one that goes missing from the fewest cells.
+  // Earliest start first, and on a tie the longest bar first, so the long bars
+  // sit on the top tracks and the short ones stack below them.
   const multiDay = events
     .filter((evt) => isMultiDay(evt, zone))
     .sort(
@@ -232,22 +231,18 @@ export function layoutWeek(
 
 /** What a single day cell renders, once its multi-day bars have claimed their tracks. */
 export interface DayCellLayout {
-  /** Tracks held by bars crossing this day, including tracks past the visible limit. */
+  /** Tracks held by bars crossing this day. */
   reserved: number[];
-  /** Single-day chips placed in the visible tracks the bars left free. */
+  /** Single-day chips placed in the tracks the bars left free. */
   singleSlots: { track: number; evt: CalendarEvent }[];
-  /** How many of the day's events the cell cannot show. Never negative. */
-  overflow: number;
 }
 
 /**
- * Places one day cell's events into the tracks it renders.
+ * Places one day cell's events into tracks, every event on one.
  *
  * Tracks are assigned across the whole week so that a bar keeps one row for
- * every day it spans, which means a bar can sit past the visible limit because
- * of congestion on days other than this one. The overflow count is therefore
- * taken from what this cell actually hides, not from the track index — on a day
- * whose crowd has already ended, that bar may be the only thing the cell holds.
+ * every day it spans; a cell's chips fill the gaps its bars leave, then stack
+ * below them.
  */
 export function layoutDayCell(
   col: number,
@@ -262,8 +257,7 @@ export function layoutDayCell(
   const used = new Set(reserved);
   const singleSlots: { track: number; evt: CalendarEvent }[] = [];
   let nextTrack = 0;
-  // All-day first, then by start, so the "+N" hides the latest events whatever
-  // order the store holds them in.
+  // All-day first, then by start, whatever order the store holds them in.
   const ordered = [...singles].sort(
     (a, b) =>
       Number(b.allDay) - Number(a.allDay) ||
@@ -271,12 +265,20 @@ export function layoutDayCell(
   );
   for (const evt of ordered) {
     while (used.has(nextTrack)) nextTrack++;
-    if (nextTrack >= MAX_VISIBLE_TRACKS) break;
     singleSlots.push({ track: nextTrack, evt });
     used.add(nextTrack);
     nextTrack++;
   }
 
-  const hiddenBars = reserved.filter((track) => track >= MAX_VISIBLE_TRACKS).length;
-  return { reserved, singleSlots, overflow: hiddenBars + singles.length - singleSlots.length };
+  return { reserved, singleSlots };
+}
+
+/** Tracks a week row draws: the deepest any cell uses, never fewer than {@link MIN_TRACKS}. */
+export function weekTrackCount(cells: DayCellLayout[]): number {
+  let count = MIN_TRACKS;
+  for (const cell of cells) {
+    for (const track of cell.reserved) count = Math.max(count, track + 1);
+    for (const slot of cell.singleSlots) count = Math.max(count, slot.track + 1);
+  }
+  return count;
 }

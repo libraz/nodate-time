@@ -14,6 +14,17 @@ const WHEEL_STEP_PX = 60;
 /** Quiet time that ends a wheel gesture, so one flick's inertia turns one month. */
 const WHEEL_IDLE_MS = 220;
 
+/** Whether the rows are taller than the grid and scroll. */
+function overflows(el: HTMLElement | null): el is HTMLElement {
+  return !!el && el.scrollHeight > el.clientHeight;
+}
+
+/** Whether a wheel in `dir` has nothing left to scroll, so it may turn the month. */
+function atScrollEdge(el: HTMLElement | null, dir: number): boolean {
+  if (!overflows(el)) return true;
+  return dir < 0 ? el.scrollTop <= 0 : el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+}
+
 export function CalendarGrid() {
   const locale = useUiStore((s) => s.locale);
   const currentMonth = useUiStore((s) => s.currentMonth);
@@ -34,8 +45,9 @@ export function CalendarGrid() {
   const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
-  const touchStartRef = useRef({ x: 0, y: 0 });
-  const wheelRef = useRef({ travel: 0, spent: false, timer: 0 });
+  const touchStartRef = useRef({ x: 0, y: 0, inScroller: false });
+  const wheelRef = useRef({ travel: 0, spent: false, active: false, timer: 0 });
+  const rowsRef = useRef<HTMLDivElement>(null);
 
   // Which way the month just turned, so the new one arrives from that side:
   // later months come up from below, as they would in a scrolled list.
@@ -48,7 +60,8 @@ export function CalendarGrid() {
   }
 
   // The month view reads as a vertical strip of months: a wheel gesture turns
-  // one month, however long its inertia runs.
+  // one month, however long its inertia runs. A month taller than the grid
+  // scrolls first, and only a gesture that starts at the edge turns it.
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
@@ -57,7 +70,13 @@ export function CalendarGrid() {
       w.timer = window.setTimeout(() => {
         w.travel = 0;
         w.spent = false;
+        w.active = false;
       }, WHEEL_IDLE_MS);
+      if (!w.active) {
+        w.active = true;
+        // Left to native scrolling for the whole gesture, inertia included.
+        if (!atScrollEdge(rowsRef.current, Math.sign(e.deltaY))) w.spent = true;
+      }
       if (w.spent) return;
       w.travel += e.deltaY;
       if (Math.abs(w.travel) >= WHEEL_STEP_PX) {
@@ -117,7 +136,12 @@ export function CalendarGrid() {
       consumeDragEnd();
       const touch = e.touches[0];
       if (touch) {
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+        const rows = rowsRef.current;
+        touchStartRef.current = {
+          x: touch.clientX,
+          y: touch.clientY,
+          inScroller: overflows(rows) && rows.contains(e.target as Node),
+        };
       }
     },
     [consumeDragEnd],
@@ -131,9 +155,10 @@ export function CalendarGrid() {
       if (!touch) return;
       const dx = touch.clientX - touchStartRef.current.x;
       const dy = touch.clientY - touchStartRef.current.y;
-      // Up switches to the week; there is no swipe back from it.
+      // Up switches to the week; there is no swipe back from it. Inside a
+      // month taller than the grid the swipe scrolls instead.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 60) {
-        if (dy < 0) setCalendarView('week');
+        if (dy < 0 && !touchStartRef.current.inScroller) setCalendarView('week');
       } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 80) {
         navigateMonth(dx < 0 ? 1 : -1);
       }
@@ -177,9 +202,11 @@ export function CalendarGrid() {
 
       <div
         key={`${currentMonth.year}-${currentMonth.month}`}
-        className="calendar-enter grid flex-1"
+        ref={rowsRef}
+        className="calendar-enter grid min-h-0 flex-1 overflow-y-auto"
         data-dir={direction}
-        style={{ gridTemplateRows: `repeat(${weekStarts.length}, minmax(0, 1fr))` }}
+        // A row holds its tracks and shares out whatever height is left.
+        style={{ gridTemplateRows: `repeat(${weekStarts.length}, minmax(min-content, 1fr))` }}
       >
         {weekStarts.map((weekStart) => {
           const key = weekStart.toFormat('yyyy-MM-dd');
@@ -200,7 +227,7 @@ export function CalendarGrid() {
               onDayClick={setSelectedDate}
               onDayDoubleClick={handleDayDoubleClick}
               onCreateOnDay={handleDayDoubleClick}
-              onOverflowClick={openDayDetail}
+              onDateClick={openDayDetail}
               onEventClick={handleEventClick}
               onEventPointerDown={handleEventPointerDown}
               canMoveEvent={canMove}

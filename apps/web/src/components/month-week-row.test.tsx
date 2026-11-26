@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@/i18n', () => ({
-  useT: () => (key: string) => key,
+  useT: () => (key: string, params?: Record<string, string | number>) =>
+    params ? `${key}:${Object.values(params).join(',')}` : key,
 }));
 
 /** Stands in for the module cache the holiday chunk fills in after first paint. */
@@ -98,7 +99,7 @@ function cellOf(isoDate: string): HTMLElement {
   return cell;
 }
 
-/** The fixed-height container holding a cell's track slots and its "+N" row. */
+/** The fixed-height container holding a cell's track slots. */
 function bodyOf(isoDate: string): HTMLElement {
   const body = cellOf(isoDate).querySelector<HTMLElement>('.flex.w-full.flex-col[style*="height"]');
   if (!body) throw new Error(`no slot body for ${isoDate}`);
@@ -141,54 +142,126 @@ describe.each<WeekRowDensity>(['compact', 'comfortable'])('%s track metrics', (d
   });
 });
 
-// The "+N" used to be squeezed into a body sized for the tracks alone, which
-// let flex shrink every slot under it and walked the chips off their bars.
-describe('overflow row', () => {
-  const crowded = [
-    chip('c1', 'One', '2026-08-05', 1),
-    chip('c2', 'Two', '2026-08-05', 2),
-    chip('c3', 'Three', '2026-08-05', 3),
-    chip('c4', 'Four', '2026-08-05', 4),
-  ];
+// A day draws every one of its events, so the row grows to the deepest track
+// any of its days uses instead of folding the rest into a count.
+describe.each<[WeekRowDensity, number]>([
+  ['compact', 15],
+  ['comfortable', 21],
+])('%s track body', (density, slotH) => {
+  const crowded = ['One', 'Two', 'Three', 'Four', 'Five'].map((title, i) =>
+    chip(`c${i}`, title, '2026-08-05', i + 1),
+  );
 
-  it('is reserved, so the tracks are never asked to shrink', async () => {
-    await renderRow({ events: crowded });
+  it('draws every chip of a crowded day and no "+N"', async () => {
+    await renderRow({ density, events: crowded });
+
+    const cell = cellOf('2026-08-05');
+    for (const title of ['One', 'Two', 'Three', 'Four', 'Five']) {
+      expect(within(cell).getByRole('button', { name: new RegExp(title) })).toBeInTheDocument();
+    }
+    expect(within(cell).queryByText(/^\+/)).toBeNull();
+  });
+
+  it('sizes every day of the week to the deepest track', async () => {
+    await renderRow({ density, events: crowded });
 
     const body = bodyOf('2026-08-05');
-    const children = [...body.children] as HTMLElement[];
-    expect(children).toHaveLength(4);
+    expect(px(body.style.height)).toBe(5 * slotH);
+    expect(bodyOf('2026-08-04').style.height).toBe(body.style.height);
 
     let stacked = 0;
-    for (const child of children) {
+    for (const child of [...body.children] as HTMLElement[]) {
       expect(child.style.height).not.toBe('');
       stacked += px(child.style.height) + (px(child.style.marginBottom) || 0);
     }
     expect(stacked).toBe(px(body.style.height));
   });
 
-  it('keeps the same height on a day with nothing to hide', async () => {
-    await renderRow({ events: crowded });
+  it('keeps an empty week three tracks tall', async () => {
+    await renderRow({ density });
 
-    expect(bodyOf('2026-08-04').style.height).toBe(bodyOf('2026-08-05').style.height);
+    const body = bodyOf('2026-08-05');
+    expect(px(body.style.height)).toBe(3 * slotH);
+    expect(body.children).toHaveLength(3);
   });
 
-  it('counts what the cell hides', async () => {
-    await renderRow({ events: crowded });
+  it('draws a bar on the fourth track', async () => {
+    const bars = ['B0', 'B1', 'B2', 'B3'].map((title, i) =>
+      spanEvent(`b${i}`, title, '2026-08-02', '2026-08-06'),
+    );
+    await renderRow({ density, events: bars });
 
-    expect(within(cellOf('2026-08-05')).getByText('+1')).toBeInTheDocument();
+    for (const title of ['B0', 'B1', 'B2', 'B3']) {
+      expect(screen.getByTitle(title)).toBeInTheDocument();
+    }
+    expect(px(screen.getByTitle('B3').style.top)).toBe(3 * slotH);
+    expect(px(bodyOf('2026-08-08').style.height)).toBe(4 * slotH);
   });
+});
 
-  it('is a badge the cell tap covers where the surface offers no target', async () => {
-    await renderRow({ events: crowded });
+describe('day number', () => {
+  it('is plain text where the surface offers no day detail', async () => {
+    await renderRow();
+
     expect(
-      within(cellOf('2026-08-05')).queryByRole('button', { name: 'calendar.moreEvents' }),
+      within(cellOf('2026-08-05')).queryByRole('button', { name: /calendar\.openDayDetail/ }),
     ).toBeNull();
+  });
 
-    cleanup();
-    await renderRow({ events: crowded, onOverflowClick: vi.fn() });
-    const more = within(cellOf('2026-08-05')).getByRole('button', { name: 'calendar.moreEvents' });
-    expect(more).toHaveTextContent('+1');
-    expect(more.className).toContain('pointer-events-auto');
+  it('opens the day detail for its own day when the surface offers one', async () => {
+    const onDateClick = vi.fn();
+    const onDayClick = vi.fn();
+    await renderRow({ onDateClick, onDayClick });
+
+    const date = within(cellOf('2026-08-05')).getByRole('button', {
+      name: 'calendar.openDayDetail:2026-08-05',
+    });
+    expect(date).toHaveTextContent('5');
+    expect(date.className).toContain('pointer-events-auto');
+
+    await act(async () => {
+      date.click();
+    });
+    expect(onDateClick).toHaveBeenCalledTimes(1);
+    expect(onDateClick.mock.calls[0]?.[0].toFormat('yyyy-MM-dd')).toBe('2026-08-05');
+  });
+});
+
+// Columns come from the row's own day order, so a row that does not start on
+// Sunday still lines its cells up with the bars and the drag ghost.
+describe('columns', () => {
+  const monday = DateTime.fromISO('2026-08-03T00:00:00', { zone: ZONE });
+
+  it('reserves a bar track on the cell the bar is drawn over', async () => {
+    await renderRow({
+      weekStart: monday,
+      selectedDate: monday,
+      // Saturday and Sunday: the last two columns of a Monday row.
+      events: [
+        spanEvent('b0', 'Bar zero', '2026-08-08', '2026-08-10'),
+        chip('c1', 'Chip', '2026-08-09', 9),
+      ],
+    });
+
+    const body = bodyOf('2026-08-09');
+    const first = body.children[0] as HTMLElement;
+    expect(first.tagName).toBe('DIV');
+    expect(within(body).getByRole('button', { name: /Chip/ })).toBe(body.children[1]);
+  });
+
+  it('puts the drag ghost in the landing day’s column', async () => {
+    const evt = chip('c1', 'Dragged', '2026-08-03', 9);
+    await renderRow({
+      weekStart: monday,
+      selectedDate: monday,
+      // A bar starting on Monday marks column 0.
+      events: [spanEvent('b0', 'Bar zero', '2026-08-03', '2026-08-05')],
+      dragLanding: { event: evt, start: monday, end: monday },
+    });
+
+    const ghost = document.querySelector<HTMLElement>('.event-bar.z-20');
+    expect(ghost).not.toBeNull();
+    expect(ghost?.style.left).toBe(screen.getByTitle('Bar zero').style.left);
   });
 });
 

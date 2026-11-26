@@ -55,7 +55,7 @@ export const ja = {
   'calendar.deleteCalendar': 'カレンダーを削除',
   'calendar.deleteWarning':
     '「{name}」の予定・メモ・アルバムがメンバー全員から消えます。元には戻せません。',
-  'calendar.moreEvents': 'ほか{count}件の予定',
+  'calendar.openDayDetail': '{date}の予定一覧を開く',
 
   // Weekday labels
   'weekday.sun': '日',
