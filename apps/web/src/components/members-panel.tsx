@@ -320,9 +320,11 @@ export function MembersPanel() {
                             </span>
                           )}
                         </p>
-                        <p className="truncate text-footnote text-[var(--color-text-secondary)]">
-                          {m.email}
-                        </p>
+                        {m.email && (
+                          <p className="truncate text-footnote text-[var(--color-text-secondary)]">
+                            {m.email}
+                          </p>
+                        )}
                         {canChangeRole && <RoleHint role={m.role} />}
                       </div>
                       {canChangeRole ? (

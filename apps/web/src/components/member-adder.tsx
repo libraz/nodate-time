@@ -16,7 +16,8 @@ import { useCalendarStore } from '@/stores/calendar-store';
 interface Candidate {
   id: string;
   name: string;
-  email: string;
+  /** Present only when the caller owns the calendar. */
+  email?: string;
   avatarUrl?: string;
 }
 
@@ -169,11 +170,11 @@ export function MemberAdder({ calendarId, onDone }: MemberAdderProps) {
                   type="button"
                   onClick={() => toggle(c)}
                   disabled={busy}
-                  aria-label={t('members.addUnselect', { name: c.name || c.email })}
+                  aria-label={t('members.addUnselect', { name: c.name || (c.email ?? '') })}
                   className="inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-full bg-[var(--color-accent-bg)] pr-2 pl-0.5 text-footnote font-medium text-[var(--color-accent-ink)] hover:brightness-95 disabled:opacity-60"
                 >
-                  <Avatar src={c.avatarUrl} name={c.name || c.email} size="h-6 w-6" round />
-                  <span className="truncate">{c.name || c.email}</span>
+                  <Avatar src={c.avatarUrl} name={c.name || (c.email ?? '')} size="h-6 w-6" round />
+                  <span className="truncate">{c.name || (c.email ?? '')}</span>
                   <svg
                     width="10"
                     height="10"
@@ -225,12 +226,17 @@ export function MemberAdder({ calendarId, onDone }: MemberAdderProps) {
                       disabled={busy}
                       onChange={() => toggle(c)}
                     />
-                    <Avatar src={c.avatarUrl} name={c.name || c.email} size="h-9 w-9" round />
+                    <Avatar
+                      src={c.avatarUrl}
+                      name={c.name || (c.email ?? '')}
+                      size="h-9 w-9"
+                      round
+                    />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-body font-medium text-[var(--color-text-primary)]">
-                        {c.name || c.email}
+                        {c.name || (c.email ?? '')}
                       </span>
-                      {c.name && (
+                      {c.name && c.email && (
                         <span className="truncate text-caption text-[var(--color-text-tertiary)]">
                           {c.email}
                         </span>

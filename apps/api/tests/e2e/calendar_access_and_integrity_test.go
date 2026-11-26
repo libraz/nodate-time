@@ -607,7 +607,7 @@ func TestAttachmentConfirmRecordsTheVerifiedSize(t *testing.T) {
 }
 
 // TestMemberListHidesOtherMembersEmails verifies that the member list shows a
-// caller who does not run the calendar their own email and nobody else's.
+// caller who does not own the calendar their own email and nobody else's.
 func TestMemberListHidesOtherMembersEmails(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()

@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -127,31 +128,51 @@ func TestSchedulePollDetailOmitsWhatTheCallerMayNotSee(t *testing.T) {
 	require.Contains(t, raw2, "etag")
 }
 
-// An address is shown to whoever administers the calendar and to its owner;
-// for everyone else it is absent, not an empty string.
-func TestMemberListOmitsOthersEmailForNonManagers(t *testing.T) {
+// Only the calendar's owner reads other members' addresses. A manager, like
+// any other member, sees only their own, and the field is absent rather than
+// an empty string -- in the member list and in the candidates for adding.
+func TestMemberEmailsAreForTheOwnerOnly(t *testing.T) {
 	bootstrap(t)
 	t.Parallel()
 
 	owner := helpers.NewTenant(t, testServerURL)
 	member := helpers.NewTenant(t, testServerURL)
+	manager := helpers.NewTenant(t, testServerURL)
 	joinScheduleCalendar(t, owner, member)
-	url := testServerURL + "/calendars/" + owner.CalendarID + "/members"
+	calURL := testServerURL + "/calendars/" + owner.CalendarID
+	joinScheduleCalendar(t, owner, manager)
+	helpers.DoJSON(t, http.MethodPut, calURL+"/members/"+manager.UserID+"/role", owner.AccessToken,
+		map[string]any{"role": "manager"}, nil)
 
-	var seen []map[string]any
-	helpers.DoJSON(t, http.MethodGet, url, member.AccessToken, nil, &seen)
-	require.Len(t, seen, 2)
-	for _, entry := range seen {
-		if entry["id"] == member.UserID {
-			require.Equal(t, member.Email, entry["email"])
-			continue
+	for _, caller := range []*helpers.TestTenant{member, manager} {
+		var seen []map[string]any
+		helpers.DoJSON(t, http.MethodGet, calURL+"/members", caller.AccessToken, nil, &seen)
+		require.Len(t, seen, 3)
+		for _, entry := range seen {
+			if entry["id"] == caller.UserID {
+				require.Equal(t, caller.Email, entry["email"])
+				continue
+			}
+			require.NotContains(t, entry, "email")
 		}
-		require.NotContains(t, entry, "email")
 	}
 
 	var managed []map[string]any
-	helpers.DoJSON(t, http.MethodGet, url, owner.AccessToken, nil, &managed)
+	helpers.DoJSON(t, http.MethodGet, calURL+"/members", owner.AccessToken, nil, &managed)
 	for _, entry := range managed {
 		require.NotEmpty(t, entry["email"])
 	}
+
+	// A workspace colleague not on the calendar: found by address, never shown it.
+	colleague := helpers.NewTenant(t, testServerURL)
+	query := "/member-candidates?q=" + url.QueryEscape(colleague.Email)
+	var byManager, byOwner struct {
+		Items []map[string]any `json:"items"`
+	}
+	helpers.DoJSON(t, http.MethodGet, calURL+query, manager.AccessToken, nil, &byManager)
+	require.Len(t, byManager.Items, 1)
+	require.NotContains(t, byManager.Items[0], "email")
+	helpers.DoJSON(t, http.MethodGet, calURL+query, owner.AccessToken, nil, &byOwner)
+	require.Len(t, byOwner.Items, 1)
+	require.Equal(t, colleague.Email, byOwner.Items[0]["email"])
 }

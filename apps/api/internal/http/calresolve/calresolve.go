@@ -162,6 +162,13 @@ func CanManage(role generated.CalendarMembersRole) bool {
 	}
 }
 
+// CanSeeEmails reports whether a role may read other members' email
+// addresses. Only the owner qualifies; everyone else, managers included,
+// knows a member by name and colour.
+func CanSeeEmails(role generated.CalendarMembersRole) bool {
+	return role == generated.CalendarMembersRoleOwner
+}
+
 // CanOwn reports whether a role may grant or revoke ownership and delete the
 // calendar. Only the owner qualifies -- a manager that could promote itself,
 // or a second account it controls, to owner would make the distinction

@@ -2169,7 +2169,7 @@ export interface components {
         };
         MemberCandidateResponse: {
             avatarUrl?: string;
-            email: string;
+            email?: string;
             id: string;
             name: string;
         };

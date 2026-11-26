@@ -2130,8 +2130,7 @@
         },
         "required": [
           "id",
-          "name",
-          "email"
+          "name"
         ],
         "type": "object"
       },

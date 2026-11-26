@@ -389,6 +389,15 @@ func DeleteCalendar(deps Deps) func(context.Context, *DeleteCalendarInput) (*Del
 	}
 }
 
+// memberEmail returns the address the caller may read for a member: their own,
+// or anyone's when the caller owns the calendar.
+func memberEmail(callerRole generated.CalendarMembersRole, callerID, memberID uint32, email string) string {
+	if memberID == callerID || calresolve.CanSeeEmails(callerRole) {
+		return email
+	}
+	return ""
+}
+
 func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembersOutput, error) {
 	return func(ctx context.Context, in *ListMembersInput) (*ListMembersOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
@@ -408,16 +417,10 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 		out := &ListMembersOutput{Body: make([]MemberResponse, 0, len(rows))}
 		av := avatars.New(deps.Queries, deps.Storage)
 		for _, m := range rows {
-			// An address is shown to whoever administers the calendar and to
-			// its owner; to everyone else a member is a name and a colour.
-			email := ""
-			if calresolve.CanManage(caller.Role) || m.UserID == userID {
-				email = m.UserEmail
-			}
 			out.Body = append(out.Body, MemberResponse{
 				ID:        pubIDToHex(m.UserPublicID),
 				Name:      m.UserDisplayName,
-				Email:     email,
+				Email:     memberEmail(caller.Role, userID, m.UserID, m.UserEmail),
 				AvatarURL: av.FromKey(ctx, m.UserAvatarStorageKey, m.UserAvatarURL),
 				Role:      string(m.Role),
 				Color:     m.MemberColor,
@@ -432,7 +435,7 @@ func ListMembers(deps Deps) func(context.Context, *ListMembersInput) (*ListMembe
 func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidatesInput) (*ListMemberCandidatesOutput, error) {
 	return func(ctx context.Context, in *ListMemberCandidatesInput) (*ListMemberCandidatesOutput, error) {
 		userID, _ := middleware.ActorFromContext(ctx)
-		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
+		cal, caller, err := resolveCalendarManage(ctx, deps, in.CalendarID, userID)
 		if err != nil {
 			return nil, apierrors.Respond(ctx, err)
 		}
@@ -452,11 +455,17 @@ func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidates
 		}
 		out.Body.Items = make([]MemberCandidateResponse, 0, len(rows))
 		av := avatars.New(deps.Queries, deps.Storage)
+		// A candidate is never on the calendar, so never the caller.
+		showEmails := calresolve.CanSeeEmails(caller.Role)
 		for _, r := range rows {
+			email := ""
+			if showEmails {
+				email = r.UserEmail
+			}
 			out.Body.Items = append(out.Body.Items, MemberCandidateResponse{
 				ID:        pubIDToHex(r.UserPublicID),
 				Name:      r.UserDisplayName,
-				Email:     r.UserEmail,
+				Email:     email,
 				AvatarURL: av.FromKey(ctx, r.UserAvatarStorageKey, r.UserAvatarURL),
 			})
 		}
@@ -469,7 +478,7 @@ func ListMemberCandidates(deps Deps) func(context.Context, *ListMemberCandidates
 func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutput, error) {
 	return func(ctx context.Context, in *AddMemberInput) (*AddMemberOutput, error) {
 		actorID, _ := middleware.ActorFromContext(ctx)
-		cal, _, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
+		cal, actor, err := resolveCalendarManage(ctx, deps, in.CalendarID, actorID)
 		if err != nil {
 			return nil, apierrors.Respond(ctx, err)
 		}
@@ -507,7 +516,7 @@ func AddMember(deps Deps) func(context.Context, *AddMemberInput) (*AddMemberOutp
 		return &AddMemberOutput{Body: MemberResponse{
 			ID:        pubIDToHex(target.PublicID),
 			Name:      target.DisplayName,
-			Email:     target.Email,
+			Email:     memberEmail(actor.Role, actorID, target.ID, target.Email),
 			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:      string(role),
 			Color:     color,
@@ -540,6 +549,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		newRole := generated.CalendarMembersRole(in.Body.Role)
 
 		var memberColor string
+		var actorRole generated.CalendarMembersRole
 		err = dbtx.Run(ctx, deps.DB, func(q *generated.Queries) error {
 			// Both memberships are read under their row locks: the gates below
 			// are decided on the roles the write then replaces, not on the
@@ -555,6 +565,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 			if !calresolve.CanManage(actorMember.Role) {
 				return apierrors.CalendarRoleRequired
 			}
+			actorRole = actorMember.Role
 			current, ok := members[target.ID]
 			if !ok {
 				return apierrors.MemberNotFound
@@ -609,7 +620,7 @@ func UpdateMemberRole(deps Deps) func(context.Context, *UpdateMemberRoleInput) (
 		return &UpdateMemberRoleOutput{Body: MemberResponse{
 			ID:        pubIDToHex(target.PublicID),
 			Name:      target.DisplayName,
-			Email:     target.Email,
+			Email:     memberEmail(actorRole, actorID, target.ID, target.Email),
 			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:      in.Body.Role,
 			Color:     memberColor,
@@ -682,14 +693,10 @@ func UpdateMemberColor(deps Deps) func(context.Context, *UpdateMemberColorInput)
 			return nil, apierrors.Respond(ctx, err)
 		}
 
-		email := ""
-		if calresolve.CanManage(actorMember.Role) || target.ID == actorID {
-			email = target.Email
-		}
 		return &UpdateMemberColorOutput{Body: MemberResponse{
 			ID:        pubIDToHex(target.PublicID),
 			Name:      target.DisplayName,
-			Email:     email,
+			Email:     memberEmail(actorMember.Role, actorID, target.ID, target.Email),
 			AvatarURL: avatars.New(deps.Queries, deps.Storage).ForUser(ctx, target),
 			Role:      string(current.Role),
 			Color:     in.Body.Color,

@@ -154,9 +154,10 @@ type ListMemberCandidatesInput struct {
 // MemberCandidateResponse is a workspace member who is not on the calendar
 // yet and can be added to it directly.
 type MemberCandidateResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Email     string `json:"email"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Email is omitted unless the caller owns the calendar.
+	Email     string `json:"email,omitempty"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 type ListMemberCandidatesPage struct {
