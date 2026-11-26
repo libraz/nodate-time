@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -31,6 +32,8 @@ const newYear = makeEvent({
 const calendarState = {
   events: [newYear] as CalendarEvent[],
   activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
+  setEventFilter: vi.fn(),
   calendars: [{ id: 'cal-1' }],
   eventsLoading: false,
 };
@@ -104,5 +107,38 @@ describe('ListView availability states', () => {
     const row = screen.getByRole('button', { name: /Shrine visit/ });
     expect(row.className).not.toContain('evt-');
     expect(within(row).queryByText(/event\./)).toBeNull();
+  });
+});
+
+describe('ListView member filter', () => {
+  const ownedByB: EventFilter = {
+    match: 'all',
+    conditions: [{ id: 'c', field: 'owner', exclude: false, people: [{ id: 'u2', name: 'B' }] }],
+  };
+
+  afterEach(() => {
+    calendarState.eventFilter = EMPTY_FILTER;
+    calendarState.events = [newYear];
+  });
+
+  it('lists only the events the filter keeps', () => {
+    calendarState.eventFilter = ownedByB;
+    calendarState.events = [newYear, { ...newYear, id: 'e2', title: 'Rehearsal', ownerId: 'u2' }];
+
+    render(<ListView />);
+
+    expect(screen.getByText('Rehearsal')).toBeInTheDocument();
+    expect(screen.queryByText('Shrine visit')).toBeNull();
+  });
+
+  // An empty list under a filter reads as missing data unless it names the cause.
+  it('says the filter hid everything and offers to clear it', () => {
+    calendarState.eventFilter = ownedByB;
+
+    render(<ListView />);
+
+    expect(screen.getByText('filter.noMatch')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'filter.clear' }).click();
+    expect(calendarState.setEventFilter).toHaveBeenCalledWith(EMPTY_FILTER);
   });
 });

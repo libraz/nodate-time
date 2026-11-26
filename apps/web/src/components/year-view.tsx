@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { dayInZone, getMonthDays, getWeekdayLabel, isToday, jsDayOfWeek } from '@/lib/date-utils';
 import { getHoliday } from '@/lib/holidays';
 import { useHolidayLoader } from '@/lib/use-holidays';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { eventEndDay, eventStartDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -23,13 +24,13 @@ export function YearView() {
     currentMonth.year + 1,
   ]);
   const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const isShown = useIsEventShown();
 
   // Build a count of events per ISO date so we can show density (1, 2, 3+ dots).
   const eventCount = useMemo(() => {
     const map = new Map<string, number>();
     for (const evt of events) {
-      if (!activeCalendarIds.includes(evt.calendarId)) continue;
+      if (!isShown(evt)) continue;
       const start = eventStartDay(evt, timezone);
       // Exclusive end: an event ending exactly at midnight does not occupy that day.
       const end = eventEndDay(evt, timezone);
@@ -45,7 +46,7 @@ export function YearView() {
       }
     }
     return map;
-  }, [events, activeCalendarIds, timezone]);
+  }, [events, isShown, timezone]);
 
   const months = useMemo(() => Array.from({ length: 12 }, (_, i) => i), []);
 

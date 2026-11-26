@@ -6,7 +6,8 @@ import type { CalendarEvent } from '@/types/calendar';
 const MAX_SPAN_DAYS = 366;
 
 /**
- * Groups events into the days an agenda lists them under, earliest day first.
+ * Groups the events `isShown` accepts into the days an agenda lists them
+ * under, earliest day first.
  *
  * An event appears under every day it covers rather than only the one it
  * began on. A trip that started last Tuesday is still on today, and a list
@@ -14,12 +15,12 @@ const MAX_SPAN_DAYS = 366;
  */
 export function groupByDay(
   events: CalendarEvent[],
-  activeCalendarIds: string[],
+  isShown: (event: CalendarEvent) => boolean,
   timezone: string,
 ): [string, CalendarEvent[]][] {
   const map = new Map<string, CalendarEvent[]>();
   const filtered = events
-    .filter((e) => activeCalendarIds.includes(e.calendarId))
+    .filter(isShown)
     .sort(
       (a, b) =>
         fromISOInZone(a.startAt, timezone).toMillis() -

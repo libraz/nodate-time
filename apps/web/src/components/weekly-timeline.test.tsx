@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -59,6 +60,7 @@ const probe: CalendarEvent = makeEvent({
 const calendarState = {
   events: [probe],
   activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
   calendars: [{ id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner' }],
   updateEvent: vi.fn().mockResolvedValue(undefined),
 };
@@ -120,6 +122,33 @@ describe('WeeklyTimeline across a daylight-saving transition', () => {
     const start = openEventModal.mock.calls[0]?.[1] as DateTime;
     // Adding the minutes to midnight as elapsed time stores 06:00 instead.
     expect(start.toFormat('yyyy-MM-dd HH:mm')).toBe(`${DAY} 05:00`);
+  });
+});
+
+describe('WeeklyTimeline member filter', () => {
+  it('draws only the events that pass the filter', () => {
+    const other = makeEvent({
+      id: 'e2',
+      title: 'Evening walk',
+      timezone: ZONE,
+      startAt: `${DAY}T18:00:00-04:00`,
+      endAt: `${DAY}T19:00:00-04:00`,
+      ownerId: 'b',
+    });
+    const mine = { ...probe, ownerId: 'a' };
+    const saved = { events: calendarState.events, eventFilter: calendarState.eventFilter };
+    calendarState.events = [mine, other];
+    calendarState.eventFilter = {
+      match: 'all',
+      conditions: [{ id: 'c', field: 'owner', exclude: false, people: [{ id: 'a', name: 'A' }] }],
+    };
+    try {
+      render(<WeeklyTimeline />);
+      expect(screen.queryByText(probe.title)).not.toBeNull();
+      expect(screen.queryByText(other.title)).toBeNull();
+    } finally {
+      Object.assign(calendarState, saved);
+    }
   });
 });
 

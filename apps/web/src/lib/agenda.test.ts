@@ -24,7 +24,7 @@ function evt(id: string, startAt: string, endAt: string, allDay = false): Calend
 }
 
 const zone = 'Asia/Tokyo';
-const active = ['cal-1'];
+const active = (e: CalendarEvent) => e.calendarId === 'cal-1';
 
 describe('groupByDay', () => {
   it('lists a multi-day event on every day it covers', () => {
@@ -55,5 +55,12 @@ describe('groupByDay', () => {
     const hidden = { ...evt('hidden', '2026-08-03T10:00:00+09:00', '2026-08-03T11:00:00+09:00') };
     (hidden as { calendarId: string }).calendarId = 'cal-2';
     expect(groupByDay([hidden], active, zone)).toEqual([]);
+  });
+
+  it('applies the predicate it is given', () => {
+    const kept = evt('kept', '2026-08-03T10:00:00+09:00', '2026-08-03T11:00:00+09:00');
+    const dropped = evt('dropped', '2026-08-03T12:00:00+09:00', '2026-08-03T13:00:00+09:00');
+    const days = groupByDay([kept, dropped], (e) => e.id === 'kept', zone);
+    expect(days.map(([, list]) => list.map((e) => e.id))).toEqual([['kept']]);
   });
 });

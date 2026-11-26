@@ -6,11 +6,13 @@ import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { groupByDay } from '@/lib/agenda';
 import { formatMonthYear, fromISOInZone, isToday, nowInZone } from '@/lib/date-utils';
+import { EMPTY_FILTER, isFilterActive } from '@/lib/event-filter';
 import { isGroupEvent } from '@/lib/event-group';
 import { flexibilityLabelKey, showAsClass } from '@/lib/event-style';
 import { getHoliday } from '@/lib/holidays';
 import { showAsLabelKey } from '@/lib/permissions';
 import { useHolidayLoader } from '@/lib/use-holidays';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -27,10 +29,10 @@ export function ListView() {
   const locale = useUiStore((s) => s.locale);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const grouped = useMemo(
-    () => groupByDay(events, activeCalendarIds, timezone),
-    [events, activeCalendarIds, timezone],
-  );
+  const isShown = useIsEventShown();
+  const filtering = useCalendarStore((s) => isFilterActive(s.eventFilter));
+  const setEventFilter = useCalendarStore((s) => s.setEventFilter);
+  const grouped = useMemo(() => groupByDay(events, isShown, timezone), [events, isShown, timezone]);
   const holidayYears = useMemo(
     () => grouped.map(([date]) => Number(date.slice(0, 4))).filter(Number.isFinite),
     [grouped],
@@ -68,6 +70,15 @@ export function ListView() {
                 label: t('calendar.showAll'),
                 onClick: () => setActiveCalendarIds(calendars.map((c) => c.id)),
               }}
+            />
+          </div>
+        ) : filtering ? (
+          <div className="flex flex-1 items-center justify-center py-10">
+            <EmptyState
+              icon={GUIDE_ICONS.calendar}
+              title={t('filter.noMatch')}
+              description={t('filter.noMatchDesc')}
+              action={{ label: t('filter.clear'), onClick: () => setEventFilter(EMPTY_FILTER) }}
             />
           </div>
         ) : (

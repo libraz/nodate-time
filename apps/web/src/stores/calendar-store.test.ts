@@ -68,6 +68,9 @@ vi.mock('@/lib/upload', () => ({
 const restore = vi.hoisted(() => ({ offerRestore: vi.fn(), offerOccurrenceRestore: vi.fn() }));
 vi.mock('@/lib/event-restore', () => restore);
 
+const filterNotice = vi.hoisted(() => ({ offerFilterReveal: vi.fn() }));
+vi.mock('@/lib/filter-notice', () => filterNotice);
+
 vi.mock('@/lib/image-resize', () => ({
   resizeImageForCover: vi.fn(async () => ({
     bytes: new TextEncoder().encode('resized bytes').buffer,
@@ -1151,5 +1154,70 @@ describe('labels', () => {
     expect(mockApi.post.mock.calls[0]?.[1]).toMatchObject({ body: { title: 'x' } });
     expect(mockApi.post.mock.calls[0]?.[1]?.body).not.toHaveProperty('labelId');
     expect(mockApi.patch.mock.calls[0]?.[1]).toMatchObject({ body: { labelId: null } });
+  });
+});
+
+describe('event filter', () => {
+  const onlyA = {
+    match: 'all' as const,
+    conditions: [
+      { id: 'c1', field: 'owner' as const, exclude: false, people: [{ id: 'a', name: 'A' }] },
+    ],
+  };
+  const input = {
+    title: 'x',
+    allDay: false,
+    startAt: '2026-04-20T10:00:00+09:00',
+    endAt: '2026-04-20T11:00:00+09:00',
+  };
+
+  beforeEach(() => {
+    filterNotice.offerFilterReveal.mockClear();
+  });
+
+  it('persists the filter and clears it on reset', () => {
+    useCalendarStore.getState().setEventFilter(onlyA);
+    expect(JSON.parse(localStorage.getItem('tt_eventFilter') ?? 'null')).toEqual(onlyA);
+
+    useCalendarStore.getState().resetSessionData();
+    expect(useCalendarStore.getState().eventFilter).toEqual({ match: 'all', conditions: [] });
+    expect(localStorage.getItem('tt_eventFilter')).toBeNull();
+  });
+
+  it('says so when a saved event is hidden by the filter, and the offer clears it', async () => {
+    useCalendarStore.setState({ eventFilter: onlyA });
+    mockApi.post.mockResolvedValue(evt('e-mine', 'cal-1', { ownerId: 'me' }) as never);
+
+    await useCalendarStore.getState().addEvent('cal-1', input);
+
+    expect(filterNotice.offerFilterReveal).toHaveBeenCalledTimes(1);
+    filterNotice.offerFilterReveal.mock.calls[0]?.[0]();
+    expect(useCalendarStore.getState().eventFilter.conditions).toEqual([]);
+  });
+
+  it('stays quiet when the saved event passes the filter, or no filter is set', async () => {
+    useCalendarStore.setState({ eventFilter: onlyA });
+    mockApi.post.mockResolvedValue(evt('e-a', 'cal-1', { ownerId: 'a' }) as never);
+    await useCalendarStore.getState().addEvent('cal-1', input);
+
+    useCalendarStore.setState({ eventFilter: { match: 'all', conditions: [] } });
+    mockApi.post.mockResolvedValue(evt('e-b', 'cal-1', { ownerId: 'b' }) as never);
+    await useCalendarStore.getState().addEvent('cal-1', input);
+
+    expect(filterNotice.offerFilterReveal).not.toHaveBeenCalled();
+  });
+
+  it('says so when an edit moves an event out of the filter', async () => {
+    useCalendarStore.setState({
+      eventFilter: onlyA,
+      events: [evt('e1', 'cal-1', { ownerId: 'a' })],
+    });
+    mockApi.patch.mockResolvedValue(evt('e1', 'cal-1', { ownerId: 'b' }) as never);
+
+    await useCalendarStore
+      .getState()
+      .updateEvent('cal-1', 'e1', { ownerId: 'b' }, undefined, '"e1"');
+
+    expect(filterNotice.offerFilterReveal).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,8 +2,15 @@ import { create } from 'zustand';
 import type { components } from '@/lib/api-schema';
 import { client, errorMessage, isAbortError, present } from '@/lib/client';
 import { fetchWindow } from '@/lib/date-utils';
+import {
+  EMPTY_FILTER,
+  type EventFilter,
+  matchesFilter,
+  parseEventFilter,
+} from '@/lib/event-filter';
 import { type EventScope, scopeEtag, seriesId } from '@/lib/event-move';
 import { offerOccurrenceRestore, offerRestore } from '@/lib/event-restore';
+import { offerFilterReveal } from '@/lib/filter-notice';
 import { resizeImageForCover } from '@/lib/image-resize';
 import { loadJson, saveJson } from '@/lib/storage';
 import { uploadCalendarCover as uploadCover } from '@/lib/upload';
@@ -87,6 +94,19 @@ async function refreshAfterLabelChange(get: () => CalendarState, calendarId: str
   await Promise.all([get().fetchLabels(calendarId), get().fetchEvents(start, end)]);
 }
 
+/**
+ * After a save, says so when the filter hides every loaded copy of the saved
+ * event. Nothing loaded (an occurrence outside the window) says nothing: that
+ * event is off screen for a reason the filter has no part in.
+ */
+function noticeIfFilteredOut(get: () => CalendarState, eventId: string) {
+  const { events, eventFilter, setEventFilter } = get();
+  const series = seriesId(eventId);
+  const copies = events.filter((e) => seriesId(e.id) === series);
+  if (copies.length === 0 || copies.some((e) => matchesFilter(e, eventFilter))) return;
+  offerFilterReveal(() => setEventFilter(EMPTY_FILTER));
+}
+
 interface CalendarState {
   calendars: Calendar[];
   events: CalendarEvent[];
@@ -95,6 +115,8 @@ interface CalendarState {
   /** Each calendar's labels, in creation order, once asked for. */
   labelsMap: Record<string, Label[]>;
   activeCalendarIds: string[];
+  /** Which people's events are shown, on top of which calendars are. */
+  eventFilter: EventFilter;
   isLoading: boolean;
   /**
    * Why the calendar list is missing, when it is. Set means the list was
@@ -203,6 +225,7 @@ interface CalendarState {
 
   toggleCalendarFilter: (calId: string) => void;
   setActiveCalendarIds: (ids: string[]) => void;
+  setEventFilter: (filter: EventFilter) => void;
   resetSessionData: () => void;
 
   /** Returns the currently visible event window as ISO date strings. */
@@ -280,6 +303,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   labelsMap: {},
   labelErrors: {},
   activeCalendarIds: loadJson<string[]>('activeCalendarIds', []),
+  eventFilter: parseEventFilter(loadJson<unknown>('eventFilter', null)),
   isLoading: false,
   loadError: null,
   memberErrors: {},
@@ -672,11 +696,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       // expanded instances instead.
       const { start, end } = get().visibleRange();
       await get().fetchEvents(start, end);
+      noticeIfFilteredOut(get, newEvt.id);
       return newEvt.id;
     }
     set((s) => ({
       events: [...s.events, { ...newEvt, calendarId }],
     }));
+    noticeIfFilteredOut(get, newEvt.id);
     return newEvt.id;
   },
 
@@ -706,6 +732,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         events: s.events.map((e) => (e.id === eventId ? updated : e)),
       }));
     }
+    noticeIfFilteredOut(get, eventId);
   },
 
   async deleteEvent(event, scope) {
@@ -820,6 +847,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set({ activeCalendarIds: ids });
   },
 
+  setEventFilter(filter) {
+    saveJson('eventFilter', filter);
+    set({ eventFilter: filter });
+  },
+
   resetSessionData() {
     accountGeneration++;
     calendarRequestGeneration++;
@@ -827,6 +859,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     memoRequestGeneration++;
     localStorage.removeItem('tt_activeCalendarIds');
     localStorage.removeItem('tt_seenCalendarIds');
+    localStorage.removeItem('tt_eventFilter');
     set({
       calendars: [],
       events: [],
@@ -835,6 +868,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       labelsMap: {},
       labelErrors: {},
       activeCalendarIds: [],
+      eventFilter: EMPTY_FILTER,
       isLoading: false,
       loadError: null,
       memberErrors: {},

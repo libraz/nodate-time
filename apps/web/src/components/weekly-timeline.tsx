@@ -33,6 +33,7 @@ import {
 import { useCanMoveEvent } from '@/lib/use-can-move-event';
 import { type DragDropContext, useEventDrag, useEventResize } from '@/lib/use-event-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { weekDropStart } from '@/lib/week-drag';
 import {
   eventEndDay,
@@ -86,7 +87,7 @@ export function WeeklyTimeline() {
   const openEventModal = useUiStore((s) => s.openEventModal);
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const isShown = useIsEventShown();
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -275,7 +276,7 @@ export function WeeklyTimeline() {
     const allDay: CalendarEvent[] = [];
     const timed: CalendarEvent[] = [];
     for (const evt of events) {
-      if (!activeCalendarIds.includes(evt.calendarId)) continue;
+      if (!isShown(evt)) continue;
       (evt.allDay ? allDay : timed).push(evt);
     }
     const weekStart = days[0] ?? DateTime.now();
@@ -312,7 +313,7 @@ export function WeeklyTimeline() {
       );
     }
     return { allDayRow: { placements, tracks }, timedLayouts: layouts };
-  }, [events, activeCalendarIds, days, timezone]);
+  }, [events, isShown, days, timezone]);
 
   /** Pixel offset within the day column of a wall-clock minute of the day. */
   const minutesToY = (minutes: number): number => (minutes / 60) * HOUR_HEIGHT;

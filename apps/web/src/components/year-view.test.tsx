@@ -1,6 +1,9 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
+import { makeEvent } from '@/test/make-event';
+import type { CalendarEvent } from '@/types/calendar';
 
 const uiState = {
   locale: 'ja',
@@ -17,7 +20,11 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
-const calendarState = { events: [], activeCalendarIds: [] };
+const calendarState = {
+  events: [] as CalendarEvent[],
+  activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
+};
 
 vi.mock('@/stores/calendar-store', () => ({
   useCalendarStore: (selector: (s: typeof calendarState) => unknown) => selector(calendarState),
@@ -71,5 +78,33 @@ describe('YearView holidays', () => {
     // cell of May (May 1 is a Thursday, so the grid starts on Apr 27).
     const may = () => dayCells(container, 4);
     await waitFor(() => expect(colorOf(may()[9])).toBe('var(--color-sunday)'));
+  });
+});
+
+describe('YearView member filter', () => {
+  it('marks only the days of events that pass the filter', () => {
+    const at = (id: string, ownerId: string, day: string) =>
+      makeEvent({
+        id,
+        ownerId,
+        timezone: 'Asia/Tokyo',
+        startAt: `2025-06-${day}T10:00:00+09:00`,
+        endAt: `2025-06-${day}T11:00:00+09:00`,
+      });
+    calendarState.events = [at('mine', 'a', '10'), at('theirs', 'b', '12')];
+    calendarState.eventFilter = {
+      match: 'all',
+      conditions: [{ id: 'c', field: 'owner', exclude: false, people: [{ id: 'a', name: 'A' }] }],
+    };
+    try {
+      const { container } = render(<YearView />);
+      // June 2025 starts on a Sunday, so the 10th and 12th are cells 9 and 11.
+      const june = dayCells(container, 5);
+      expect(june[9]?.querySelector('[aria-hidden].absolute.flex')).not.toBeNull();
+      expect(june[11]?.querySelector('[aria-hidden].absolute.flex')).toBeNull();
+    } finally {
+      calendarState.events = [];
+      calendarState.eventFilter = EMPTY_FILTER;
+    }
   });
 });

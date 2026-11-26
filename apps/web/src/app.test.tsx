@@ -2,6 +2,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER } from '@/lib/event-filter';
 import type { CalendarEvent } from '@/types/calendar';
 
 vi.mock('@tanstack/react-router', () => ({
@@ -62,6 +63,8 @@ const calendarState = {
   membersMap: {},
   memberErrors: {},
   truncatedCalendarIds: [] as string[],
+  eventFilter: EMPTY_FILTER,
+  setEventFilter: vi.fn(),
   loadError: null,
   fetchCalendars: vi.fn().mockResolvedValue(undefined),
   fetchEvents: vi.fn().mockResolvedValue(undefined),

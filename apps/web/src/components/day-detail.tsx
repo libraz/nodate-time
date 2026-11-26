@@ -3,11 +3,13 @@ import { OwnerMark } from '@/components/owner-mark';
 import { useT } from '@/i18n';
 import { writableVisibleCalendars } from '@/lib/create-event';
 import { formatTime, fromISOInZone, getWeekdayLabel, jsDayOfWeek } from '@/lib/date-utils';
+import { EMPTY_FILTER, isFilterActive } from '@/lib/event-filter';
 import { isGroupEvent } from '@/lib/event-group';
 import { flexibilityLabelKey } from '@/lib/event-style';
 import { showAsLabelKey } from '@/lib/permissions';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useSheetDrag } from '@/lib/use-sheet-drag';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { eventOccupiesDay } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -42,13 +44,12 @@ export function DayDetail() {
   const canAdd = writableVisibleCalendars(calendars, activeCalendarIds).length > 0;
 
   const timezone = useUiStore((s) => s.timezone);
+  const isShown = useIsEventShown();
+  const filtering = useCalendarStore((s) => isFilterActive(s.eventFilter));
+  const setEventFilter = useCalendarStore((s) => s.setEventFilter);
   const dayEvents = useMemo(
-    () =>
-      events.filter(
-        (e) =>
-          activeCalendarIds.includes(e.calendarId) && eventOccupiesDay(e, selectedDate, timezone),
-      ),
-    [events, activeCalendarIds, selectedDate, timezone],
+    () => events.filter((e) => isShown(e) && eventOccupiesDay(e, selectedDate, timezone)),
+    [events, isShown, selectedDate, timezone],
   );
 
   if (!showDayDetail) return null;
@@ -129,8 +130,17 @@ export function DayDetail() {
                   <path d="M3 9h18M8 2v4M16 2v4" />
                 </svg>
                 <p className="mt-3 text-callout text-[var(--color-text-tertiary)]">
-                  {t('calendar.noEvents')}
+                  {filtering ? t('filter.noMatch') : t('calendar.noEvents')}
                 </p>
+                {filtering && (
+                  <button
+                    type="button"
+                    onClick={() => setEventFilter(EMPTY_FILTER)}
+                    className="mt-2 rounded-full px-3 py-1.5 text-footnote font-medium text-[var(--color-accent-ink)] hover:bg-[var(--color-hover)]"
+                  >
+                    {t('filter.clear')}
+                  </button>
+                )}
               </div>
             ) : (
               <div className="flex flex-col gap-2 px-4 pt-1">

@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -65,6 +66,8 @@ function timedEvent(id: string, title: string, day: string, hour: number) {
 const calendarState = {
   events: [] as CalendarEvent[],
   activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
+  setEventFilter: vi.fn(),
   calendars: [{ id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner' }],
   updateEvent: vi.fn().mockResolvedValue(undefined),
 };
@@ -396,5 +399,26 @@ describe('MonthScroll keeps the week being read in place', () => {
     ];
     await rerender();
     expect(container.scrollTop).toBe(30 * ROW_H + 25);
+  });
+});
+
+describe('MonthScroll member filter', () => {
+  afterEach(() => {
+    calendarState.eventFilter = EMPTY_FILTER;
+  });
+
+  it('draws only the events the filter keeps', async () => {
+    calendarState.eventFilter = {
+      match: 'all',
+      conditions: [{ id: 'c', field: 'owner', exclude: true, people: [{ id: 'u2', name: 'B' }] }],
+    };
+    await renderScroll([
+      timedEvent('a', 'Kept', '2026-08-05', 1),
+      { ...timedEvent('b', 'Hidden', '2026-08-05', 2), ownerId: 'u2' },
+    ]);
+
+    const cell = cellOf('2026-08-05');
+    expect(within(cell).getByRole('button', { name: /Kept/ })).toBeTruthy();
+    expect(within(cell).queryByRole('button', { name: /Hidden/ })).toBeNull();
   });
 });

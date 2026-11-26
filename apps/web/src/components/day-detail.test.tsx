@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -35,6 +36,8 @@ const rehearsal = makeEvent({
 const calendarState = {
   events: [] as CalendarEvent[],
   activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
+  setEventFilter: vi.fn(),
   calendars: [{ id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner' }],
 };
 
@@ -166,5 +169,37 @@ describe('DayDetail availability states', () => {
     render(<DayDetail />);
 
     expect(screen.queryByText(/event\.(showAs|flexibility)/)).toBeNull();
+  });
+});
+
+describe('DayDetail member filter', () => {
+  const ownedByB: EventFilter = {
+    match: 'all',
+    conditions: [{ id: 'c', field: 'owner', exclude: false, people: [{ id: 'u2', name: 'B' }] }],
+  };
+
+  afterEach(() => {
+    calendarState.eventFilter = EMPTY_FILTER;
+  });
+
+  it('lists only the events the filter keeps', () => {
+    calendarState.eventFilter = ownedByB;
+    calendarState.events = [rehearsal, { ...rehearsal, id: 'e2', title: 'Fitting', ownerId: 'u2' }];
+
+    render(<DayDetail />);
+
+    expect(screen.getByText('Fitting')).toBeInTheDocument();
+    expect(screen.queryByText(rehearsal.title)).toBeNull();
+  });
+
+  it('says the filter hid the day and offers to clear it', () => {
+    calendarState.eventFilter = ownedByB;
+    calendarState.events = [rehearsal];
+
+    render(<DayDetail />);
+
+    expect(screen.getByText('filter.noMatch')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'filter.clear' }).click();
+    expect(calendarState.setEventFilter).toHaveBeenCalledWith(EMPTY_FILTER);
   });
 });

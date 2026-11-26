@@ -5,6 +5,7 @@ import { getMonthDays, getWeekdayLabel } from '@/lib/date-utils';
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { bucketEventsByWeek, NO_EVENTS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -42,7 +43,7 @@ export function CalendarGrid() {
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const navigateMonth = useUiStore((s) => s.navigateMonth);
   const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const isShown = useIsEventShown();
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const touchStartRef = useRef({ x: 0, y: 0, inScroller: false });
@@ -105,10 +106,7 @@ export function CalendarGrid() {
     [currentMonth, timezone],
   );
 
-  const visibleEvents = useMemo(
-    () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
-    [events, activeCalendarIds],
-  );
+  const visibleEvents = useMemo(() => events.filter(isShown), [events, isShown]);
 
   const weekStarts = useMemo(() => {
     const result: DateTime[] = [];

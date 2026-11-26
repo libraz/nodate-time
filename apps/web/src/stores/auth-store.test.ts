@@ -140,6 +140,7 @@ describe('logout', () => {
   it('clears the token, tt_ keys, and resets the calendar store', () => {
     localStorage.setItem('tt_token', 'tok');
     localStorage.setItem('tt_activeCalendarIds', '["cal-1"]');
+    localStorage.setItem('tt_eventFilter', '{"match":"all","conditions":[]}');
     localStorage.setItem('unrelated', 'keep');
     useCalendarStore.setState({
       calendars: [
@@ -191,6 +192,7 @@ describe('logout', () => {
 
     expect(mockEndSession).toHaveBeenCalled();
     expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
+    expect(localStorage.getItem('tt_eventFilter')).toBeNull();
     expect(localStorage.getItem('unrelated')).toBe('keep');
     const auth = useAuthStore.getState();
     expect(auth.user).toBeNull();
@@ -215,6 +217,7 @@ describe('logout', () => {
   it('clears account-owned state when the API expires the session', () => {
     localStorage.setItem('tt_token', 'tok');
     localStorage.setItem('tt_activeCalendarIds', '["cal-1"]');
+    localStorage.setItem('tt_eventFilter', '{"match":"all","conditions":[]}');
     useAuthStore.setState({ user: sampleUser, isAuthenticated: true });
     useCalendarStore.setState({
       calendars: [
@@ -242,6 +245,7 @@ describe('logout', () => {
 
     expect(mockEndSession).toHaveBeenCalled();
     expect(localStorage.getItem('tt_activeCalendarIds')).toBeNull();
+    expect(localStorage.getItem('tt_eventFilter')).toBeNull();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useCalendarStore.getState()).toMatchObject({
       calendars: [],

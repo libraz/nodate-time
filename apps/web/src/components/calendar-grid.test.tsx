@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { DateTime } from 'luxon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_FILTER, type EventFilter } from '@/lib/event-filter';
 import { makeEvent } from '@/test/make-event';
 import type { CalendarEvent } from '@/types/calendar';
 
@@ -72,6 +73,8 @@ const defaultEvents = [event('a', 1), event('b', 2), event('c', 3), event('d', 4
 const calendarState = {
   events: defaultEvents as CalendarEvent[],
   activeCalendarIds: ['cal-1'],
+  eventFilter: EMPTY_FILTER as EventFilter,
+  setEventFilter: vi.fn(),
   calendars: [{ id: 'cal-1', name: 'Family', color: '#47B2F7', role: 'owner' }],
   updateEvent: vi.fn().mockResolvedValue(undefined),
 };
@@ -415,5 +418,25 @@ describe('CalendarGrid drag to move', () => {
     fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 50, clientY: 10 }] });
 
     expect(uiState.navigateMonth).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('CalendarGrid member filter', () => {
+  afterEach(() => {
+    calendarState.eventFilter = EMPTY_FILTER;
+  });
+
+  it('draws only the events the filter keeps', async () => {
+    calendarState.eventFilter = {
+      match: 'all',
+      conditions: [{ id: 'c', field: 'owner', exclude: true, people: [{ id: 'u2', name: 'B' }] }],
+    };
+    calendarState.events = [event('a', 1), { ...event('b', 2), ownerId: 'u2' }];
+
+    await renderGrid();
+
+    const cell = cellOf('2026-08-05');
+    expect(within(cell).getByRole('button', { name: /Event a/ })).toBeTruthy();
+    expect(within(cell).queryByRole('button', { name: /Event b/ })).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import { dayInZone, formatMonthYear, getWeekdayLabel, nowInZone } from '@/lib/da
 import { useHolidayLoader } from '@/lib/use-holidays';
 import { useMonthDrag } from '@/lib/use-month-drag';
 import { useScopedUpdate } from '@/lib/use-scoped-update';
+import { useIsEventShown } from '@/lib/use-shown-events';
 import { bucketEventsByWeek, NO_EVENTS } from '@/lib/week-layout';
 import { useCalendarStore } from '@/stores/calendar-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -89,7 +90,7 @@ export function MonthScroll() {
   const setSelectedDate = useUiStore((s) => s.setSelectedDate);
   const setCurrentMonth = useUiStore((s) => s.setCurrentMonth);
   const events = useCalendarStore((s) => s.events);
-  const activeCalendarIds = useCalendarStore((s) => s.activeCalendarIds);
+  const isShown = useIsEventShown();
   const { requestUpdate, dialog: scopeDialog } = useScopedUpdate();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -123,10 +124,7 @@ export function MonthScroll() {
     [anchorMonth, timezone],
   );
 
-  const visibleEvents = useMemo(
-    () => events.filter((e) => activeCalendarIds.includes(e.calendarId)),
-    [events, activeCalendarIds],
-  );
+  const visibleEvents = useMemo(() => events.filter(isShown), [events, isShown]);
 
   // Three years of weeks stay mounted, so a row that filtered the whole event
   // list on every render would do that work a few hundred times per frame.
