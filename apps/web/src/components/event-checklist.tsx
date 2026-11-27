@@ -276,24 +276,31 @@ function ChecklistView({
   onDelete,
 }: ChecklistViewProps) {
   const t = useT();
+  // Nothing to show and nothing to add: no card at all.
+  if (!editable && items.length === 0 && !isLoading && !loadError) return null;
   return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M9 11l3 3L22 4" />
-          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.checklist')}
-        </span>
-      </div>
+    <div className="card-section mx-6 mt-2 bg-[var(--color-surface-secondary)] px-4 py-3">
+      {/* Empty, the add field is the whole section and its placeholder names it. */}
+      {items.length > 0 && (
+        <div className="mb-2 flex items-center gap-2 text-[var(--color-text-secondary)]">
+          <svg
+            aria-hidden
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+          </svg>
+          <span className="text-footnote font-semibold">{t('event.checklist')}</span>
+          <span className="ml-auto text-footnote tabular-nums text-[var(--color-text-tertiary)]">
+            {items.filter((i) => i.done).length}/{items.length}
+          </span>
+        </div>
+      )}
 
       {isLoading && items.length === 0 && (
         <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
@@ -306,7 +313,7 @@ function ChecklistView({
       )}
 
       {items.length > 0 && (
-        <div className="mb-3 space-y-1">
+        <div className="mb-2 space-y-1">
           {items.map((item) => (
             <div key={item.id} className="group flex items-center gap-2">
               <LabelledButton
@@ -378,6 +385,7 @@ function ChecklistView({
               handleAdd();
             }}
             placeholder={t('event.checklistPlaceholder')}
+            aria-label={t('event.checklist')}
             className="input-modern h-10 min-w-0 flex-1 text-default"
           />
           {/* A software keyboard's return key is not something users reach for. */}

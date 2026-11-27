@@ -12,7 +12,8 @@ export function LeftSidebar() {
 
   return (
     <div className="glass-surface app-sidebar hidden w-[260px] shrink-0 flex-col border-r border-[var(--color-border)] sm:flex">
-      <div className="px-4 pt-4 pb-2">
+      {/* As tall as the grid's weekday row, so the brand sits on the same line as the weekdays. */}
+      <div className="flex h-10 shrink-0 items-center px-4">
         <BrandRow />
       </div>
 

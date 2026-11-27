@@ -10,11 +10,12 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Avatar } from '@/components/avatar';
 import { Callout } from '@/components/callout';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { CustomSelect } from '@/components/custom-select';
 import { DateTimeRangeField } from '@/components/date-time-fields';
+import { EventActionsMenu } from '@/components/event-actions-menu';
+import { EventActivity } from '@/components/event-activity';
 import { AttachmentsSection } from '@/components/event-attachments';
 import {
   ChecklistSection,
@@ -22,11 +23,9 @@ import {
   EMPTY_DRAFT_CHECKLIST,
   saveDraftChecklist,
 } from '@/components/event-checklist';
-import { CommentsSection } from '@/components/event-comments';
 import { EventPeople, ShowAsPicker } from '@/components/event-people';
 import { RecurrenceEditor } from '@/components/event-recurrence';
 import { TipCard } from '@/components/guide';
-import { HistoryTimeline } from '@/components/history-timeline';
 import { LabelledButton } from '@/components/labelled-button';
 import { SubmitHint } from '@/components/submit-hint';
 import { Switch } from '@/components/switch';
@@ -34,6 +33,7 @@ import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
 import { ApiError, client, errorMessage, isStaleError } from '@/lib/client';
 import { writableVisibleCalendars } from '@/lib/create-event';
+import { formatRelativeTime } from '@/lib/date-utils';
 import { seriesId } from '@/lib/event-move';
 import {
   eventTimesForSave,
@@ -198,6 +198,7 @@ function eventToForm(ev: CalendarEvent, timezone: string): FormState {
 export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement | null }) {
   const t = useT();
   const timezone = useUiStore((s) => s.timezone);
+  const locale = useUiStore((s) => s.locale);
   const showEventModal = useUiStore((s) => s.showEventModal);
   const editingEventId = useUiStore((s) => s.editingEventId);
   const closeEventModal = useUiStore((s) => s.closeEventModal);
@@ -506,9 +507,8 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
       setRemoteChanged(false);
       setShowMore(
         !!(
-          editingEvent.location ||
-          editingEvent.url ||
-          editingEvent.memo ||
+          editingEvent.labelId ||
+          (editingEvent.showAs && editingEvent.showAs !== 'busy') ||
           editingEvent.notificationOffset != null ||
           (editingEvent.visibility && editingEvent.visibility !== 'default') ||
           (editingEvent.flexibility && editingEvent.flexibility !== 'fixed')
@@ -834,6 +834,16 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         <span className="truncate text-center text-callout font-semibold text-[var(--color-text-primary)]">
           {editingEvent ? t('event.editEvent') : t('event.createEvent')}
         </span>
+        {/* Delete lives here, away from Save; a task's event goes with the task. */}
+        {editingEvent && editable && !taskOwned && (
+          <EventActionsMenu
+            deleteLabel={
+              editingEvent.recurrenceRule ? t('event.deleteRecurring') : t('event.deleteEvent')
+            }
+            disabled={saving}
+            onDelete={() => (isRecurringInstance ? handleDelete() : setConfirming('delete'))}
+          />
+        )}
       </div>
 
       {/* Title */}
@@ -873,134 +883,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         </div>
       )}
 
-      {/* Identity: which calendar + which color (event's visual identity) */}
-      {/* An event is drawn in its label's colour, else its owner's layer colour,
-          which the whole calendar has agreed on and the members list changes.
-          With one calendar there is nothing to choose or name, so the card is
-          left out. */}
-      {(() => {
-        const current = calendars.find((c) => c.id === formCalendarId);
-        const calIcon = (
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-text-tertiary)"
-            strokeWidth="2"
-            className="shrink-0"
-            aria-hidden="true"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M8 2v4M16 2v4M3 10h18" />
-          </svg>
-        );
-        let row: ReactNode = null;
-        if (!editingEvent && postableCalendars.length > 1) {
-          row = (
-            <>
-              {calIcon}
-              <CustomSelect
-                value={formCalendarId}
-                onChange={(v) =>
-                  setForm((f) => ({ ...f, calendarId: v, ownerId: null, labelId: null }))
-                }
-                ariaLabel={t('event.calendar')}
-                className="min-w-0 flex-1"
-                triggerClassName="input-modern"
-                options={postableCalendars.map((c) => ({
-                  value: c.id,
-                  label: c.name,
-                  color: c.color,
-                }))}
-              />
-            </>
-          );
-        } else if (current && calendars.length > 1) {
-          row = (
-            <>
-              {calIcon}
-              <span
-                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: current.color }}
-              />
-              <span className="text-callout font-medium text-[var(--color-text-primary)]">
-                {current.name}
-              </span>
-            </>
-          );
-        }
-        if (!row) return null;
-        return (
-          <div className="px-6 pb-3">
-            <div className="card-section flex items-center gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5">
-              {row}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Label: the colour the event is drawn in instead of its owner's. Left
-          out where the calendar has none to offer. */}
-      {!detailsHidden && calendarLabels.length > 0 && (
-        <div className="px-6 pb-3">
-          <div className="card-section flex items-center gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-tertiary)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="shrink-0"
-              aria-hidden="true"
-            >
-              <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
-              <circle cx="7.5" cy="7.5" r="1.2" />
-            </svg>
-            <span className="flex-1 text-default text-[var(--color-text-primary)]">
-              {t('event.label')}
-            </span>
-            <CustomSelect
-              value={form.labelId ?? ''}
-              onChange={(v) => setForm((f) => ({ ...f, labelId: v || null }))}
-              ariaLabel={t('event.label')}
-              disabled={!editable}
-              options={[
-                { value: '', label: t('event.labelNone') },
-                ...calendarLabels.map((l) => ({ value: l.id, label: l.name, color: l.color })),
-              ]}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Creator (read-only metadata, shown only for existing events) */}
-      {editingEvent &&
-        (() => {
-          const member = (membersMap[editingEvent.calendarId] ?? []).find(
-            (m) => m.id === editingEvent.creatorId,
-          );
-          const name = editingEvent.creatorName || member?.name;
-          if (!name) return null;
-          return (
-            <div className="flex items-center gap-2 px-6 pb-3 text-caption text-[var(--color-text-secondary)]">
-              <span>{t('event.createdBy')}</span>
-              <Avatar
-                src={editingEvent.creatorAvatarUrl}
-                name={name}
-                color={member?.color}
-                round
-                size="h-5 w-5"
-                className="text-caption"
-              />
-              <span className="font-medium text-[var(--color-text-primary)]">{name}</span>
-            </div>
-          );
-        })()}
-
       {/* The reader's own answer to an invitation: theirs to give whether or
           not they may edit the plan. */}
       {myAttendance && (
@@ -1034,29 +916,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Who: whose plan it is and who takes part. Left out on a calendar
-          nobody else is on, where both answers are the author. */}
-      {!detailsHidden && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
-        <div className="px-6 pb-3">
-          <EventPeople
-            members={membersMap[formCalendarId] ?? []}
-            myId={me?.id}
-            ownerId={form.ownerId}
-            participants={form.participantIds}
-            readOnly={!editable}
-            canChangeOwner={canChangeOwner}
-            canRemoveEditors={canChangeOwner}
-            ownerHint={ownerHint}
-            attendees={editingEvent?.attendees?.map((a) =>
-              a.userId in grants ? { ...a, canEdit: grants[a.userId] ?? a.canEdit } : a,
-            )}
-            onCanEditChange={editingEvent && canChangeOwner ? setCanEdit : undefined}
-            onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
-            onParticipantsChange={(ids) => setForm((f) => ({ ...f, participantIds: ids }))}
-          />
         </div>
       )}
 
@@ -1162,22 +1021,185 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         </div>
       </div>
 
-      <div className="mt-3 px-6">
-        <ShowAsPicker
-          value={form.showAs}
-          disabled={!editable}
-          onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
-        />
-        {/* No "learn more" link: the help page is another route, and
-            leaving for it would throw away the plan being written. */}
-        {!editingEvent && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
-          <TipCard id="event" className="mt-3">
-            {t('tip.event')}
-          </TipCard>
-        )}
-      </div>
+      {/* Which calendar the event is on */}
+      {/* An event is drawn in its label's colour, else its owner's layer colour,
+          which the whole calendar has agreed on and the members list changes.
+          With one calendar there is nothing to choose or name, so the card is
+          left out. */}
+      {(() => {
+        const current = calendars.find((c) => c.id === formCalendarId);
+        const calIcon = (
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--color-text-tertiary)"
+            strokeWidth="2"
+            className="shrink-0"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M8 2v4M16 2v4M3 10h18" />
+          </svg>
+        );
+        let row: ReactNode = null;
+        if (!editingEvent && postableCalendars.length > 1) {
+          row = (
+            <>
+              {calIcon}
+              <CustomSelect
+                value={formCalendarId}
+                onChange={(v) =>
+                  setForm((f) => ({ ...f, calendarId: v, ownerId: null, labelId: null }))
+                }
+                ariaLabel={t('event.calendar')}
+                className="min-w-0 flex-1"
+                triggerClassName="input-modern"
+                options={postableCalendars.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  color: c.color,
+                }))}
+              />
+            </>
+          );
+        } else if (current && calendars.length > 1) {
+          row = (
+            <>
+              {calIcon}
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: current.color }}
+              />
+              <span className="text-callout font-medium text-[var(--color-text-primary)]">
+                {current.name}
+              </span>
+            </>
+          );
+        }
+        if (!row) return null;
+        return (
+          <div className="mt-3 px-6">
+            <div className="card-section flex items-center gap-3 bg-[var(--color-surface-secondary)] px-4 py-2.5">
+              {row}
+            </div>
+          </div>
+        );
+      })()}
 
-      {/* Optional fields: collapsed by default on create, expanded when used */}
+      {/* Where, a link and notes: what a family reads an event for */}
+      {!detailsHidden && (
+        <div className="mt-3 px-6">
+          <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+            <div className="flex items-center gap-3 py-1">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-text-tertiary)"
+                strokeWidth="2"
+                className="shrink-0"
+              >
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              <input
+                data-1p-ignore
+                type="text"
+                value={form.location}
+                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                readOnly={!editable}
+                placeholder={t('event.location')}
+                className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              />
+            </div>
+            <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+            <div className="flex items-center gap-3 py-1">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-text-tertiary)"
+                strokeWidth="2"
+                className="shrink-0"
+              >
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+              </svg>
+              <input
+                data-1p-ignore
+                type="url"
+                value={form.url}
+                onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                readOnly={!editable}
+                placeholder={t('event.urlPlaceholder')}
+                className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              />
+            </div>
+            <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+            <div className="flex items-start gap-3 py-1">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-text-tertiary)"
+                strokeWidth="2"
+                className="mt-0.5 shrink-0"
+              >
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+              </svg>
+              <textarea
+                data-1p-ignore
+                ref={memoRef}
+                value={form.memo}
+                onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
+                readOnly={!editable}
+                placeholder={t('event.memo')}
+                maxLength={16000}
+                rows={1}
+                className="max-h-[12lh] flex-1 resize-none overflow-y-auto bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Who: whose plan it is and who takes part. Left out on a calendar
+          nobody else is on, where both answers are the author. */}
+      {!detailsHidden && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
+        <div className="mt-3 px-6">
+          <EventPeople
+            members={membersMap[formCalendarId] ?? []}
+            myId={me?.id}
+            ownerId={form.ownerId}
+            participants={form.participantIds}
+            readOnly={!editable}
+            canChangeOwner={canChangeOwner}
+            canRemoveEditors={canChangeOwner}
+            ownerHint={ownerHint}
+            attendees={editingEvent?.attendees?.map((a) =>
+              a.userId in grants ? { ...a, canEdit: grants[a.userId] ?? a.canEdit } : a,
+            )}
+            onCanEditChange={editingEvent && canChangeOwner ? setCanEdit : undefined}
+            onOwnerChange={(id) => setForm((f) => ({ ...f, ownerId: id }))}
+            onParticipantsChange={(ids) => setForm((f) => ({ ...f, participantIds: ids }))}
+          />
+        </div>
+      )}
+
+      {!editingEvent && (membersMap[formCalendarId]?.length ?? 0) > 1 && (
+        <div className="mt-3 px-6">
+          {/* No "learn more" link: the help page is another route, and
+              leaving for it would throw away the plan being written. */}
+          <TipCard id="event">{t('tip.event')}</TipCard>
+        </div>
+      )}
+      {/* Optional fields: collapsed until one of them is set */}
       <div className="mt-3 px-6">
         <button
           type="button"
@@ -1203,90 +1225,61 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
 
       {showMore && (
         <>
-          {/* Details card (location + memo) */}
-          {!detailsHidden && (
-            <div className="mt-1 px-6">
-              <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-                <div className="flex items-center gap-3 py-1">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--color-text-tertiary)"
-                    strokeWidth="2"
-                    className="shrink-0"
-                  >
-                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
-                    <circle cx="12" cy="10" r="3" />
-                  </svg>
-                  <input
-                    data-1p-ignore
-                    type="text"
-                    value={form.location}
-                    onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                    readOnly={!editable}
-                    placeholder={t('event.location')}
-                    className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                  />
-                </div>
-                <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-                <div className="flex items-center gap-3 py-1">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--color-text-tertiary)"
-                    strokeWidth="2"
-                    className="shrink-0"
-                  >
-                    <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-                  </svg>
-                  <input
-                    data-1p-ignore
-                    type="url"
-                    value={form.url}
-                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                    readOnly={!editable}
-                    placeholder={t('event.urlPlaceholder')}
-                    className="flex-1 bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                  />
-                </div>
-                <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
-                <div className="flex items-start gap-3 py-1">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--color-text-tertiary)"
-                    strokeWidth="2"
-                    className="mt-0.5 shrink-0"
-                  >
-                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-                  </svg>
-                  <textarea
-                    data-1p-ignore
-                    ref={memoRef}
-                    value={form.memo}
-                    onChange={(e) => setForm((f) => ({ ...f, memo: e.target.value }))}
-                    readOnly={!editable}
-                    placeholder={t('event.memo')}
-                    maxLength={16000}
-                    rows={2}
-                    className="max-h-[12lh] flex-1 resize-none overflow-y-auto bg-transparent text-callout text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-tertiary)]"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Reminder, visibility and flexibility card */}
-          <div className="mt-3 px-6">
+          {/* Label, availability, reminder, visibility and flexibility */}
+          <div className="mt-1 px-6">
             <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+              {/* Label: the colour the event is drawn in instead of its owner's. Left
+                  out where the calendar has none to offer. */}
+              {!detailsHidden && calendarLabels.length > 0 && (
+                <>
+                  <div className="flex items-center gap-3 py-1.5">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--color-text-tertiary)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0"
+                      aria-hidden="true"
+                    >
+                      <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+                      <circle cx="7.5" cy="7.5" r="1.2" />
+                    </svg>
+                    <span className="flex-1 text-default text-[var(--color-text-primary)]">
+                      {t('event.label')}
+                    </span>
+                    <CustomSelect
+                      value={form.labelId ?? ''}
+                      onChange={(v) => setForm((f) => ({ ...f, labelId: v || null }))}
+                      ariaLabel={t('event.label')}
+                      disabled={!editable}
+                      options={[
+                        { value: '', label: t('event.labelNone') },
+                        ...calendarLabels.map((l) => ({
+                          value: l.id,
+                          label: l.name,
+                          color: l.color,
+                        })),
+                      ]}
+                    />
+                  </div>
+                  <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+                </>
+              )}
+
+              {/* Availability is what a scheduling poll reads this time as. */}
+              <div className="py-1.5">
+                <ShowAsPicker
+                  value={form.showAs}
+                  disabled={!editable}
+                  onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
+                />
+              </div>
+              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
+
               {/* Notification. The reminder travels with the event as an
                   iCalendar alarm; the app itself does not deliver one, so the
                   hint names what will. */}
@@ -1391,88 +1384,66 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
 
       {/* The sections below write as they change, unlike the form above. */}
       {editingEvent && (
-        <div className="mx-6 mt-5 flex items-center gap-3">
-          <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
-          <h3 className="shrink-0 text-footnote font-medium text-[var(--color-text-secondary)]">
-            {t('event.savedImmediately')}
-          </h3>
+        <div className="mx-6 mt-6 mb-1 flex items-center gap-2 text-[var(--color-text-tertiary)]">
+          <svg
+            aria-hidden
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0"
+          >
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          <h3 className="shrink-0 text-footnote font-medium">{t('event.savedImmediately')}</h3>
           <span className="h-px flex-1 bg-[var(--color-border)]" aria-hidden="true" />
         </div>
       )}
 
       {/* Keyed by event, so switching events in the open panel starts each section afresh. */}
-      <div data-saves-immediately key={editingEvent?.id}>
-        {/* Checklist (edit mode only) */}
-        {editingEvent && (
+      {editingEvent && (
+        <div data-saves-immediately key={editingEvent.id}>
           <ChecklistSection
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
           />
-        )}
-
-        {/* Attachments (edit mode only) */}
-        {editingEvent && (
           <AttachmentsSection
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
             editable={editable}
           />
-        )}
-
-        {/* Comments (edit mode only) */}
-        {editingEvent && (
-          <CommentsSection
+          <EventActivity
             calendarId={editingEvent.calendarId}
             eventId={editingEvent.id}
+            seriesId={seriesId(editingEvent.id)}
             canPost={canEdit(myRole)}
             moderatorRole={myRole}
           />
-        )}
-      </div>
-
-      {/* History (edit mode only) */}
-      {editingEvent && (
-        <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-text-secondary)"
-              strokeWidth="2"
-            >
-              <path d="M12 8v4l3 3" />
-              <circle cx="12" cy="12" r="9" />
-            </svg>
-            <span className="text-default font-semibold text-[var(--color-text-primary)]">
-              {t('history.title')}
-            </span>
-          </div>
-          <HistoryTimeline
-            key={editingEvent.id}
-            kind="event"
-            calendarId={editingEvent.calendarId}
-            entityId={seriesId(editingEvent.id)}
-          />
         </div>
       )}
 
-      {/* Delete (edit mode, editors only; a task's event goes with the task) */}
-      {editingEvent && editable && !taskOwned && (
-        <div className="px-6 pt-4">
-          <button
-            type="button"
-            onClick={() => (isRecurringInstance ? handleDelete() : setConfirming('delete'))}
-            disabled={saving}
-            className="w-full bg-[var(--color-danger-bg)] py-3 text-center text-default font-medium text-[var(--color-danger)] disabled:opacity-50"
-            style={{ borderRadius: 'var(--radius-md)' }}
-          >
-            {editingEvent?.recurrenceRule ? t('event.deleteRecurring') : t('event.deleteEvent')}
-          </button>
-        </div>
-      )}
+      {/* Who made the event and when: read-only, so it sits below everything editable. */}
+      {editingEvent &&
+        (() => {
+          const member = (membersMap[editingEvent.calendarId] ?? []).find(
+            (m) => m.id === editingEvent.creatorId,
+          );
+          const name = editingEvent.creatorName || member?.name;
+          if (!name) return null;
+          return (
+            <p className="px-6 pt-4 text-caption tabular-nums text-[var(--color-text-tertiary)]">
+              {t('event.createdMeta', {
+                name,
+                when: formatRelativeTime(editingEvent.createdAt, locale),
+              })}
+            </p>
+          );
+        })()}
 
       {/* Spacer so content doesn't hide behind sticky action bar on mobile */}
       <div className="h-20 sm:h-0" />
@@ -1516,7 +1487,7 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
             type="button"
             onClick={() => handleSave()}
             disabled={saving || !form.title.trim() || endError}
-            className="btn-primary flex-1 py-3 text-default font-medium disabled:opacity-50"
+            className="btn-primary flex-1 py-3 text-default font-medium"
           >
             {saving ? t('common.saving') : t('common.save')}
           </button>

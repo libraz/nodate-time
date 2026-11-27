@@ -214,15 +214,16 @@ export function MonthScroll() {
     endSmoothRef.current = end;
   }, []);
 
+  // A week row lands under the pinned month header; a month header lands at the very top.
   const scrollToTarget = useCallback(
-    (selector: string, smooth: boolean) => {
+    (selector: string, smooth: boolean, inset = MONTH_HEADER_H) => {
       const container = scrollRef.current;
       if (!container) return false;
       const el = container.querySelector<HTMLElement>(selector);
       if (!el) return false;
       const cRect = container.getBoundingClientRect();
       const tRect = el.getBoundingClientRect();
-      const delta = tRect.top - cRect.top - MONTH_HEADER_H;
+      const delta = tRect.top - cRect.top - inset;
       if (smooth) beginSmoothScroll(container);
       container.scrollTo({
         top: container.scrollTop + delta,
@@ -242,7 +243,7 @@ export function MonthScroll() {
 
   const scrollToMonth = useCallback(
     (monthKey: string, smooth: boolean) =>
-      !!monthKey && scrollToTarget(`[data-month="${monthKey}"]`, smooth),
+      !!monthKey && scrollToTarget(`[data-month="${monthKey}"]`, smooth, 0),
     [scrollToTarget],
   );
 
@@ -318,9 +319,11 @@ export function MonthScroll() {
       }
       return;
     }
+    // Opens on the current month from its first week, which still shows today.
     if (!initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true;
-      scrollToToday(false);
+      if (scrollToMonth(anchorKey, false)) updateActiveMonth();
+      else scrollToToday(false);
     }
   }, [anchorKey, scrollToMonth, scrollToToday, scrollToWeek, todayKey, updateActiveMonth]);
 
@@ -374,7 +377,7 @@ export function MonthScroll() {
             <div
               key={item.key}
               data-month={item.month.toFormat('yyyy-MM')}
-              className="month-sticky-header sticky top-0 z-10 flex items-center px-3 text-body font-bold tabular-nums text-[var(--color-text-primary)]"
+              className="month-sticky-header sticky top-0 z-30 flex items-center px-3 text-body font-bold tabular-nums text-[var(--color-text-primary)]"
               style={{ height: MONTH_HEADER_H }}
             >
               {formatMonthYear(item.month, locale)}

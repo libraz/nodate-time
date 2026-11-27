@@ -110,30 +110,37 @@ export function AttachmentsSection({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // Nothing attached and nothing to attach: no card at all.
+  if (!editable && attachments.length === 0 && !loadError) return null;
   return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.attachments')}
-        </span>
-      </div>
+    <div className="card-section mx-6 mt-2 bg-[var(--color-surface-secondary)] px-4 py-1.5">
+      {/* Empty, the attach row is the whole section and names it. */}
+      {attachments.length > 0 && (
+        <div className="mt-1.5 mb-2 flex items-center gap-2 text-[var(--color-text-secondary)]">
+          <svg
+            aria-hidden
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+          </svg>
+          <span className="text-footnote font-semibold">{t('event.attachments')}</span>
+          <span className="ml-auto text-footnote tabular-nums text-[var(--color-text-tertiary)]">
+            {attachments.length}
+          </span>
+        </div>
+      )}
 
       {loadError && attachments.length === 0 && (
         <p className="py-2 text-center text-body text-[var(--color-danger)]">{loadError}</p>
       )}
 
       {attachments.length > 0 && (
-        <div className="mb-3 space-y-2">
+        <div className="mb-1 space-y-2">
           {attachments.map((att) => (
             <div
               key={att.id}
@@ -197,20 +204,19 @@ export function AttachmentsSection({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="flex w-full items-center justify-center gap-2 border border-dashed border-[var(--color-border)] py-2.5 text-body text-[var(--color-text-tertiary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent-ink)] transition-colors disabled:opacity-50"
-            style={{ borderRadius: 'var(--radius-md)' }}
+            className="flex w-full items-center gap-3 py-1.5 text-left text-default text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-accent-ink)] disabled:opacity-50"
           >
             <svg
-              width="16"
-              height="16"
+              aria-hidden
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="currentColor"
+              stroke="var(--color-text-tertiary)"
               strokeWidth="2"
+              className="shrink-0"
             >
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
             </svg>
             {uploading ? t('event.uploading') : t('event.uploadAttachment')}
           </button>

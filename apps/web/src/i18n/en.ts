@@ -138,7 +138,7 @@ export const en: Record<TranslationKey, string> = {
   'event.urlPlaceholder': 'URL (meeting link, etc.)',
   // Checklist
   'event.checklist': 'Checklist',
-  'event.checklistPlaceholder': 'Add item...',
+  'event.checklistPlaceholder': 'Add to checklist...',
   'event.noChecklist': 'No checklist items yet',
   // Attachments
   'event.attachments': 'Attachments',
@@ -169,7 +169,9 @@ export const en: Record<TranslationKey, string> = {
   'event.flexibilityConditional': 'Can move if needed',
   'event.deleteConfirmTitle': 'Delete this event?',
   'event.endBeforeStart': 'End must be after start',
-  'event.savedImmediately': 'Changes below save immediately',
+  'event.savedImmediately': 'Saved as you go',
+  'event.moreActions': 'More actions',
+  'event.commentsAndHistory': 'Comments and history',
   'event.ownerOtherHint': "This becomes {name}'s event. You won't be able to edit it after saving",
   'event.flexibilityShort.negotiable': 'Flexible',
   'event.flexibilityShort.conditional': 'Conditional',
@@ -564,8 +566,6 @@ export const en: Record<TranslationKey, string> = {
   'members.roleViewer': 'Viewer',
   'members.removeConfirm': 'They lose access to this calendar',
   'members.you': 'You',
-  'members.layerHint':
-    "An event is drawn in its label's colour, or its owner's when it has none. Layer colours are the same for every member",
   'members.soloHint':
     "You're the only member so far. Use Add to bring in people from your workspace; their events appear here in their own colour",
   'members.leave': 'Leave calendar',
@@ -678,7 +678,7 @@ export const en: Record<TranslationKey, string> = {
   'event.recurrenceNthFourth': 'Fourth',
   'event.recurrenceNthFifth': 'Fifth',
 
-  'event.createdBy': 'Created by',
+  'event.createdMeta': 'Created by {name} · {when}',
   'event.calendar': 'Calendar',
   'event.color': 'Color',
   'event.moreOptions': 'More options',

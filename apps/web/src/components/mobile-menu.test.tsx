@@ -24,7 +24,7 @@ const calendarListStub = vi.hoisted(() => () => null);
 // biome-ignore lint/style/useNamingConvention: must mirror the real module's exported component name
 vi.mock('@/components/calendar-list', () => ({ CalendarList: calendarListStub }));
 
-const authState = { logout: vi.fn() };
+const authState = { logout: vi.fn(), user: { id: 'u1' } };
 vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
 }));
@@ -39,6 +39,7 @@ vi.mock('@/stores/ui-store', () => ({
   useUiStore: (selector: (s: typeof uiState) => unknown) => selector(uiState),
 }));
 
+import { useSchedulePollStore } from '@/stores/schedule-poll-store';
 import { MobileMenu } from './mobile-menu';
 
 afterEach(() => {
@@ -57,5 +58,21 @@ describe('MobileMenu header', () => {
     uiState.showMobileMenu = false;
     render(<MobileMenu />);
     expect(screen.queryByText('Acme')).toBeNull();
+  });
+});
+
+describe('MobileMenu scheduling entry', () => {
+  it('offers scheduling, with the waiting count when there is one', () => {
+    useSchedulePollStore.setState({
+      accountId: 'u1',
+      actions: [
+        { calendarId: 'c', calendarName: 'C', pollId: 'p', title: 'Picnic', kind: 'answer' },
+      ],
+    });
+    render(<MobileMenu />);
+
+    const entry = screen.getByRole('button', { name: /schedulePoll.nav/ });
+    expect(entry).toHaveTextContent('1');
+    useSchedulePollStore.getState().reset();
   });
 });

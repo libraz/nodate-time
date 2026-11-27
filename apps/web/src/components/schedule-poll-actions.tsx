@@ -66,7 +66,14 @@ function PollIcon() {
   );
 }
 
-function ActionCount({ count }: { count: number }) {
+/** How many scheduling polls are waiting on the signed-in user. */
+export function usePendingPollCount(): number {
+  const userId = useAuthStore((state) => state.user?.id);
+  return useSchedulePollStore((state) => (state.accountId === userId ? state.actions.length : 0));
+}
+
+/** The red count badge for pending poll actions; nothing when there are none. */
+export function ActionCount({ count }: { count: number }) {
   if (count === 0) return null;
   return (
     <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--color-danger)] px-1.5 text-caption font-semibold leading-5 tabular-nums text-[var(--color-text-on-accent)]">
@@ -77,10 +84,7 @@ function ActionCount({ count }: { count: number }) {
 
 export function SchedulePollNavDesktop() {
   const t = useT();
-  const userId = useAuthStore((state) => state.user?.id);
-  const count = useSchedulePollStore((state) =>
-    state.accountId === userId ? state.actions.length : 0,
-  );
+  const count = usePendingPollCount();
   return (
     <Link
       to="/schedule-polls"
@@ -92,51 +96,6 @@ export function SchedulePollNavDesktop() {
       <span>{t('schedulePoll.nav')}</span>
       <ActionCount count={count} />
     </Link>
-  );
-}
-
-export function SchedulePollNavMobile() {
-  const t = useT();
-  const userId = useAuthStore((state) => state.user?.id);
-  const count = useSchedulePollStore((state) =>
-    state.accountId === userId ? state.actions.length : 0,
-  );
-  return (
-    <div className="flex h-[42px] items-center border-t border-[var(--color-separator)] px-3 sm:hidden">
-      <Link
-        to="/schedule-polls"
-        className="flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-body font-semibold text-[var(--color-text-primary)] active:bg-[var(--color-hover)]"
-      >
-        <span className="flex items-center gap-2">
-          <span className="text-[var(--color-text-secondary)]">
-            <PollIcon />
-          </span>
-          {t('schedulePoll.nav')}
-        </span>
-        <span className="flex items-center gap-2">
-          {count > 0 && (
-            <span className="sr-only">{t('schedulePoll.pendingCount', { count })}</span>
-          )}
-          <span aria-hidden>
-            <ActionCount count={count} />
-          </span>
-          <svg
-            aria-hidden
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-[var(--color-text-tertiary)]"
-          >
-            <path d="M9 6l6 6-6 6" />
-          </svg>
-        </span>
-      </Link>
-    </div>
   );
 }
 

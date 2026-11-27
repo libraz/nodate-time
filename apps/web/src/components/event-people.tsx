@@ -282,8 +282,8 @@ export function EventPeople({
 
 /**
  * Whether the time reads as taken. Four equal segments rather than a menu:
- * on a shared calendar "tentative" and "free" are everyday answers, and the
- * line under them says what each does when a time is being found.
+ * on a shared calendar "tentative" and "free" are everyday answers. A line
+ * under them says what a non-default answer does when a time is being found.
  */
 export function ShowAsPicker({
   value,
@@ -296,29 +296,30 @@ export function ShowAsPicker({
 }) {
   const t = useT();
   return (
-    <div className="card-section bg-[var(--color-surface-secondary)] p-4">
-      <fieldset className="m-0 min-w-0 border-0 p-0">
-        <legend className="mb-2 p-0 text-default text-[var(--color-text-primary)]">
-          {t('event.showAs')}
-        </legend>
-        <div className="segmented-control w-full">
-          {SHOW_AS_OPTIONS.map((v) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={value === v}
-              data-active={value === v}
-              disabled={disabled}
-              onClick={() => onChange(v)}
-            >
-              {t(showAsLabelKey(v))}
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-footnote text-[var(--color-text-secondary)]">
+    <fieldset className="m-0 min-w-0 border-0 p-0">
+      <legend className="mb-2 p-0 text-body text-[var(--color-text-secondary)]">
+        {t('event.showAs')}
+      </legend>
+      <div className="segmented-control w-full">
+        {SHOW_AS_OPTIONS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={value === v}
+            data-active={value === v}
+            disabled={disabled}
+            onClick={() => onChange(v)}
+          >
+            {t(showAsLabelKey(v))}
+          </button>
+        ))}
+      </div>
+      {/* "Busy" is what everyone assumes; only a departure from it needs saying. */}
+      {value !== 'busy' && (
+        <p className="mt-1.5 text-footnote text-[var(--color-text-tertiary)]">
           {t(SHOW_AS_HINT[value])}
         </p>
-      </fieldset>
-    </div>
+      )}
+    </fieldset>
   );
 }

@@ -175,24 +175,9 @@ export function CommentsSection({
     fetchComments();
   };
 
+  // Bare: the tab it sits under names it and draws the card.
   return (
-    <div className="card-section mx-6 mt-3 bg-[var(--color-surface-secondary)] p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--color-text-secondary)"
-          strokeWidth="2"
-        >
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-        </svg>
-        <span className="text-default font-semibold text-[var(--color-text-primary)]">
-          {t('event.comments')}
-        </span>
-      </div>
-
+    <div>
       {isLoading && comments.length === 0 && (
         <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
           {t('common.loading')}
@@ -204,9 +189,7 @@ export function CommentsSection({
       )}
 
       {!isLoading && !loadError && comments.length === 0 && (
-        <p className="py-2 text-center text-body text-[var(--color-text-tertiary)]">
-          {t('event.noComments')}
-        </p>
+        <p className="pb-3 text-body text-[var(--color-text-tertiary)]">{t('event.noComments')}</p>
       )}
 
       {comments.length > 0 && (

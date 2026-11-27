@@ -225,6 +225,18 @@ function titleField(): HTMLElement {
   return screen.getByPlaceholderText('event.titlePlaceholder');
 }
 
+/** Opens the optional fields unless they already are. */
+function expandMoreOptions() {
+  const more = screen.getByRole('button', { name: 'event.moreOptions' });
+  if (more.getAttribute('aria-expanded') !== 'true') fireEvent.click(more);
+}
+
+/** Delete sits in the header's "more actions" menu. */
+function deleteButton(): HTMLElement {
+  fireEvent.click(screen.getByRole('button', { name: 'event.moreActions' }));
+  return screen.getByRole('menuitem', { name: 'event.deleteEvent' });
+}
+
 beforeEach(() => {
   layout.desktop = false;
   uiState.showEventModal = true;
@@ -958,7 +970,7 @@ describe('EventModal task-derived event', () => {
   it('offers no delete, since the event goes with its task', async () => {
     await openEvent(taskEvent);
 
-    expect(screen.queryByRole('button', { name: 'event.deleteEvent' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'event.moreActions' })).toBeNull();
   });
 
   it('still saves the fields that have no task-side counterpart', async () => {
@@ -973,13 +985,12 @@ describe('EventModal task-derived event', () => {
     expect(screen.queryByText('event.taskOwnedNote')).toBeNull();
     expect(titleField()).not.toHaveAttribute('readonly');
     expect(screen.getByRole('button', { name: 'calendar.allDay' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'event.deleteEvent' })).toBeInTheDocument();
+    expect(deleteButton()).toBeInTheDocument();
   });
 });
 
-// On a shared calendar whose plan it is, who takes part and whether the time
-// is taken are what the plan says to everyone else, so they are answered on
-// the form itself rather than behind the optional fields.
+// On a shared calendar whose plan it is, who takes part is answered on the form
+// itself; whether the time is taken is a scheduling detail among the optional fields.
 describe('EventModal who and availability', () => {
   const members: Member[] = [
     { id: 'u1', name: 'Me', email: '', role: 'owner', color: '#111' },
@@ -1007,6 +1018,7 @@ describe('EventModal who and availability', () => {
     expect(within(people).getByText('Bob')).toBeInTheDocument();
     expect(within(people).queryByText('event.memberMe')).toBeNull();
     expect(within(people).getByRole('button', { name: 'event.removeParticipant' })).toBeVisible();
+    expandMoreOptions();
     fireEvent.click(screen.getByRole('button', { name: 'event.showAsTentative' }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -1025,6 +1037,7 @@ describe('EventModal who and availability', () => {
     render(<EventModal />);
 
     expect(screen.queryByRole('button', { name: 'event.whose' })).toBeNull();
+    expandMoreOptions();
     expect(screen.getByRole('group', { name: 'event.showAs' })).toBeInTheDocument();
   });
 });
@@ -1397,11 +1410,40 @@ describe('EventModal immediate sections', () => {
     expect(collisions).toEqual([]);
   });
 
+  it('keeps the history behind a tab beside the comments', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+
+    const history = screen.getByRole('tab', { name: 'history.title' });
+    expect(screen.getByRole('tab', { name: 'event.comments' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.queryByRole('tabpanel', { name: 'history.title' })).toBeNull();
+
+    fireEvent.click(history);
+
+    expect(history).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: 'history.title' })).toBeVisible();
+  });
+
   it('has no such heading on create, where those sections are absent', () => {
     uiState.editingEventId = null;
     render(<EventModal />);
 
     expect(screen.queryByRole('heading', { name: 'event.savedImmediately' })).toBeNull();
+  });
+});
+
+describe('EventModal availability hint', () => {
+  it('explains only an availability other than busy', async () => {
+    render(<EventModal />);
+    await waitFor(() => expect(titleField()).toHaveValue('Standup'));
+    expandMoreOptions();
+
+    expect(screen.queryByText('event.showAsBusyHint')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'event.showAsFree' }));
+    expect(screen.getByText('event.showAsFreeHint')).toBeInTheDocument();
   });
 });
 
@@ -1411,7 +1453,7 @@ describe('EventModal delete', () => {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'event.deleteEvent' }));
+    fireEvent.click(deleteButton());
     const sheet = await screen.findByRole('alertdialog', { name: 'event.deleteConfirmTitle' });
     expect(calendarState.deleteEvent).not.toHaveBeenCalled();
 
@@ -1430,8 +1472,7 @@ describe('EventModal notification offsets', () => {
   async function openMore() {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
-    const more = screen.getByRole('button', { name: 'event.moreOptions' });
-    if (more.getAttribute('aria-expanded') !== 'true') fireEvent.click(more);
+    expandMoreOptions();
   }
 
   it.each([
@@ -1620,6 +1661,7 @@ describe('EventModal label', () => {
   }
 
   async function chooseLabel(name: string) {
+    expandMoreOptions();
     fireEvent.click(screen.getByRole('button', { name: 'event.label' }));
     fireEvent.click(await screen.findByRole('option', { name }));
   }

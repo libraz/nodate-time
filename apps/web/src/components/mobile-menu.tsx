@@ -1,6 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { BrandRow } from '@/components/brand-mark';
 import { CalendarList } from '@/components/calendar-list';
+import { ActionCount, usePendingPollCount } from '@/components/schedule-poll-actions';
 import type { TranslationKey } from '@/i18n';
 import { useT } from '@/i18n';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -12,12 +13,14 @@ interface MenuAction {
   labelKey: TranslationKey;
   icon: React.ReactNode;
   onSelect: () => void;
+  /** Pending items behind the entry, shown as a count badge. */
+  count?: number;
 }
 
 /**
  * Mobile-only slide-in drawer that surfaces controls living in the desktop
- * sidebars: the calendar list (visibility + create) plus the shared-calendar
- * panels (album, members, share), the activity feed, and the
+ * sidebars: the calendar list (visibility + create) plus scheduling polls, the
+ * shared-calendar panels (album, members, share), the activity feed, and the
  * account controls — settings and sign-out have no other route on a phone.
  */
 export function MobileMenu() {
@@ -29,6 +32,7 @@ export function MobileMenu() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
   const panelRef = useModalA11y<HTMLDivElement>(show, () => setShow(false));
+  const pendingPolls = usePendingPollCount();
 
   if (!show) return null;
 
@@ -38,6 +42,30 @@ export function MobileMenu() {
   };
 
   const actions: MenuAction[] = [
+    {
+      key: 'schedule-polls',
+      labelKey: 'schedulePoll.nav',
+      icon: (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          width="20"
+          height="20"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+          <path d="M3.5 10h17M8 3v4M16 3v4M9 15l2 2 4-4" />
+        </svg>
+      ),
+      onSelect: () => {
+        setShow(false);
+        navigate({ to: '/schedule-polls' });
+      },
+      count: pendingPolls,
+    },
     {
       key: 'album',
       labelKey: 'panel.album',
@@ -255,7 +283,17 @@ export function MobileMenu() {
                 className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-hover)]"
               >
                 <span className="shrink-0">{a.icon}</span>
-                <span className="text-body">{t(a.labelKey)}</span>
+                <span className="flex-1 text-body">{t(a.labelKey)}</span>
+                {!!a.count && (
+                  <>
+                    <span aria-hidden>
+                      <ActionCount count={a.count} />
+                    </span>
+                    <span className="sr-only">
+                      {t('schedulePoll.pendingCount', { count: a.count })}
+                    </span>
+                  </>
+                )}
               </button>
             ))}
           </div>

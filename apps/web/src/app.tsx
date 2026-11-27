@@ -351,6 +351,7 @@ function MemoPanel() {
   const rightPanel = useUiStore((s) => s.rightPanel);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const presence = usePresence(rightPanel === 'memo');
+  const hasMemos = useCalendarStore((s) => s.memos.length > 0);
 
   return (
     <SidePanel
@@ -359,9 +360,11 @@ function MemoPanel() {
       title={t('panel.memo')}
       helpTopic="memos"
     >
-      <TipCard id="memo" topic="memos" className="mx-5 mt-4">
-        {t('tip.memo')}
-      </TipCard>
+      {hasMemos && (
+        <TipCard id="memo" topic="memos" className="mx-5 mt-4">
+          {t('tip.memo')}
+        </TipCard>
+      )}
       <div className="flex-1 overflow-hidden">
         <MemoSection />
       </div>

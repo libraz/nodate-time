@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe('schedule poll entry and notice', () => {
-  it('shows the same pending count in both headers and links to the response', () => {
+  it('shows the pending count in both headers and links to the response', () => {
     useSchedulePollStore.setState({
       accountId: 'u1',
       actions: [
@@ -87,7 +87,11 @@ describe('schedule poll entry and notice', () => {
       </>,
     );
 
-    expect(screen.getAllByRole('link', { name: /Scheduling/ })).toHaveLength(2);
+    // The desktop header links to it; on a phone it is in the drawer, and the menu button says so.
+    expect(screen.getAllByRole('link', { name: /Scheduling/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Calendars' })).toHaveAccessibleDescription(
+      '1 action(s) needed',
+    );
     expect(screen.getByRole('link', { name: /Studio day/ })).toHaveAttribute(
       'href',
       '/schedule-polls/$calendarId/$pollId',

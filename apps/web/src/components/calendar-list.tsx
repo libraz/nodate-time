@@ -104,7 +104,10 @@ export function CalendarList() {
   return (
     <div className="flex min-h-0 flex-col" data-tour="calendars">
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
-        <span className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+        <span
+          title={t('calendar.listHint')}
+          className="text-caption font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]"
+        >
           {t('calendar.calendarList')}
         </span>
         <div className="flex items-center gap-1">
@@ -170,9 +173,6 @@ export function CalendarList() {
           </button>
         </div>
       </div>
-      <p className="px-4 pb-1 text-caption text-[var(--color-text-tertiary)]">
-        {t('calendar.listHint')}
-      </p>
 
       <div className="overflow-y-auto px-2 py-1">
         {calendars.length === 0 && !showNewForm && (
@@ -371,7 +371,7 @@ function ShareStateLine({ memberCount }: { memberCount: number }) {
   const t = useT();
   const shared = memberCount > 1;
   return (
-    <span className="mt-0.5 flex items-center gap-1 text-caption text-[var(--color-text-tertiary)]">
+    <span className="flex items-center gap-1 text-micro text-[var(--color-text-tertiary)]">
       <ShareStateIcon shared={shared} />
       <span className="truncate tabular-nums">
         {shared ? t('calendar.sharedWith', { count: memberCount }) : t('calendar.onlyMe')}

@@ -323,7 +323,7 @@ function MonthWeekRowImpl({
                 )}
                 {showHolidayName && holiday && (
                   <span
-                    className="ml-auto min-w-0 truncate rounded-full bg-[var(--color-sunday-bg,rgba(244,67,54,0.12))] px-1.5 text-micro font-medium text-[var(--color-sunday)]"
+                    className="ml-auto min-w-0 truncate pr-1 text-micro text-[var(--color-sunday)] opacity-80"
                     title={holiday.name}
                   >
                     {holiday.name}

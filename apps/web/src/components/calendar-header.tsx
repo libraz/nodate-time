@@ -1,8 +1,8 @@
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { EventFilterButton } from '@/components/event-filter-button';
-import { SchedulePollNavDesktop, SchedulePollNavMobile } from '@/components/schedule-poll-actions';
+import { SchedulePollNavDesktop, usePendingPollCount } from '@/components/schedule-poll-actions';
 import { useT } from '@/i18n';
 import { startCreateEvent } from '@/lib/create-event';
 import { formatMonthYear, formatYear } from '@/lib/date-utils';
@@ -141,6 +141,8 @@ export function CalendarHeader() {
   const calendarView = useUiStore((s) => s.calendarView);
   const setCalendarView = useUiStore((s) => s.setCalendarView);
   const setShowMobileMenu = useUiStore((s) => s.setShowMobileMenu);
+  const pendingPolls = usePendingPollCount();
+  const pendingPollsId = useId();
   const mobileTab = useUiStore((s) => s.mobileTab);
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const navigate = useNavigate();
@@ -362,8 +364,21 @@ export function CalendarHeader() {
           onClick={() => setShowMobileMenu(true)}
           aria-label={t('calendar.calendarList')}
           data-tour="menu"
-          className="icon-btn h-8 w-8 text-[var(--color-text-primary)]"
+          aria-describedby={pendingPolls > 0 ? pendingPollsId : undefined}
+          className="icon-btn relative h-8 w-8 text-[var(--color-text-primary)]"
         >
+          {/* Scheduling lives in the drawer on a phone; a dot says something there is waiting. */}
+          {pendingPolls > 0 && (
+            <>
+              <span
+                aria-hidden
+                className="absolute top-1 right-1 h-2 w-2 rounded-full bg-[var(--color-danger)] ring-2 ring-[var(--color-surface)]"
+              />
+              <span id={pendingPollsId} className="sr-only">
+                {t('schedulePoll.pendingCount', { count: pendingPolls })}
+              </span>
+            </>
+          )}
           <svg
             width="20"
             height="20"
@@ -494,8 +509,6 @@ export function CalendarHeader() {
           </div>
         </div>
       </div>
-
-      <SchedulePollNavMobile />
 
       {/* PC header (sm+) */}
       <div className="hidden h-[56px] items-center px-3 sm:flex">

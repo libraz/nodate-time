@@ -78,9 +78,11 @@ export function PublicPanel() {
               onChange={setTargetId}
             />
 
-            <TipCard id="public" topic="invite">
-              {t('tip.public')}
-            </TipCard>
+            {publicLink && (
+              <TipCard id="public" topic="invite">
+                {t('tip.public')}
+              </TipCard>
+            )}
 
             <section className="space-y-2">
               <p className="text-caption text-[var(--color-text-secondary)]">
@@ -112,7 +114,7 @@ export function PublicPanel() {
                   type="button"
                   onClick={() => setConfirmingPublic(true)}
                   disabled={busy === 'public'}
-                  className="btn-primary w-full text-body disabled:opacity-50"
+                  className="btn-primary w-full text-body"
                 >
                   {busy === 'public' ? t('share.creating') : t('share.createPublic')}
                 </button>

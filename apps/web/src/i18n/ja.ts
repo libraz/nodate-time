@@ -142,7 +142,7 @@ export const ja = {
   'event.urlPlaceholder': 'URL（ミーティングリンクなど）',
   // Checklist
   'event.checklist': 'チェックリスト',
-  'event.checklistPlaceholder': 'アイテムを追加...',
+  'event.checklistPlaceholder': 'チェックリストに追加...',
   'event.noChecklist': 'チェックリストはまだありません',
   // Attachments
   'event.attachments': '添付ファイル',
@@ -171,7 +171,9 @@ export const ja = {
   'event.flexibilityConditional': '条件付きで変更可能',
   'event.deleteConfirmTitle': 'この予定を削除しますか？',
   'event.endBeforeStart': '終了は開始より後にしてください',
-  'event.savedImmediately': 'ここから下はすぐに保存されます',
+  'event.savedImmediately': '自動で保存される項目',
+  'event.moreActions': 'その他の操作',
+  'event.commentsAndHistory': 'コメントと履歴',
   'event.ownerOtherHint': '{name}さんの予定になります。保存後はあなたが編集できなくなります',
   'event.flexibilityShort.negotiable': '変更可',
   'event.flexibilityShort.conditional': '条件付き',
@@ -578,8 +580,6 @@ export const ja = {
   'members.roleViewer': '閲覧者',
   'members.removeConfirm': 'このカレンダーを見られなくなります',
   'members.you': 'あなた',
-  'members.layerHint':
-    '予定は、ラベルがあればラベルの色、なければ持ち主の色で表示されます。レイヤーの色はメンバー全員に共通です',
   'members.soloHint':
     'まだメンバーはあなただけです。「追加」からワークスペースの人を加えられます。加わった人の予定は、その人の色で重なります',
   'members.leave': 'カレンダーから退出',
@@ -693,7 +693,7 @@ export const ja = {
   'event.recurrenceNthFourth': '第4',
   'event.recurrenceNthFifth': '第5',
 
-  'event.createdBy': '作成者',
+  'event.createdMeta': '作成: {name} · {when}',
   'event.calendar': 'カレンダー',
   'event.color': 'カラー',
   'event.moreOptions': '詳細オプション',

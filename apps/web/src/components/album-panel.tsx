@@ -448,7 +448,7 @@ export function AlbumPanel() {
         {error && <div className="px-5 py-2 text-footnote text-[var(--color-danger)]">{error}</div>}
 
         <div className="flex-1 overflow-y-auto">
-          {activeCalendarId && !selecting && (
+          {activeCalendarId && !selecting && photos.length > 0 && (
             <TipCard id="album" topic="memos" className="mx-4 mt-4 mb-2">
               {t('tip.album')}
             </TipCard>

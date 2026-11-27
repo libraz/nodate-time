@@ -152,21 +152,17 @@ export function MembersPanel() {
             target={target}
             onChange={setTargetId}
           />
-          {!picking && (
-            <>
+          {!picking &&
+            canManageMembers &&
+            (members.length === 1 ? (
               <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
-                {t('members.layerHint')}
+                {t('members.soloHint')}
               </p>
-              {members.length === 1 && (
-                <p className="mt-2 text-caption text-[var(--color-text-secondary)]">
-                  {t('members.soloHint')}
-                </p>
-              )}
+            ) : (
               <TipCard id="members" topic="calendars" className="mt-3">
                 {t('tip.members')}
               </TipCard>
-            </>
-          )}
+            ))}
         </div>
       )}
 
