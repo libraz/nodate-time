@@ -104,7 +104,7 @@ export function AlbumPhotoDetails({
             type="button"
             onClick={handleSaveCaption}
             disabled={savingCaption || captionDraft === photo.caption}
-            className="btn-primary btn-sm shrink-0 disabled:opacity-40"
+            className="btn-primary btn-sm shrink-0"
           >
             {savingCaption ? t('profile.saving') : t('album.saveCaption')}
           </button>

@@ -307,7 +307,7 @@ export function MemberAdder({ calendarId, onDone }: MemberAdderProps) {
           type="button"
           onClick={submit}
           disabled={count === 0 || busy}
-          className="btn-primary h-10 w-full text-body font-semibold tabular-nums disabled:opacity-50"
+          className="btn-primary h-10 w-full text-body font-semibold tabular-nums"
         >
           {progress
             ? t('members.addingProgress', { done: progress.done, total: progress.total })

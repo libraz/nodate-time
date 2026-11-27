@@ -170,11 +170,6 @@
     transform: scale(0.98);
   }
 
-  .btn-primary:disabled {
-    opacity: 0.35;
-    pointer-events: none;
-  }
-
   .btn-secondary {
     height: 44px;
     border-radius: var(--radius-sm);
@@ -433,4 +428,15 @@
   .spinner {
     animation-duration: 1.6s;
   }
+}
+
+/* A disabled primary button turns neutral rather than fading the accent, so its
+   label stays legible. Unlayered and :root-scoped to win over the theme fills. */
+:root .btn-primary:disabled,
+:root[data-mode="dark"] .btn-primary:disabled {
+  background: var(--color-surface-inset);
+  color: var(--color-text-tertiary);
+  box-shadow: none;
+  opacity: 1;
+  pointer-events: none;
 }

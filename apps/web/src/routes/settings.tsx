@@ -528,7 +528,7 @@ export function ProfileSection() {
             type="button"
             onClick={save}
             disabled={saving || !dirty}
-            className="btn-primary px-5 text-default disabled:opacity-50"
+            className="btn-primary px-5 text-default"
           >
             {saving ? t('common.saving') : t('common.save')}
           </button>
@@ -565,7 +565,7 @@ export function ProfileSection() {
             type="button"
             onClick={changePassword}
             disabled={pwSaving || !currentPw || !newPw}
-            className="btn-primary px-5 text-default disabled:opacity-50"
+            className="btn-primary px-5 text-default"
           >
             {pwSaving ? t('profile.changing') : t('profile.changePassword')}
           </button>
@@ -1095,7 +1095,7 @@ function CalendarDetailsSection({ calendarId }: { calendarId: string }) {
         type="button"
         onClick={save}
         disabled={saving || !dirty || !name.trim()}
-        className="btn-primary px-5 text-default disabled:opacity-50"
+        className="btn-primary px-5 text-default"
       >
         {saving ? t('common.saving') : t('common.save')}
       </button>
@@ -1341,7 +1341,7 @@ export function ExportSection() {
             type="button"
             onClick={() => downloadFile('ics')}
             disabled={!selectedId || exporting !== null}
-            className="btn-primary px-5 text-default disabled:opacity-50"
+            className="btn-primary px-5 text-default"
           >
             {exporting === 'ics' ? '...' : t('settings.exportIcal')}
           </button>
@@ -1386,7 +1386,7 @@ export function ExportSection() {
             type="button"
             onClick={handleImport}
             disabled={!icsText.trim() || !selectedId || importing}
-            className="btn-primary px-5 text-default disabled:opacity-50"
+            className="btn-primary px-5 text-default"
           >
             {importing ? '...' : t('settings.importPasted')}
           </button>
@@ -1931,7 +1931,7 @@ export function ProviderCard({
             (!clientId && !info.hasSecret) ||
             (editingSecret && !secret && !info.hasSecret)
           }
-          className="btn-primary px-5 text-default disabled:opacity-50"
+          className="btn-primary px-5 text-default"
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>

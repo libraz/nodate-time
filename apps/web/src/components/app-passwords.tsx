@@ -314,7 +314,7 @@ export function AppPasswords() {
                 <button
                   type="submit"
                   disabled={!canStart}
-                  className="btn-primary px-5 text-default disabled:opacity-50"
+                  className="btn-primary px-5 text-default"
                 >
                   {busy ? t('appPasswords.creating') : actionLabel(t, target, device)}
                 </button>
@@ -694,7 +694,7 @@ function ProfileCard({
             type="button"
             onClick={onRecreate}
             disabled={recreating}
-            className="btn-primary px-5 text-default disabled:opacity-50"
+            className="btn-primary px-5 text-default"
           >
             {recreating ? t('appPasswords.creating') : t('appPasswords.profileRecreate')}
           </button>

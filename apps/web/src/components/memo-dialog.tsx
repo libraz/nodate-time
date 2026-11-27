@@ -320,7 +320,7 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
           type="button"
           onClick={handleSave}
           disabled={saving || !form.title.trim()}
-          className="btn-primary flex-1 text-default font-medium disabled:opacity-50"
+          className="btn-primary flex-1 text-default font-medium"
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>
