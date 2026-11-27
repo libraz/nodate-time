@@ -716,6 +716,8 @@ export const ja = {
   'album.info': '情報',
   'album.prev': '前の写真',
   'album.next': '次の写真',
+  'album.thumbnails': 'アルバムの写真一覧',
+  'album.photoNumber': '{n} 枚目の写真',
   'album.addedBy': '追加した人',
   'album.uploadProgress': 'アップロード中 {done} / {total}',
   'album.count': '{count} 枚の写真',

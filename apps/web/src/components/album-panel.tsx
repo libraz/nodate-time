@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlbumViewer, TrashIcon } from '@/components/album-viewer';
+import { AlbumViewer } from '@/components/album-viewer';
+import { TrashIcon } from '@/components/album-viewer-icons';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { EmptyState, GUIDE_ICONS, TipCard } from '@/components/guide';
 import { PanelCalendarPicker } from '@/components/panel-calendar-picker';

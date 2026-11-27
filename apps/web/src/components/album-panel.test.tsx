@@ -1023,3 +1023,147 @@ describe('AlbumPanel camera roll', () => {
     expect(screen.getByAltText('photo 1')).toBeInTheDocument();
   });
 });
+
+/**
+ * Past the `sm` breakpoint the viewer is a gallery: the details sit in a
+ * sidebar beside the photo rather than in a sheet over it, and a filmstrip
+ * of the album pages it.
+ */
+describe('AlbumPanel desktop gallery', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(min-width: 640px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function openGallery() {
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-21', '2026-04-20') });
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('photo 0'));
+    return screen.getByRole('dialog', { name: 'album.photo' });
+  }
+
+  it('opens with the details beside the photo', async () => {
+    const viewer = await openGallery();
+
+    const aside = within(viewer).getByRole('complementary', { name: 'album.info' });
+    expect(within(aside).getByText('photo 0')).toBeInTheDocument();
+    const toggle = within(viewer).getByRole('button', { name: 'album.info' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(toggle);
+    expect(within(viewer).queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('pages through the filmstrip and keeps the details on the photo shown', async () => {
+    const viewer = await openGallery();
+    const strip = within(viewer).getByRole('navigation', { name: 'album.thumbnails' });
+    expect(within(strip).getAllByRole('button')).toHaveLength(3);
+
+    fireEvent.click(within(strip).getAllByRole('button')[2] as HTMLElement);
+
+    expect(await within(viewer).findByAltText('photo 2')).toBeInTheDocument();
+    expect(within(strip).getAllByRole('button')[2]).toHaveAttribute('aria-current', 'true');
+    const aside = within(viewer).getByRole('complementary', { name: 'album.info' });
+    expect(within(aside).getByText('photo 2')).toBeInTheDocument();
+    expect(within(viewer).queryByLabelText('album.next')).not.toBeInTheDocument();
+  });
+
+  // The sidebar is not a layer over the photo, so Escape leaves the viewer
+  // rather than first closing the details as the phone's sheet does.
+  it('closes the viewer on Escape with the sidebar open', async () => {
+    await openGallery();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'album.photo' })).not.toBeInTheDocument(),
+    );
+  });
+});
+
+/**
+ * Below the `sm` breakpoint the viewer takes a camera roll's touch model.
+ * jsdom lays nothing out, so the stage measures as the window's width.
+ */
+describe('AlbumPanel phone viewer gestures', () => {
+  async function openViewer() {
+    mockApi.get.mockResolvedValue({ items: photos('2026-04-21', '2026-04-21', '2026-04-20') });
+    render(<AlbumPanel />);
+    fireEvent.click(await screen.findByAltText('photo 0'));
+    return screen.getByRole('dialog', { name: 'album.photo' });
+  }
+
+  function drag(target: Element, from: [number, number], to: [number, number]) {
+    const at = ([clientX, clientY]: [number, number]) => ({ pointerId: 1, clientX, clientY });
+    fireEvent.pointerDown(target, at(from));
+    fireEvent.pointerMove(target, at([(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]));
+    fireEvent.pointerMove(target, at(to));
+    fireEvent.pointerUp(target, at(to));
+  }
+
+  function tap(target: Element) {
+    fireEvent.pointerDown(target, { pointerId: 1, clientX: 200, clientY: 300 });
+    fireEvent.pointerUp(target, { pointerId: 1, clientX: 200, clientY: 300 });
+  }
+
+  it('pages to the next photo on a leftward swipe', async () => {
+    const viewer = await openViewer();
+
+    drag(within(viewer).getByAltText('photo 0'), [700, 400], [300, 400]);
+
+    expect(await within(viewer).findByAltText('photo 1')).toBeInTheDocument();
+    expect(within(viewer).queryByAltText('photo 0')).not.toBeInTheDocument();
+  });
+
+  it('springs back from a rightward swipe on the first photo', async () => {
+    const viewer = await openViewer();
+
+    drag(within(viewer).getByAltText('photo 0'), [300, 400], [700, 400]);
+
+    await new Promise((r) => setTimeout(r, 320));
+    expect(within(viewer).getByAltText('photo 0')).toBeInTheDocument();
+  });
+
+  it('closes on a downward swipe', async () => {
+    const viewer = await openViewer();
+
+    drag(within(viewer).getByAltText('photo 0'), [400, 200], [400, 500]);
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'album.photo' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('hides the bars on a tap once the double-tap window has passed', async () => {
+    const viewer = await openViewer();
+    const bar = () => within(viewer).getByLabelText('album.download').closest('[aria-hidden]');
+    expect(bar()).toHaveAttribute('aria-hidden', 'false');
+
+    tap(within(viewer).getByAltText('photo 0'));
+
+    expect(bar()).toHaveAttribute('aria-hidden', 'false');
+    await waitFor(() => expect(bar()).toHaveAttribute('aria-hidden', 'true'));
+  });
+
+  it('zooms in on a double tap and out on the next', async () => {
+    const viewer = await openViewer();
+    const img = within(viewer).getByAltText('photo 0');
+
+    tap(img);
+    tap(img);
+    await waitFor(() => expect(img.style.transform).toContain('scale(2.5)'));
+
+    await new Promise((r) => setTimeout(r, 320));
+    tap(img);
+    tap(img);
+    await waitFor(() => expect(img.style.transform).toBe(''));
+  });
+});

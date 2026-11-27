@@ -701,6 +701,8 @@ export const en: Record<TranslationKey, string> = {
   'album.info': 'Info',
   'album.prev': 'Previous photo',
   'album.next': 'Next photo',
+  'album.thumbnails': 'Photos in this album',
+  'album.photoNumber': 'Photo {n}',
   'album.addedBy': 'Added by',
   'album.uploadProgress': 'Uploading {done} of {total}',
   'album.count': '{count} photos',
