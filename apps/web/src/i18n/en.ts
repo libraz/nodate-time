@@ -6,6 +6,7 @@ export const en: Record<TranslationKey, string> = {
   'common.cancel': 'Cancel',
   'common.save': 'Save',
   'common.saving': 'Saving...',
+  'common.submitHint': 'to submit',
   'common.delete': 'Delete',
   'common.create': 'Create',
   'common.processing': 'Working...',

@@ -107,6 +107,21 @@ describe('MemoDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('saves on Ctrl+Enter from the body field, but not a plain Enter', async () => {
+    calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
+    calendarState.updateMemo.mockResolvedValueOnce(undefined);
+    const onClose = vi.fn();
+    render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={onClose} />);
+    const body = screen.getByDisplayValue('milk');
+
+    fireEvent.keyDown(body, { key: 'Enter' });
+    expect(calendarState.updateMemo).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(body, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(calendarState.updateMemo).toHaveBeenCalledTimes(1);
+  });
+
   it('asks before deleting the memo', () => {
     calendarState.calendars = [{ id: 'cal-1', role: 'editor' }];
     render(<MemoDialog calendarId="cal-1" memoId="memo-1" onClose={() => {}} />);

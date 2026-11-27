@@ -6,6 +6,7 @@ export const ja = {
   'common.cancel': 'キャンセル',
   'common.save': '保存',
   'common.saving': '保存中...',
+  'common.submitHint': 'で確定',
   'common.delete': '削除',
   'common.create': '作成',
   'common.processing': '処理中...',

@@ -8,6 +8,7 @@ import { CustomSelect } from '@/components/custom-select';
 import { ImageUploadTile } from '@/components/image-upload-tile';
 import { LoadFailureBanner } from '@/components/load-failure';
 import { PageTopBar } from '@/components/page-top-bar';
+import { SubmitHint } from '@/components/submit-hint';
 import { Switch } from '@/components/switch';
 import { type Locale, useT } from '@/i18n';
 import type { components } from '@/lib/api-schema';
@@ -23,6 +24,7 @@ import {
 import type { WeekStart } from '@/lib/date-utils';
 import { formatDateTime } from '@/lib/format-datetime';
 import { detectHolidayCountry } from '@/lib/holidays';
+import { isSubmitShortcut } from '@/lib/keys';
 import { canManage } from '@/lib/permissions';
 import { detectTimezone } from '@/lib/preferences';
 import { THEME_OPTIONS } from '@/lib/theme';
@@ -1247,7 +1249,7 @@ export function ExportSection() {
   };
 
   const handleImport = async () => {
-    if (!icsText.trim() || !selectedId) return;
+    if (!icsText.trim() || !selectedId || importing) return;
     setImporting(true);
     try {
       const { data } = await client.POST('/calendars/{calendarId}/import', {
@@ -1369,18 +1371,26 @@ export function ExportSection() {
             data-1p-ignore
             value={icsText}
             onChange={(e) => setIcsText(e.target.value)}
+            onKeyDown={(e) => {
+              if (!isSubmitShortcut(e)) return;
+              e.preventDefault();
+              void handleImport();
+            }}
             placeholder={t('settings.importPlaceholder')}
             className="input-modern h-32 w-full font-mono text-footnote"
           />
         </FieldRow>
-        <button
-          type="button"
-          onClick={handleImport}
-          disabled={!icsText.trim() || !selectedId || importing}
-          className="btn-primary px-5 text-default disabled:opacity-50"
-        >
-          {importing ? '...' : t('settings.importPasted')}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <SubmitHint />
+          <button
+            type="button"
+            onClick={handleImport}
+            disabled={!icsText.trim() || !selectedId || importing}
+            className="btn-primary px-5 text-default disabled:opacity-50"
+          >
+            {importing ? '...' : t('settings.importPasted')}
+          </button>
+        </div>
       </Section>
     </>
   );

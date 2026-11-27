@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ShareStateIcon } from '@/components/calendar-list';
 import { ConfirmSheet } from '@/components/confirm-sheet';
 import { HistoryTimeline } from '@/components/history-timeline';
+import { SubmitHint } from '@/components/submit-hint';
 import { useT } from '@/i18n';
 import { errorMessage, isStaleError } from '@/lib/client';
+import { isSubmitShortcut } from '@/lib/keys';
 import { canEdit, roleOnCalendar } from '@/lib/permissions';
 import { toast } from '@/lib/toast';
 import { useIsDesktop } from '@/lib/use-is-desktop';
@@ -152,6 +154,12 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
     }
   }, [editing, saving, calendarId, deleteMemo, fetchMemos, onClose, t]);
 
+  const onDialogKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!editable || !isSubmitShortcut(e)) return;
+    e.preventDefault();
+    void handleSave();
+  };
+
   const formContent = (
     <>
       {/* Header */}
@@ -298,7 +306,8 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   );
 
   const actionBar = (
-    <div className="flex gap-3 border-t border-[var(--color-border)] px-6 py-4">
+    <div className="flex flex-wrap items-center gap-3 border-t border-[var(--color-border)] px-6 py-4">
+      {editable && <SubmitHint />}
       <button
         type="button"
         onClick={guardedClose}
@@ -338,7 +347,13 @@ export function MemoDialog({ calendarId, memoId, onClose }: MemoDialogProps) {
   // One form, framed per layout: rendering it once per breakpoint loaded the
   // history twice and left titleRef on whichever copy rendered last.
   return createPortal(
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={heading}>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={heading}
+      onKeyDown={onDialogKeyDown}
+    >
       {backdrop}
       <ConfirmSheet
         open={confirmingDiscard || unsavedGuard.blocked}

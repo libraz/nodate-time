@@ -28,6 +28,7 @@ import { RecurrenceEditor } from '@/components/event-recurrence';
 import { TipCard } from '@/components/guide';
 import { HistoryTimeline } from '@/components/history-timeline';
 import { LabelledButton } from '@/components/labelled-button';
+import { SubmitHint } from '@/components/submit-hint';
 import { Switch } from '@/components/switch';
 import { type TranslationKey, useT } from '@/i18n';
 import { toAllDayInclusiveEndInput, toLocalDatetimeInput } from '@/lib/all-day';
@@ -39,7 +40,7 @@ import {
   recurrenceAnchorStart,
   shiftStartKeepingDuration,
 } from '@/lib/event-times';
-import { isSubmitEnter } from '@/lib/keys';
+import { isSubmitEnter, isSubmitShortcut } from '@/lib/keys';
 import {
   canEdit,
   canEditEvent,
@@ -1480,7 +1481,7 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
 
   const panelLabel = editingEvent ? t('event.editEvent') : t('event.createEvent');
   const onPanelKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!isSubmitEnter(e) || !(e.metaKey || e.ctrlKey)) return;
+    if (!isSubmitShortcut(e)) return;
     // The sections that save as they change keep Enter for themselves.
     if ((e.target as HTMLElement).closest('[data-saves-immediately]')) return;
     e.preventDefault();
@@ -1499,9 +1500,10 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
       {/* Sticky action bar (clears the home-indicator safe area, which is
           zero on a desktop viewport and leaves a plain 1rem there) */}
       <div
-        className="flex gap-3 border-t border-[var(--color-border)] px-6 pt-4"
+        className="flex flex-wrap items-center gap-3 border-t border-[var(--color-border)] px-6 pt-4"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 1rem)' }}
       >
+        {editable && <SubmitHint />}
         <button
           type="button"
           onClick={guardedClose}
