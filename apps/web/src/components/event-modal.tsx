@@ -508,7 +508,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
       setShowMore(
         !!(
           editingEvent.labelId ||
-          (editingEvent.showAs && editingEvent.showAs !== 'busy') ||
           editingEvent.notificationOffset != null ||
           (editingEvent.visibility && editingEvent.visibility !== 'default') ||
           (editingEvent.flexibility && editingEvent.flexibility !== 'fixed')
@@ -1021,6 +1020,18 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
         </div>
       </div>
 
+      {/* Availability is what a scheduling poll reads this time as. Outside the
+          time fieldset: a task owns the time, not whether it reads as taken. */}
+      <div className="mt-3 px-6">
+        <div className="card-section bg-[var(--color-surface-secondary)] p-4">
+          <ShowAsPicker
+            value={form.showAs}
+            disabled={!editable}
+            onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
+          />
+        </div>
+      </div>
+
       {/* Which calendar the event is on */}
       {/* An event is drawn in its label's colour, else its owner's layer colour,
           which the whole calendar has agreed on and the members list changes.
@@ -1225,7 +1236,7 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
 
       {showMore && (
         <>
-          {/* Label, availability, reminder, visibility and flexibility */}
+          {/* Label, reminder, visibility and flexibility */}
           <div className="mt-1 px-6">
             <div className="card-section bg-[var(--color-surface-secondary)] p-4">
               {/* Label: the colour the event is drawn in instead of its owner's. Left
@@ -1269,16 +1280,6 @@ export function EventModal({ desktopSlot = null }: { desktopSlot?: HTMLElement |
                   <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
                 </>
               )}
-
-              {/* Availability is what a scheduling poll reads this time as. */}
-              <div className="py-1.5">
-                <ShowAsPicker
-                  value={form.showAs}
-                  disabled={!editable}
-                  onChange={(v) => setForm((f) => ({ ...f, showAs: v }))}
-                />
-              </div>
-              <div className="my-1 border-t border-[var(--color-border)] opacity-50" />
 
               {/* Notification. The reminder travels with the event as an
                   iCalendar alarm; the app itself does not deliver one, so the

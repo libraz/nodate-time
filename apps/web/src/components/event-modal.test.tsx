@@ -1018,7 +1018,6 @@ describe('EventModal who and availability', () => {
     expect(within(people).getByText('Bob')).toBeInTheDocument();
     expect(within(people).queryByText('event.memberMe')).toBeNull();
     expect(within(people).getByRole('button', { name: 'event.removeParticipant' })).toBeVisible();
-    expandMoreOptions();
     fireEvent.click(screen.getByRole('button', { name: 'event.showAsTentative' }));
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
@@ -1037,7 +1036,6 @@ describe('EventModal who and availability', () => {
     render(<EventModal />);
 
     expect(screen.queryByRole('button', { name: 'event.whose' })).toBeNull();
-    expandMoreOptions();
     expect(screen.getByRole('group', { name: 'event.showAs' })).toBeInTheDocument();
   });
 });
@@ -1439,8 +1437,12 @@ describe('EventModal availability hint', () => {
   it('explains only an availability other than busy', async () => {
     render(<EventModal />);
     await waitFor(() => expect(titleField()).toHaveValue('Standup'));
-    expandMoreOptions();
 
+    // Shown without opening the optional fields.
+    expect(screen.getByRole('button', { name: 'event.moreOptions' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
     expect(screen.queryByText('event.showAsBusyHint')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'event.showAsFree' }));
     expect(screen.getByText('event.showAsFreeHint')).toBeInTheDocument();
